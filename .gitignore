@@ -20,7 +20,12 @@ coverage/.tmp/
 # Emitted TS declaration files. Composite builds emit to .tsbuildcache/ (above);
 # any *.d.ts next to a *.ts source is a stale build artifact, not hand-written source.
 src/**/*.d.ts
+src/**/*.d.ts.map
 test/**/*.d.ts
+test/**/*.d.ts.map
+
+# Ad-hoc throwaway scripts (repro/check/diag). Keep gitignored — these are local-only.
+.tmp/
 
 # Environment & secrets
 .env

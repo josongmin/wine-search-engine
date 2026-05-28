@@ -7,7 +7,7 @@
  *  - H14 / index-to-vespa.runIndexer: maxFailureRate>0 requires
  *         ETL_INDEX_PARTIAL_FAILURE_ACK=YES.
  *  - H15 / publish-search-snapshot.run: --allow-missing-ltr is removed;
- *         canonical publish hard-fails on missing active LTR models.
+ *         canonical publish treats LTR as optional search-quality uplift.
  */
 import { describe, expect, it } from 'vitest';
 import { loadGoldCanonicalLookupForBuild } from '../../scripts/etl/snapshot-entity-identity.js';
@@ -57,7 +57,7 @@ describe('Wave 4 / H14: index-to-vespa partial-failure ack source check', () => 
 });
 
 describe('Wave 4 / H15: publish-search-snapshot allow-missing-ltr removal source check', () => {
-  it('rejects --allow-missing-ltr outright under the canonical publish contract', async () => {
+  it('rejects --allow-missing-ltr outright because the flag is obsolete under the canonical publish contract', async () => {
     const { readFileSync } = await import('node:fs');
     const { fileURLToPath } = await import('node:url');
     const src = readFileSync(
@@ -65,7 +65,7 @@ describe('Wave 4 / H15: publish-search-snapshot allow-missing-ltr removal source
       'utf-8',
     );
     expect(src).toMatch(/--allow-missing-ltr has been removed/);
-    expect(src).toMatch(/canonical snapshot publish now hard-fails on missing active LTR models/);
+    expect(src).toMatch(/LTR is now optional for canonical snapshot publish and the flag is obsolete/);
   });
 });
 
@@ -90,5 +90,6 @@ describe('Wave 4 / cross-cutting: fail-loud principles', () => {
     );
     expect(src).toMatch(/--allow-missing-ltr has been removed/);
     expect(src).toMatch(/Refusing canonical publish/);
+    expect(src).toMatch(/continuing canonical publish with search-core only/);
   });
 });

@@ -3,6 +3,7 @@
  */
 export type ConstraintOperator = '=' | '<=' | '>=' | 'range' | 'in' | 'exclude' | 'not_in';
 export type SoftPromotionAuthority = 'allow' | 'deny';
+export type InferredConstraintBinding = 'binding' | 'descriptive';
 
 /**
  * A single normalized constraint extracted from a user query.
@@ -35,6 +36,12 @@ export interface NormalizedConstraint {
    * Absent for constraints derived from sources without explicit versioning.
    */
   readonly mapping_version?: string | undefined;
+
+  /**
+   * Distinguishes inferred constraints that should participate in ranking /
+   * compliance from descriptive typicity priors. Omitted defaults to binding.
+   */
+  readonly inferred_binding?: InferredConstraintBinding | undefined;
 }
 
 /**
@@ -48,4 +55,14 @@ export interface ConstraintBundle {
   readonly hard: ReadonlyArray<NormalizedConstraint>;
   readonly soft: ReadonlyArray<NormalizedConstraint>;
   readonly inferred: ReadonlyArray<NormalizedConstraint>;
+}
+
+export function isBindingInferredConstraint(constraint: NormalizedConstraint): boolean {
+  return constraint.inferred_binding !== 'descriptive';
+}
+
+export function filterBindingInferredConstraints(
+  constraints: readonly NormalizedConstraint[],
+): readonly NormalizedConstraint[] {
+  return constraints.filter(isBindingInferredConstraint);
 }

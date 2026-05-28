@@ -12,10 +12,16 @@ interface ReadyResponse {
   readonly checks?: Readonly<Record<string, { readonly status: 'up' | 'down' | 'skipped'; readonly required: boolean }>>;
 }
 
-const RELEASE_BLOCKING_READINESS_CHECKS = [
-  'drinking_window_model',
-  'blocking_zero_candidates',
-] as const;
+export interface LiveBenchmarkRuntimeMetadata {
+  readonly readinessPassed: boolean;
+  readonly searchSnapshotId?: string | undefined;
+  readonly runtimeActivationStatus?: 'activated' | 'shadow_only' | undefined;
+  readonly activeLtrModels?: number | undefined;
+}
+
+export interface LiveBenchmarkReadinessOptions {
+  readonly requiredOptionalChecks?: readonly string[] | undefined;
+}
 
 export function resolveBenchmarkSearchEndpoint(
   apiUrl: string,
@@ -52,10 +58,11 @@ function formatReadyChecks(checks: ReadyResponse['checks']): string {
     .join(', ');
 }
 
-function formatReleaseBlockingReadinessFailures(
+function formatRequiredOptionalReadinessFailures(
   checks: ReadyResponse['checks'],
+  requiredOptionalChecks: readonly string[],
 ): string {
-  return RELEASE_BLOCKING_READINESS_CHECKS
+  return requiredOptionalChecks
     .flatMap((name) => {
       const check = checks?.[name];
       if (check?.status === 'up') {
@@ -66,7 +73,10 @@ function formatReleaseBlockingReadinessFailures(
     .join(', ');
 }
 
-export async function assertLiveBenchmarkReadiness(apiUrl: string): Promise<void> {
+export async function assertLiveBenchmarkReadiness(
+  apiUrl: string,
+  options: LiveBenchmarkReadinessOptions = {},
+): Promise<void> {
   const response = await fetch(`${apiUrl}/ready`);
   if (!response.ok) {
     throw new Error(`Live benchmark preflight failed: GET /ready returned HTTP ${response.status}`);
@@ -79,11 +89,46 @@ export async function assertLiveBenchmarkReadiness(apiUrl: string): Promise<void
     );
   }
 
-  const releaseBlockingFailures = formatReleaseBlockingReadinessFailures(body.checks);
-  if (releaseBlockingFailures.length > 0) {
+  const requiredOptionalFailures = formatRequiredOptionalReadinessFailures(
+    body.checks,
+    options.requiredOptionalChecks ?? [],
+  );
+  if (requiredOptionalFailures.length > 0) {
     throw new Error(
-      `Live benchmark preflight failed: release-blocking readiness checks are not up (${releaseBlockingFailures}).`,
+      `Live benchmark preflight failed: required optional readiness checks are not up (${requiredOptionalFailures}).`,
     );
+  }
+}
+
+export async function collectLiveBenchmarkRuntimeMetadata(
+  apiUrl: string,
+  options: LiveBenchmarkReadinessOptions = {},
+): Promise<LiveBenchmarkRuntimeMetadata> {
+  const response = await fetch(`${apiUrl}/ready`);
+  if (!response.ok) {
+    return { readinessPassed: false };
+  }
+
+  const body = (await response.json()) as ReadyResponse;
+  const requiredOptionalFailures = formatRequiredOptionalReadinessFailures(
+    body.checks,
+    options.requiredOptionalChecks ?? [],
+  );
+  const readinessPassed = body.ready === true && requiredOptionalFailures.length === 0;
+  if (!isLocalApiUrl(apiUrl)) {
+    return { readinessPassed };
+  }
+
+  try {
+    const runtimeState = await loadSearchSnapshotRuntimeState();
+    return {
+      readinessPassed,
+      searchSnapshotId: runtimeState.snapshotId,
+      runtimeActivationStatus: runtimeState.ltrReleaseProvenance?.activationStatus,
+      activeLtrModels: runtimeState.counts.activeLtrModels,
+    };
+  } catch {
+    return { readinessPassed };
   }
 }
 
@@ -194,8 +239,9 @@ export async function runLiveBenchmarkPreflight(args: {
   readonly executionLane: BenchmarkExecutionLane;
   readonly debugKey?: string;
   readonly requiredEntityIds?: readonly string[] | undefined;
+  readonly readiness?: LiveBenchmarkReadinessOptions | undefined;
 }): Promise<void> {
-  await assertLiveBenchmarkReadiness(args.apiUrl);
+  await assertLiveBenchmarkReadiness(args.apiUrl, args.readiness);
   if (args.requiredEntityIds !== undefined && args.requiredEntityIds.length > 0) {
     await assertRuntimeEntityCompatibility(args.requiredEntityIds);
   }

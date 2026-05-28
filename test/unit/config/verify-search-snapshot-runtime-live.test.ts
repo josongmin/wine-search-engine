@@ -346,7 +346,7 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
     }
   });
 
-  it('throws when active LTR rows are absent', async () => {
+  it('allows zero active LTR rows by default when counts and hashes agree', async () => {
     const dir = await makeTempDir();
     const nlPath = path.join(dir, 'nl.json');
     const nlPayload = { mappings: [{ key: 'a', canonical: 'b' }] };
@@ -392,7 +392,7 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
           vespaUrl: 'http://vespa.test:8080',
           runtimeState,
         }),
-      ).rejects.toThrow(/Active LTR runtime count is zero/);
+      ).resolves.toBe(runtimeState);
     } finally {
       fetchSpy.mockRestore();
     }
@@ -946,7 +946,7 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
       }
     });
 
-    it('throws before legacy no-LTR compatibility can apply when active LTR rows are absent', async () => {
+    it('allows zero active LTR rows by default when runtime counts and hashes agree', async () => {
       const runtimeState = await buildHappyRuntimeState({
         snapshotId: 'snap-legacy',
         activeLtrModels: 0,
@@ -974,6 +974,42 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
             pool,
             vespaUrl: 'http://vespa.test:8080',
             runtimeState,
+          }),
+        ).resolves.toBe(runtimeState);
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
+    it('throws when active LTR rows are explicitly required and absent', async () => {
+      const runtimeState = await buildHappyRuntimeState({
+        snapshotId: 'snap-legacy',
+        activeLtrModels: 0,
+        activeLtrHash: activeLtrHashFromEmptyRows(),
+      });
+      const fetchSpy = mockVespaResponses();
+
+      try {
+        const pool = createPoolMock({
+          totalCounts: { activeLtrModels: '0' },
+          ltrRows: [{
+            total_count: '0',
+            snapshot_count: '0',
+            query_class: null,
+            model_version: null,
+            eval_dataset_version: null,
+            feature_schema_hash: null,
+            weights: null,
+            bias: null,
+          }],
+          ltrFeatureSchemaHashColumn: false,
+        }) as unknown as Pool;
+        await expect(
+          verifySearchSnapshotRuntimeStateLive({
+            pool,
+            vespaUrl: 'http://vespa.test:8080',
+            runtimeState,
+            requireActiveLtr: true,
           }),
         ).rejects.toThrow(/Active LTR runtime count is zero/);
       } finally {

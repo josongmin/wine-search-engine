@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DeterministicDrinkingWindowPredictor } from '../deterministic-drinking-window-predictor.js';
 import {
-  FIXED_DRINKING_WINDOW_FORMULA_VERSION,
-  FixedDrinkingWindowFormula,
-} from '../fixed-drinking-window-formula.js';
-import {
   STRUCTURAL_DRINKING_WINDOW_FORMULA_VERSION,
   StructuralDrinkingWindowFormula,
 } from '../structural-drinking-window-formula.js';
@@ -43,35 +39,6 @@ describe('DeterministicDrinkingWindowPredictor', () => {
     // aligned with the legacy 'low' band (< CONFIDENCE_MEDIUM_THRESHOLD = 0.5).
     expect(prediction.confidenceScore).toBeGreaterThanOrEqual(0);
     expect(prediction.confidenceScore).toBeLessThan(0.5);
-  });
-});
-
-describe('FixedDrinkingWindowFormula', () => {
-  it('pins the placeholder formula slot to its declared version namespace', () => {
-    const formula = new FixedDrinkingWindowFormula();
-
-    expect(formula.formulaVersion).toBe(FIXED_DRINKING_WINDOW_FORMULA_VERSION);
-  });
-
-  it('returns fixed offsets as the placeholder formula slot', () => {
-    const formula = new FixedDrinkingWindowFormula();
-
-    expect(
-      formula.evaluate({
-        vintage: 2020,
-        grapePrimaryEnc: 1,
-        regionEnc: 2,
-        countryEnc: 3,
-        tannin: 3,
-        acidity: 3,
-        avgCriticProxyScore: 90,
-      }),
-    ).toEqual({
-      startOffsetYears: 4,
-      endOffsetYears: 12,
-      peakOffsetYears: 8,
-      confidence: 'low',
-    });
   });
 });
 

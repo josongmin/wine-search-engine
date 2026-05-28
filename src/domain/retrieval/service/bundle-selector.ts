@@ -22,6 +22,7 @@ import type {
 } from '../../query/model/constraint-graph.js';
 import type { HybridCandidate } from '../model/hybrid-candidate.js';
 import { computeGraphCoverage } from '../../query/service/compute-graph-coverage.js';
+import { isConstraintGraphEmitEnabled } from '../../query/service/constraint-graph-flags.js';
 import {
   classifyGraphPresence,
   recordGraphPathDecision,
@@ -351,7 +352,7 @@ export class BundleSelectorImpl implements BundleSelector {
       outcome: classifyGraphPresence({
         graphPresent: true,
         graphOrigin: graph.origin,
-        graphEmitFlagOn: process.env['CONSTRAINT_GRAPH_EMIT'] !== 'false',
+        graphEmitFlagOn: isConstraintGraphEmitEnabled(),
       }),
     });
 

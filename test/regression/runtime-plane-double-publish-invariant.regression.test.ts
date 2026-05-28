@@ -98,4 +98,12 @@ describe('Runtime plane double-publish append-only invariant', () => {
     expect(ambiguityInsert?.[1]).toMatch(/search_snapshot_id/);
     expect(ambiguityInsert?.[2]).toMatch(/search_snapshot_id/);
   });
+
+  it('skips expensive re-stage when the snapshot runtime plane is already fully populated', () => {
+    expect(src).toContain('isSnapshotRuntimeSubstratePlaneAlreadyStaged');
+    expect(src).toContain('SELECT COUNT(*)::text AS count FROM entities WHERE search_snapshot_id = $1');
+    expect(src).toContain('SELECT COUNT(*)::text AS count FROM aliases WHERE search_snapshot_id = $1');
+    expect(src).toContain('SELECT COUNT(*)::text AS count FROM ambiguity_registry WHERE search_snapshot_id = $1');
+    expect(src).toContain('if (await isSnapshotRuntimeSubstratePlaneAlreadyStaged(args)) {');
+  });
 });

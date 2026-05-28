@@ -23,8 +23,10 @@ import type { ScoringWeights } from './scoring-weights.js';
  *      counterpart.
  *
  * **Non-invariant**: profile fields do NOT sum to 1.0. Each weight is an
- * independent overlay applied via `Math.max(baseWeight, modeWeight)` in
- * `ranker.ts`, so they can collectively exceed 1.0 — that's intentional.
+ * independent overlay applied via per-field floors in `ranker.ts`, with
+ * optional mode-specific caps for signals that must be suppressed on a lane
+ * (e.g. prestige/critic on generic attribute search). They can collectively
+ * exceed 1.0 before renormalization — that's intentional.
  * Tuning a single weight changes only that signal's floor.
  *
  * All 12 non-penalty ScoringWeights fields have exactly one entry here so
@@ -81,7 +83,7 @@ export interface ModeWeightProfile {
 
 /**
  * No-op fallback used when retrievalMode is undefined or unrecognised.
- * All values are 0.0 so Math.max(baseWeight, 0) = baseWeight — the
+ * All values are 0.0 so the floor step preserves base weights exactly — the
  * query-class weights are preserved exactly with no mode interference.
  */
 export const DEFAULT_WEIGHTS: ModeWeightProfile = {
@@ -145,15 +147,19 @@ const MODE_WEIGHT_PROFILES: Record<RetrievalMode, ModeWeightProfile> = {
 
   // === Attribute search: balance text + semantic ===
   attribute_search: {
-    semanticWeight: 0.35,
-    popularityWeight: 0.10,
+    // Semantic recall still matters, but parsed sensory/style constraints are
+    // first-class preference evidence on this lane. If popularity/semantic
+    // dominate too hard, medium-body / sweet / dry queries collapse into
+    // prestige-heavy generic results even after correct parsing.
+    semanticWeight: 0.24,
+    popularityWeight: 0.03,
     entityIntegrityWeight: 0.03,
-    attributeAlignmentWeight: 0.10,  // Constraints matter
+    attributeAlignmentWeight: 0.18,
     recencyWeight: 0.0,
     producerPrestigeWeight: 0.0,
-    preferenceAlignmentWeight: 0.0,
+    preferenceAlignmentWeight: 0.10,
     anchorSimilarityWeight: 0.0,
-    softConstraintWeight: 0.0,
+    softConstraintWeight: 0.20,
     availabilityWeight: 0.0,
     criticScoreWeight: 0.0,
     multilingualScoreWeight: 0.0,
@@ -313,8 +319,9 @@ export function getModeWeights(mode: RetrievalMode | undefined): ModeWeightProfi
  * the test suite verifies that every key here corresponds to a real
  * ModeWeightProfile entry and a real ScoringWeights entry.
  *
- * Operator: `Math.max(base[scoringField], mode[modeField])` — modes only
- * raise floors, never suppress.
+ * Operator: `Math.max(base[scoringField], mode[modeField])` for the floor
+ * step. Optional per-mode caps are applied afterwards when a lane must
+ * suppress a signal entirely.
  */
 export const MODE_WEIGHT_OVERLAY_MAP: ReadonlyArray<{
   readonly modeField: keyof ModeWeightProfile;
@@ -336,16 +343,33 @@ export const MODE_WEIGHT_OVERLAY_MAP: ReadonlyArray<{
   { modeField: 'beginnerSuitabilityWeight', scoringField: 'beginnerSuitability' },
 ] as const;
 
+const MODE_WEIGHT_CAP_PROFILES: Partial<Readonly<Record<RetrievalMode, Partial<ScoringWeights>>>> = {
+  attribute_search: {
+    producerPrestige: 0,
+    criticScore: 0,
+    multilingualScore: 0,
+    availability: 0,
+  },
+  constraint_filter: {
+    producerPrestige: 0,
+    criticScore: 0,
+    multilingualScore: 0,
+    availability: 0,
+  },
+} as const;
+
 /**
  * Apply a `ModeWeightProfile` overlay to a `ScoringWeights` base via
- * `Math.max` per field defined in {@link MODE_WEIGHT_OVERLAY_MAP}. This is
- * the only allowed overlay surface — ranker.ts and any test helper MUST
- * call this rather than re-implementing the per-field max chain (RCA5-04
- * history: a hand-rolled overlay silently dropped 6 of 12 fields).
+ * `Math.max` per field defined in {@link MODE_WEIGHT_OVERLAY_MAP}, then
+ * optional per-mode caps. This is the only allowed overlay surface —
+ * ranker.ts and any test helper MUST call this rather than re-implementing
+ * the chain (RCA5-04 history: a hand-rolled overlay silently dropped fields,
+ * and generic sensory lanes leaked prestige/critic residuals).
  */
 export function applyModeWeightOverlay(
   base: ScoringWeights,
   mode: ModeWeightProfile,
+  retrievalMode?: RetrievalMode,
 ): ScoringWeights {
   const next: ScoringWeights = { ...base };
   for (const { modeField, scoringField } of MODE_WEIGHT_OVERLAY_MAP) {
@@ -353,6 +377,12 @@ export function applyModeWeightOverlay(
       base[scoringField],
       mode[modeField],
     );
+  }
+  const caps = retrievalMode !== undefined ? MODE_WEIGHT_CAP_PROFILES[retrievalMode] : undefined;
+  if (caps !== undefined) {
+    for (const [scoringField, cap] of Object.entries(caps) as ReadonlyArray<[keyof ScoringWeights, number]>) {
+      (next as unknown as Record<string, number>)[scoringField] = Math.min(next[scoringField], cap);
+    }
   }
   return next;
 }

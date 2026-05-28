@@ -164,6 +164,7 @@ function makeInferredConstraint(
     source_phrase: sourcePhrase,
     confidence: COMPOSITIONAL_CONFIDENCE,
     mapping_version: COMPOSITIONAL_VERSION,
+    inferred_binding: 'descriptive',
   };
 }
 

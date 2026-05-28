@@ -272,6 +272,7 @@ describe('Runtime substrates publication — adjacency invariants', () => {
     expect(PUBLISHER_SRC).toMatch(/--refresh-active-runtime-substrates/);
     expect(PUBLISHER_SRC).toMatch(/allowExistingActiveSnapshot:\s*args\.refreshActiveRuntimeSubstrates/);
     expect(PUBLISHER_SRC).toMatch(/--allow-missing-ltr has been removed/);
+    expect(PUBLISHER_SRC).toMatch(/LTR is now optional for canonical runtime publish and the flag is obsolete/);
   });
 
   it('mixed Korean + English substrate items both pass NFC normalization', () => {

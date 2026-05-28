@@ -184,7 +184,7 @@ CREATE TABLE IF NOT EXISTS ltr_model_registry (
   query_class TEXT NOT NULL,
   model_version INT NOT NULL DEFAULT 1,
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
-  weights FLOAT8[] NOT NULL CHECK (array_length(weights, 1) = 8),
+  weights FLOAT8[] NOT NULL CHECK (array_ndims(weights) = 1 AND array_length(weights, 1) >= 1),
   bias FLOAT8 NOT NULL,
   training_example_count INT NOT NULL,
   ndcg5_validation_score FLOAT8 NOT NULL,

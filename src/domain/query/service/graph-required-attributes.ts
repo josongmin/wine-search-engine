@@ -17,6 +17,7 @@
 import type { QueryPlanV1 } from '../model/query-plan.js';
 import type { ConstraintGraph } from '../model/constraint-graph.js';
 import { computeGraphCoverage } from './compute-graph-coverage.js';
+import { projectHardTierSubgraph } from './graph-tier-projection.js';
 
 interface RequiredAttributeResolution {
   /** Unique required-and-matched attribute names, in deterministic order. */
@@ -63,7 +64,13 @@ export function resolveRequiredAttributes(
   const { plan, graph, satisfiedAttributes } = input;
 
   if (graph !== undefined) {
-    const coverage = computeGraphCoverage(graph, new Set(satisfiedAttributes));
+    // Hard-evidence readers must never upgrade inferred/soft slots into
+    // required obligations. Project the full graph down to the hard-tier
+    // subgraph before evaluating coverage.
+    const coverage = computeGraphCoverage(
+      projectHardTierSubgraph(graph),
+      new Set(satisfiedAttributes),
+    );
     return {
       matched: coverage.matchedAttributes,
       unmet: coverage.unmetAttributes,

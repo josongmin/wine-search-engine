@@ -62,6 +62,7 @@ import {
   computeGraphCoverage,
   type GraphCoverageSignals,
 } from '../../domain/query/service/compute-graph-coverage.js';
+import { isConstraintGraphEmitEnabled } from '../../domain/query/service/constraint-graph-flags.js';
 import { globalBundleSelectorCounter } from '../../domain/observability/bundle-selector-counters.js';
 import {
   classifyGraphPresence,
@@ -69,6 +70,7 @@ import {
 } from '../../domain/observability/graph-path-telemetry.js';
 import { globalRetrievalCriticCounter } from '../../domain/observability/retrieval-critic-counters.js';
 import { pipelineDebug } from '../../domain/observability/request-pipeline-debug.js';
+import { PipelineDebugStep } from '../../domain/observability/pipeline-debug-steps.js';
 import {
   executeRetrievalBranches,
   formatRetrievalBranchFailureReasons,
@@ -336,7 +338,7 @@ export async function executeGraphAware(
     outcome: classifyGraphPresence({
       graphPresent: graph !== undefined,
       ...(graph !== undefined ? { graphOrigin: graph.origin } : {}),
-      graphEmitFlagOn: process.env['CONSTRAINT_GRAPH_EMIT'] !== 'false',
+      graphEmitFlagOn: isConstraintGraphEmitEnabled(),
     }),
   });
   const rewriter = deps.queryRewriter;
@@ -369,7 +371,7 @@ export async function executeGraphAware(
     if (remainingLatencyBudgetMs !== undefined && remainingLatencyBudgetMs <= 0) {
       pipelineDebug(
         {
-          step: 'retrieval.critic.budget_exhausted',
+          step: PipelineDebugStep.RETRIEVAL_CRITIC_BUDGET_EXHAUSTED,
           iterations: rewriteTraces.length,
         },
         'pipeline critic retry budget exhausted',
@@ -400,7 +402,7 @@ export async function executeGraphAware(
     if (!decision.retry) {
       pipelineDebug(
         {
-          step: 'retrieval.critic.decision',
+          step: PipelineDebugStep.RETRIEVAL_CRITIC_DECISION,
           retry: false,
           reason: decision.reason,
           iterations: retryCount,
@@ -419,7 +421,7 @@ export async function executeGraphAware(
       // will mark this as exhausted below.
       pipelineDebug(
         {
-          step: 'retrieval.critic.rewriter_declined',
+          step: PipelineDebugStep.RETRIEVAL_CRITIC_REWRITER_DECLINED,
           rewrite_type: decision.rewriteType,
           iteration: retryCount,
         },
@@ -449,7 +451,7 @@ export async function executeGraphAware(
   globalRetrievalCriticCounter.incrementRetriesExhausted();
   pipelineDebug(
     {
-      step: 'retrieval.critic.retries_exhausted',
+      step: PipelineDebugStep.RETRIEVAL_CRITIC_RETRIES_EXHAUSTED,
       iterations: rewriteTraces.length,
     },
     'pipeline critic retries exhausted',
@@ -491,7 +493,7 @@ async function runRetrievalOnce(
 
   pipelineDebug(
     {
-      step: 'retrieval.bundle_selector.engage',
+      step: PipelineDebugStep.RETRIEVAL_BUNDLE_SELECTOR_ENGAGE,
       subquery_count: subqueries.length,
       graph_origin: engagedGraph.origin,
     },
@@ -511,7 +513,7 @@ async function runRetrievalOnce(
   if (subqueryExecution.status === 'fail_closed') {
     pipelineDebug(
       {
-        step: 'retrieval.bundle_selector.subquery_fail_closed',
+        step: PipelineDebugStep.RETRIEVAL_BUNDLE_SELECTOR_SUBQUERY_FAIL_CLOSED,
         reasons: [...subqueryExecution.degradationReasons],
       },
       'pipeline bundle selector subquery fail closed',
@@ -535,7 +537,7 @@ async function runRetrievalOnce(
     }
     pipelineDebug(
       {
-        step: 'retrieval.bundle_selector.fail_closed',
+        step: PipelineDebugStep.RETRIEVAL_BUNDLE_SELECTOR_FAIL_CLOSED,
         reasons: [...solution.degradationReasons],
       },
       'pipeline bundle selector fail closed',
@@ -597,7 +599,7 @@ async function runRetrievalOnce(
       if (err instanceof BudgetViolationError) {
         pipelineDebug(
           {
-            step: 'retrieval.bundle_selector.budget_violation',
+            step: PipelineDebugStep.RETRIEVAL_BUNDLE_SELECTOR_BUDGET_VIOLATION,
             entity_id: err.entityId,
             would_become_krw: err.wouldBecomeKrw,
             ceiling_krw: err.ceilingKrw,

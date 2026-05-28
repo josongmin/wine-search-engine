@@ -51,6 +51,7 @@ import {
   buildCacheReadRuntimeStateProvider,
 } from './kill-switch-policy.js';
 import { warnStartupMisconfigurations } from './startup-preflight.js';
+import { SearchSnapshotEntityLookup } from '../infrastructure/adapter/search-snapshot-entity-lookup.js';
 
 export interface CoreContainerServices {
   // T1.2: typed as QueryPlannerPort for backward compat while Planner returns QueryPlanV2.
@@ -97,7 +98,7 @@ export async function buildCoreContainerServices(
   warnStartupMisconfigurations(config);
 
   const support = await buildRuntimeSupportServices(config, runtime);
-  const adapters = await Promise.resolve(buildCoreAdapterServices(config, runtime.pool));
+  const adapters = await Promise.resolve(buildCoreAdapterServices(config, runtime));
 
   // T1.2: Wrap the concrete Planner (returns QueryPlanV2) in the V1 adapter so
   // existing consumers continue to receive QueryPlanV1-shaped objects.
@@ -117,6 +118,7 @@ export async function buildCoreContainerServices(
       config.openai.llmQueryInterpreter,
       config.openai.llmQueryInterpreterTimeoutMs,
       support.phraseCache,
+      runtime.searchSnapshotId,
     ),
     {
       anchorRefresh: buildAnchorRefreshCallbackFromAliasOverlay(adapters.aliasMatcher),
@@ -128,6 +130,9 @@ export async function buildCoreContainerServices(
   const compareRetriever = buildCompareRetriever(adapters);
   const baseRanker = buildRanker(adapters, config, support);
   const ranker = buildRankingPipeline(baseRanker);
+  const entityLookup: EntityDocumentLookupPort = runtime.searchSnapshotManifestPath !== undefined
+    ? await SearchSnapshotEntityLookup.loadFromManifest(runtime.searchSnapshotManifestPath)
+    : adapters.searchIndex;
 
   return {
     queryPlanner,
@@ -136,7 +141,7 @@ export async function buildCoreContainerServices(
     candidatePool,
     browseRetriever,
     compareRetriever,
-    entityLookup: adapters.searchIndex,
+    entityLookup,
     ...(adapters.chatLlm !== undefined ? { chatLlm: adapters.chatLlm } : {}),
     ranker,
     decisionEngine: buildDecisionEngine(adapters, config),

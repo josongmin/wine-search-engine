@@ -8,6 +8,8 @@ import { isCanonicalPublicEntityId } from '../../domain/shared/types/index.js';
 import {
   createCircuitBreaker,
   DEFAULT_BREAKER_FAILURE_THRESHOLD,
+  DEFAULT_RECOVERY_TIMEOUT_MS,
+  DEFAULT_HALF_OPEN_ATTEMPTS,
   type CircuitBreaker,
 } from '../../domain/shared/circuit-breaker/circuit-breaker.js';
 import { globalCircuitBreakerRegistry } from '../../domain/observability/circuit-breaker-registry.js';
@@ -26,8 +28,8 @@ const COHERE_RERANKER_HTTP_ERROR_PREVIEW_CHARS = 200;
 /** Circuit breaker thresholds for the Cohere rerank endpoint — same tuning
  *  as OpenAI/Anthropic chat so providers share an equivalent failure budget. */
 const COHERE_RERANK_BREAKER_FAILURE_THRESHOLD = DEFAULT_BREAKER_FAILURE_THRESHOLD;
-const COHERE_RERANK_BREAKER_RECOVERY_TIMEOUT_MS = 60_000;
-const COHERE_RERANK_BREAKER_HALF_OPEN_MAX_ATTEMPTS = 3;
+const COHERE_RERANK_BREAKER_RECOVERY_TIMEOUT_MS = DEFAULT_RECOVERY_TIMEOUT_MS;
+const COHERE_RERANK_BREAKER_HALF_OPEN_MAX_ATTEMPTS = DEFAULT_HALF_OPEN_ATTEMPTS;
 const COHERE_RERANK_BREAKER_NAME = 'cohere-rerank';
 
 interface CohereRerankerOptions {

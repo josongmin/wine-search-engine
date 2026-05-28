@@ -4,7 +4,7 @@
  * Unlike the offline rig (no LLM), this script uses the full LlmNLMapper
  * pipeline so that phrases the rule table misses are handled by the LLM.
  *
- * Requires OPENAI_API_KEY in .env.
+ * Requires OPENAI_API_KEY/OPENAI_API_KEYS or a valid Codex ChatGPT login token.
  *
  * Usage:  npx tsx scripts/diag-constraint-extraction-llm.mts
  */
@@ -15,7 +15,7 @@ import { AGENT_SCENARIOS } from '../test/benchmark/agent/scenarios.js';
 import { scoreSemanticConstraintRecall } from '../test/benchmark/agent/constraint-metrics.js';
 import { NLMapper } from '../src/domain/attribute/service/nl-mapper.js';
 import { LlmNLMapper } from '../src/domain/attribute/service/llm-nl-mapper.js';
-import { OpenAiChatLlm } from '../src/infrastructure/ai/openai-chat-llm.js';
+import { createChatLlmFromEnv } from '../src/infrastructure/ai/chat-llm-from-env.js';
 import { ConstraintCompiler } from '../src/domain/query/service/constraint-compiler.js';
 import { QueryNormalizer } from '../src/domain/query/service/query-normalizer.js';
 import { correctKoreanWineTypos } from '../src/domain/query/service/korean-wine-aliases.js';
@@ -29,21 +29,17 @@ const NO_OP_MAPPING_TABLE: MappingTablePort = {
   async getCurrentVersion(): Promise<string> { return 'noop-v1.0'; },
 };
 
-const OPENAI_API_KEY = process.env['OPENAI_API_KEY'];
-const OPENAI_BASE_URL = process.env['OPENAI_BASE_URL'] ?? 'https://api.openai.com/v1';
 const OPENAI_MODEL = process.env['OPENAI_MODEL'] ?? 'gpt-4o-mini';
-
-if (!OPENAI_API_KEY) {
-  console.error('OPENAI_API_KEY not found in environment. Set it in .env');
-  process.exit(1);
-}
-
-const chatLlm = new OpenAiChatLlm({
-  baseUrl: OPENAI_BASE_URL,
-  apiKey: OPENAI_API_KEY,
+const chatLlm = createChatLlmFromEnv({
+  env: process.env,
   defaultModel: OPENAI_MODEL,
   httpTimeoutMs: 10_000,
+  allowCodexFallback: true,
 });
+if (chatLlm === undefined) {
+  console.error('OPENAI_API_KEY/OPENAI_API_KEYS or a valid Codex ChatGPT login token is required.');
+  process.exit(1);
+}
 
 const LLM_TIMEOUT_MS = 15_000;
 const llmMapper = new LlmNLMapper(NO_OP_MAPPING_TABLE, chatLlm, LLM_TIMEOUT_MS);

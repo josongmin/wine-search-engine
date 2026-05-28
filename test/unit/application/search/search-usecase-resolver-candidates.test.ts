@@ -578,43 +578,51 @@ describe('buildResolverCandidatesFromGenerator', () => {
       expect(candidates[0]?.aliasMatches[0]?.aliasType).toBe('derived_initialism');
     });
 
-    it('rejects anchors that omit aliasType even when strategy is exact-like', async () => {
+    it('preserves anchors that omit aliasType even when strategy is exact-like', async () => {
       const entityId = createEntityId('chateau-margaux-2015');
       const doc = { entityId, entityType: 'wine' as const, canonicalLabel: 'Château Margaux 2015' };
       const lookup = makeBatchLookup(async () => doc);
-      await expect(buildResolverCandidatesFromGenerator(
+      const candidates = await buildResolverCandidatesFromGenerator(
         makeAnchorInput({
           candidateEntityIds: [entityId],
           lookupStrategies: ['exact'],
         }),
         lookup,
-      )).rejects.toThrow(/anchor aliasType missing/);
+      );
+      expect(candidates[0]?.aliasMatches[0]).toEqual({
+        aliasValue: 'CM',
+        matchScore: expect.any(Number),
+      });
     });
 
-    it('rejects anchors that omit aliasType for substring strategy', async () => {
+    it('preserves anchors that omit aliasType for substring strategy', async () => {
       const entityId = createEntityId('chateau-margaux-2015');
       const doc = { entityId, entityType: 'wine' as const, canonicalLabel: 'Château Margaux 2015' };
       const lookup = makeBatchLookup(async () => doc);
-      await expect(buildResolverCandidatesFromGenerator(
+      const candidates = await buildResolverCandidatesFromGenerator(
         makeAnchorInput({
           candidateEntityIds: [entityId],
           lookupStrategies: ['substring'],
         }),
         lookup,
-      )).rejects.toThrow(/anchor aliasType missing/);
+      );
+      expect(candidates[0]?.aliasMatches[0]?.aliasType).toBeUndefined();
+      expect(candidates[0]?.sourceSignals.aliasFuzzyMatch).toBeGreaterThan(0);
     });
 
-    it('rejects anchors that omit aliasType for phonetic strategy', async () => {
+    it('preserves anchors that omit aliasType for phonetic strategy', async () => {
       const entityId = createEntityId('chateau-margaux-2015');
       const doc = { entityId, entityType: 'wine' as const, canonicalLabel: 'Château Margaux 2015' };
       const lookup = makeBatchLookup(async () => doc);
-      await expect(buildResolverCandidatesFromGenerator(
+      const candidates = await buildResolverCandidatesFromGenerator(
         makeAnchorInput({
           candidateEntityIds: [entityId],
           lookupStrategies: ['phonetic_fuzzy'],
         }),
         lookup,
-      )).rejects.toThrow(/anchor aliasType missing/);
+      );
+      expect(candidates[0]?.aliasMatches[0]?.aliasType).toBeUndefined();
+      expect(candidates[0]?.sourceSignals.phoneticMatch).toBeGreaterThan(0);
     });
 
     it('mixed anchors on same entity preserve per-anchor aliasType (canonical + derived_initialism coexist)', async () => {

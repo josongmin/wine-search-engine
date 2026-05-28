@@ -25,7 +25,9 @@ describe('ensureEvalBenchmarkLedgerBootstrap', () => {
     expect(query).toHaveBeenCalledTimes(EVAL_BENCHMARK_LEDGER_BOOTSTRAP_STATEMENTS.length);
     expect(query.mock.calls[0]?.[0]).toContain('CREATE TABLE IF NOT EXISTS eval_benchmark_runs');
     expect(query.mock.calls[1]?.[0]).toContain('ALTER COLUMN search_snapshot_id DROP NOT NULL');
-    expect(query.mock.calls[2]?.[0]).toContain('ADD COLUMN IF NOT EXISTS metrics JSONB');
+    expect(query.mock.calls.some(([sql]) => sql.includes('ADD COLUMN IF NOT EXISTS metrics JSONB'))).toBe(true);
+    expect(query.mock.calls.at(-4)?.[0]).toContain('DROP VIEW IF EXISTS eval_benchmark_run_trends_v');
+    expect(query.mock.calls.at(-3)?.[0]).toContain('DROP VIEW IF EXISTS eval_benchmark_run_metrics_v');
     expect(query.mock.calls.at(-2)?.[0]).toContain('CREATE OR REPLACE VIEW eval_benchmark_run_metrics_v');
     expect(query.mock.calls.at(-1)?.[0]).toContain('CREATE OR REPLACE VIEW eval_benchmark_run_trends_v');
   });

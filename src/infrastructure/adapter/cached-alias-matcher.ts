@@ -1,6 +1,7 @@
 import type {
   AliasMatchResult,
   AliasMatcher,
+  AliasLookupOptions,
 } from '../../domain/query/service/anchor-extractor.js';
 
 interface CachedAliasMatcherOptions {
@@ -54,10 +55,17 @@ export class CachedAliasMatcher implements AliasMatcher {
       : CachedAliasMatcher.DEFAULT_MAX_ENTRIES;
   }
 
-  async findMatches(normalizedQuery: string): Promise<readonly AliasMatchResult[]> {
+  async findMatches(
+    normalizedQuery: string,
+    options?: AliasLookupOptions,
+  ): Promise<readonly AliasMatchResult[]> {
     const trimmed = normalizedQuery.trim();
     if (trimmed.length === 0) {
       return [];
+    }
+
+    if (options?.scope !== undefined) {
+      return this.inner.findMatches(trimmed, options);
     }
 
     const cached = this.cache.get(trimmed);
@@ -88,10 +96,23 @@ export class CachedAliasMatcher implements AliasMatcher {
 
   async findMatchesBatch(
     normalizedQueries: readonly string[],
+    options?: AliasLookupOptions,
   ): Promise<ReadonlyMap<string, readonly AliasMatchResult[]>> {
     const trimmedQueries = this.trimDedupedQueries(normalizedQueries);
     if (trimmedQueries.length === 0) {
       return new Map();
+    }
+
+    if (options?.scope !== undefined) {
+      if (this.inner.findMatchesBatch !== undefined) {
+        return this.inner.findMatchesBatch(trimmedQueries, options);
+      }
+      const perQuery = await Promise.all(
+        trimmedQueries.map((query) => this.inner.findMatches(query, options)),
+      );
+      return new Map(
+        trimmedQueries.map((query, index) => [query, perQuery[index] ?? []] as const),
+      );
     }
 
     const hits = new Map<string, Promise<readonly AliasMatchResult[]>>();

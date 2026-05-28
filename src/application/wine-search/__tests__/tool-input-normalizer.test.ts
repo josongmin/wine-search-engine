@@ -332,7 +332,7 @@ describe('applyAnalysisDefaults', () => {
     });
     const out = DefaultToolInputNormalizer.applyAnalysisDefaults(input, analysis);
     expect((out.filters ?? []).map((c) => c.attribute)).toEqual(
-      expect.arrayContaining(['region', 'grape_primary', 'max_price_krw']),
+      expect.arrayContaining(['region', 'grape_primary', 'price_usd']),
     );
     // Dedupe — `region` constraint should appear once (same attribute+operator+value).
     const regionCount = (out.filters ?? []).filter((c) => c.attribute === 'region').length;
@@ -533,7 +533,7 @@ describe('_internalFindTotalBudgetForParallelSlots', () => {
     expect(_internalFindTotalBudgetForParallelSlots(makeAnalysis())).toBeUndefined();
   });
 
-  it('reads max_price_krw from analysis constraints', () => {
+  it('reads canonical total budget from legacy max_price_krw analysis constraints', () => {
     const analysis = makeAnalysis({
       decomposition: {
         kind: 'parallel-slot',
@@ -541,10 +541,10 @@ describe('_internalFindTotalBudgetForParallelSlots', () => {
       },
       normalizedConstraints: [makeConstraint('max_price_krw', 200_000, '<=')],
     });
-    expect(_internalFindTotalBudgetForParallelSlots(analysis)).toBe(200_000);
+    expect(_internalFindTotalBudgetForParallelSlots(analysis)).toBe(convertKrwToConstraintUsd(200_000));
   });
 
-  it('reads tiered max_price_krw when flat legacy constraints are empty', () => {
+  it('reads canonical total budget from tiered legacy max_price_krw when flat constraints are empty', () => {
     const analysis = makeAnalysis({
       constraints: {
         hard: [makeConstraint('max_price_krw', 120_000, '<=')],
@@ -557,7 +557,7 @@ describe('_internalFindTotalBudgetForParallelSlots', () => {
         slots: [{ wineType: 'red' }, { wineType: 'white' }],
       },
     });
-    expect(_internalFindTotalBudgetForParallelSlots(analysis)).toBe(120_000);
+    expect(_internalFindTotalBudgetForParallelSlots(analysis)).toBe(convertKrwToConstraintUsd(120_000));
   });
 });
 
@@ -633,7 +633,7 @@ describe('normalizeSearchInput — end-to-end composition', () => {
     expect(out.query).toBe('부르고뉴 피노누아 5만원 이하');
     // Defaults from analysis merged.
     expect((out.filters ?? []).map((c) => c.attribute)).toEqual(
-      expect.arrayContaining(['region', 'grape_primary', 'max_price_krw']),
+      expect.arrayContaining(['region', 'grape_primary', 'price_usd']),
     );
   });
 

@@ -9,6 +9,7 @@ import type { HybridCandidate } from '../../domain/retrieval/model/hybrid-candid
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { ConstraintGraph } from '../../domain/query/model/constraint-graph.js';
 import { resolveRequiredAttributes } from '../../domain/query/service/graph-required-attributes.js';
+import { isConstraintGraphEmitEnabled } from '../../domain/query/service/constraint-graph-flags.js';
 import { RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY } from '../../domain/retrieval/model/retrieval-channel.js';
 import {
   classifyGraphPresence,
@@ -28,7 +29,7 @@ function recordGraphPath(
   const outcome = classifyGraphPresence({
     graphPresent: graph !== undefined,
     ...(graph !== undefined ? { graphOrigin: graph.origin } : {}),
-    graphEmitFlagOn: process.env['CONSTRAINT_GRAPH_EMIT'] !== 'false',
+    graphEmitFlagOn: isConstraintGraphEmitEnabled(),
   });
   recordGraphPathDecision({ reader, outcome });
 }

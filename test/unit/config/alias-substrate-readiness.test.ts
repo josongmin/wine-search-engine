@@ -3,7 +3,36 @@ import { parseEnv } from '../../../src/config/env.js';
 import { buildHealthRouteOptions } from '../../../src/config/readiness.js';
 
 describe('alias substrate readiness', () => {
-  it('registers alias_substrate as a required probe when a PG runtime is present', () => {
+  function makePool(rows: readonly unknown[]): {
+    connect: () => Promise<{
+      query: (sql: string, values?: readonly unknown[]) => Promise<{ rows: unknown[]; rowCount?: number }>;
+      release: () => void;
+    }>;
+  } {
+    let i = 0;
+    return {
+      connect: async () => ({
+        query: async (sql: string, _values?: readonly unknown[]) => {
+          if (
+            sql === 'BEGIN'
+            || sql === 'ROLLBACK'
+            || sql === 'COMMIT'
+            || sql.startsWith('SET LOCAL statement_timeout')
+          ) {
+            return { rows: [], rowCount: 0 };
+          }
+          const next = rows[i++];
+          if (next instanceof Error) {
+            throw next;
+          }
+          return (next as { rows: unknown[]; rowCount?: number }) ?? { rows: [], rowCount: 0 };
+        },
+        release: () => {},
+      }),
+    };
+  }
+
+  it('registers alias_substrate as a non-critical probe when a PG runtime is present', () => {
     const config = parseEnv({
       NODE_ENV: 'test',
       KILL_SWITCH_QUERY_CACHE: 'true',
@@ -11,11 +40,11 @@ describe('alias substrate readiness', () => {
     });
 
     const health = buildHealthRouteOptions(config, {
-      pool: { query: async () => ({ rows: [] }) } as never,
+      pool: makePool([]) as never,
     });
 
     expect(health.readiness?.alias_substrate).toBeDefined();
-    expect(health.readiness?.alias_substrate?.required).toBe(true);
+    expect(health.readiness?.alias_substrate?.required).toBe(false);
   });
 
   it('fails closed for alias and snapshot substrate readiness in production without a PG runtime', async () => {
@@ -38,9 +67,7 @@ describe('alias substrate readiness', () => {
       KILL_SWITCH_QUERY_CACHE: 'true',
       KILL_SWITCH_INJECTION_JUDGE: 'true',
     });
-    const pool = {
-      query: async () => ({ rows: [] }),
-    };
+    const pool = makePool([{ rows: [] }]);
 
     const health = buildHealthRouteOptions(config, {
       pool: pool as never,

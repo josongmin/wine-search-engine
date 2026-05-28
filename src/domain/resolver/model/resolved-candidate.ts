@@ -113,8 +113,15 @@ export interface AliasMatchInfo {
   /** The alias surface form that matched. */
   readonly aliasValue: string;
 
-  /** The type of the matched alias. */
-  readonly aliasType: AliasType;
+  /**
+   * The type of the matched alias.
+   *
+   * Optional for degraded / legacy substrates that can recover a matching
+   * surface but cannot recover the per-alias type. Downstream scorers must
+   * treat `undefined` as unknown and fall back to strategy/signal-based guards
+   * instead of crashing the exact-entity route.
+   */
+  readonly aliasType?: AliasType | undefined;
 
   /** Raw match score in [0, 1]. */
   readonly matchScore: number;

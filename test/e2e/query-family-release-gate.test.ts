@@ -16,6 +16,7 @@ interface FamilyCase {
   readonly relevant?: RelevanceMap;
   readonly expectedTop1?: string | undefined;
   readonly excludedSeed?: string | undefined;
+  readonly expectedDecisionStatus?: 'resolved' | 'ambiguous' | 'failed' | undefined;
 }
 
 let server: TestServer;
@@ -52,9 +53,15 @@ function toRankedHits(entityIds: readonly string[]): RankedHit[] {
   }));
 }
 
-function mean<T extends Record<string, number>, K extends keyof T>(
-  rows: readonly T[],
-  key: K,
+interface RankedMetrics {
+  readonly ndcgAt10: number;
+  readonly recallAt20: number;
+  readonly mrrAt10: number;
+}
+
+function mean(
+  rows: readonly RankedMetrics[],
+  key: keyof RankedMetrics,
 ): number {
   return rows.reduce((sum, row) => sum + row[key], 0) / rows.length;
 }
@@ -94,6 +101,24 @@ const CASES: readonly FamilyCase[] = [
     relevant: relevance([['sauternes-2015', 3]]),
   },
   {
+    family: 'pure_constraint',
+    query: '상큼한 화이트 와인',
+    mode: 'hybrid',
+    relevant: relevance([['cloudy-bay-2022', 3]]),
+  },
+  {
+    family: 'pure_constraint',
+    query: '호주 쉬라즈 풀바디',
+    mode: 'hybrid',
+    relevant: relevance([['penfolds-grange-2017', 3]]),
+  },
+  {
+    family: 'pure_constraint',
+    query: '강한 타닌 네비올로',
+    mode: 'hybrid',
+    relevant: relevance([['barolo-giacomo', 3]]),
+  },
+  {
     family: 'anchored_similarity',
     query: '오푸스원 같은 와인',
     excludedSeed: 'opus-one-2018',
@@ -123,6 +148,12 @@ const CASES: readonly FamilyCase[] = [
     ]),
   },
   {
+    family: 'browse',
+    query: '스파클링 와인',
+    mode: 'hybrid',
+    relevant: relevance([['moet-brut', 3]]),
+  },
+  {
     family: 'situation_based',
     query: '결혼식 샴페인',
     mode: 'hybrid',
@@ -131,6 +162,12 @@ const CASES: readonly FamilyCase[] = [
   {
     family: 'situation_based',
     query: '와인 잘 모르는 사람한테 선물할 거, 실패 없는 걸로',
+  },
+  {
+    family: 'no_match',
+    query: '존재하지않는 와인 12345',
+    mode: 'hybrid',
+    expectedDecisionStatus: 'failed',
   },
 ] as const;
 
@@ -160,8 +197,7 @@ describe('Query Family Release Gate', () => {
   });
 
   it(`keeps pure_constraint and situation_based zero-candidate non-regressing against ${QUERY_FAMILY_RELEASE_BASELINE_VERSION}`, async () => {
-    const families: readonly ReleaseQueryFamily[] = ['pure_constraint', 'situation_based'];
-    for (const family of families) {
+    for (const family of ['pure_constraint', 'situation_based'] as const) {
       const cases = CASES.filter((entry) => entry.family === family);
       const bodies = await Promise.all(cases.map((entry) => search(entry)));
       const zeroCandidateRate = bodies.filter((body) => body.results.length === 0).length / bodies.length;
@@ -209,5 +245,18 @@ describe('Query Family Release Gate', () => {
         baseline.meanMrrAt10 - QUERY_FAMILY_RELEASE_THRESHOLDS.rankedFamilyMrrAt10MaxDrop,
       );
     }
+  });
+
+  it(`keeps no_match fail-closed against ${QUERY_FAMILY_RELEASE_BASELINE_VERSION}`, async () => {
+    const cases = CASES.filter((entry) => entry.family === 'no_match');
+    const bodies = await Promise.all(cases.map((entry) => search(entry)));
+    const failClosedRate = bodies.filter((body, index) =>
+      body.engine_decision.decision_status === cases[index]?.expectedDecisionStatus,
+    ).length / bodies.length;
+
+    expect(failClosedRate, 'no_match: fail-closed rate').toBeGreaterThanOrEqual(
+      QUERY_FAMILY_RELEASE_BASELINES.no_match.failClosedRate
+        - QUERY_FAMILY_RELEASE_THRESHOLDS.noMatchFailClosedMaxDrop,
+    );
   });
 });

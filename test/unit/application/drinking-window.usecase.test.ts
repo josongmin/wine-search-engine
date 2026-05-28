@@ -140,4 +140,32 @@ describe('DrinkingWindowUseCase', () => {
     expect(result.evidenceLevel).toBe('deterministic');
     expect(result.blockingEligible).toBe(true);
   });
+
+  it('fails closed when predictor emits non-projectable calendar years', async () => {
+    const predictor = {
+      modelVersion: 'onnx:predictor-v1',
+      predict: vi.fn().mockReturnValue({
+        drinkingWindowStart: 1,
+        drinkingWindowEnd: 12,
+        peakYear: 6,
+        confidence: 'high' as const,
+        modelVersion: 'onnx:predictor-v1',
+      }),
+    };
+
+    const useCase = new DrinkingWindowUseCase(predictor);
+
+    await expect(() => useCase.check({
+      vintage: 1,
+      grapePrimaryEnc: 1,
+      regionEnc: 2,
+      countryEnc: 3,
+      body: 4,
+      tannin: 5,
+      acidity: 6,
+      sweetness: 1,
+      avgCriticProxyScore: 91,
+      targetYear: 2027,
+    })).rejects.toThrow('predictor emitted non-projectable window');
+  });
 });

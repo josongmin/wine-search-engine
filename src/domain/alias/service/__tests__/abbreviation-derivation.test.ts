@@ -38,6 +38,18 @@ describe('deriveAbbreviations — deterministic wine-community shorthand', () =>
     expect(out).toContain('DRC 2019');
   });
 
+  it('suppresses truncated prefix initialisms when the label already starts with an explicit acronym', () => {
+    // "DRC Romanée-Conti 2015" already exposes the community acronym "DRC".
+    // Emitting shorter prefixes like "DR" creates noise, not recall lift.
+    const out = surfaces('DRC Romanée-Conti 2015');
+    expect(out).toContain('DRC');
+    expect(out).toContain('DRC 15');
+    expect(out).toContain('DRC15');
+    expect(out).not.toContain('DR');
+    expect(out).not.toContain('DR 15');
+    expect(out).not.toContain('DR15');
+  });
+
   it('emits a "<word> <YY>" compound for every significant word (R6/R7), not just the first', () => {
     // "Penfolds Grange 2017" — both "Penfolds" and "Grange" clear the
     // length floor (≥ MIN_PRODUCER_TOKEN_LENGTH=4) and neither is a stop

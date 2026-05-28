@@ -3,6 +3,14 @@ import {
   KRW_PER_MAN_WON,
   KRW_PER_USD_APPROXIMATE,
 } from '../../shared/constants.js';
+import {
+  BODY_FULL_MIN,
+  BODY_LIGHT_MAX,
+  BODY_MEDIUM_MAX,
+  BODY_MEDIUM_MIN,
+  SWEETNESS_DRY_MAX,
+  SWEETNESS_SWEET_MIN,
+} from '../../shared/constants/sensory-thresholds.js';
 import { convertKrwToConstraintUsd } from '../../shared/utils/canonical-price.js';
 import { WINE_TYPE_RULES } from '../model/wine-type-patterns.js';
 import {
@@ -226,22 +234,37 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
     });
   }
 
-  if (/(?:^|[^\p{L}\p{N}])(?:full[\s-]?body|풀바디|bold|heavy|묵직)(?=$|[^\p{L}\p{N}])/iu.test(q)) {
+  if (/(?:^|[^\p{L}\p{N}])(?:full(?:[\s-]?body|[\s-]?bodied)|풀바디|bold|heavy|묵직)(?=$|[^\p{L}\p{N}])/iu.test(q)) {
     soft.push({
       attribute: 'body',
-      operator: '=',
-      value: 'full',
+      operator: '>=',
+      value: BODY_FULL_MIN,
       source_phrase: 'full-body',
       confidence: 0.75,
       mapping_version: mv,
     });
-  } else if (/(?:^|[^\p{L}\p{N}])(?:light[\s-]?body|라이트바디|light wine|가벼운|가볍)(?=$|[^\p{L}\p{N}])/iu.test(q)) {
+  } else if (
+    /(?:^|[^\p{L}\p{N}])(?:light(?:[\s-]?body|[\s-]?bodied)|라이트바디|light wine|가벼(?:운|운편|우며|우면서)|가볍(?:고|게|지만)?)(?=$|[^\p{L}\p{N}])/iu
+      .test(q)
+  ) {
     soft.push({
       attribute: 'body',
-      operator: '=',
-      value: 'light',
+      operator: '<=',
+      value: BODY_LIGHT_MAX,
       source_phrase: 'light-body',
       confidence: 0.75,
+      mapping_version: mv,
+    });
+  } else if (
+    /(?:^|[^\p{L}\p{N}])(?:medium(?:[\s-]?body|[\s-]?bodied)|미디엄바디|미디엄\s*바디|미디엄)(?=$|[^\p{L}\p{N}])/iu
+      .test(q)
+  ) {
+    soft.push({
+      attribute: 'body',
+      operator: 'range',
+      value: { min: BODY_MEDIUM_MIN, max: BODY_MEDIUM_MAX },
+      source_phrase: 'medium-body',
+      confidence: 0.78,
       mapping_version: mv,
     });
   }
@@ -275,6 +298,36 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
     });
   }
 
+  // "fresh / crisp / high-acid" intent
+  if (
+    /(?:상큼(?:한|하게)?|산뜻(?:한|하게)?|산미\s*(?:있(?:는|고)|좋(?:은|고)|높(?:은|고))|crisp|fresh|zesty|high[\s-]?acid)/iu
+      .test(predicateNormalizedQuery)
+  ) {
+    soft.push({
+      attribute: 'acidity',
+      operator: '>=',
+      value: 0.6,
+      source_phrase: '상큼/산미',
+      confidence: 0.8,
+      mapping_version: mv,
+    });
+  }
+
+  // "high tannin / firm tannin" intent
+  if (
+    /(?:강한?\s*타닌|타닌감?\s*(?:강(?:한|하게)|있(?:는|고)|좋(?:은|고))|tannic|high[\s-]?tannin|firm[\s-]?tannin)/iu
+      .test(predicateNormalizedQuery)
+  ) {
+    soft.push({
+      attribute: 'tannin',
+      operator: '>=',
+      value: 0.6,
+      source_phrase: '강한 타닌',
+      confidence: 0.8,
+      mapping_version: mv,
+    });
+  }
+
   // "fruity" intensity intent
   if (/(?:과일향\s*풍부(?:한|하게)?|과일향\s*진하(?:다|한|게)?|fruity)/iu.test(predicateNormalizedQuery)) {
     soft.push({
@@ -300,14 +353,14 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
   ) {
     soft.push({
       attribute: 'sweetness',
-      operator: '=',
-      value: 'dry',
+      operator: '<=',
+      value: SWEETNESS_DRY_MAX,
       source_phrase: 'dry',
       confidence: 0.8,
       mapping_version: mv,
     });
   } else if (
-    /(?:^|[^\p{L}\p{N}])(?:sweet wine|달콤한|스위트|demi[\s-]?sec|semi[\s-]?sweet)(?=$|[^\p{L}\p{N}])/iu.test(q)
+    /(?:^|[^\p{L}\p{N}])(?:sweet wine|달콤한|달달한|달달|달큰한|단맛(?:\s*(?:있는|나는))?|스위트|demi[\s-]?sec|semi[\s-]?sweet)(?=$|[^\p{L}\p{N}])/iu.test(q)
     // Bare "sweet" qualifies as a positive sweetness preference when it is
     // NOT immediately preceded by an aversion modifier ("too"/"not"/"no").
     // This allows "sweet but not too sweet" to emit BOTH sweetness=sweet
@@ -318,8 +371,8 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
   ) {
     soft.push({
       attribute: 'sweetness',
-      operator: '=',
-      value: 'sweet',
+      operator: '>=',
+      value: SWEETNESS_SWEET_MIN,
       source_phrase: 'sweet',
       confidence: 0.8,
       mapping_version: mv,

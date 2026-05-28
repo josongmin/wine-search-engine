@@ -184,6 +184,67 @@ describe('LLMInjectionJudge', () => {
     });
   });
 
+  describe('Cache envelope shape validation (rule 12 — Zod safeParse)', () => {
+    it('treats a JSON cache entry with an unexpected shape as a miss and queries the classifier', async () => {
+      // Simulate a poisoned/legacy entry: parses as JSON but does not match
+      // the InjectionJudgeCacheEnvelopeSchema (missing `is_injection`).
+      const query = 'shape-mismatch query';
+      const { createHash } = await import('node:crypto');
+      const digest = createHash('sha256').update(query, 'utf8').digest('hex');
+      const cacheKey = `injection_judge:${digest}`;
+      mockRedisClient.cache.set(cacheKey, JSON.stringify({ verdict: 'safe' }));
+
+      mockClassifier.queueResponse(false);
+
+      const result = await judge.judge(query);
+
+      expect(result).toBe(false);
+      // Classifier MUST be called because the envelope failed Zod validation.
+      expect(mockClassifier.getCallCount()).toBe(1);
+    });
+
+    it('rejects a cache entry where is_injection has the wrong type (number, not boolean)', async () => {
+      // `.strict()` + boolean validation: a number coerced into is_injection
+      // (e.g., from a buggy writer or attacker injection) must NOT short-circuit
+      // the LLM classifier.
+      const query = 'wrong-type cache query';
+      const { createHash } = await import('node:crypto');
+      const digest = createHash('sha256').update(query, 'utf8').digest('hex');
+      const cacheKey = `injection_judge:${digest}`;
+      mockRedisClient.cache.set(cacheKey, JSON.stringify({ is_injection: 1 }));
+
+      mockClassifier.queueResponse(true);
+
+      const result = await judge.judge(query);
+
+      expect(result).toBe(true);
+      expect(mockClassifier.getCallCount()).toBe(1);
+    });
+
+    it('rejects a cache entry with an unexpected extra field (strict schema)', async () => {
+      // `.strict()` is intentional on the security surface: any unknown field
+      // is treated as potential cache poisoning and forced through the miss path.
+      const query = 'extra-field cache query';
+      const { createHash } = await import('node:crypto');
+      const digest = createHash('sha256').update(query, 'utf8').digest('hex');
+      const cacheKey = `injection_judge:${digest}`;
+      mockRedisClient.cache.set(
+        cacheKey,
+        JSON.stringify({ is_injection: false, attacker_field: 'payload' }),
+      );
+
+      mockClassifier.queueResponse(true);
+
+      const result = await judge.judge(query);
+
+      // The cached entry said `false`, but strict schema rejected it; the
+      // classifier was consulted and said `true`. We must see the classifier's
+      // verdict, not the corrupted cache.
+      expect(result).toBe(true);
+      expect(mockClassifier.getCallCount()).toBe(1);
+    });
+  });
+
   describe('Cache miss and store', () => {
     it('stores result in Redis asynchronously', async () => {
       mockRedisClient.clear();

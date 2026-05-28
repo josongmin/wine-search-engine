@@ -21,7 +21,7 @@ export type IdentityExactnessTier =
 
 export interface IdentityAliasMatchProvenance {
   readonly aliasValue: string;
-  readonly aliasType: AliasType;
+  readonly aliasType?: AliasType | undefined;
   readonly matchScore: number;
 }
 
@@ -53,6 +53,7 @@ export interface EntityLaneCandidateArtifact {
   readonly resolvedCandidate: ResolvedCandidate;
   readonly rawCandidate?: ResolverCandidate | undefined;
   readonly identityProvenance: IdentityLaneProvenance;
+  readonly identityBackedHardConstraintAttributes?: readonly string[] | undefined;
   readonly evidenceItems: readonly EvidenceItem[];
 }
 

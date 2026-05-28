@@ -18,6 +18,7 @@ import type { HybridCandidate } from '../../model/hybrid-candidate.js';
 import type { ConstraintBundle, NormalizedConstraint } from '../../../shared/types/index.js';
 import type { CanonicalEntityId } from '../../../shared/types/index.js';
 import { recipientProfileEvidenceAxes } from '../../../query/service/recipient-situation-profile.js';
+import { convertKrwToConstraintUsd } from '../../../shared/utils/canonical-price.js';
 import { makeHybridCandidate } from '../../../../../test/support/hybrid-candidate-test-factory.js';
 
 // Minimal HybridCandidate factory — only sets the fields under test.
@@ -76,6 +77,36 @@ describe('geography constraint — substring matching (Fix 1)', () => {
     const bundle = makeBundle([makeConstraint('region', '=', 'Bordeaux')]);
     const result = annotateCandidateConstraintEvidence(candidate, bundle);
     expect(result.matchedConstraints).toContain('region');
+  });
+
+  it('region ontology synonyms match: "Tuscany" satisfies constraint "Toscana"', () => {
+    const candidate = makeCandidate({ region: 'Tuscany' });
+    const bundle = makeBundle([makeConstraint('region', '=', 'Toscana')]);
+    const result = annotateCandidateConstraintEvidence(candidate, bundle);
+    expect(result.matchedConstraints).toContain('region');
+    expect(result.unmetHardConstraints ?? []).not.toContain('region');
+  });
+
+  it('region hierarchy parent matches even when leaf region differs', () => {
+    const candidate = makeCandidate({
+      region: 'Chianti',
+      regionHierarchy: ['Italy', 'Toscana', 'Central Italy'],
+    });
+    const bundle = makeBundle([makeConstraint('region', '=', 'Toscana')]);
+    const result = annotateCandidateConstraintEvidence(candidate, bundle);
+    expect(result.matchedConstraints).toContain('region');
+    expect(result.unmetHardConstraints ?? []).not.toContain('region');
+  });
+
+  it('country falls back to region hierarchy when country field is absent', () => {
+    const candidate = makeCandidate({
+      country: undefined,
+      regionHierarchy: ['Italy', 'Toscana', 'Central Italy'],
+    });
+    const bundle = makeBundle([makeConstraint('country', '=', 'Italy')]);
+    const result = annotateCandidateConstraintEvidence(candidate, bundle);
+    expect(result.matchedConstraints).toContain('country');
+    expect(result.unmetHardConstraints ?? []).not.toContain('country');
   });
 
   it('region "Tuscany" does NOT satisfy constraint "Bordeaux"', () => {
@@ -188,6 +219,25 @@ describe('unmetHardConstraints annotation', () => {
     const bundle = makeBundle([], [makeConstraint('style', 'in', ['approachable'])]);
     const result = annotateCandidateConstraintEvidence(candidate, bundle);
     expect(result.matchedConstraints).toContain('style');
+  });
+
+  it('grape ontology synonyms match: "Grenache" satisfies constraint "Garnacha"', () => {
+    const candidate = makeCandidate({ grapePrimary: 'Grenache' });
+    const bundle = makeBundle([makeConstraint('grape_primary', '=', 'Garnacha')]);
+    const result = annotateCandidateConstraintEvidence(candidate, bundle);
+    expect(result.matchedConstraints).toContain('grape_primary');
+    expect(result.unmetHardConstraints ?? []).not.toContain('grape_primary');
+  });
+
+  it('keeps matched and unmet hard attributes disjoint when one same-attribute sibling matches', () => {
+    const candidate = makeCandidate({ region: 'Bourgogne', unmetHardConstraints: ['region'] });
+    const bundle = makeBundle([
+      makeConstraint('region', '=', 'Chambolle-Musigny'),
+      makeConstraint('region', '=', 'Bourgogne'),
+    ]);
+    const result = annotateCandidateConstraintEvidence(candidate, bundle);
+    expect(result.matchedConstraints).toContain('region');
+    expect(result.unmetHardConstraints ?? []).not.toContain('region');
   });
 
   // presentation_forward semantic profile removed — no backing data in source.
@@ -356,18 +406,18 @@ describe('unknown attribute — silent-drop guard (Fix 4)', () => {
     );
   });
 
-  it('evaluates max_price_krw against candidate priceUsd via the shared approximate KRW conversion', () => {
+  it('evaluates price_usd ceiling against candidate priceUsd', () => {
     const candidate = makeCandidate({ priceUsd: 60 });
-    const bundle = makeBundle([], [makeConstraint('max_price_krw', '<=', 100000)]);
+    const bundle = makeBundle([], [makeConstraint('price_usd', '<=', convertKrwToConstraintUsd(100000))]);
     const result = annotateCandidateConstraintEvidence(candidate, bundle);
-    expect(result.matchedConstraints).toContain('max_price_krw');
+    expect(result.matchedConstraints).toContain('price_usd');
   });
 
-  it('evaluates min_price_krw against candidate priceUsd via the shared approximate KRW conversion', () => {
+  it('evaluates price_usd floor against candidate priceUsd', () => {
     const candidate = makeCandidate({ priceUsd: 120 });
-    const bundle = makeBundle([], [makeConstraint('min_price_krw', '>=', 100000)]);
+    const bundle = makeBundle([], [makeConstraint('price_usd', '>=', convertKrwToConstraintUsd(100000))]);
     const result = annotateCandidateConstraintEvidence(candidate, bundle);
-    expect(result.matchedConstraints).toContain('min_price_krw');
+    expect(result.matchedConstraints).toContain('price_usd');
   });
 });
 
@@ -701,5 +751,23 @@ describe('fruit_intensity soft constraint — no-backing-field exemption (Bug 2 
     expect(result.matchedConstraints).toContain('body');
     // sweetness does NOT match and IS resolvable → NOT in matchedConstraints
     expect(result.matchedConstraints).not.toContain('sweetness');
+  });
+
+  it('missing sweetness does not get the no-backing-field soft exemption', () => {
+    const candidate = makeCandidate({ wineType: 'red', sweetness: undefined });
+    const bundle = makeBundle([], [
+      makeConstraint('sweetness', '=', 5),
+    ]);
+    const result = annotateCandidateConstraintEvidence(candidate, bundle);
+    expect(result.matchedConstraints).not.toContain('sweetness');
+  });
+
+  it('missing acidity does not get the no-backing-field soft exemption', () => {
+    const candidate = makeCandidate({ wineType: 'white', acidity: undefined });
+    const bundle = makeBundle([], [
+      makeConstraint('acidity', '>=', 0.6),
+    ]);
+    const result = annotateCandidateConstraintEvidence(candidate, bundle);
+    expect(result.matchedConstraints).not.toContain('acidity');
   });
 });

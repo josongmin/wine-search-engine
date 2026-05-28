@@ -4,6 +4,7 @@ import type { AnchorConditionedQuery } from '../model/relative-query.js';
 import { WINE_TYPE_DETECTION_PATTERNS } from '../model/wine-type-patterns.js';
 import { parseSpans } from '../../attribute/service/span-parser.js';
 import { isDirectEntityResolution, resolveEntity } from '../../attribute/service/entity-resolver.js';
+import { extractAllPairingConstraints } from './pairing-extractor.js';
 import type { AnchorExtractor } from './anchor-extractor.js';
 import {
   hasEntityMetadataKeyword,
@@ -27,16 +28,12 @@ const PRICE_KEYWORDS: readonly RegExp[] = [
   /만원\s*(?:이하|미만|대)/u,
 ] as const;
 
-/** Pairing-related keywords — lightweight intent signals only.
- *  For detailed food tag extraction, see pairing-extractor.ts (PAIRING_PATTERNS).
- *  This list covers pairing verbs + the most common food nouns to detect
- *  "pairing_search" intent quickly, while pairing-extractor maps to specific
- *  taxonomy tags (beef, shellfish, etc.) for Vespa filtering. */
+/** Pairing verbs / generic recommendation verbs only.
+ *  Food noun detection MUST come from pairing-extractor.ts so intent routing
+ *  and retrieval taxonomy share one authority surface. */
 const PAIRING_KEYWORDS: readonly RegExp[] = [
   /(?<!\p{L})(?<!\p{N})(?:pair|pairing|goes?\s+with|match|accompany)(?!\p{L})(?!\p{N})/iu,
   /(?:^|[^\p{L}\p{N}])(?:어울리|곁들|맞는|페어링)(?=$|[^\p{L}\p{N}])/u,
-  /(?<!\p{L})(?<!\p{N})(?:steak|fish|cheese|chicken|pasta|pizza|beef|pork|seafood)(?!\p{L})(?!\p{N})/iu,
-  /(?:^|[^\p{L}\p{N}])(?:스테이크|생선|치즈|치킨|파스타|피자|소고기|돼지고기|해산물)(?=$|[^\p{L}\p{N}])/u,
   /(?<!\p{L})(?<!\p{N})(?:gift|anniversary|date\s+night|birthday|celebration|party|housewarming|dinner|camping)(?!\p{L})(?!\p{N})/iu,
   /(?:선물(?:용|할|하려|하고)?|(?:결혼)?기념일|데이트|생일|축하|파티|집들이|디너|캠핑)/u,
 ] as const;
@@ -63,7 +60,7 @@ const OCCASION_SUBSTRINGS: readonly string[] = [
 const NON_WINE_TYPE_CONSTRAINT_KEYWORDS: readonly RegExp[] = [
   /(?<!\p{L})(?<!\p{N})(?:from|region|grape|variety|vintage|year)(?!\p{L})(?!\p{N})/iu,
   /(?:^|[^\p{L}\p{N}])(?:지역|품종|빈티지|연도)(?=$|[^\p{L}\p{N}])/u,
-  /(?<!\p{L})(?<!\p{N})(?:dry|sweet|tannic|fruity|oaky|light|full[\s-]?body)(?!\p{L})(?!\p{N})/iu,
+  /(?<!\p{L})(?<!\p{N})(?:dry|sweet|tannic|fruity|oaky|light(?:[\s-]?body|[\s-]?bodied)?|full(?:[\s-]?body|[\s-]?bodied)?)(?!\p{L})(?!\p{N})/iu,
   /(?:^|[^\p{L}\p{N}])(?:드라이|스위트|타닌|과일|오크|라이트|풀바디)(?=$|[^\p{L}\p{N}])/u,
 ] as const;
 
@@ -121,9 +118,10 @@ export function detectQueryIntent(
   const hasPriceKeyword = PRICE_KEYWORDS.some((re) =>
     re.test(intentQuerySurface),
   );
+  const pairingTags = extractAllPairingConstraints(intentQuerySurface);
   const hasPairingKeyword = PAIRING_KEYWORDS.some((re) =>
     re.test(intentQuerySurface),
-  ) || OCCASION_SUBSTRINGS.some((token) => intentQuerySurface.includes(token));
+  ) || pairingTags.length > 0 || OCCASION_SUBSTRINGS.some((token) => intentQuerySurface.includes(token));
   const hasConstraintKeyword = CONSTRAINT_KEYWORDS.some((re) =>
     re.test(intentQuerySurface),
   );

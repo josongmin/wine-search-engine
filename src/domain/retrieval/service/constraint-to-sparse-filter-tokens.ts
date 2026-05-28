@@ -1,4 +1,5 @@
 import type { NormalizedConstraint } from '../../shared/types/index.js';
+import { normalizeConstraintComparableString } from '../../attribute/service/constraint-ontology-normalization.js';
 
 /**
  * P1.A — Soft→hard confidence-gated promotion.
@@ -31,12 +32,11 @@ const SOFT_PROMOTION_DEFAULT_CONFIDENCE_FLOOR = 0.8;
  *    style-normalisation before YQL emission (see `case 'style'` in
  *    `constraintToSparseFilterTokens`).
  *  - `price_band` — categorical enum; soft preference signals only.
- *  - `body` / `tannin` / `acidity` — sensory sliders for ranking; the
- *    `body_min` promotion is intentionally MIN-only to avoid over-pruning
- *    fuller-body recall, matching the historical SOTA++ default.
+ *  - none currently. Explicit low/medium/high body preferences now promote
+ *    symmetrically so `<=' and range ceilings can actually tighten retrieval.
  *
  * Field-level promotion semantics:
- *  - **MIN-only attributes** (`critic_score`, `body`, `producer_prestige`,
+ *  - **MIN-only attributes** (`critic_score`, `producer_prestige`,
  *    `gift_suitability`, `beginner_suitability`): a user asking for "high X"
  *    has no implicit ceiling. Promoting a MAX would silently exclude the best
  *    candidates. So `maxKey` is omitted for these.
@@ -62,7 +62,7 @@ const SOFT_PROMOTION_TOKEN_SPEC: ReadonlyMap<string, SoftPromotionSpec> = new Ma
   // MIN-only numeric attributes — historical SOTA++ default. MAX intentionally
   // omitted to prevent over-pruning on the unbounded-high end of user intent.
   ['critic_score',         { minKey: 'critic_score_min' }],
-  ['body',                 { minKey: 'body_min' }],
+  ['body',                 { minKey: 'body_min', maxKey: 'body_max' }],
   ['producer_prestige',    { minKey: 'producer_prestige_min' }],
   ['gift_suitability',     { minKey: 'gift_suitability_min' }],
   ['beginner_suitability', { minKey: 'beginner_suitability_min' }],
@@ -70,12 +70,56 @@ const SOFT_PROMOTION_TOKEN_SPEC: ReadonlyMap<string, SoftPromotionSpec> = new Ma
   // C1b regression: "저알콜" / "도수 낮은" / "드라이" / "달지 않은" must filter.
   ['alcohol_pct', { minKey: 'alcohol_min', maxKey: 'alcohol_max' }],
   ['alcohol',     { minKey: 'alcohol_min', maxKey: 'alcohol_max' }],
+  ['acidity',     { minKey: 'acidity_min', maxKey: 'acidity_max' }],
+  ['tannin',      { minKey: 'tannin_min', maxKey: 'tannin_max' }],
   ['sweetness',   { minKey: 'sweetness_min', maxKey: 'sweetness_max' }],
   ['price_usd',   { minKey: 'price_usd_min', maxKey: 'price_usd_max' }],
   // String-contains attributes — `=` / `in` operators only.
+  ['pairing', { stringKey: 'pairing' }],
+  ['grape_primary', { stringKey: 'grape_or' }],
   ['flavor_profile', { stringKey: 'flavor_profile' }],
   ['certification',  { stringKey: 'certification' }],
 ]);
+
+const GRAPE_FILTER_SURFACE_VARIANTS: ReadonlyMap<string, readonly string[]> = new Map([
+  ['syrah', ['Syrah', 'Shiraz']],
+  ['grenache', ['Grenache', 'Garnacha']],
+  ['moscato', ['Moscato', 'Muscat']],
+  ['pinot_gris', ['Pinot Gris', 'Pinot Grigio']],
+  ['zinfandel', ['Zinfandel', 'Primitivo']],
+  ['gewurztraminer', ['Gewürztraminer', 'Gewurztraminer']],
+]);
+
+function dedupeNonEmptyFilterValues(values: readonly string[]): readonly string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const safe = value.replace(/\|/g, '').trim();
+    if (safe.length === 0 || seen.has(safe)) {
+      continue;
+    }
+    seen.add(safe);
+    out.push(safe);
+  }
+  return out;
+}
+
+function expandGrapeFilterValues(value: string): readonly string[] {
+  const canonical = normalizeConstraintComparableString('grape_primary', value);
+  const variants = GRAPE_FILTER_SURFACE_VARIANTS.get(canonical);
+  if (variants === undefined) {
+    return dedupeNonEmptyFilterValues([value]);
+  }
+  return dedupeNonEmptyFilterValues([value, ...variants]);
+}
+
+function expandGrapeFilterValueList(values: readonly string[]): readonly string[] {
+  const expanded: string[] = [];
+  for (const value of values) {
+    expanded.push(...expandGrapeFilterValues(value));
+  }
+  return dedupeNonEmptyFilterValues(expanded);
+}
 
 /**
  * Vespa `style` field stores compound strings: "medium red", "bold red", "light red",
@@ -246,17 +290,20 @@ function constraintToSparseFilterTokens(
       // Exclusion must cover BOTH grape fields in the schema:
       // grape_primary (string) and grapes (array<string>).
       if (operator === 'exclude' && typeof value === 'string' && value.length > 0) {
-        const safe = value.replace(/\|/g, '');
-        if (safe.length === 0) return [];
-        return [`grape_primary_not:${safe}`, `grapes_not:${safe}`];
+        const expanded = expandGrapeFilterValues(value);
+        if (expanded.length === 0) return [];
+        if (expanded.length === 1) {
+          return [`grape_primary_not:${expanded[0]}`, `grapes_not:${expanded[0]}`];
+        }
+        const joined = expanded.join('|');
+        return [`grape_primary_not_in:${joined}`, `grapes_not_in:${joined}`];
       }
       if (operator === 'exclude' && Array.isArray(value)) {
         // Array exclude: must cover both grape_primary (string) and grapes (array<string>).
         // Strip pipes to prevent token-delimiter injection.
-        const normalized = value
-          .filter((e): e is string => typeof e === 'string' && e.length > 0)
-          .map((e) => e.replace(/\|/g, ''))
-          .filter((e) => e.length > 0);
+        const normalized = expandGrapeFilterValueList(
+          value.filter((e): e is string => typeof e === 'string' && e.length > 0),
+        );
         if (normalized.length === 0) return [];
         if (normalized.length === 1) {
           return [`grape_primary_not:${normalized[0]}`, `grapes_not:${normalized[0]}`];
@@ -266,9 +313,9 @@ function constraintToSparseFilterTokens(
       }
       if (operator === 'not_in' && Array.isArray(value)) {
         // Strip pipes to prevent token-delimiter injection (same as stringEq branch).
-        const normalized = value.filter((e): e is string => typeof e === 'string' && e.length > 0)
-          .map((e) => e.replace(/\|/g, ''))
-          .filter((e) => e.length > 0);
+        const normalized = expandGrapeFilterValueList(
+          value.filter((e): e is string => typeof e === 'string' && e.length > 0),
+        );
         if (normalized.length === 0) return [];
         const joined = normalized.join('|');
         // Single value: use _not form; multiple: use _not_in pipe-delimited form.
@@ -284,14 +331,17 @@ function constraintToSparseFilterTokens(
       // buildSparseFilters combined as AND — meaning blend wines where the requested
       // variety is only in grapes[] but NOT grape_primary were EXCLUDED. OR is correct.
       if (operator === '=' && typeof value === 'string' && value.length > 0) {
-        const safe = value.replace(/\|/g, '');
-        if (safe.length === 0) return [];
-        return [`grape_or:${safe}`];
+        const expanded = expandGrapeFilterValues(value);
+        if (expanded.length === 0) return [];
+        if (expanded.length === 1) {
+          return [`grape_or:${expanded[0]}`];
+        }
+        return [`grape_or_in:${expanded.join('|')}`];
       }
       if (operator === 'in' && Array.isArray(value)) {
-        const normalized = value.filter((e): e is string => typeof e === 'string' && e.length > 0)
-          .map((e) => e.replace(/\|/g, ''))
-          .filter((e) => e.length > 0);
+        const normalized = expandGrapeFilterValueList(
+          value.filter((e): e is string => typeof e === 'string' && e.length > 0),
+        );
         if (normalized.length === 0) return [];
         if (normalized.length === 1) {
           return [`grape_or:${normalized[0]}`];
@@ -604,9 +654,13 @@ function softConstraintToPromotionTokens(
       && value.length > 0
       && spec.stringKey !== undefined
     ) {
-      const safe = value.replace(/\|/g, '');
-      if (safe.length > 0) {
-        out.push(`${spec.stringKey}:${safe}`);
+      const normalized = c.attribute === 'grape_primary'
+        ? expandGrapeFilterValues(value)
+        : dedupeNonEmptyFilterValues([value]);
+      if (normalized.length === 1) {
+        out.push(`${spec.stringKey}:${normalized[0]}`);
+      } else if (normalized.length > 1) {
+        out.push(`${spec.stringKey}_in:${normalized.join('|')}`);
       }
       return out;
     }
@@ -640,10 +694,13 @@ function softConstraintToPromotionTokens(
     // Multi-value string `in` — emit pipe-delimited `_in` token. Buildsparsefilters
     // turns this into a Vespa OR clause. Strip pipes from individual values to
     // prevent the token-delimiter injection vector.
-    const normalized = value
-      .filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
-      .map((entry) => entry.replace(/\|/g, ''))
-      .filter((entry) => entry.length > 0);
+    const normalized = c.attribute === 'grape_primary'
+      ? expandGrapeFilterValueList(
+          value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0),
+        )
+      : dedupeNonEmptyFilterValues(
+          value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0),
+        );
     if (normalized.length === 1) {
       out.push(`${spec.stringKey}:${normalized[0]}`);
       return out;

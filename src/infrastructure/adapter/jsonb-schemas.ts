@@ -13,6 +13,7 @@ import type { DecisionSnapshot } from '../../domain/shared/types/index.js';
 import type { EvidenceItem } from '../../domain/shared/types/index.js';
 import type { Relations } from '../../domain/entity/model/relations.js';
 import type { EntityAttributes } from '../../domain/entity/model/attributes.js';
+import type { LTRScoreComponents } from '../../domain/ranking/service/ltr-feature-extractor.js';
 import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 
 // ---------------------------------------------------------------------------
@@ -137,6 +138,45 @@ export function parseEvidenceItemsJsonb(raw: unknown, caller: string): readonly 
     throw new CorruptedJsonbError('evidence_items', caller, failures);
   }
   return validated;
+}
+
+// ---------------------------------------------------------------------------
+// LTRScoreComponents
+// ---------------------------------------------------------------------------
+
+/**
+ * Runtime schema for persisted top-result LTR score components.
+ * Numeric fields are finite-only to prevent NaN/Infinity poisoning the
+ * training feature extractor after a JSONB round-trip.
+ */
+export const LtrScoreComponentsJsonbSchema = z.object({
+  semantic: z.number().finite().optional(),
+  popularity: z.number().finite().optional(),
+  attributeAlignment: z.number().finite().optional(),
+  preferenceAlignment: z.number().finite().optional(),
+  criticScore: z.number().finite().optional(),
+  recency: z.number().finite().optional(),
+  producerPrestige: z.number().finite().optional(),
+  multilingualScore: z.number().finite().optional(),
+  entityPosterior: z.number().finite().optional(),
+  identityExactnessTier: z.enum(['exact', 'alias_exact', 'alias_fuzzy', 'none']).optional(),
+  lanePresence: z.enum(['corroborated', 'entity_only', 'general_only']).optional(),
+}).strict();
+
+export function parseLtrScoreComponentsJsonb(
+  raw: unknown,
+  caller: string,
+): LTRScoreComponents {
+  const result = LtrScoreComponentsJsonbSchema.safeParse(raw);
+  if (result.success) {
+
+    return result.data as unknown as LTRScoreComponents;
+  }
+  jsonbLog.warn(
+    { issues: result.error.issues.slice(0, 3), caller, rawType: typeof raw },
+    'top_result_score_components JSONB failed validation — throwing CorruptedJsonbError',
+  );
+  throw new CorruptedJsonbError('top_result_score_components', caller, result.error.issues);
 }
 
 // ---------------------------------------------------------------------------

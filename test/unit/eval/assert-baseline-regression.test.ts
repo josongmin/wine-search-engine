@@ -7,6 +7,55 @@ import {
 } from '../../../scripts/eval/assert-baseline-regression.js';
 
 describe('assert-baseline-regression', () => {
+  it('fails closed when offline baseline provenance is incompatible', () => {
+    const baseline: OfflineEvalReport = {
+      dataset_tier: 'bronze',
+      query_count: 100,
+      ndcg_at_10: 0.65,
+      mrr_at_10: 0.62,
+      wrong_top1_rate: 0.01,
+      provenance: {
+        benchmark_kind: 'offline_eval_in_memory_regression',
+        provenance_schema_version: 1,
+        corpus_id: 'fixture:smoke',
+        corpus_hash: 'hash-a',
+        runtime_target: 'in_memory_test_server',
+        uses_live_api: false,
+        smoke_synthesized: false,
+        threshold_source: 'external_fixture_thresholds',
+        gate_eligible: false,
+        suite_gate_passed: true,
+        search_snapshot_id: null,
+        runtime_activation_status: null,
+        readiness_passed: null,
+        active_ltr_models: null,
+        feature_schema_hash: 'feature-hash',
+        comparison_compatibility_key: 'compat-a',
+        run_provenance_key: 'run-a',
+      },
+    };
+    const current: OfflineEvalReport = {
+      ...baseline,
+      provenance: {
+        ...baseline.provenance!,
+        comparison_compatibility_key: 'compat-b',
+        run_provenance_key: 'run-b',
+      },
+    };
+
+    expect(compareOfflineRegression(current, baseline, {
+      ndcg_at_10_max_drop: 0.02,
+      mrr_at_10_max_drop: 0.02,
+      recall_at_3_max_drop: 0.02,
+      recall_at_100_max_drop: 0.02,
+      wrong_top1_rate_max_increase: 0,
+    })).toEqual([
+      expect.objectContaining({
+        metric: 'provenance.comparison_compatibility_key',
+      }),
+    ]);
+  });
+
   it('passes offline reports within thresholds', () => {
     const baseline: OfflineEvalReport = {
       dataset_tier: 'bronze',

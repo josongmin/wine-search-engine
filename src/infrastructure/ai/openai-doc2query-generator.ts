@@ -41,6 +41,11 @@
  *     "similar to" in 200/200, killing those tokens' IDF.
  */
 
+import {
+  KRW_PER_USD_APPROXIMATE,
+  KRW_PER_MAN_WON,
+  KRW_PER_CHEON_WON,
+} from '../../domain/shared/constants.js';
 import type { ChatLlmPort } from '../../domain/ai/port/chat-llm.port.js';
 import type { EmbeddingServicePort } from '../../domain/retrieval/port/embedding-service.port.js';
 import type {
@@ -107,13 +112,12 @@ const ROUND_TRIP_MIN_SIM = 0.15;
 /** Sampling temperature. gpt-5 series ignores this; we still set it. */
 const DOC2QUERY_TEMPERATURE = 1;
 
-// Korean price-tier hint thresholds
-const USD_TO_KRW = 1300;
+// Korean price-tier hint thresholds.
+// FX rate and KRW unit constants come from `@domain/shared/constants` so the
+// doc2query hint mirrors NL price extraction (no silent FX drift).
 const KRW_TIER_LOW = 30_000;
 const KRW_TIER_MID = 100_000;
 const KRW_TIER_HIGH = 1_000_000;
-const WON_PER_CHEON = 1_000;
-const WON_PER_MAN = 10_000;
 
 const BODY_TANNIN_HIGH = 0.7;
 const BODY_TANNIN_MID = 0.4;
@@ -203,17 +207,17 @@ function hasHangul(s: string): boolean {
 function describePriceKrw(priceUsd: number | null, priceBand: string | undefined): string {
   if (priceUsd === null) return priceBand ?? 'price unavailable';
   const bandSuffix = priceBand !== undefined ? ` (${priceBand})` : '';
-  const krw = Math.round(priceUsd * USD_TO_KRW);
+  const krw = Math.round(priceUsd * KRW_PER_USD_APPROXIMATE);
   if (krw < KRW_TIER_LOW) {
-    return `약 ${Math.round(krw / WON_PER_CHEON)}천원${bandSuffix}`;
+    return `약 ${Math.round(krw / KRW_PER_CHEON_WON)}천원${bandSuffix}`;
   }
   if (krw < KRW_TIER_MID) {
-    return `약 ${Math.round(krw / WON_PER_MAN)}만원${bandSuffix}`;
+    return `약 ${Math.round(krw / KRW_PER_MAN_WON)}만원${bandSuffix}`;
   }
   if (krw < KRW_TIER_HIGH) {
-    return `약 ${Math.round(krw / WON_PER_MAN)}만원${bandSuffix}`;
+    return `약 ${Math.round(krw / KRW_PER_MAN_WON)}만원${bandSuffix}`;
   }
-  return `약 ${(krw / WON_PER_MAN).toFixed(0)}만원${bandSuffix}`;
+  return `약 ${(krw / KRW_PER_MAN_WON).toFixed(0)}만원${bandSuffix}`;
 }
 
 function styleDescriptor(body: number | null, tannin: number | null): string {

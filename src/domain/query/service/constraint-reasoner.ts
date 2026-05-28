@@ -435,7 +435,11 @@ export function buildBundleFromAtoms(atoms: readonly ConstraintAtom[]): Constrai
       value: atom.value,
       source_phrase: atom.source_phrase,
       confidence: atom.confidence,
+      ...(atom.soft_promotion_authority !== undefined
+        ? { soft_promotion_authority: atom.soft_promotion_authority }
+        : {}),
       ...(atom.mapping_version !== undefined ? { mapping_version: atom.mapping_version } : {}),
+      ...(atom.inferred_binding !== undefined ? { inferred_binding: atom.inferred_binding } : {}),
     };
     if (atom.constraint_role === 'exclusion' || atom.constraint_role === 'must_satisfy') {
       hard.push(base);

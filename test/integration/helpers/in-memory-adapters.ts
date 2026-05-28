@@ -34,15 +34,10 @@ import type { AnchorProfile } from '../../../src/domain/mixed/model/anchor-profi
 import type { HybridCandidate } from '../../../src/domain/retrieval/model/hybrid-candidate.js';
 import type { FeedbackStore, FeedbackFilter, AggregatedFeedbackStats } from '../../../src/domain/learning/port/feedback-store.port.js';
 import type { FeedbackSignal } from '../../../src/domain/learning/model/feedback-signal.js';
-import type { ProposalStore } from '../../../src/domain/learning/port/proposal-store.port.js';
-import type { AliasProposal, AliasProposalStatus } from '../../../src/domain/learning/model/alias-proposal.js';
-import type { ThresholdProposal, ThresholdProposalStatus } from '../../../src/domain/learning/model/threshold-proposal.js';
 import type { GoldSetStore, GoldSetFilter } from '../../../src/domain/evaluation/port/gold-set-store.port.js';
 import type { EvalCase } from '../../../src/domain/evaluation/model/eval-case.js';
 import type { EvalResultStore, EvalResultFilter } from '../../../src/domain/evaluation/port/eval-result-store.port.js';
 import type { EvalResult } from '../../../src/domain/evaluation/model/eval-result.js';
-import type { ExistingAliasChecker } from '../../../src/domain/learning/service/alias-proposer.js';
-import type { AdversarialGuardPort } from '../../../src/domain/learning/service/promotion-gate.js';
 import type { FeedbackType } from '../../../src/domain/learning/model/feedback-signal.js';
 import { Transliterator } from '../../../src/domain/alias/service/transliterator.js';
 import {
@@ -96,6 +91,41 @@ const FUZZY_SIMILARITY_THRESHOLD = FUZZY_IDENTITY_TRUST_MIN_SIMILARITY;
 const FUZZY_MIN_KEY_LENGTH = 5;
 const FUZZY_MATCH_CONFIDENCE_FACTOR = 0.8;
 import type { NormalizedConstraint } from '../../../src/domain/shared/types/index.js';
+
+const IN_MEMORY_EMBEDDING_DIM = 1024;
+
+function hashTextToUnitVector(text: string, dim = IN_MEMORY_EMBEDDING_DIM): readonly number[] {
+  const vec = new Array<number>(dim).fill(0);
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    const idx = (code * (i + 1)) % dim;
+    vec[idx] = ((vec[idx] ?? 0) + code / 255) % 1;
+  }
+  const norm = Math.sqrt(vec.reduce((s, v) => s + v * v, 0)) || 1;
+  return vec.map((v) => v / norm);
+}
+
+function dotProduct(a: readonly number[], b: readonly number[]): number {
+  const length = Math.min(a.length, b.length);
+  let total = 0;
+  for (let index = 0; index < length; index += 1) {
+    total += (a[index] ?? 0) * (b[index] ?? 0);
+  }
+  return total;
+}
+
+function buildDenseSearchDocumentText(doc: RetrievalDocument): string {
+  return [
+    doc.canonicalLabel,
+    doc.searchTextKo,
+    doc.searchTextEn,
+    doc.semanticSummary,
+    ...doc.aliasesIdentitySafe,
+    ...doc.aliasesNoisyRecall,
+  ]
+    .filter((value): value is string => typeof value === 'string' && value.length > 0)
+    .join(' ');
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // InMemoryAmbiguityDictionary
@@ -189,9 +219,11 @@ export class InMemoryCalibrationStore implements CalibrationStore {
  */
 export class InMemorySearchIndex implements SearchIndexPort {
   private readonly docs = new Map<EntityId, RetrievalDocument>();
+  private readonly denseVectors = new Map<EntityId, readonly number[]>();
 
   upsertDoc(doc: RetrievalDocument): void {
     this.docs.set(doc.entityId, doc);
+    this.denseVectors.set(doc.entityId, hashTextToUnitVector(buildDenseSearchDocumentText(doc)));
   }
 
   async sparseSearch(
@@ -264,7 +296,7 @@ export class InMemorySearchIndex implements SearchIndexPort {
   }
 
   async denseSearch(
-    _embedding: readonly number[],
+    embedding: readonly number[],
     filters?: readonly string[],
     limit?: number,
     _rankProfile?: string,
@@ -276,24 +308,26 @@ export class InMemorySearchIndex implements SearchIndexPort {
     // wine type (the constraint overlay then dropped them all, leaving 0
     // candidates — the 마고 비슷한 레드 zero-result class).
     //
-    // We intentionally keep the popularity-ordered ranking inside the
-    // filtered set instead of computing a cosine against `_embedding`.
-    // The InMemoryEmbeddingService produces deterministic but
-    // dimensionally-collapsed vectors that don't carry the semantic
-    // structure of real embeddings; cosine ranking off those vectors
-    // shifts many e2e contracts that were calibrated against the
-    // popularity-stable order, and that's a separate test-harness
-    // re-baselining job.
     const filterPredicate = buildFilterPredicate(filters);
     const docs = Array.from(this.docs.values())
       .filter(filterPredicate)
-      .sort((a, b) => b.popularityScore - a.popularityScore);
+      .map((doc) => {
+        const vector = this.denseVectors.get(doc.entityId) ?? hashTextToUnitVector(buildDenseSearchDocumentText(doc));
+        const semanticScore = dotProduct(embedding, vector);
+        const popularityTieBreak = doc.popularityScore * 0.01;
+        return {
+          doc,
+          score: semanticScore + popularityTieBreak,
+          similarity: semanticScore,
+        };
+      })
+      .sort((left, right) => right.score - left.score);
     const limited = limit != null ? docs.slice(0, limit) : docs;
-    return limited.map((doc, i) => ({
+    return limited.map(({ doc, similarity }, i) => ({
       entityId: doc.entityId,
-      score: doc.popularityScore,
+      score: similarity,
       rank: i + 1,
-      similarity: doc.popularityScore,
+      similarity,
       summary: retrievalDocumentToHitSummary(doc),
     }));
   }
@@ -326,12 +360,12 @@ export class InMemorySearchIndex implements SearchIndexPort {
   }
 
   async upsertDocument(doc: RetrievalDocument): Promise<void> {
-    this.docs.set(doc.entityId, doc);
+    this.upsertDoc(doc);
   }
 
   async bulkUpsert(docs: readonly RetrievalDocument[]): Promise<void> {
     for (const doc of docs) {
-      this.docs.set(doc.entityId, doc);
+      this.upsertDoc(doc);
     }
   }
 }
@@ -344,26 +378,12 @@ export class InMemorySearchIndex implements SearchIndexPort {
  * Returns deterministic hash-based fake vectors — always the same for the same text.
  */
 export class InMemoryEmbeddingService implements EmbeddingServicePort {
-  private readonly DIM = 1024;
-
-  private hashText(text: string): readonly number[] {
-    const vec = new Array<number>(this.DIM).fill(0);
-    for (let i = 0; i < text.length; i++) {
-      const code = text.charCodeAt(i);
-      const idx = (code * (i + 1)) % this.DIM;
-      vec[idx] = ((vec[idx] ?? 0) + code / 255) % 1;
-    }
-    // Normalize to unit vector
-    const norm = Math.sqrt(vec.reduce((s, v) => s + v * v, 0)) || 1;
-    return vec.map((v) => v / norm);
-  }
-
   async embed(text: string): Promise<readonly number[]> {
-    return this.hashText(text);
+    return hashTextToUnitVector(text);
   }
 
   async embedBatch(texts: readonly string[]): Promise<readonly (readonly number[])[]> {
-    return texts.map((t) => this.hashText(t));
+    return texts.map((t) => hashTextToUnitVector(t));
   }
 }
 
@@ -1307,60 +1327,6 @@ export class InMemoryFeedbackStore implements FeedbackStore {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// InMemoryProposalStore
-// ─────────────────────────────────────────────────────────────────────────────
-
-export class InMemoryProposalStore implements ProposalStore {
-  private readonly aliasProposals: AliasProposal[] = [];
-  private readonly thresholdProposals: ThresholdProposal[] = [];
-
-  async saveAliasProposal(proposal: AliasProposal): Promise<void> {
-    this.aliasProposals.push(proposal);
-  }
-
-  async saveThresholdProposal(proposal: ThresholdProposal): Promise<void> {
-    this.thresholdProposals.push(proposal);
-  }
-
-  async getPendingAliasProposals(): Promise<readonly AliasProposal[]> {
-    return this.aliasProposals.filter((p) => p.status === 'pending');
-  }
-
-  async getPendingThresholdProposals(): Promise<readonly ThresholdProposal[]> {
-    return this.thresholdProposals.filter(
-      (p) => p.status === 'pending' || p.status === 'shadow_testing',
-    );
-  }
-
-  async updateProposalStatus(
-    proposalId: string,
-    status: AliasProposalStatus | ThresholdProposalStatus,
-  ): Promise<void> {
-    // Find in alias proposals first
-    const aliasIdx = this.aliasProposals.findIndex((p) => p.proposalId === proposalId);
-    if (aliasIdx >= 0) {
-      const existing = this.aliasProposals[aliasIdx]!;
-      this.aliasProposals[aliasIdx] = { ...existing, status: status as AliasProposalStatus };
-      return;
-    }
-    // Then threshold proposals
-    const threshIdx = this.thresholdProposals.findIndex((p) => p.proposalId === proposalId);
-    if (threshIdx >= 0) {
-      const existing = this.thresholdProposals[threshIdx]!;
-      this.thresholdProposals[threshIdx] = { ...existing, status: status as ThresholdProposalStatus };
-    }
-  }
-
-  getAllAliasProposals(): readonly AliasProposal[] {
-    return this.aliasProposals.slice();
-  }
-
-  getAllThresholdProposals(): readonly ThresholdProposal[] {
-    return this.thresholdProposals.slice();
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // InMemoryGoldSetStore
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1421,37 +1387,5 @@ export class InMemoryEvalResultStore implements EvalResultStore {
 
   getAll(): readonly EvalResult[] {
     return this.results.slice();
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// InMemoryExistingAliasChecker
-// ─────────────────────────────────────────────────────────────────────────────
-
-export class InMemoryExistingAliasChecker implements ExistingAliasChecker {
-  private readonly existing = new Set<string>();
-
-  addExisting(surfaceForm: string): void {
-    this.existing.add(surfaceForm.toLowerCase());
-  }
-
-  async aliasExists(surfaceForm: string): Promise<boolean> {
-    return this.existing.has(surfaceForm.toLowerCase());
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// InMemoryAdversarialGuard
-// ─────────────────────────────────────────────────────────────────────────────
-
-export class InMemoryAdversarialGuard implements AdversarialGuardPort {
-  private readonly adversarial = new Set<string>();
-
-  markAdversarial(surfaceForm: string): void {
-    this.adversarial.add(surfaceForm);
-  }
-
-  async isAdversarial(surfaceForm: string): Promise<boolean> {
-    return this.adversarial.has(surfaceForm);
   }
 }

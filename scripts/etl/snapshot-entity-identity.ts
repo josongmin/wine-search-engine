@@ -23,7 +23,10 @@ import {
   type SourceRecordId,
 } from '../../src/domain/shared/types/entity-id.js';
 import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
-import type { EntitySnapshotRecord } from './search-snapshot-schema.js';
+import {
+  parseManifest,
+  type EntitySnapshotRecord,
+} from './search-snapshot-schema.js';
 
 /** Fields sufficient for ADR-007 wine canonical id (gold overlay + identity signature). */
 export type WineSnapshotIdentityRow = Pick<
@@ -190,12 +193,25 @@ export async function loadActiveSourceEntityContinuity(
     return new Map();
   }
 
-  const manifestRaw = await readFile(runtimeParsed.manifestPath, 'utf8');
-  const manifestParsed = JSON.parse(manifestRaw) as {
-    artifacts?: { entitiesNdjson?: unknown };
-  };
-  const entitiesNdjson = manifestParsed.artifacts?.entitiesNdjson;
-  if (typeof entitiesNdjson !== 'string' || entitiesNdjson.length === 0 || !existsSync(entitiesNdjson)) {
+  return loadSourceEntityContinuityFromManifestPath(runtimeParsed.manifestPath);
+}
+
+export async function loadSourceEntityContinuityFromManifestPath(
+  manifestPath: string,
+): Promise<ReadonlyMap<SourceRecordId, SourceEntityContinuityRecord>> {
+  if (!existsSync(manifestPath)) {
+    return new Map();
+  }
+
+  const manifestRaw = await readFile(manifestPath, 'utf8');
+  const manifest = parseManifest(manifestRaw, manifestPath);
+  return loadSourceEntityContinuityFromEntitiesNdjson(manifest.artifacts.entitiesNdjson);
+}
+
+export async function loadSourceEntityContinuityFromEntitiesNdjson(
+  entitiesNdjson: string,
+): Promise<ReadonlyMap<SourceRecordId, SourceEntityContinuityRecord>> {
+  if (!existsSync(entitiesNdjson)) {
     return new Map();
   }
 
@@ -333,10 +349,14 @@ export function resolveWineSnapshotEntity(
 export function buildEntityIdBySourceId(
   records: readonly WineSnapshotIdentityRow[],
   goldLookup: ReadonlyMap<string, string>,
+  sourceContinuityLookup: ReadonlyMap<SourceRecordId, SourceEntityContinuityRecord> = new Map(),
 ): ReadonlyMap<SourceRecordId, CanonicalEntityId> {
   const map = new Map<SourceRecordId, CanonicalEntityId>();
   for (const record of records) {
-    map.set(record.sourceId, resolveWineSnapshotEntity(record, goldLookup).entityId);
+    map.set(
+      record.sourceId,
+      resolveWineSnapshotEntity(record, goldLookup, sourceContinuityLookup).entityId,
+    );
   }
   return map;
 }

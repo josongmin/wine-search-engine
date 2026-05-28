@@ -25,6 +25,7 @@ import {
 
 } from '@shared/types/index.js';
 import { SOFT_CONSTRAINT_ATTRIBUTES } from '@shared/constants/constraint-attributes.js';
+import { canonicalizePriceConstraintLike } from '@shared/utils/canonical-price.js';
 import {
   MAX_PRODUCED_VINTAGE_YEAR,
   MIN_PRODUCED_VINTAGE_YEAR,
@@ -265,6 +266,22 @@ function isSoftTierConstraint(constraint: z.infer<typeof NormalizedConstraintSch
   return !isNegationOperator && SOFT_CONSTRAINT_ATTRIBUTES.has(constraint.attribute);
 }
 
+function canonicalizeConstraint(
+  constraint: z.infer<typeof NormalizedConstraintSchema>,
+): z.infer<typeof NormalizedConstraintSchema> {
+  return canonicalizePriceConstraintLike(constraint);
+}
+
+function canonicalizeConstraintTierBundle(
+  bundle: ConstraintTierBundle,
+): ConstraintTierBundle {
+  return {
+    hard: bundle.hard.map(canonicalizeConstraint),
+    soft: bundle.soft.map(canonicalizeConstraint),
+    inferred: bundle.inferred.map(canonicalizeConstraint),
+  };
+}
+
 export function flattenConstraintTierBundle(
   bundle: ConstraintTierBundle,
 ): readonly z.infer<typeof NormalizedConstraintSchema>[] {
@@ -281,11 +298,12 @@ export function classifyLegacyNormalizedConstraints(
   const hard: z.infer<typeof NormalizedConstraintSchema>[] = [];
   const soft: z.infer<typeof NormalizedConstraintSchema>[] = [];
   for (const constraint of constraints) {
-    if (isSoftTierConstraint(constraint)) {
-      soft.push(constraint);
+    const canonicalConstraint = canonicalizeConstraint(constraint);
+    if (isSoftTierConstraint(canonicalConstraint)) {
+      soft.push(canonicalConstraint);
       continue;
     }
-    hard.push(constraint);
+    hard.push(canonicalConstraint);
   }
   return {
     hard,
@@ -307,7 +325,7 @@ export function getCanonicalConstraintTierBundle(
   if (canonicalCount === 0 && analysis.normalizedConstraints.length > 0) {
     return classifyLegacyNormalizedConstraints(analysis.normalizedConstraints);
   }
-  return analysis.constraints;
+  return canonicalizeConstraintTierBundle(analysis.constraints);
 }
 
 export function getCanonicalNormalizedConstraints(

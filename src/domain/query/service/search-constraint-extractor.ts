@@ -199,7 +199,7 @@ export interface SearchConstraints {
  * the Vespa `grape_primary` / `grapes` fields.
  */
 const KOREAN_GRAPE_ALIASES: ReadonlyArray<readonly [RegExp, string]> = [
-  [/카베르네\s*소비뇽|카베르네|cab(?:ernet)?\s*sauv(?:ignon)?/iu, 'Cabernet Sauvignon'],
+  [/까?베르네\s*소비뇽|까?베르네|cab(?:ernet)?\s*sauv(?:ignon)?/iu, 'Cabernet Sauvignon'],
   [/카베르네\s*프랑|cab(?:ernet)?\s*franc/iu, 'Cabernet Franc'],
   [/메를로|merlot/iu, 'Merlot'],
   [/피노\s*누아르?|피노누아|pinot\s*noir/iu, 'Pinot Noir'],

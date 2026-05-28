@@ -97,6 +97,12 @@ describe('ModeWeightProfile invariants (RFC-017 §8.3)', () => {
     expect(profile.beginnerSuitabilityWeight).toBe(0);
   });
 
+  it('attribute_search prioritizes structured preference evidence over popularity', () => {
+    const profile = getModeWeights('attribute_search');
+    expect(profile.softConstraintWeight).toBeGreaterThan(profile.popularityWeight);
+    expect(profile.attributeAlignmentWeight).toBeGreaterThan(profile.popularityWeight);
+  });
+
   it('pure_constraint does not add warm gift/beginner baseline before explicit triggers', () => {
     const weights = resolveWeights('pure_constraint');
     expect(weights.giftSuitability).toBe(0);
@@ -132,7 +138,7 @@ describe('MODE_WEIGHT_OVERLAY_MAP — SSoT parity (RCA5-04 prevention)', () => {
   it('applyModeWeightOverlay raises every base weight to mode floor and never lowers', () => {
     const base = resolveWeights('default');
     const profile = getModeWeights('compare_candidates');
-    const result = applyModeWeightOverlay(base, profile);
+    const result = applyModeWeightOverlay(base, profile, 'compare_candidates');
     for (const { modeField, scoringField } of MODE_WEIGHT_OVERLAY_MAP) {
       expect(
         result[scoringField],
@@ -143,13 +149,13 @@ describe('MODE_WEIGHT_OVERLAY_MAP — SSoT parity (RCA5-04 prevention)', () => {
 
   it('scaleOverlaidWeights factor=1 returns input unchanged', () => {
     const base = resolveWeights('default');
-    const overlaid = applyModeWeightOverlay(base, getModeWeights('attribute_search'));
+    const overlaid = applyModeWeightOverlay(base, getModeWeights('attribute_search'), 'attribute_search');
     expect(scaleOverlaidWeights(overlaid, 1)).toBe(overlaid);
   });
 
   it('scaleOverlaidWeights scales every overlaid field by factor', () => {
     const base = resolveWeights('default');
-    const overlaid = applyModeWeightOverlay(base, getModeWeights('producer_browse'));
+    const overlaid = applyModeWeightOverlay(base, getModeWeights('producer_browse'), 'producer_browse');
     const scaled = scaleOverlaidWeights(overlaid, 0.5);
     for (const { scoringField } of MODE_WEIGHT_OVERLAY_MAP) {
       expect(scaled[scoringField]).toBeCloseTo(overlaid[scoringField] * 0.5, 10);
@@ -162,5 +168,16 @@ describe('MODE_WEIGHT_OVERLAY_MAP — SSoT parity (RCA5-04 prevention)', () => {
     for (const { scoringField } of MODE_WEIGHT_OVERLAY_MAP) {
       expect(noopOverlay[scoringField]).toBe(base[scoringField]);
     }
+  });
+
+  it('attribute_search caps query-class prestige and critic residuals that are irrelevant to generic sensory queries', () => {
+    const base = resolveWeights('semantic_preference');
+    expect(base.producerPrestige).toBeGreaterThan(0);
+    expect(base.criticScore).toBeGreaterThan(0);
+    const overlaid = applyModeWeightOverlay(base, getModeWeights('attribute_search'), 'attribute_search');
+    expect(overlaid.producerPrestige).toBe(0);
+    expect(overlaid.criticScore).toBe(0);
+    expect(overlaid.multilingualScore).toBe(0);
+    expect(overlaid.availability).toBe(0);
   });
 });

@@ -48,4 +48,27 @@ describe('in-memory retrieval helpers', () => {
     expect(predicate(fullBodied)).toBe(true);
     expect(predicate(lightBodied)).toBe(false);
   });
+
+  it('infers country from region when retrieval docs omit explicit country', () => {
+    const predicate = buildFilterPredicate(['country:Australia', 'grape_or_in:Syrah|Shiraz']);
+
+    expect(predicate({
+      region: 'Barossa Valley',
+      grapePrimary: 'Shiraz',
+      grapes: ['Shiraz', 'Cabernet Sauvignon'],
+    })).toBe(true);
+  });
+
+  it('prefers explicit wineType over style fallback for dessert fixtures', () => {
+    const dessertPredicate = buildFilterPredicate(['wine_type:dessert']);
+    const whitePredicate = buildFilterPredicate(['wine_type:white']);
+
+    const doc = {
+      wineType: 'dessert',
+      style: 'sweet white',
+    };
+
+    expect(dessertPredicate(doc)).toBe(true);
+    expect(whitePredicate(doc)).toBe(false);
+  });
 });

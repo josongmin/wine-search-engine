@@ -30,6 +30,8 @@ export const DEFAULT_OUTPUT = ETL_ARTIFACT_FILES.ko;
 const BATCH_SIZE = 20;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-haiku-4-5-20251001';
+const HANGUL_RE = /[\u3131-\u318E\uAC00-\uD7A3]/u;
+const LATIN_RE = /[A-Za-z]/u;
 
 // ---------------------------------------------------------------------------
 // CLI
@@ -58,10 +60,10 @@ function parseArgs(argv: string[]): Args {
 // LLM call
 // ---------------------------------------------------------------------------
 
-const SYSTEM_PROMPT = `You are a Korean wine expert. Generate Korean transliterations of wine names.
-For each wine, provide 3 variations of Korean phonetic transliteration.
-Use natural Korean wine drinker vocabulary (how Koreans actually search for these wines).
-Include: producer name only, producer + vintage, and common abbreviation.
+const SYSTEM_PROMPT = `You are a Korean wine expert. Generate Korean Hangul transliterations of exact wine labels.
+For each wine, provide up to 3 Korean Hangul variants that still refer to the same exact wine.
+Use natural Korean wine drinker vocabulary (how Koreans actually search for the exact wine label).
+Do NOT emit producer-only names, producer-only + vintage forms, abbreviations, Latin letters, or mixed-script shorthand.
 Output ONLY a JSON array of arrays of strings, no explanation.
 Each outer array entry must align with the corresponding input wine.`;
 
@@ -76,6 +78,14 @@ const MAX_RETRIES = 5;
 
 export function normalizeAliasKey(value: string): string {
   return value.trim().toLowerCase();
+}
+
+export function isKoreanHangulAliasCandidate(value: string): boolean {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return false;
+  }
+  return HANGUL_RE.test(trimmed) && !LATIN_RE.test(trimmed);
 }
 
 export function parseAliasMatrix(text: string, expectedCount: number): string[][] {
@@ -254,7 +264,7 @@ async function run(): Promise<void> {
       for (let ri = 0; ri < batch.length; ri++) {
         const aliases = result[ri] ?? [];
         const filtered = aliases.filter(
-          (a): a is string => typeof a === 'string' && a.length > 0,
+          (a): a is string => typeof a === 'string' && isKoreanHangulAliasCandidate(a),
         );
         if (filtered.length > 0) {
           koAliasMap.set(batch[ri]!.sourceId, filtered);

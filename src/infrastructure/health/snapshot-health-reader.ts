@@ -1,7 +1,8 @@
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 
 const log = bootstrapLogger.child({ component: 'snapshot-health-reader' });
+export const SNAPSHOT_HEALTH_QUERY_TIMEOUT_MS = 500;
 
 /** Shape surfaced on GET /ready response body as `snapshot_health`. */
 interface SnapshotHealth {
@@ -23,8 +24,13 @@ interface SnapshotHealth {
  */
 export function createSnapshotHealthReader(pool: Pool): () => Promise<SnapshotHealth | undefined> {
   return async () => {
+    let client: PoolClient | undefined;
     try {
-      const { rows: pointerRows } = await pool.query<{
+      client = await pool.connect();
+      await client.query('BEGIN');
+      await client.query(`SET LOCAL statement_timeout = '${SNAPSHOT_HEALTH_QUERY_TIMEOUT_MS}ms'`);
+
+      const { rows: pointerRows } = await client.query<{
         active_snapshot_id: string;
         previous_snapshot_id: string | null;
         promoted_at: Date;
@@ -34,13 +40,16 @@ export function createSnapshotHealthReader(pool: Pool): () => Promise<SnapshotHe
          WHERE id = 1`,
       );
       const pointer = pointerRows[0];
-      if (pointer === undefined) return undefined;
+      if (pointer === undefined) {
+        await client.query('ROLLBACK');
+        return undefined;
+      }
 
       const protectedIds = [pointer.active_snapshot_id, pointer.previous_snapshot_id].filter(
         (id): id is string => id !== null,
       );
 
-      const { rows: staleRows } = await pool.query<{ c: string }>(
+      const { rows: staleRows } = await client.query<{ c: string }>(
         `SELECT (
            (SELECT COUNT(*) FROM entities WHERE search_snapshot_id <> ALL($1::text[]))
            + (SELECT COUNT(*) FROM aliases WHERE search_snapshot_id <> ALL($1::text[]))
@@ -49,7 +58,12 @@ export function createSnapshotHealthReader(pool: Pool): () => Promise<SnapshotHe
         [protectedIds],
       );
       const staleRowCount = Number(staleRows[0]?.c ?? '0');
-      if (!Number.isFinite(staleRowCount)) return undefined;
+      if (!Number.isFinite(staleRowCount)) {
+        await client.query('ROLLBACK');
+        return undefined;
+      }
+
+      await client.query('COMMIT');
 
       const pointerAgeSeconds = Math.max(
         0,
@@ -63,8 +77,17 @@ export function createSnapshotHealthReader(pool: Pool): () => Promise<SnapshotHe
         pointer_age_seconds: pointerAgeSeconds,
       };
     } catch (err: unknown) {
+      if (client !== undefined) {
+        try {
+          await client.query('ROLLBACK');
+        } catch (rollbackErr: unknown) {
+          log.debug({ err: rollbackErr }, 'snapshot-health rollback failed; ignoring');
+        }
+      }
       log.debug({ err }, 'snapshot-health read failed; returning undefined');
       return undefined;
+    } finally {
+      client?.release();
     }
   };
 }

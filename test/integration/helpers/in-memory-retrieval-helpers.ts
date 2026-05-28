@@ -186,6 +186,17 @@ function inferWineTypeFromStyle(style: string | undefined): string | undefined {
   return 'red';
 }
 
+function inferCountryFromRegion(region: string | undefined): string | undefined {
+  if (region === undefined) return undefined;
+  const lower = region.toLowerCase();
+  if (lower.includes('napa') || lower.includes('california')) return 'united states';
+  if (lower.includes('bordeaux') || lower.includes('burgundy') || lower.includes('champagne')) return 'france';
+  if (lower.includes('tuscany') || lower.includes('piedmont') || lower.includes('veneto')) return 'italy';
+  if (lower.includes('barossa') || lower.includes('south australia') || lower.includes('south eastern australia')) return 'australia';
+  if (lower.includes('marlborough')) return 'new zealand';
+  return undefined;
+}
+
 function normaliseDocFieldValues(doc: FilterableDoc, key: string): readonly string[] {
   switch (key) {
     case 'wine_type': {
@@ -194,7 +205,10 @@ function normaliseDocFieldValues(doc: FilterableDoc, key: string): readonly stri
       return inferred !== undefined ? [inferred] : [];
     }
     case 'country':
-      return doc.country !== undefined ? [doc.country.toLowerCase()] : [];
+      if (doc.country !== undefined) return [doc.country.toLowerCase()];
+      return inferCountryFromRegion(doc.region) !== undefined
+        ? [inferCountryFromRegion(doc.region)!]
+        : [];
     case 'region':
       return doc.region !== undefined ? [doc.region.toLowerCase()] : [];
     case 'appellation':

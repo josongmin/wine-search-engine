@@ -1,6 +1,7 @@
 import { PipelineDebugStep } from '../../domain/observability/pipeline-debug-steps.js';
 import { pipelineDebug } from '../../domain/observability/request-pipeline-debug.js';
 import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
+import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { QueryRoute } from '../../domain/query/model/query-route.js';
 import type {
   ExecutionLaneTrace,
@@ -61,6 +62,7 @@ export interface SearchRouteExecutionResultBase<
   TGeneralArtifact extends SearchExecutionLaneArtifactRef = SearchExecutionLaneArtifactRef,
   TFusedArtifact extends SearchExecutionLaneArtifactRef = SearchExecutionLaneArtifactRef,
 > extends SearchExecutionResolveSet<TIdentityResolveResult> {
+  readonly executedPlan: QueryPlanV1;
   readonly executedCompiled: CompiledWineQuery;
   readonly executionTopology: TExecutionTopology;
   readonly laneArtifacts: SearchExecutionLaneArtifacts<

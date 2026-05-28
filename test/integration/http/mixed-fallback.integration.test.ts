@@ -30,7 +30,7 @@ describe('HTTP /v1/search — mixed empty-result fallback', () => {
         engine_decision?: { degradation_reasons?: readonly string[] };
       }>();
 
-      expect(body.meta?.route).toMatch(/^(mixed|hybrid)$/);
+      expect(body.meta?.route).toBe('hybrid');
       expect(body.results?.length ?? 0).toBeGreaterThan(0);
       expect(body.results?.map((result) => result.entity_id)).not.toContain(CLOUDY_BAY_ID);
       expect([

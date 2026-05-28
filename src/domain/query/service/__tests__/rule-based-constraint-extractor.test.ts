@@ -129,7 +129,8 @@ describe('extractRuleBasedConstraints — sweetness "dry" pattern (SCAN4-05)', (
     // before non-wine-type words still matches.
     const result = extractRuleBasedConstraints('prefer dry and crisp');
     expect(result.soft.find((c) => c.attribute === 'sweetness')).toBeDefined();
-    expect(result.soft.find((c) => c.attribute === 'sweetness')?.value).toBe('dry');
+    expect(result.soft.find((c) => c.attribute === 'sweetness')?.operator).toBe('<=');
+    expect(result.soft.find((c) => c.attribute === 'sweetness')?.value).toBe(0.2);
   });
 
   it('SCAN4-05 note: "dry wine" is excluded by negative lookahead (design decision)', () => {
@@ -147,19 +148,22 @@ describe('extractRuleBasedConstraints — sweetness "dry" pattern (SCAN4-05)', (
   it('standalone "dry" in query → sweetness=dry', () => {
     const result = extractRuleBasedConstraints('something dry and crisp');
     expect(result.soft.find((c) => c.attribute === 'sweetness')).toBeDefined();
-    expect(result.soft.find((c) => c.attribute === 'sweetness')?.value).toBe('dry');
+    expect(result.soft.find((c) => c.attribute === 'sweetness')?.operator).toBe('<=');
+    expect(result.soft.find((c) => c.attribute === 'sweetness')?.value).toBe(0.2);
   });
 
   it('Korean "드라이" → sweetness=dry', () => {
     const result = extractRuleBasedConstraints('드라이 와인');
     expect(result.soft.find((c) => c.attribute === 'sweetness')).toBeDefined();
-    expect(result.soft.find((c) => c.attribute === 'sweetness')?.value).toBe('dry');
+    expect(result.soft.find((c) => c.attribute === 'sweetness')?.operator).toBe('<=');
+    expect(result.soft.find((c) => c.attribute === 'sweetness')?.value).toBe(0.2);
   });
 
   it('"brut" sparkling → sweetness=dry', () => {
     const result = extractRuleBasedConstraints('champagne brut');
     expect(result.soft.find((c) => c.attribute === 'sweetness')).toBeDefined();
-    expect(result.soft.find((c) => c.attribute === 'sweetness')?.value).toBe('dry');
+    expect(result.soft.find((c) => c.attribute === 'sweetness')?.operator).toBe('<=');
+    expect(result.soft.find((c) => c.attribute === 'sweetness')?.value).toBe(0.2);
   });
 });
 
@@ -188,6 +192,20 @@ describe('extractRuleBasedConstraints — soft constraint attributes (W2-01)', (
     const result = extractRuleBasedConstraints('과일향 풍부한 와인');
     expect(result.hard.find((c) => c.attribute === 'fruit_intensity')).toBeUndefined();
     expect(result.soft.find((c) => c.attribute === 'fruit_intensity')).toBeDefined();
+  });
+
+  it('상큼한 화이트 와인 → acidity soft constraint', () => {
+    const result = extractRuleBasedConstraints('상큼한 화이트 와인');
+    const acidity = result.soft.find((c) => c.attribute === 'acidity' && c.operator === '>=');
+    expect(acidity).toBeDefined();
+    expect(acidity?.value).toBe(0.6);
+  });
+
+  it('강한 타닌 네비올로 → tannin soft constraint', () => {
+    const result = extractRuleBasedConstraints('강한 타닌 네비올로');
+    const tannin = result.soft.find((c) => c.attribute === 'tannin' && c.operator === '>=');
+    expect(tannin).toBeDefined();
+    expect(tannin?.value).toBe(0.6);
   });
 });
 
@@ -324,6 +342,54 @@ describe('extractRuleBasedConstraints — Korean connective form patterns (연�
     const body = result.soft.find((c) => c.attribute === 'body');
     expect(body).toBeDefined();
     expect(body?.value).toBe(0.5);
+  });
+
+  it('"light-bodied" → body = light', () => {
+    const result = extractRuleBasedConstraints('recommend a light-bodied Spain red');
+    const body = result.soft.find((c) => c.attribute === 'body');
+    expect(body).toBeDefined();
+    expect(body?.operator).toBe('<=');
+    expect(body?.value).toBe(0.3);
+  });
+
+  it('"full-bodied" → body = full', () => {
+    const result = extractRuleBasedConstraints('full-bodied red under 50 dollars');
+    const body = result.soft.find((c) => c.attribute === 'body');
+    expect(body).toBeDefined();
+    expect(body?.operator).toBe('>=');
+    expect(body?.value).toBe(0.7);
+  });
+
+  it('"medium body" → body range 0.4-0.6', () => {
+    const result = extractRuleBasedConstraints('medium body United States red');
+    const body = result.soft.find((c) => c.attribute === 'body');
+    expect(body).toBeDefined();
+    expect(body?.operator).toBe('range');
+    expect(body?.value).toEqual({ min: 0.4, max: 0.6 });
+  });
+
+  it('"미디엄 Spain 레드" → body range 0.4-0.6', () => {
+    const result = extractRuleBasedConstraints('미디엄 Spain 레드');
+    const body = result.soft.find((c) => c.attribute === 'body');
+    expect(body).toBeDefined();
+    expect(body?.operator).toBe('range');
+    expect(body?.value).toEqual({ min: 0.4, max: 0.6 });
+  });
+
+  it('"달달한 와인" → sweetness = sweet', () => {
+    const result = extractRuleBasedConstraints('달달한 와인');
+    const sweetness = result.soft.find((c) => c.attribute === 'sweetness');
+    expect(sweetness).toBeDefined();
+    expect(sweetness?.operator).toBe('>=');
+    expect(sweetness?.value).toBe(0.5);
+  });
+
+  it('"단맛 있는 와인" → sweetness = sweet', () => {
+    const result = extractRuleBasedConstraints('단맛 있는 와인');
+    const sweetness = result.soft.find((c) => c.attribute === 'sweetness');
+    expect(sweetness).toBeDefined();
+    expect(sweetness?.operator).toBe('>=');
+    expect(sweetness?.value).toBe(0.5);
   });
 
   // "타닌 없고" → tannin <= 0.4

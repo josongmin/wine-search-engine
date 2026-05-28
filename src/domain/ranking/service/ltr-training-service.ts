@@ -88,6 +88,17 @@ function outcomeToLabel(result: EvalResult, evalCase: EvalCase): 0 | 1 | 2 | 3 {
 }
 
 /**
+ * LambdaMART training needs a concrete ranked top candidate.
+ *
+ * Eval cases that end in no-match / empty-results have no candidate feature
+ * vector to supervise. Those cases belong to retrieval / abstention quality
+ * analysis, not pairwise ranker training.
+ */
+function hasRankableTopResult(result: EvalResult): boolean {
+  return result.predictedEntityId !== undefined;
+}
+
+/**
  * Builds training examples from evaluation results and cases.
  */
 export function buildTrainingExamples(
@@ -96,10 +107,28 @@ export function buildTrainingExamples(
 ): LambdaMARTExample[] {
   const resultById = new Map(results.map((r) => [r.caseId, r]));
   const examples: LambdaMARTExample[] = [];
+  let skippedNoRankedResultCount = 0;
 
   for (const evalCase of cases) {
     const result = resultById.get(evalCase.caseId);
     if (!result) continue;
+
+    if (!hasRankableTopResult(result)) {
+      skippedNoRankedResultCount += 1;
+      continue;
+    }
+
+    if (result.runtimeQueryClass === undefined) {
+      throw new Error(
+        `LTR training requires runtimeQueryClass metadata (caseId='${evalCase.caseId}')`,
+      );
+    }
+    if (result.goldRuntimeQueryClassMismatch === true) {
+      throw new Error(
+        `LTR training refuses gold/runtime queryClass mismatch (caseId='${evalCase.caseId}', gold='${evalCase.queryClass}', runtime='${result.runtimeQueryClass}')`,
+      );
+    }
+    const trainingQueryClass = result.runtimeQueryClass;
 
     const features = extractFeaturesFromResult(result);
     const label = outcomeToLabel(result, evalCase);
@@ -112,7 +141,7 @@ export function buildTrainingExamples(
       if (degradedLabel < label) {
         examples.push({
           query: evalCase.query,
-          queryClass: evalCase.queryClass,
+          queryClass: trainingQueryClass,
           label1: label,
           features1: features,
           label2: degradedLabel,
@@ -121,6 +150,16 @@ export function buildTrainingExamples(
       }
     }
   }
+
+  ltrLog.info(
+    {
+      evalCaseCount: cases.length,
+      resultCount: results.length,
+      skippedNoRankedResultCount,
+      exampleCount: examples.length,
+    },
+    'built LambdaMART training examples',
+  );
 
   return examples;
 }

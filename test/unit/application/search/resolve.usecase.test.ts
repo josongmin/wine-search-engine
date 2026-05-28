@@ -470,6 +470,44 @@ describe('ResolveUseCase', () => {
       expect(candidate?.sources).toContain('blocker_seed');
     });
 
+    it('P1: exact canonical singleton anchors suppress blocker widening', async () => {
+      const blocker: BlockingUseCasePort = {
+        block: vi.fn().mockResolvedValue([createEntityId('meo-camuzet-fixin-2019')]),
+      };
+      const resolver = makeResolver('resolved');
+      const useCase = new ResolveUseCase({
+        queryPlanner: {
+          plan: vi.fn().mockResolvedValue(makePlan({
+            rawQuery: '2010 Méo-Camuzet Marsannay',
+            normalizedQuery: '2010 méo-camuzet marsannay',
+            intent: 'entity_exact',
+            anchors: [{
+              surfaceForm: '2010 Méo-Camuzet Marsannay',
+              normalizedForm: '2010 méo-camuzet marsannay',
+              candidateEntityIds: [createEntityId('meo-camuzet-marsannay-2010')],
+              lookupStrategies: ['exact', 'compact_exact'],
+              aliasType: 'canonical',
+              confidence: 1,
+              source: 'alias',
+            }],
+          })),
+        },
+        entityResolver: resolver,
+        entityLookup: makeEntityLookup('meo-camuzet-marsannay-2010', '2010 Méo-Camuzet Marsannay'),
+        blocker,
+        querySanitizer: {
+          sanitize: vi.fn().mockReturnValue({ safe: true, sanitizedQuery: '2010 Méo-Camuzet Marsannay' }),
+        },
+      });
+
+      await useCase.execute({ query: '2010 Méo-Camuzet Marsannay' });
+
+      expect(blocker.block).not.toHaveBeenCalled();
+      const resolverCall = (resolver.resolve as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
+      expect(resolverCall?.candidateEntities).toHaveLength(1);
+      expect(String(resolverCall?.candidateEntities[0]?.entityId)).toBe('meo-camuzet-marsannay-2010');
+    });
+
     it('P0-1-F: /search vs /resolve blocker contract — blocker.block called with same query args', async () => {
       // Structural contract test: both /search and /resolve invoke
       // blocker.block(rawQuery, normalizedQuery) — same argument signature.

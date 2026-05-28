@@ -12,7 +12,11 @@ import {
   retryWithBackoff,
   type RetryConfig,
 } from '../http/retry-with-backoff.js';
-import { DEFAULT_BREAKER_FAILURE_THRESHOLD } from '../../domain/shared/circuit-breaker/circuit-breaker.js';
+import {
+  DEFAULT_BREAKER_FAILURE_THRESHOLD,
+  DEFAULT_RECOVERY_TIMEOUT_MS,
+  DEFAULT_HALF_OPEN_ATTEMPTS,
+} from '../../domain/shared/circuit-breaker/circuit-breaker.js';
 import { runUnderLlmBreaker } from '../ai/llm-circuit-breaker-classifier.js';
 import {
   createOpenAiKeyPool,
@@ -37,8 +41,8 @@ const OPENAI_CLASSIFIER_MAX_OUTPUT_TOKENS = 50;
 const OPENAI_PARSE_ERROR_PREVIEW_CHARS = 120;
 
 const OPENAI_INJECTION_BREAKER_FAILURE_THRESHOLD = DEFAULT_BREAKER_FAILURE_THRESHOLD;
-const OPENAI_INJECTION_BREAKER_RECOVERY_TIMEOUT_MS = 60_000;
-const OPENAI_INJECTION_BREAKER_HALF_OPEN_MAX_ATTEMPTS = 3;
+const OPENAI_INJECTION_BREAKER_RECOVERY_TIMEOUT_MS = DEFAULT_RECOVERY_TIMEOUT_MS;
+const OPENAI_INJECTION_BREAKER_HALF_OPEN_MAX_ATTEMPTS = DEFAULT_HALF_OPEN_ATTEMPTS;
 const OPENAI_INJECTION_BREAKER_NAME = 'openai-injection-classifier';
 
 const OPENAI_INJECTION_RETRY_CONFIG: RetryConfig = {

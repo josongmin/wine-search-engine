@@ -485,3 +485,28 @@ describe('buildCandidatePool — killSwitchDenseRetrieval wiring', () => {
     expect(buildCandidatePoolBody).toContain('config.killSwitch.denseRetrieval');
   });
 });
+
+describe('buildSnapshotVersions/buildCandidatePool — query embedding model SSOT wiring', () => {
+  it('uses config.openai.embeddingModel instead of the legacy embedding label for runtime telemetry', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const builderSource = fs.readFileSync(
+      path.resolve('src/config/container-core-builders.ts'),
+      'utf-8',
+    );
+
+    const snapshotVersionsBody = builderSource.slice(
+      builderSource.indexOf('function buildSnapshotVersions'),
+      builderSource.indexOf('\n\nexport async function buildQueryPlanner'),
+    );
+    expect(snapshotVersionsBody).toContain('dense_model: config.openai.embeddingModel');
+    expect(snapshotVersionsBody).not.toContain('dense_model: config.embedding.model');
+
+    const candidatePoolBody = builderSource.slice(
+      builderSource.indexOf('function buildCandidatePool'),
+      builderSource.indexOf('\nexport function buildBrowseRetriever'),
+    );
+    expect(candidatePoolBody).toContain('config.openai.embeddingModel');
+    expect(candidatePoolBody).not.toContain('config.embedding.model');
+  });
+});

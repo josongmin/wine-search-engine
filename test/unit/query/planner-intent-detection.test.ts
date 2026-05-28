@@ -61,6 +61,12 @@ describe('detectQueryIntent', () => {
     expect(detectQueryIntent('wine pairing with steak', [], noopExtractor)).toBe('pairing_search');
   });
 
+  it('returns pairing_search for mixed-script food pairing queries', () => {
+    expect(detectQueryIntent('Cheese에 어울리는 와인', [], noopExtractor)).toBe('pairing_search');
+    expect(detectQueryIntent('Pasta랑 마실 와인', [], noopExtractor)).toBe('pairing_search');
+    expect(detectQueryIntent('Cured Meat에 어울리는 와인', [], noopExtractor)).toBe('pairing_search');
+  });
+
   it('prefers pairing_search over weak mixed anchors for occasion-driven recommendation queries', () => {
     const weakAnchor = anchor((ANCHOR_PRESENT_CONFIDENCE + EXACT_ANCHOR_CONFIDENCE) / 2);
     expect(

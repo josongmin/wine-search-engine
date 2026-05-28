@@ -216,4 +216,25 @@ describe('resolveRequiredAttributes — graph-only semantics (XOR / OR / nested)
     });
     expect(full.satisfied).toBe(true);
   });
+
+  it('ignores inferred-tier slots when deriving required evidence obligations', () => {
+    const bundle: ConstraintBundle = {
+      hard: [
+        { attribute: 'region', operator: '=', value: 'Toscana', source_phrase: 'toscana', confidence: 1 },
+      ],
+      soft: [],
+      inferred: [
+        { attribute: 'country', operator: '=', value: 'Italy', source_phrase: 'italy', confidence: 1 },
+      ],
+    };
+    const graph = buildTrivialGraphFromAtoms(liftBundleToAtoms(bundle));
+    const r = resolveRequiredAttributes({
+      plan: makePlan(bundle),
+      graph,
+      satisfiedAttributes: ['region'],
+    });
+    expect(r.matched).toEqual(['region']);
+    expect(r.unmet).toEqual([]);
+    expect(r.satisfied).toBe(true);
+  });
 });

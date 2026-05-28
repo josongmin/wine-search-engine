@@ -22,7 +22,7 @@ import {
   resolveWeights,
   applySituationIntentWeightOverlay,
 } from '../../../src/domain/ranking/model/scoring-weights.js';
-import { getModeWeights } from '../../../src/domain/ranking/model/mode-weights.js';
+import { applyModeWeightOverlay, getModeWeights } from '../../../src/domain/ranking/model/mode-weights.js';
 import { globalSilentSkipCounter } from '../../../src/domain/observability/silent-skip-counters.js';
 import { createStageTimer } from '../../../src/domain/shared/stage-timer.js';
 import { makeHybridCandidate } from '../../support/hybrid-candidate-test-factory.js';
@@ -184,15 +184,7 @@ function makeInputWithOverrides(
 function resolveExpectedRankerWeights(input: RankingInput, channels: readonly string[]) {
   const baseWeights = resolveWeights(input.queryPlan.queryClass);
   const modeProfile = getModeWeights(input.queryPlan.retrievalMode);
-  const overlaid = {
-    ...baseWeights,
-    semantic: Math.max(baseWeights.semantic, modeProfile.semanticWeight),
-    popularity: Math.max(baseWeights.popularity, modeProfile.popularityWeight),
-    attributeAlignment: Math.max(baseWeights.attributeAlignment, modeProfile.attributeAlignmentWeight),
-    preferenceAlignment: Math.max(baseWeights.preferenceAlignment, modeProfile.preferenceAlignmentWeight),
-    producerPrestige: Math.max(baseWeights.producerPrestige, modeProfile.producerPrestigeWeight),
-    recency: Math.max(baseWeights.recency, modeProfile.recencyWeight),
-  };
+  const overlaid = applyModeWeightOverlay(baseWeights, modeProfile, input.queryPlan.retrievalMode);
   const nonPenaltyKeys = [
     'entityIntegrity', 'anchorSimilarity', 'semantic', 'softConstraint',
     'attributeAlignment', 'preferenceAlignment', 'popularity', 'availability',
@@ -607,6 +599,51 @@ describe('Ranker', () => {
       expect(result?.matchedConstraints).toEqual(['country', 'price_band']);
       expect(result?.unmetConstraints).toEqual(['wine_type', 'appellation']);
       expect(result?.inferredConstraints).toEqual(['appellation']);
+    });
+
+    it('does not surface descriptive compositional inferred priors as unmet constraints', async () => {
+      const candidate = {
+        ...makeCandidate('wine-002'),
+        matchedConstraints: ['region', 'wine_type', 'body'],
+        unmetHardConstraints: [],
+      };
+      const sharedConstraints: ConstraintBundle = {
+        hard: [
+          makeConstraint('region', 'Bordeaux'),
+          makeConstraint('wine_type', 'red'),
+        ],
+        soft: [
+          makeConstraint('body', 'full'),
+        ],
+        inferred: [
+          {
+            attribute: 'grape_family',
+            operator: 'in',
+            value: ['Cabernet', 'Merlot'],
+            source_phrase: 'composition(bordeaux+red)',
+            confidence: 0.6,
+            inferred_binding: 'descriptive',
+          },
+        ],
+      };
+
+      const plan = {
+        ...makeQueryPlan(),
+        constraints: sharedConstraints,
+      } as QueryPlanV1;
+      const input: RankingInput = {
+        queryPlan: plan,
+        candidates: [candidate],
+        constraints: sharedConstraints,
+        compiled: makeCompiled(plan),
+      };
+
+      const ranker = makeRanker(makeScoreAggregator(0.9), { evidenceItems: [STUB_EVIDENCE] });
+      const { results: [result] } = await ranker.rank(input);
+
+      expect(result?.matchedConstraints).toEqual(['region', 'wine_type', 'body']);
+      expect(result?.unmetConstraints).toEqual([]);
+      expect(result?.inferredConstraints).toEqual([]);
     });
   });
 

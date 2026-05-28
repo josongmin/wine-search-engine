@@ -8,7 +8,11 @@ import type {
   StructuredClarifyOptionEntity,
   TypedAbstainDecision,
 } from '../../domain/query/model/abstain-decision.js';
-import type { DecisionSnapshot, EvidenceItem } from '../../domain/shared/types/index.js';
+import {
+  type DecisionSnapshot,
+  type EvidenceItem,
+  deriveDecisionConfidenceSemantics,
+} from '../../domain/shared/types/index.js';
 import type { ResponseBuildParams } from '../../domain/response/service/response-builder.js';
 import { buildAuthorityTraceRef } from '../../domain/decision/service/authority-trace.js';
 import type { EvalProvenanceSlice } from '../../domain/retrieval/model/provenance.js';
@@ -18,6 +22,69 @@ import { buildDisplayIdentitySignature } from '../../domain/response/service/dis
 
 const ENTROPY_SNAPSHOT_REASON_FRACTION_DIGITS = 4;
 const ENTROPY_CLARIFICATION_REASON_FRACTION_DIGITS = 3;
+
+function buildAbstainDecisionTraceReason(
+  abstainDecision: TypedAbstainDecision,
+  entropy: number,
+): { readonly rulesApplied: readonly string[]; readonly finalReason: string } {
+  switch (abstainDecision.reason) {
+    case 'low_confidence':
+      return {
+        rulesApplied: ['ENTROPY_ABSTAIN'],
+        finalReason: `Normalized entropy ${
+          Number.isFinite(entropy)
+            ? entropy.toFixed(ENTROPY_SNAPSHOT_REASON_FRACTION_DIGITS)
+            : 'unknown'
+        } exceeds threshold; query is ambiguous`,
+      };
+    case 'no_match':
+      return {
+        rulesApplied: ['ABSTAIN_NO_MATCH'],
+        finalReason: abstainDecision.detail,
+      };
+    case 'semantic_conflict':
+      return {
+        rulesApplied: ['ABSTAIN_SEMANTIC_CONFLICT'],
+        finalReason: abstainDecision.detail,
+      };
+    case 'insufficient_evidence':
+      return {
+        rulesApplied: ['ABSTAIN_INSUFFICIENT_EVIDENCE'],
+        finalReason: abstainDecision.detail,
+      };
+  }
+}
+
+function buildAbstainClarificationReason(
+  abstainDecision: TypedAbstainDecision,
+  entropy: number,
+): string {
+  if (abstainDecision.reason === 'low_confidence') {
+    return `Query is ambiguous (entropy=${
+      Number.isFinite(entropy)
+        ? entropy.toFixed(ENTROPY_CLARIFICATION_REASON_FRACTION_DIGITS)
+        : 'unknown'
+    }). Please refine your search.`;
+  }
+  return abstainDecision.detail;
+}
+
+function deriveAbstainDecisionOutcome(
+  abstainDecision: TypedAbstainDecision,
+): { readonly decisionStatus: DecisionOutput['decisionStatus']; readonly nextAction: DecisionOutput['nextAction']; readonly ambiguity: boolean } {
+  if (abstainDecision.reason === 'no_match') {
+    return {
+      decisionStatus: 'failed',
+      nextAction: 'fail',
+      ambiguity: false,
+    };
+  }
+  return {
+    decisionStatus: 'ambiguous',
+    nextAction: 'clarify',
+    ambiguity: true,
+  };
+}
 
 function deriveDecisionEvidenceItems(
   rankedResults?: readonly RankedResult[],
@@ -273,7 +340,8 @@ export function buildConstraintContradictionResponseParams(options: {
     decisionStatus: 'failed',
     nextAction: 'fail',
     decisionConfidence: 0,
-    confidenceSemantics: 'calibrated_decision_confidence',
+    confidenceSemantics: deriveDecisionConfidenceSemantics(false),
+    calibrationTrusted: false,
     signalSet: {
       entity_integrity_score: 0,
       hard_constraint_pass: 0,
@@ -377,12 +445,15 @@ export function buildEntropyAbstainResponseParams(options: {
     results.filter((result) => presentationEntityIds.has(result.entity.entityId)),
   );
   const failClosedIdentityClarification = shouldFailClosedIdentityClarification(plan, abstainDecision);
+  const abstainTraceReason = buildAbstainDecisionTraceReason(abstainDecision, entropy);
+  const abstainOutcome = deriveAbstainDecisionOutcome(abstainDecision);
 
   const decisionOutput: DecisionOutput = {
-    decisionStatus: 'ambiguous',
-    nextAction: 'clarify',
+    decisionStatus: abstainOutcome.decisionStatus,
+    nextAction: abstainOutcome.nextAction,
     decisionConfidence: 0,
-    confidenceSemantics: 'calibrated_decision_confidence',
+    confidenceSemantics: deriveDecisionConfidenceSemantics(false),
+    calibrationTrusted: false,
     signalSet: {
       entity_integrity_score: 0,
       hard_constraint_pass: 0,
@@ -399,13 +470,13 @@ export function buildEntropyAbstainResponseParams(options: {
       snapshot,
       route: effectiveRoute,
       retrievalMode: compiled.execution.effectiveRetrievalMode,
-      decisionStatus: 'ambiguous',
-      nextAction: 'clarify',
+      decisionStatus: abstainOutcome.decisionStatus,
+      nextAction: abstainOutcome.nextAction,
     }),
     decisionSnapshot: snapshot,
     decisionTrace: {
-      decisionStatus: 'ambiguous',
-      nextAction: 'clarify',
+      decisionStatus: abstainOutcome.decisionStatus,
+      nextAction: abstainOutcome.nextAction,
       inputs: {
         queryClass: plan.queryClass,
         policy: plan.policy,
@@ -413,7 +484,7 @@ export function buildEntropyAbstainResponseParams(options: {
       signals: {
         decisionConfidence: 0,
         calibratedGap: undefined,
-        ambiguity: true,
+        ambiguity: abstainOutcome.ambiguity,
       },
       thresholds: {
         resolveThreshold: 0,
@@ -424,12 +495,8 @@ export function buildEntropyAbstainResponseParams(options: {
         thresholdProfileId: plan.thresholdProfileId,
         plannerVersion: plan.plannerVersion,
       },
-      rulesApplied: ['ENTROPY_ABSTAIN'],
-      finalReason: `Normalized entropy ${
-        Number.isFinite(entropy)
-          ? entropy.toFixed(ENTROPY_SNAPSHOT_REASON_FRACTION_DIGITS)
-          : 'unknown'
-      } exceeds threshold; query is ambiguous`,
+      rulesApplied: [...abstainTraceReason.rulesApplied],
+      finalReason: abstainTraceReason.finalReason,
     },
   };
 
@@ -440,11 +507,7 @@ export function buildEntropyAbstainResponseParams(options: {
     abstainReason: abstainDecision.reason,
     results: failClosedIdentityClarification ? [] : presentationResults,
     clarification: {
-      reason: `Query is ambiguous (entropy=${
-        Number.isFinite(entropy)
-          ? entropy.toFixed(ENTROPY_CLARIFICATION_REASON_FRACTION_DIGITS)
-          : 'unknown'
-      }). Please refine your search.`,
+      reason: buildAbstainClarificationReason(abstainDecision, entropy),
       structuredPayload: buildStructuredClarifyPayload(plan, abstainDecision, presentationRankedResults),
       candidates: failClosedIdentityClarification
         ? []

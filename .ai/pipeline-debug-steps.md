@@ -150,6 +150,24 @@ To reconstruct a stage-by-stage shortfall timeline from structured logs:
 `ranking.hybrid.complete` is absent, retrieval succeeded but ranking failed
 or was skipped -- investigate the gap between stages 4 and 6.
 
+## Corrective-retry, retrieval-critic & bundle-selector steps
+
+Promoted from inline string literals to `PipelineDebugStep` constants during the SSoT codemod. Field sets vary by callsite; treat the `.ts` source as authoritative.
+
+| Step | Fields | Source |
+|------|--------|--------|
+| `search.execute.stage_timings` | _(per-stage `latency_ms` map)_ | `search.usecase.ts` |
+| `route.entity.corrective_retry.start` | _(varies)_ | `search.usecase.ts` |
+| `route.entity.corrective_retry.candidates` | _(varies)_ | `search.usecase.ts` |
+| `retrieval.critic.decision` | _(varies)_ | `search-usecase-graph-executor.ts` |
+| `retrieval.critic.budget_exhausted` | _(varies)_ | `search-usecase-graph-executor.ts` |
+| `retrieval.critic.rewriter_declined` | _(varies)_ | `search-usecase-graph-executor.ts` |
+| `retrieval.critic.retries_exhausted` | _(varies)_ | `search-usecase-graph-executor.ts` |
+| `retrieval.bundle_selector.engage` | _(varies)_ | `search-usecase-graph-executor.ts` |
+| `retrieval.bundle_selector.subquery_fail_closed` | _(varies)_ | `search-usecase-graph-executor.ts` |
+| `retrieval.bundle_selector.fail_closed` | _(varies)_ | `search-usecase-graph-executor.ts` |
+| `retrieval.bundle_selector.budget_violation` | _(varies)_ | `search-usecase-graph-executor.ts` |
+
 ## Why this file exists
 
 Human-readable index next to the TS module: operators can skim categories; agents should still treat the **`.ts` file** as authoritative when they differ.

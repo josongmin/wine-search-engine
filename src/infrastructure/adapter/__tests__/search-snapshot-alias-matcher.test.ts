@@ -56,6 +56,40 @@ describe('SearchSnapshotAliasMatcher', () => {
     expect(queries.some((query) => query.includes('FROM aliases'))).toBe(true);
   });
 
+  it('uses the explicit snapshot override without resolving the active pointer', async () => {
+    const queries: string[] = [];
+    const paramsSeen: readonly unknown[][] = [];
+    const pool = {
+      async query(sql: string, params?: readonly unknown[]): Promise<{ rows: Array<Record<string, unknown>> }> {
+        queries.push(sql);
+        paramsSeen.push(params ?? []);
+        if (sql.includes('FROM active_search_snapshot')) {
+          throw new Error('active pointer should not be read when snapshot override is provided');
+        }
+        if (sql.includes('FROM aliases')) {
+          return {
+            rows: [
+              {
+                alias_id: 'alias-001',
+                entity_id: 'entity-opus-one',
+                surface_form: 'Opus One',
+                normalized_value: 'opus one',
+                source_trust: 1,
+                confidence: 0.98,
+              },
+            ],
+          };
+        }
+        return { rows: [] };
+      },
+    } as never;
+
+    const matcher = await SearchSnapshotAliasMatcher.loadFromPostgres(pool, 'search-snapshot:v1:target');
+    expect(matcher).toBeDefined();
+    expect(queries.some((query) => query.includes('FROM active_search_snapshot'))).toBe(false);
+    expect(paramsSeen).toContainEqual(['search-snapshot:v1:target']);
+  });
+
   it('resolves exact, compact, and transliterated alias matches from memory', async () => {
     const matcher = new SearchSnapshotAliasMatcher([
       {
@@ -99,6 +133,64 @@ describe('SearchSnapshotAliasMatcher', () => {
     expect(transliterated[0]?.surfaceForm).toBe('Opus One');
   });
 
+  it('defers secondary alias index construction until the first non-exact lookup', async () => {
+    const matcher = new SearchSnapshotAliasMatcher([
+      {
+        aliasId: 'a1',
+        entityId: 'wine:opus-one',
+        value: 'Opus One',
+        normalizedValue: 'opus one',
+        sourceTrust: 1,
+        confidencePrior: 0.97,
+      },
+    ]);
+    const internalState = matcher as unknown as {
+      compactIndexBuilt: boolean;
+      broadRecallIndexesBuilt: boolean;
+    };
+
+    expect(internalState.compactIndexBuilt).toBe(true);
+    expect(internalState.broadRecallIndexesBuilt).toBe(false);
+
+    await expect(matcher.findMatches('opus one')).resolves.toMatchObject([
+      expect.objectContaining({
+        surfaceForm: 'Opus One',
+        lookupStrategy: 'exact',
+      }),
+    ]);
+    expect(internalState.compactIndexBuilt).toBe(true);
+    expect(internalState.broadRecallIndexesBuilt).toBe(false);
+
+    await expect(matcher.findMatches('opu')).resolves.toMatchObject([
+      expect.objectContaining({
+        surfaceForm: 'Opus One',
+      }),
+    ]);
+    expect(internalState.compactIndexBuilt).toBe(true);
+    expect(internalState.broadRecallIndexesBuilt).toBe(true);
+  });
+
+  it('keeps whole-surface lookup strict while allowing broad recall on span scope', async () => {
+    const matcher = new SearchSnapshotAliasMatcher([
+      {
+        aliasId: 'a1',
+        entityId: 'wine:opus-one',
+        value: 'Opus One',
+        normalizedValue: 'opus one',
+        sourceTrust: 1,
+        confidencePrior: 0.97,
+      },
+    ]);
+
+    await expect(matcher.findMatches('opu', { scope: 'surface' })).resolves.toEqual([]);
+    await expect(matcher.findMatches('opu', { scope: 'span' })).resolves.toMatchObject([
+      expect.objectContaining({
+        surfaceForm: 'Opus One',
+        lookupStrategy: 'prefix_exact',
+      }),
+    ]);
+  });
+
   it('resolves Hangul syllable prefixes against curated Korean transliteration surfaces', async () => {
     const matcher = new SearchSnapshotAliasMatcher([
       {
@@ -122,8 +214,7 @@ describe('SearchSnapshotAliasMatcher', () => {
       surfaceForm: 'Opus One',
       entityIds: ['wine:opus-one'],
     });
-    expect(completedPrefix[0]?.lookupStrategy).toContain('hangul_ime_completion');
-    expect(completedPrefix[0]?.lookupStrategy).toContain('transliterated_fuzzy');
+    expect(completedPrefix[0]?.lookupStrategy).toContain('transliterated_exact');
     expect(choseongPrefix[0]).toMatchObject({
       surfaceForm: 'Opus One',
       entityIds: ['wine:opus-one'],
@@ -148,7 +239,7 @@ describe('SearchSnapshotAliasMatcher', () => {
     expect(singleJamo).toEqual([]);
   });
 
-  it('prefers explicit Korean exact aliases over broad Chateau-family Hangul completion collisions', async () => {
+  it('prefers explicit Korean exact aliases and does not widen them into Chateau-family collisions', async () => {
     const matcher = new SearchSnapshotAliasMatcher([
       {
         aliasId: 'a1',
@@ -175,7 +266,7 @@ describe('SearchSnapshotAliasMatcher', () => {
       entityIds: ['wine:dyquem'],
     });
     expect(matches[0]?.lookupStrategy).toContain('exact');
-    expect(matches[1]?.lookupStrategy).toContain('hangul_ime_completion');
+    expect(matches).toHaveLength(1);
   });
 
   it('supports request-scoped batch lookups without downstream I/O', async () => {
@@ -203,6 +294,56 @@ describe('SearchSnapshotAliasMatcher', () => {
     expect(batch.get('opusone')?.[0]?.surfaceForm).toBe('Opus One');
     expect(batch.get('오푸스 원')?.[0]?.surfaceForm).toBe('Opus One');
     expect(batch.get('chateau margaux')?.[0]?.surfaceForm).toBe('Chateau Margaux');
+  });
+
+  it('keeps single-token lexical recall but does not widen multi-token identity lookups into family collisions', async () => {
+    const matcher = new SearchSnapshotAliasMatcher([
+      {
+        aliasId: 'a1',
+        entityId: 'wine:chateau-margaux-2015',
+        value: 'Chateau Margaux',
+        normalizedValue: 'chateau margaux',
+        sourceTrust: 1,
+        confidencePrior: 0.99,
+      },
+      {
+        aliasId: 'a2',
+        entityId: 'wine:chateau-angelus-2010',
+        value: 'Chateau Angelus',
+        normalizedValue: 'chateau angelus',
+        sourceTrust: 1,
+        confidencePrior: 0.95,
+      },
+      {
+        aliasId: 'a3',
+        entityId: 'wine:opus-one-2018',
+        value: 'Opus One 2018',
+        normalizedValue: 'opus one 2018',
+        sourceTrust: 1,
+        confidencePrior: 0.99,
+      },
+      {
+        aliasId: 'a4',
+        entityId: 'wine:opus-one-overture-2019',
+        value: 'Opus One Overture 2019',
+        normalizedValue: 'opus one overture 2019',
+        sourceTrust: 1,
+        confidencePrior: 0.95,
+      },
+    ]);
+
+    const singleToken = await matcher.findMatches('margaux');
+    const exactMultiToken = await matcher.findMatches('chateau margaux');
+    const vintageExact = await matcher.findMatches('opus one 2018');
+
+    expect(singleToken).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        surfaceForm: 'Chateau Margaux',
+        lookupStrategy: 'lexical_exact',
+      }),
+    ]));
+    expect(exactMultiToken.map((match) => match.surfaceForm)).toEqual(['Chateau Margaux']);
+    expect(vintageExact.map((match) => match.surfaceForm)).toEqual(['Opus One 2018']);
   });
 
   it('does not collapse lexical latin queries into uppercase acronym alias collisions', async () => {
@@ -451,6 +592,7 @@ describe('SearchSnapshotAliasMatcher', () => {
     await expect(matcher!.findMatches('오푸스 원')).resolves.toMatchObject([
       expect.objectContaining({
         surfaceForm: '오푸스 원',
+        aliasType: 'translation',
       }),
     ]);
   });

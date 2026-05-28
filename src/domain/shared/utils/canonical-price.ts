@@ -4,6 +4,17 @@ const USD_DISPLAY_PRICE_RE = /^\$(\d[\d,]*(?:\.\d+)?)$/u;
 const USD_DISPLAY_RANGE_RE = /^\$(\d[\d,]*(?:\.\d+)?)\s*-\s*\$?(\d[\d,]*(?:\.\d+)?)$/u;
 const KRW_DISPLAY_PRICE_RE = /^(?:₩\s*)?(\d[\d,]*)(?:\s*원)?$/u;
 const KRW_DISPLAY_RANGE_RE = /^(?:₩\s*)?(\d[\d,]*)\s*-\s*(?:₩\s*)?(\d[\d,]*)(?:\s*원)?$/u;
+const KRW_PRICE_CONSTRAINT_ATTRIBUTES = new Set([
+  'price_krw',
+  'max_price_krw',
+  'min_price_krw',
+]);
+const USD_PRICE_CONSTRAINT_ATTRIBUTES = new Set([
+  'price',
+  'price_usd',
+  'max_price_usd',
+  'min_price_usd',
+]);
 
 export interface CanonicalPriceRangeUsd {
   readonly minUsd: number;
@@ -14,9 +25,25 @@ function roundUsdToConstraintPrecision(priceUsd: number): number {
   return Math.round(priceUsd * 100) / 100;
 }
 
+export function roundConstraintUsd(priceUsd: number): number {
+  return roundUsdToConstraintPrecision(priceUsd);
+}
+
 function parseFiniteNumber(raw: string): number | null {
   const parsed = Number(raw.replace(/,/gu, ''));
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isFiniteNumericRange(
+  value: unknown,
+): value is { readonly min?: number; readonly max?: number } {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const range = value as { readonly min?: unknown; readonly max?: unknown };
+  const minValid = range.min === undefined || (typeof range.min === 'number' && Number.isFinite(range.min));
+  const maxValid = range.max === undefined || (typeof range.max === 'number' && Number.isFinite(range.max));
+  return minValid && maxValid;
 }
 
 export function convertKrwToConstraintUsd(priceKrw: number): number {
@@ -25,6 +52,47 @@ export function convertKrwToConstraintUsd(priceKrw: number): number {
 
 export function convertConstraintUsdToApproxKrw(priceUsd: number): number {
   return Math.round(priceUsd * KRW_PER_USD_APPROXIMATE);
+}
+
+export function canonicalizePriceConstraintAttribute(attribute: string): string {
+  if (KRW_PRICE_CONSTRAINT_ATTRIBUTES.has(attribute) || USD_PRICE_CONSTRAINT_ATTRIBUTES.has(attribute)) {
+    return 'price_usd';
+  }
+  return attribute;
+}
+
+export function canonicalizePriceConstraintLike<T extends {
+  readonly attribute: string;
+  readonly value: unknown;
+}>(
+  constraint: T,
+): T {
+  const canonicalAttribute = canonicalizePriceConstraintAttribute(constraint.attribute);
+  if (canonicalAttribute === constraint.attribute && canonicalAttribute !== 'price_usd') {
+    return constraint;
+  }
+
+  let canonicalValue = constraint.value;
+  if (KRW_PRICE_CONSTRAINT_ATTRIBUTES.has(constraint.attribute)) {
+    if (typeof constraint.value === 'number' && Number.isFinite(constraint.value)) {
+      canonicalValue = convertKrwToConstraintUsd(constraint.value);
+    } else if (isFiniteNumericRange(constraint.value)) {
+      canonicalValue = {
+        ...(constraint.value.min !== undefined ? { min: convertKrwToConstraintUsd(constraint.value.min) } : {}),
+        ...(constraint.value.max !== undefined ? { max: convertKrwToConstraintUsd(constraint.value.max) } : {}),
+      };
+    }
+  }
+
+  if (canonicalAttribute === constraint.attribute && canonicalValue === constraint.value) {
+    return constraint;
+  }
+
+  return {
+    ...constraint,
+    attribute: canonicalAttribute,
+    value: canonicalValue,
+  };
 }
 
 export function convertKrwBudgetToUsdBounds(budget: {
@@ -104,4 +172,20 @@ export function priceUsdMatchesBudget(
     return false;
   }
   return true;
+}
+
+export function splitCanonicalUsdBudgetAcrossSlots(
+  totalBudgetUsd: number | undefined,
+  slotCount: number,
+): number | undefined {
+  if (totalBudgetUsd === undefined) {
+    return undefined;
+  }
+  if (!Number.isFinite(totalBudgetUsd) || totalBudgetUsd <= 0) {
+    return undefined;
+  }
+  if (!Number.isFinite(slotCount) || slotCount <= 0) {
+    return undefined;
+  }
+  return roundUsdToConstraintPrecision(totalBudgetUsd / slotCount);
 }

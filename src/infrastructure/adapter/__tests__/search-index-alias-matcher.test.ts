@@ -206,6 +206,60 @@ describe('SearchIndexAliasMatcher', () => {
     );
   });
 
+  it('surface-only mode does not expand span-level fallback queries for generic misses', async () => {
+    const searchIndex = {
+      sparseSearch: vi.fn(async () => []),
+    } satisfies Pick<SearchIndexPort, 'sparseSearch'>;
+
+    const matcher = new SearchIndexAliasMatcher(searchIndex as SearchIndexPort, {
+      surfaceOnly: true,
+    });
+    await matcher.findMatchesBatch(['wine for cheese']);
+
+    expect(searchIndex.sparseSearch).toHaveBeenCalledTimes(1);
+    expect(searchIndex.sparseSearch.mock.calls[0]?.[0]).toEqual(
+      expect.not.arrayContaining(['wine', 'for', 'cheese']),
+    );
+  });
+
+  it('drops punctuation-only fallback queries before sparseSearch so Vespa never sees NullItem YQL', async () => {
+    const backingIndex = new InMemorySearchIndex();
+    await backingIndex.upsertDocument(makeDoc());
+
+    const searchIndex = {
+      sparseSearch: vi.fn(backingIndex.sparseSearch.bind(backingIndex)),
+    } satisfies Pick<SearchIndexPort, 'sparseSearch'>;
+
+    const matcher = new SearchIndexAliasMatcher(searchIndex as SearchIndexPort);
+    const batch = await matcher.findMatchesBatch([
+      '&',
+      'Opus One',
+    ]);
+
+    expect(searchIndex.sparseSearch).toHaveBeenCalledTimes(1);
+    expect(searchIndex.sparseSearch.mock.calls[0]?.[0]).toEqual(
+      expect.not.arrayContaining(['&']),
+    );
+    expect(batch.get('&')).toEqual([]);
+    expect(batch.get('Opus One')?.[0]?.entityIds).toContain(
+      createCanonicalEntityId('wine-opus-one-2018'),
+    );
+  });
+
+  it('returns empty matches without calling sparseSearch when every fallback query is punctuation-only', async () => {
+    const searchIndex = {
+      sparseSearch: vi.fn(),
+    } satisfies Pick<SearchIndexPort, 'sparseSearch'>;
+
+    const matcher = new SearchIndexAliasMatcher(searchIndex as SearchIndexPort);
+    const batch = await matcher.findMatchesBatch(['&', '/', '...']);
+
+    expect(searchIndex.sparseSearch).not.toHaveBeenCalled();
+    expect(batch.get('&')).toEqual([]);
+    expect(batch.get('/')).toEqual([]);
+    expect(batch.get('...')).toEqual([]);
+  });
+
   it('degrades Vespa transport failures to empty alias matches instead of throwing', async () => {
     const searchIndex = {
       sparseSearch: vi.fn(async () => {

@@ -174,6 +174,48 @@ describe('VespaSearchIndex', () => {
     expect(client.query.mock.calls[0]?.[0]).toContain(`entity_id in ("${publicEntityId}")`);
   });
 
+  it('serializes bulk getDocuments summary batches to avoid silent partial hydration under parallel fan-out', async () => {
+    const ids = Array.from({ length: VESPA_BULK_HYDRATION_BATCH_SIZE * 3 }, (_, i) =>
+      createEntityId(`wine-bulk-hydration-${String(i).padStart(4, '0')}`),
+    );
+    let inFlight = 0;
+    const client = {
+      query: vi.fn().mockImplementation(async (yql: string) => {
+        const requestedIds = [...yql.matchAll(/"([^"]+)"/g)].map((match) => match[1] ?? '');
+        inFlight += 1;
+        const overloaded = inFlight > 1;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        const returnedIds = overloaded
+          ? requestedIds.slice(0, Math.max(1, Math.floor(requestedIds.length / 2)))
+          : requestedIds;
+        inFlight -= 1;
+        return {
+          root: {
+            id: 'root',
+            relevance: 1,
+            children: returnedIds.map((entityId) => ({
+              id: `id:wine:wine_entity::${entityId}`,
+              relevance: 1,
+              source: 'content',
+              fields: makeDocumentFields(entityId),
+            })),
+          },
+        } satisfies VespaQueryResponse;
+      }),
+    } as unknown as VespaClient;
+
+    const index = new VespaSearchIndex(client);
+    const report = await index.getDocumentsReport(ids);
+
+    expect(report.docs.size).toBe(ids.length);
+    expect(report.missingIds).toHaveLength(0);
+    expect(report.batchFailures).toBe(0);
+    expect(report.parseFailures).toBe(0);
+    expect(client.query).toHaveBeenCalledTimes(
+      Math.ceil(ids.length / VESPA_BULK_HYDRATION_BATCH_SIZE),
+    );
+  });
+
   it('skips malformed getDocuments hits and returns remaining valid documents', async () => {
     const validId = createEntityId('vespa-get-doc-valid');
     const malformedId = createEntityId('vespa-get-doc-malformed');

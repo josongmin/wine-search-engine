@@ -8,7 +8,7 @@ import { registerContractRoute } from './register-contract-route.js';
 import { LookupRouteContract } from './route-contracts.js';
 import { toLookupRequest } from './search-request-mappers.js';
 import { getRequestId } from '../request-id.js';
-import { abortSignalFromFastifyRequest } from '../request-abort-signal.js';
+import { abortSignalFromFastifyRequest, raceWithRequestAbort } from '../request-abort-signal.js';
 import { HTTP_STATUS_OK } from '../constants.js';
 import { DomainError } from '../../../domain/shared/error/domain-error.js';
 
@@ -37,10 +37,15 @@ export function registerLookupRoute(
       const parsed = parseContractBody(request, LookupRouteContract);
       const searchRequest = toLookupRequest(parsed);
       const requestId = getRequestId(request);
+      const abortSignal = abortSignalFromFastifyRequest(request, reply);
 
-      const response = await deps.searchUseCase.execute(searchRequest, requestId, {
-        abortSignal: abortSignalFromFastifyRequest(request),
-      });
+      const response = await raceWithRequestAbort(
+        deps.searchUseCase.execute(searchRequest, requestId, {
+          abortSignal,
+        }),
+        abortSignal,
+        'Lookup request aborted',
+      );
 
       // Decomposition detector runs before route-dispatch and may return a
       // ComparisonSearchResponse even with retrieval_mode:'entity'. Lookup

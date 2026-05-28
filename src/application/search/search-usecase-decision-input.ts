@@ -7,6 +7,7 @@ import type {
 import { isExploratoryRetrievalMode } from '../../domain/query/model/retrieval-mode-classification.js';
 import type { ConstraintGraph } from '../../domain/query/model/constraint-graph.js';
 import { resolveRequiredAttributes } from '../../domain/query/service/graph-required-attributes.js';
+import { isConstraintGraphEmitEnabled } from '../../domain/query/service/constraint-graph-flags.js';
 import type {
   DualLanePresence,
   DualLaneArtifact,
@@ -348,7 +349,7 @@ export function buildSearchDecisionInput(
     outcome: classifyGraphPresence({
       graphPresent: constraintGraph !== undefined,
       ...(constraintGraph !== undefined ? { graphOrigin: constraintGraph.origin } : {}),
-      graphEmitFlagOn: process.env['CONSTRAINT_GRAPH_EMIT'] !== 'false',
+      graphEmitFlagOn: isConstraintGraphEmitEnabled(),
     }),
   });
   const graphResolution =

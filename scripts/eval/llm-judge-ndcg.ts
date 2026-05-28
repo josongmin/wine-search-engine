@@ -23,6 +23,8 @@ import { createReadStream } from 'node:fs';
 import { glob, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { z } from 'zod';
+import type { ChatLlmPort } from '../../src/domain/ai/port/chat-llm.port.js';
+import { createChatLlmFromEnv } from '../../src/infrastructure/ai/chat-llm-from-env.js';
 
 import {
   buildEntityIdBySourceId,
@@ -32,12 +34,16 @@ import {
 // ---------------------------------------------------------------------------
 // Config from env
 // ---------------------------------------------------------------------------
-const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1';
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY ?? '';
 const MODEL = process.env.OPENAI_CHAT_MODEL ?? 'gpt-5.4-mini';
+const JUDGE_LLM = createChatLlmFromEnv({
+  env: process.env,
+  defaultModel: MODEL,
+  httpTimeoutMs: 30_000,
+  allowCodexFallback: true,
+});
 
-if (!OPENAI_API_KEY) {
-  console.error('OPENAI_API_KEY is required. Run with --env-file=.env.local');
+if (JUDGE_LLM === undefined) {
+  console.error('OPENAI_API_KEY/OPENAI_API_KEYS or a valid Codex ChatGPT login token is required.');
   process.exit(1);
 }
 
@@ -196,30 +202,16 @@ function buildUserMessage(query: string, wine: WineJudgeCorpusRow): string {
 interface ChatMessage { role: 'system' | 'user'; content: string }
 interface JudgeResult { grade: number; reason: string }
 
-async function callJudge(messages: ChatMessage[]): Promise<JudgeResult> {
-  const resp = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      messages,
-      temperature: 0,
-      max_tokens: 100,
-      response_format: { type: 'json_object' },
-    }),
-    signal: AbortSignal.timeout(30_000),
+async function callJudge(
+  llm: ChatLlmPort,
+  messages: readonly ChatMessage[],
+): Promise<JudgeResult> {
+  const result = await llm.complete({
+    messages,
+    model: MODEL,
+    maxOutputTokens: 100,
   });
-
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`OpenAI error ${resp.status}: ${text.slice(0, 200)}`);
-  }
-
-  const data = await resp.json() as { choices: Array<{ message: { content: string } }> };
-  const content = data.choices[0]?.message?.content ?? '{}';
+  const content = result.text;
   const parsed = JSON.parse(content) as { grade?: unknown; reason?: unknown };
 
   const rawGrade = typeof parsed.grade === 'string' ? parseFloat(parsed.grade) : parsed.grade;
@@ -332,7 +324,7 @@ async function main(): Promise<void> {
         let attempt = 0;
         while (attempt < 3) {
           try {
-            const result = await callJudge(messages);
+            const result = await callJudge(JUDGE_LLM, messages);
             return {
               qid: q.qid,
               entityId: canonicalEntityId,

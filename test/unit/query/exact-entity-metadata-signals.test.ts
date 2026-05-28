@@ -28,6 +28,11 @@ describe('exact entity metadata signals', () => {
     expect(hasExactEntityLookupKeyword('페트뤼스 어떤 와인이야?')).toBe(true);
   });
 
+  it('does not treat leading recommendation phrasing as exact-entity lookup', () => {
+    expect(hasExactEntityLookupKeyword('recommend a light-bodied Spain red')).toBe(false);
+    expect(hasExactEntityLookupKeyword('suggest a sweet sparkling wine')).toBe(false);
+  });
+
   it('strips price and drinkability suffixes down to the bare entity query', () => {
     expect(stripExactEntityMetadataSuffix('오푸스원 얼마야?')).toBe('오푸스원');
     expect(stripExactEntityMetadataSuffix('오푸스원 지금 마시기 좋아?')).toBe('오푸스원');

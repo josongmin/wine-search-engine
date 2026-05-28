@@ -1,10 +1,17 @@
 import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  buildEvalTrainingRuntimeHandles,
   buildEvalTrainingReleaseMarkdownSummary,
   combineReleaseGateStatuses,
   evaluateNoisyEntityReleaseGate,
+  linkEvalTrainingReleaseToRuntimeState,
+  parseArgs,
+  resolveEvalTrainingArtifactPaths,
   runEvaluationAndTraining,
+  stageEvalTrainingSnapshotRuntimeSubstrates,
 } from '../../../scripts/eval/run-eval-and-train-ltr.ts';
 import type { ReleaseGateResult } from '../../../src/domain/evaluation/service/eval-runner.js';
 import type { EvalCase } from '../../../src/domain/evaluation/model/eval-case.js';
@@ -12,6 +19,7 @@ import { createCanonicalEntityId } from '../../../src/domain/shared/types/index.
 
 const hoisted = vi.hoisted(() => ({
   goldCases: [] as EvalCase[],
+  getCasesFilters: [] as unknown[],
   savedEvalResults: [] as unknown[],
   registry: {
     saveModel: vi.fn(async () => {}),
@@ -20,6 +28,12 @@ const hoisted = vi.hoisted(() => ({
   benchmarkRunStore: {
     saveRun: vi.fn(async () => {}),
   },
+  stageSnapshotRuntimeSubstratesToPgMock: vi.fn(async () => ({
+    snapshotId: 'search-snapshot:v1:test',
+    entities: 1,
+    aliases: 1,
+    ambiguityRegistry: 0,
+  })),
   evaluateNoisyEntityBenchmarkWithSearchExecutorMock: vi.fn(),
   buildTrainingExamplesMock: vi.fn(),
   trainAllModelsMock: vi.fn(),
@@ -27,7 +41,8 @@ const hoisted = vi.hoisted(() => ({
 
 vi.mock('../../../src/infrastructure/adapter/pg-gold-set-store.js', () => ({
   PgGoldSetStore: class {
-    async getCases() {
+    async getCases(filter?: unknown) {
+      hoisted.getCasesFilters.push(filter);
       return hoisted.goldCases;
     }
   },
@@ -37,10 +52,6 @@ vi.mock('../../../src/infrastructure/adapter/pg-eval-result-store.js', () => ({
   PgEvalResultStore: class {
     async saveResult(result: unknown) {
       hoisted.savedEvalResults.push(result);
-    }
-
-    async getResults() {
-      return hoisted.savedEvalResults;
     }
   },
 }));
@@ -56,6 +67,10 @@ vi.mock('../../../src/infrastructure/adapter/pg-eval-benchmark-run-store.js', ()
   PgEvalBenchmarkRunStore: class {
     saveRun = hoisted.benchmarkRunStore.saveRun;
   },
+}));
+
+vi.mock('../../../scripts/etl/publish-runtime-substrates.js', () => ({
+  stageSnapshotRuntimeSubstratesToPg: hoisted.stageSnapshotRuntimeSubstratesToPgMock,
 }));
 
 vi.mock('../../../src/domain/ranking/training.js', () => ({
@@ -190,10 +205,12 @@ function passingNoisyReport() {
 beforeEach(() => {
   hoisted.goldCases.length = 0;
   hoisted.goldCases.push(makeEvalCase());
+  hoisted.getCasesFilters.length = 0;
   hoisted.savedEvalResults.length = 0;
   hoisted.registry.saveModel.mockClear();
   hoisted.registry.activateSnapshot.mockClear();
   hoisted.benchmarkRunStore.saveRun.mockClear();
+  hoisted.stageSnapshotRuntimeSubstratesToPgMock.mockClear();
   hoisted.evaluateNoisyEntityBenchmarkWithSearchExecutorMock.mockReset();
   hoisted.buildTrainingExamplesMock.mockReset();
   hoisted.trainAllModelsMock.mockReset();
@@ -205,6 +222,149 @@ beforeEach(() => {
 });
 
 describe('run-eval-and-train-ltr release gating', () => {
+  it('defaults noisy entity mode to auto for release gating', () => {
+    const parsed = parseArgs([]);
+    expect(parsed.noisyEntityMode).toBe('auto');
+  });
+
+  it('keeps explicit noisy entity mode overrides', () => {
+    const parsed = parseArgs(['--noisy-entity-mode', 'hybrid']);
+    expect(parsed.noisyEntityMode).toBe('hybrid');
+  });
+
+  it('parses eval case filters and partial-run flags', () => {
+    const parsed = parseArgs([
+      '--query-class', 'exact_entity',
+      '--slice-tag', 'mixed_constraint_guided_hybrid_fallback',
+      '--label-tier', 'gold',
+      '--since', '2026-05-27T00:00:00.000Z',
+      '--case-limit', '12',
+      '--skip-noisy-entity',
+    ]);
+
+    expect(parsed.evalCaseFilter).toMatchObject({
+      queryClass: 'exact_entity',
+      sliceTag: 'mixed_constraint_guided_hybrid_fallback',
+      labelTier: 'gold',
+    });
+    expect(parsed.evalCaseFilter.since?.toISOString()).toBe('2026-05-27T00:00:00.000Z');
+    expect(parsed.caseLimit).toBe(12);
+    expect(parsed.skipNoisyEntity).toBe(true);
+  });
+
+  it('rewrites canonical release artifacts onto partial-debug paths for partial runs', () => {
+    const parsed = parseArgs([
+      '--query-class', 'exact_entity',
+      '--case-limit', '1',
+      '--skip-noisy-entity',
+    ]);
+
+    const resolved = resolveEvalTrainingArtifactPaths({
+      partialDebugRun: true,
+      noisyEntityOutput: parsed.noisyEntityOutput,
+      releaseSummaryOutput: parsed.releaseSummaryOutput,
+      releaseSummaryMarkdownOutput: parsed.releaseSummaryMarkdownOutput,
+    });
+
+    expect(resolved.noisyEntityOutputPath).toContain('.partial-debug.json');
+    expect(resolved.releaseSummaryOutputPath).toContain('.partial-debug.json');
+    expect(resolved.releaseSummaryMarkdownOutputPath).toContain('.partial-debug.md');
+  });
+
+  it('builds snapshot-scoped runtime handles from the target manifest for non-active eval runs', async () => {
+    const realFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'eval-training-runtime-'));
+    const snapshotId = 'search-snapshot:v1:target';
+    const snapshotDir = path.join(tempDir, snapshotId);
+    await fs.mkdir(snapshotDir, { recursive: true });
+    await realFs.writeFile(
+      path.join(snapshotDir, 'manifest.json'),
+      JSON.stringify({
+        schemaVersion: 'search_snapshot.v1',
+        snapshotId,
+        generatedAt: '2026-05-27T00:00:00.000Z',
+        contentHash: 'target-hash',
+        sourceInputPath: '/tmp/input.ndjson',
+        artifacts: {
+          documentsNdjson: '/tmp/documents.ndjson',
+          vespaFeedNdjson: '/tmp/vespa-feed.ndjson',
+          entitiesNdjson: '/tmp/entities.ndjson',
+          aliasesNdjson: '/tmp/aliases.ndjson',
+          ambiguityRegistryNdjson: '/tmp/ambiguity.ndjson',
+          nlMappingsJson: '/tmp/nl-mappings.json',
+          metadataJson: '/tmp/metadata.json',
+        },
+        counts: {
+          documents: 1,
+          vespaFeed: 1,
+          entities: 1,
+          aliases: 1,
+          ambiguityRegistry: 0,
+          nlMappings: 1,
+        },
+        hashes: {
+          documents: 'd',
+          vespaFeed: 'v',
+          entities: 'e',
+          aliases: 'a',
+          ambiguityRegistry: 'r',
+          nlMappings: 'n',
+        },
+        fieldAvailability: {
+          appellation: { populatedDocCount: 1, totalDocCount: 1, populatedDocRatio: 1 },
+          body: { populatedDocCount: 1, totalDocCount: 1, populatedDocRatio: 1 },
+          sweetness: { populatedDocCount: 1, totalDocCount: 1, populatedDocRatio: 1 },
+          acidity: { populatedDocCount: 1, totalDocCount: 1, populatedDocRatio: 1 },
+          tannin: { populatedDocCount: 1, totalDocCount: 1, populatedDocRatio: 1 },
+        },
+        quality: {
+          status: 'canonical',
+          blockers: [],
+          bypasses: [],
+          carryForwardBenchmarkCount: 0,
+          experimentalInputsPresent: false,
+        },
+      }, null, 2),
+      'utf8',
+    );
+
+    try {
+      const handles = await buildEvalTrainingRuntimeHandles({
+        pool: {} as never,
+        snapshotId,
+        snapshotRootDir: tempDir,
+      });
+      expect(handles).toMatchObject({
+        searchSnapshotId: snapshotId,
+        searchSnapshotManifestPath: path.join(tempDir, snapshotId, 'manifest.json'),
+        searchSnapshotFieldAvailability: {
+          appellation: { populatedDocCount: 1, totalDocCount: 1, populatedDocRatio: 1 },
+          body: { populatedDocCount: 1, totalDocCount: 1, populatedDocRatio: 1 },
+        },
+      });
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('stages snapshot-bound PG substrates before target-snapshot eval/train boot', async () => {
+    await stageEvalTrainingSnapshotRuntimeSubstrates({
+      snapshotId: 'search-snapshot:v1:target',
+      snapshotRootDir: '/tmp/search-snapshots',
+    });
+
+    expect(hoisted.stageSnapshotRuntimeSubstratesToPgMock).toHaveBeenCalledWith({
+      manifestPath: '/tmp/search-snapshots/search-snapshot:v1:target/manifest.json',
+      allowExistingActiveSnapshot: true,
+    });
+  });
+
+  it('skips PG substrate staging when no snapshot override is requested', async () => {
+    await stageEvalTrainingSnapshotRuntimeSubstrates({});
+
+    expect(hoisted.stageSnapshotRuntimeSubstratesToPgMock).not.toHaveBeenCalled();
+  });
+
   const passingEvalGate: ReleaseGateResult = {
     passed: true,
     gates: [
@@ -351,8 +511,11 @@ describe('run-eval-and-train-ltr release gating', () => {
       {
         snapshotId: 'snapshot-test',
         evalDatasetVersion: 'pg_gold_set_store.v1',
+        evalCaseFilter: {},
+        caseLimit: undefined,
         noisyEntityInput: 'fixture://noisy_attribute_recovery',
         noisyEntityOutput: '/tmp/noisy-entity-eval-results.json',
+        skipNoisyEntity: false,
         runtimeStatePath: '/tmp/nonexistent-runtime-search-snapshot.json',
         releaseSummaryOutput: '/tmp/eval-training-release-summary.json',
         releaseSummaryMarkdownOutput: '/tmp/eval-training-release-summary.md',
@@ -390,8 +553,11 @@ describe('run-eval-and-train-ltr release gating', () => {
       {
         snapshotId: 'snapshot-test',
         evalDatasetVersion: 'pg_gold_set_store.v1',
+        evalCaseFilter: {},
+        caseLimit: undefined,
         noisyEntityInput: 'fixture://noisy_attribute_recovery',
         noisyEntityOutput: '/tmp/noisy-entity-eval-results.json',
+        skipNoisyEntity: false,
         runtimeStatePath: '/tmp/nonexistent-runtime-search-snapshot.json',
         releaseSummaryOutput: '/tmp/eval-training-release-summary.json',
         releaseSummaryMarkdownOutput: '/tmp/eval-training-release-summary.md',
@@ -425,8 +591,11 @@ describe('run-eval-and-train-ltr release gating', () => {
       {
         snapshotId: 'snapshot-test',
         evalDatasetVersion: 'pg_gold_set_store.v1',
+        evalCaseFilter: {},
+        caseLimit: undefined,
         noisyEntityInput: 'fixture://noisy_attribute_recovery',
         noisyEntityOutput: '/tmp/noisy-entity-eval-results.json',
+        skipNoisyEntity: false,
         runtimeStatePath: '/tmp/nonexistent-runtime-search-snapshot.json',
         releaseSummaryOutput: '/tmp/eval-training-release-summary.json',
         releaseSummaryMarkdownOutput: '/tmp/eval-training-release-summary.md',
@@ -446,11 +615,13 @@ describe('run-eval-and-train-ltr release gating', () => {
     expect(hoisted.registry.activateSnapshot).toHaveBeenCalledWith('snapshot-test');
     expect(hoisted.benchmarkRunStore.saveRun).toHaveBeenCalledWith(expect.objectContaining({
       benchmarkKind: 'noisy_entity',
-      snapshotId: 'snapshot-test',
       queryCount: 20,
       recallAt3: 1,
-      releaseGatePassed: true,
-      activationStatus: 'activated',
+      provenance: expect.objectContaining({
+        searchSnapshotId: 'snapshot-test',
+        suiteGatePassed: true,
+        runtimeActivationStatus: 'activated',
+      }),
     }));
     expect(fs.writeFile).toHaveBeenCalledWith(
       '/tmp/eval-training-release-summary.json',
@@ -462,5 +633,146 @@ describe('run-eval-and-train-ltr release gating', () => {
       expect.stringContaining('## Eval + LTR Release Summary'),
       'utf8',
     );
+  });
+
+  it('keeps filtered partial runs shadow-only even when eval passes', async () => {
+    hoisted.evaluateNoisyEntityBenchmarkWithSearchExecutorMock.mockResolvedValue(passingNoisyReport());
+    const searchUseCase = {
+      executeForEvaluation: vi.fn(async () => ({
+        response: passingSearchResponse(),
+      })),
+    };
+    const readFileSpy = vi.spyOn(fs, 'readFile');
+    const parsed = parseArgs([
+      '--query-class', 'exact_entity',
+      '--slice-tag', 'mixed_constraint_guided_hybrid_fallback',
+      '--case-limit', '1',
+      '--skip-noisy-entity',
+    ]);
+
+    await expect(runEvaluationAndTraining(
+      searchUseCase as never,
+      {} as never,
+      {
+        snapshotId: 'snapshot-test',
+        ...parsed,
+        evalCaseFilter: { queryClass: 'exact_entity', sliceTag: 'mixed_constraint_guided_hybrid_fallback' },
+        runtimeStatePath: '/tmp/nonexistent-runtime-search-snapshot.json',
+        noisyEntityGateThresholds: {
+          minRecallAt3: 1,
+          minResolutionMatchRate: 1,
+          minProvenanceMatchRate: 1,
+          maxFalseExactRate: 0,
+        },
+      },
+    )).resolves.toBeUndefined();
+
+    expect(hoisted.getCasesFilters).toEqual([
+      expect.objectContaining({
+        queryClass: 'exact_entity',
+        sliceTag: 'mixed_constraint_guided_hybrid_fallback',
+      }),
+    ]);
+    expect(hoisted.evaluateNoisyEntityBenchmarkWithSearchExecutorMock).not.toHaveBeenCalled();
+    expect(hoisted.registry.saveModel).not.toHaveBeenCalled();
+    expect(hoisted.registry.activateSnapshot).not.toHaveBeenCalled();
+    expect(hoisted.benchmarkRunStore.saveRun).toHaveBeenCalledWith(expect.objectContaining({
+      queryCount: 0,
+      provenance: expect.objectContaining({
+        runtimeActivationStatus: 'shadow_only',
+        suiteGatePassed: true,
+      }),
+    }));
+    expect(fs.writeFile).toHaveBeenCalledWith(
+      expect.stringContaining('eval-training-release-summary.partial-debug.json'),
+      expect.any(String),
+      'utf8',
+    );
+    expect(fs.writeFile).toHaveBeenCalledWith(
+      expect.stringContaining('eval-training-release-summary.partial-debug.md'),
+      expect.any(String),
+      'utf8',
+    );
+    expect(readFileSpy).not.toHaveBeenCalledWith('/tmp/nonexistent-runtime-search-snapshot.json', 'utf8');
+  });
+
+  it('builds training examples from the in-memory eval report, not a schema-dependent DB reread', async () => {
+    hoisted.evaluateNoisyEntityBenchmarkWithSearchExecutorMock.mockResolvedValue(passingNoisyReport());
+    const searchUseCase = {
+      executeForEvaluation: vi.fn(async () => ({
+        response: passingSearchResponse(),
+        runtimeClassification: {
+          queryClass: 'short_entity',
+          intent: 'entity_exact',
+          route: 'hybrid',
+          retrievalMode: 'attribute_search',
+        },
+      })),
+    };
+
+    await expect(runEvaluationAndTraining(
+      searchUseCase as never,
+      {} as never,
+      {
+        snapshotId: 'snapshot-test',
+        evalDatasetVersion: 'pg_gold_set_store.v1',
+        evalCaseFilter: {},
+        caseLimit: undefined,
+        noisyEntityInput: 'fixture://noisy_attribute_recovery',
+        noisyEntityOutput: '/tmp/noisy-entity-eval-results.json',
+        skipNoisyEntity: true,
+        runtimeStatePath: '/tmp/nonexistent-runtime-search-snapshot.json',
+        releaseSummaryOutput: '/tmp/eval-training-release-summary.json',
+        releaseSummaryMarkdownOutput: '/tmp/eval-training-release-summary.md',
+        noisyEntityMode: 'hybrid',
+        noisyEntityConcurrency: 1,
+        noisyEntityGateThresholds: {
+          minRecallAt3: 1,
+          minResolutionMatchRate: 1,
+          minProvenanceMatchRate: 1,
+          maxFalseExactRate: 0,
+        },
+      },
+    )).resolves.toBeUndefined();
+
+    expect(hoisted.buildTrainingExamplesMock).toHaveBeenCalledOnce();
+    expect(hoisted.buildTrainingExamplesMock.mock.calls[0]?.[0]).toEqual([
+      expect.objectContaining({
+        caseId: 'case-1',
+        runtimeQueryClass: 'short_entity',
+      }),
+    ]);
+    expect(hoisted.registry.saveModel).not.toHaveBeenCalled();
+  });
+});
+
+describe('linkEvalTrainingReleaseToRuntimeState', () => {
+  it('skips malformed runtime state instead of failing the whole training pipeline', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ltr-runtime-link-'));
+    const runtimeStatePath = path.join(dir, 'runtime-state.json');
+    const readFileSpy = vi.spyOn(fs, 'readFile').mockImplementation(async (filePath) => {
+      if (typeof filePath === 'string' && filePath === runtimeStatePath) {
+        return '{"schemaVersion":"broken"}';
+      }
+      const err = new Error('ENOENT') as NodeJS.ErrnoException;
+      err.code = 'ENOENT';
+      throw err;
+    });
+
+    const result = await linkEvalTrainingReleaseToRuntimeState({
+      runtimeStatePath,
+      snapshotId: 'search-snapshot:v1:test',
+      evalDatasetVersion: 'pg_gold_set_store.v1',
+      featureSchemaHash: 'feature-hash',
+      noisyEntityOutputPath: path.join(dir, 'noisy.json'),
+      releaseSummaryOutput: path.join(dir, 'summary.json'),
+      releaseSummaryMarkdownOutput: path.join(dir, 'summary.md'),
+      combinedReleaseGatePassed: true,
+      activationStatus: 'activated',
+    });
+    readFileSpy.mockRestore();
+
+    expect(result.status).toBe('skipped');
+    expect(result.reason?.startsWith('runtime_state_unreadable:')).toBe(true);
   });
 });

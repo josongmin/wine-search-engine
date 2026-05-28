@@ -7,6 +7,8 @@
  * All functions are pure — no I/O.
  */
 
+import type { EvalBenchmarkReportProvenance } from './benchmark-provenance.js';
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -32,6 +34,18 @@ export interface DecisionOutcome {
   readonly decision_status: 'resolved' | 'ambiguous' | 'failed';
   readonly top_entity_id: string | null;
   readonly decision_confidence: number;
+  /**
+   * Whether `decision_confidence` is trusted as a calibrated probability.
+   *
+   * False means the runtime resolved via a substitute-trust path over an
+   * uncalibrated score; calibration metrics must exclude it.
+   */
+  readonly calibration_trusted?: boolean;
+  /**
+   * Whether the eval runner recorded a transport/runtime execution error for
+   * this query. This is orthogonal to semantic `decision_status='failed'`.
+   */
+  readonly evaluation_error?: boolean;
   readonly execution_mode?: 'authoritative' | 'degraded' | 'heuristic' | 'advisory';
   readonly blocking_eligible?: boolean;
   readonly degradation_reasons?: readonly string[];
@@ -382,8 +396,7 @@ export function ece(
 
   for (let i = 0; i < outcomes.length; i++) {
     const outcome = outcomes[i]!;
-    // ECE only for resolved decisions — abstain/failed are excluded
-    if (outcome.decision_status !== 'resolved') continue;
+    if (!isCalibrationEligibleDecision(outcome)) continue;
 
     const conf = outcome.decision_confidence;
     const category = classifyDecision(outcome, truths[i]!);
@@ -408,6 +421,15 @@ export function ece(
   }
 
   return totalEce;
+}
+
+export function isEvalExecutionError(outcome: DecisionOutcome): boolean {
+  return outcome.evaluation_error === true;
+}
+
+export function isCalibrationEligibleDecision(outcome: DecisionOutcome): boolean {
+  return outcome.decision_status === 'resolved'
+    && outcome.calibration_trusted !== false;
 }
 
 // ---------------------------------------------------------------------------
@@ -752,6 +774,7 @@ function slotMatchesMode(
 export interface EvalResult {
   readonly dataset_tier: 'bronze' | 'silver' | 'gate';
   readonly query_count: number;
+  readonly provenance?: EvalBenchmarkReportProvenance;
 
   // Global metrics
   readonly ndcg_at_10: number;
@@ -770,7 +793,12 @@ export interface EvalResult {
   readonly e_aurc: number;
 
   // Calibration
+  /** ECE is computed only over resolved decisions with trusted calibrated confidence. */
   readonly ece: number;
+  /** Number of resolved decisions eligible for trusted ECE computation. */
+  readonly calibration_eligible_resolved_count: number;
+  /** Scope note for ECE consumers; prevents reading substitute-trust lanes as calibrated. */
+  readonly ece_scope: 'trusted_resolved_only';
 
   // Scenario slices
   readonly by_scenario: Record<string, ScenarioSlice>;
@@ -837,6 +865,8 @@ export interface EvalResult {
   // T5.7: Optional baseline delta + significance summary.
   baseline_comparison?: {
     readonly baseline_path: string;
+    readonly compatibility_status?: 'compatible' | 'skipped';
+    readonly compatibility_reason?: string;
     readonly deltas: {
       readonly ndcg_at_10: number;
       readonly mrr_at_10: number;

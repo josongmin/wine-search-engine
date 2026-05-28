@@ -96,6 +96,21 @@ export function isDisallowedWholeLeadingTokenExpansion(
   );
 }
 
+function isDisallowedWholeLeadingPhraseExpansion(
+  querySurface: string,
+  candidateSurface: string,
+): boolean {
+  const queryTokens = tokenizeSurface(querySurface);
+  const candidateTokens = tokenizeSurface(candidateSurface);
+  if (queryTokens.length === 0 || candidateTokens.length <= queryTokens.length) {
+    return false;
+  }
+
+  return candidateTokens
+    .slice(0, queryTokens.length)
+    .join(' ') === queryTokens.join(' ');
+}
+
 /**
  * True iff `queryTerm` should be allowed to prefix-match `candidateTerm` in
  * the exact-like alias-prefix substrate.
@@ -124,6 +139,10 @@ export function matchesAliasPrefixTerm(
   }
 
   if (isDisallowedWholeLeadingTokenExpansion(trimmedQuery, trimmedCandidate)) {
+    return false;
+  }
+
+  if (isDisallowedWholeLeadingPhraseExpansion(trimmedQuery, trimmedCandidate)) {
     return false;
   }
 

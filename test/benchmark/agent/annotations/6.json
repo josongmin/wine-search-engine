@@ -5,7 +5,7 @@
   "notes": "Steak pairing under 100K KRW. Both pairing rationale and budget must hold.",
   "expectedConstraints": {
     "soft": [
-      { "attribute": "max_price_krw", "operator": "<=", "value": 100000 }
+      { "attribute": "price_usd", "operator": "<=", "value": 74.07 }
     ]
   },
   "expectedClaims": {

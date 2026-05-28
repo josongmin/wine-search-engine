@@ -38,6 +38,26 @@ function runtimeStatePayload(runtimeStatePathDir: string, snapshotId: string) {
         totalDocCount: 10,
         populatedDocRatio: 0.8,
       },
+      body: {
+        populatedDocCount: 6,
+        totalDocCount: 10,
+        populatedDocRatio: 0.6,
+      },
+      sweetness: {
+        populatedDocCount: 6,
+        totalDocCount: 10,
+        populatedDocRatio: 0.6,
+      },
+      acidity: {
+        populatedDocCount: 6,
+        totalDocCount: 10,
+        populatedDocRatio: 0.6,
+      },
+      tannin: {
+        populatedDocCount: 6,
+        totalDocCount: 10,
+        populatedDocRatio: 0.6,
+      },
     },
     quality: {
       status: 'canonical',

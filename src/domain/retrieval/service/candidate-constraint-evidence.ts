@@ -3,10 +3,10 @@ import type {
   ConstraintOperator,
   NormalizedConstraint,
 } from '../../shared/types/index.js';
+import { filterBindingInferredConstraints } from '../../shared/types/index.js';
 import type { HybridCandidate } from '../model/hybrid-candidate.js';
 import type { ConstraintGraph } from '../../query/model/constraint-graph.js';
 import { GEOGRAPHY_ATTRIBUTES } from '../../shared/constants/constraint-attributes.js';
-import { convertConstraintUsdToApproxKrw } from '../../shared/utils/canonical-price.js';
 import {
   normalizeConstraintComparableArray,
   normalizeConstraintComparableString,
@@ -58,13 +58,97 @@ function normalizeString(value: string): string {
     .replace(/[\u0300-\u036f]/g, '');
 }
 
-function geographyContains(attrValue: string, constraintValue: string): boolean {
+function geographyContains(
+  attribute: string,
+  attrValue: string,
+  constraintValue: string,
+): boolean {
+  if (
+    normalizeConstraintComparableString(attribute, attrValue)
+    === normalizeConstraintComparableString(attribute, constraintValue)
+  ) {
+    return true;
+  }
   return normalizeString(attrValue).includes(normalizeString(constraintValue));
 }
 
-function geographyExcludesAll(attrValue: string, constraintValues: readonly string[]): boolean {
-  const norm = normalizeString(attrValue);
-  return constraintValues.every((cv) => !norm.includes(normalizeString(cv)));
+function geographyExcludesAll(
+  attribute: string,
+  attrValue: string,
+  constraintValues: readonly string[],
+): boolean {
+  const normalizedAttr = normalizeString(attrValue);
+  const comparableAttr = normalizeConstraintComparableString(attribute, attrValue);
+  return constraintValues.every((constraintValue) => {
+    if (
+      comparableAttr
+      === normalizeConstraintComparableString(attribute, constraintValue)
+    ) {
+      return false;
+    }
+    return !normalizedAttr.includes(normalizeString(constraintValue));
+  });
+}
+
+function dedupeNonEmptyStrings(values: readonly (string | undefined)[]): readonly string[] {
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    if (typeof value !== 'string') {
+      continue;
+    }
+    const trimmed = value.trim();
+    if (trimmed.length === 0 || seen.has(trimmed)) {
+      continue;
+    }
+    seen.add(trimmed);
+    result.push(trimmed);
+  }
+  return result;
+}
+
+function resolveGeographyCandidateValues(
+  candidate: HybridCandidate,
+  attribute: string,
+): readonly string[] {
+  const regionHierarchy = dedupeNonEmptyStrings(candidate.regionHierarchy ?? []);
+  switch (attribute) {
+    case 'region':
+      return dedupeNonEmptyStrings([
+        candidate.region,
+        candidate.appellation,
+        ...regionHierarchy.slice(1),
+      ]);
+    case 'country':
+      return dedupeNonEmptyStrings([
+        candidate.country,
+        regionHierarchy[0],
+      ]);
+    case 'appellation':
+      return dedupeNonEmptyStrings([
+        candidate.appellation,
+        candidate.region,
+        regionHierarchy[regionHierarchy.length - 1],
+      ]);
+    default:
+      return [];
+  }
+}
+
+function geographyValueListContains(
+  attribute: string,
+  attrValues: readonly string[],
+  constraintValue: string,
+): boolean {
+  return attrValues.some((attrValue) => geographyContains(attribute, attrValue, constraintValue));
+}
+
+function geographyValueListExcludesAll(
+  attribute: string,
+  attrValues: readonly string[],
+  constraintValues: readonly string[],
+): boolean {
+  return attrValues.every((attrValue) => geographyExcludesAll(attribute, attrValue, constraintValues));
 }
 
 function normalizeWineType(value: string): string {
@@ -74,6 +158,25 @@ function normalizeWineType(value: string): string {
 
 function normalizeClosure(value: string): string {
   return normalizeString(value).replace(/[^\p{L}\p{N}]+/gu, '');
+}
+
+const OCCASION_COMPATIBILITY_CLOSURE: ReadonlyMap<string, readonly string[]> = new Map([
+  ['gift', ['gift']],
+  ['party', ['party', 'celebration', 'special_occasion', 'wedding', 'birthday']],
+  ['celebration', ['celebration', 'special_occasion', 'party', 'wedding', 'birthday', 'anniversary']],
+  ['anniversary', ['anniversary', 'celebration', 'special_occasion']],
+  ['wedding', ['wedding', 'celebration', 'special_occasion', 'party']],
+  ['birthday', ['birthday', 'celebration', 'special_occasion', 'party']],
+  ['date_night', ['date_night']],
+  ['housewarming', ['housewarming', 'party', 'celebration']],
+  ['solo', ['solo']],
+  ['special_occasion', ['special_occasion', 'celebration', 'party', 'wedding', 'birthday', 'anniversary']],
+  ['healing', ['healing', 'solo']],
+]);
+
+function expandComparableOccasionValues(value: string): readonly string[] {
+  const canonical = normalizeConstraintComparableString('occasion', value);
+  return OCCASION_COMPATIBILITY_CLOSURE.get(canonical) ?? [canonical];
 }
 
 function closureMatches(attrValue: string, constraintValue: string): boolean {
@@ -251,9 +354,6 @@ function resolveCandidateValue(
     case 'price':
     case 'price_usd':
       return candidate.priceUsd;
-    case 'max_price_krw':
-    case 'min_price_krw':
-      return candidate.priceUsd === undefined ? undefined : convertConstraintUsdToApproxKrw(candidate.priceUsd);
     case 'drinking_window':
       return candidate.drinkingWindowStart !== undefined && candidate.drinkingWindowEnd !== undefined
         ? candidate.drinkingWindowStart
@@ -311,12 +411,19 @@ function evaluateOperator(
       // '=' means "the array contains this value" — mirrors 'in' single-value semantics.
       if (Array.isArray(attrValue) && typeof constraintValue === 'string') {
         const attrValueSet = new Set(
-          normalizeConstraintComparableArray(
-            attribute,
-            attrValue.filter((v): v is string => typeof v === 'string'),
-          ),
+          attribute === 'occasion'
+            ? attrValue
+              .filter((v): v is string => typeof v === 'string')
+              .flatMap((value) => expandComparableOccasionValues(value))
+            : normalizeConstraintComparableArray(
+              attribute,
+              attrValue.filter((v): v is string => typeof v === 'string'),
+            ),
         );
-        return attrValueSet.has(normalizeConstraintComparableString(attribute, constraintValue));
+        const constraintTargets = attribute === 'occasion'
+          ? expandComparableOccasionValues(constraintValue)
+          : [normalizeConstraintComparableString(attribute, constraintValue)];
+        return constraintTargets.some((target) => attrValueSet.has(target));
       }
       return attrValue === constraintValue;
     }
@@ -485,6 +592,42 @@ function satisfiesConstraint(
       candidate.drinkingWindowEnd >= constraint.value;
   }
 
+  // Geography attributes (country, region, appellation) use Vespa `contains`
+  // (substring) at retrieval time. Annotation must mirror this: "Bordeaux AOC"
+  // satisfies constraint value "Bordeaux" for positive operators.
+  // Negative operators (exclude, not_in) retain exact semantics — broad
+  // exclusions must never pass a superset string.
+  if (GEOGRAPHY_ATTRIBUTES.has(constraint.attribute)) {
+    const { operator, value } = constraint;
+    const attrValues = resolveGeographyCandidateValues(candidate, constraint.attribute);
+    if (attrValues.length === 0) {
+      return false;
+    }
+    if (operator === '=') {
+      return typeof value === 'string'
+        && geographyValueListContains(constraint.attribute, attrValues, value);
+    }
+    if (operator === 'in') {
+      const vals = Array.isArray(value)
+        ? value.filter((v): v is string => typeof v === 'string')
+        : typeof value === 'string'
+          ? [value]
+          : [];
+      return vals.some((v) => geographyValueListContains(constraint.attribute, attrValues, v));
+    }
+    if (operator === 'exclude' || operator === 'not_in') {
+      // Both exclude and not_in mean "attrValue must NOT match any listed value".
+      // Use geographyExcludesAll for both to keep negative semantics consistent:
+      // excludes means "not a substring of attrValue" for geography.
+      const vals = Array.isArray(value)
+        ? value.filter((v): v is string => typeof v === 'string')
+        : typeof value === 'string'
+          ? [value]
+          : [];
+      return geographyValueListExcludesAll(constraint.attribute, attrValues, vals);
+    }
+  }
+
   const attrValue = resolveCandidateValue(candidate, constraint.attribute);
   if (attrValue === undefined) {
     return false;
@@ -505,37 +648,6 @@ function satisfiesConstraint(
     }
     if (operator === 'exclude' || operator === 'not_in') {
       return vals.every((v) => !closureMatches(attrValue, v));
-    }
-  }
-
-  // Geography attributes (country, region, appellation) use Vespa `contains`
-  // (substring) at retrieval time. Annotation must mirror this: "Bordeaux AOC"
-  // satisfies constraint value "Bordeaux" for positive operators.
-  // Negative operators (exclude, not_in) retain exact semantics — broad
-  // exclusions must never pass a superset string.
-  if (GEOGRAPHY_ATTRIBUTES.has(constraint.attribute) && typeof attrValue === 'string') {
-    const { operator, value } = constraint;
-    if (operator === '=') {
-      return typeof value === 'string' && geographyContains(attrValue, value);
-    }
-    if (operator === 'in') {
-      const vals = Array.isArray(value)
-        ? value.filter((v): v is string => typeof v === 'string')
-        : typeof value === 'string'
-          ? [value]
-          : [];
-      return vals.some((v) => geographyContains(attrValue, v));
-    }
-    if (operator === 'exclude' || operator === 'not_in') {
-      // Both exclude and not_in mean "attrValue must NOT match any listed value".
-      // Use geographyExcludesAll for both to keep negative semantics consistent:
-      // excludes means "not a substring of attrValue" for geography.
-      const vals = Array.isArray(value)
-        ? value.filter((v): v is string => typeof v === 'string')
-        : typeof value === 'string'
-          ? [value]
-          : [];
-      return geographyExcludesAll(attrValue, vals);
     }
   }
 
@@ -574,20 +686,40 @@ function isConstraintStyleWithoutBackedSemanticProfile(constraint: NormalizedCon
   return !hasBackedProfile;
 }
 
+const SOFT_CONSTRAINT_MISSING_VALUE_NON_EXEMPT_ATTRIBUTES = new Set([
+  'body',
+  'tannin',
+  'acidity',
+  'sweetness',
+]);
+
+function shouldExemptMissingSoftConstraintValue(constraint: NormalizedConstraint): boolean {
+  return !SOFT_CONSTRAINT_MISSING_VALUE_NON_EXEMPT_ATTRIBUTES.has(constraint.attribute);
+}
+
 export function annotateCandidateConstraintEvidence(
   candidate: HybridCandidate,
   constraints: ConstraintBundle,
   graph?: ConstraintGraph  ,
 ): HybridCandidate {
+  const {
+    unmetHardConstraints: _staleUnmetHardConstraints,
+    matchedAtomRefs: _staleMatchedAtomRefs,
+    unmetAtomRefs: _staleUnmetAtomRefs,
+    ...candidateWithoutStaleConstraintEvidence
+  } = candidate;
   const matched = new Set(candidate.matchedConstraints);
-  const unmetHardSet = new Set<string>();
+  const hardConstraintStatus = new Map<string, { matched: boolean; unmet: boolean }>();
 
   for (const constraint of constraints.hard) {
+    const status = hardConstraintStatus.get(constraint.attribute) ?? { matched: false, unmet: false };
     if (satisfiesConstraint(candidate, constraint)) {
       matched.add(constraint.attribute);
+      status.matched = true;
     } else {
-      unmetHardSet.add(constraint.attribute);
+      status.unmet = true;
     }
+    hardConstraintStatus.set(constraint.attribute, status);
   }
 
   for (const constraint of constraints.soft) {
@@ -601,7 +733,10 @@ export function annotateCandidateConstraintEvidence(
       // measurable catalog evidence. Treat as "not evaluable" instead of strict
       // mismatch to avoid soft-constraint denominator pollution.
       matched.add(constraint.attribute);
-    } else if (resolveCandidateValue(candidate, constraint.attribute) === undefined) {
+    } else if (
+      resolveCandidateValue(candidate, constraint.attribute) === undefined
+      && shouldExemptMissingSoftConstraintValue(constraint)
+    ) {
       // Soft constraint has no backing field on this candidate (e.g. fruit_intensity
       // is not projected from Vespa). Treat as "not evaluable" rather than "unmet" so
       // the ranker's computeSoftConstraint does not penalise every result by counting
@@ -613,7 +748,7 @@ export function annotateCandidateConstraintEvidence(
     }
   }
 
-  for (const constraint of constraints.inferred) {
+  for (const constraint of filterBindingInferredConstraints(constraints.inferred)) {
     if (satisfiesConstraint(candidate, constraint)) {
       matched.add(constraint.attribute);
     }
@@ -639,8 +774,15 @@ export function annotateCandidateConstraintEvidence(
     }
   }
 
+  const unmetHardSet = new Set<string>();
+  for (const [attribute, status] of hardConstraintStatus.entries()) {
+    if (!status.matched && status.unmet) {
+      unmetHardSet.add(attribute);
+    }
+  }
+
   return {
-    ...candidate,
+    ...candidateWithoutStaleConstraintEvidence,
     matchedConstraints: [...matched],
     ...(unmetHardSet.size > 0
       ? { unmetHardConstraints: [...unmetHardSet] }

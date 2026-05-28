@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { z } from 'zod';
 import { bootstrapLogger } from '../../../domain/shared/bootstrap-logger.js';
 import type { JudgmentCachePort } from '../port/judgment-cache.port.js';
 import type { LLMInjectionClassifierPort } from '../port/llm-injection-classifier.port.js';
@@ -7,6 +8,19 @@ import { SECONDS_PER_MINUTE, MINUTES_PER_HOUR } from '../../shared/utils/time-un
 import { globalSilentSkipCounter } from '../../../domain/observability/silent-skip-counters.js';
 
 const log = bootstrapLogger.child({ component: 'LLMInjectionJudge' });
+
+/**
+ * Cache envelope shape persisted by {@link LLMInjectionJudge.storeCacheAsync}.
+ *
+ * `.strict()` ensures unknown fields trigger a shape-mismatch (treated as a
+ * miss + corrupt_entry counter increment), which is the desired posture on a
+ * SECURITY surface — anything we did not write is potential cache poisoning.
+ */
+const InjectionJudgeCacheEnvelopeSchema = z
+  .object({
+    is_injection: z.boolean(),
+  })
+  .strict();
 
 /**
  * LLM-as-Judge for borderline prompt injection detection.
@@ -107,17 +121,25 @@ export class LLMInjectionJudge implements InjectionJudgePort {
           );
           parsed = null;
         }
-        if (typeof parsed === 'object' && parsed !== null && 'is_injection' in parsed && typeof (parsed as Record<string, unknown>)['is_injection'] === 'boolean') {
-          return (parsed as Record<string, unknown>)['is_injection'] as boolean;
-        }
         if (parsed !== null) {
+          // CLAUDE.md rule 12: Validate the JSON.parse result with a Zod
+          // schema rather than narrowing with an `as` cast. On a security
+          // surface, any unexpected field is treated as potential poisoning
+          // and forced through the cache-miss path (corrupt_entry counter).
+          const envelope = InjectionJudgeCacheEnvelopeSchema.safeParse(parsed);
+          if (envelope.success) {
+            return envelope.data.is_injection;
+          }
           // Shape mismatch (JSON parsed but not our format).
           globalSilentSkipCounter.increment('cache_read_failure', {
             surface: 'injection_judge',
             errorClass: 'corrupt_entry_shape_mismatch',
           });
           log.error(
-            { keyPrefix: cacheKey.slice(0, LLMInjectionJudge.CACHE_KEY_LOG_PREFIX_LEN) },
+            {
+              keyPrefix: cacheKey.slice(0, LLMInjectionJudge.CACHE_KEY_LOG_PREFIX_LEN),
+              issues: envelope.error.issues.slice(0, 3),
+            },
             'injection judge cache entry has unexpected shape (corrupt_entry); treating as miss. Possible cache poisoning — investigate.',
           );
         }

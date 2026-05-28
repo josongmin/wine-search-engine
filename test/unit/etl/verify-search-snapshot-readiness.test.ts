@@ -6,6 +6,12 @@ import {
   SEARCH_SNAPSHOT_SCHEMA_VERSION,
   SEARCH_SNAPSHOT_STATE_VERSION,
 } from '../../../src/domain/shared/constants/search-snapshot.js';
+import {
+  canonicalizeAliasSnapshotRecords,
+  canonicalizeAmbiguitySnapshotRows,
+  canonicalizeEntitySnapshotRecords,
+} from '../../../src/domain/shared/utils/search-snapshot-canonicalization.js';
+import { hashStableJson } from '../../../src/domain/shared/utils/stable-json.js';
 
 const {
   mockVerifySearchSnapshotRuntimeStateLive,
@@ -50,6 +56,7 @@ async function makeTempDir(): Promise<string> {
 async function writeFixtureFiles(args?: {
   readonly runtimeEntities?: number;
   readonly manifestEntities?: number;
+  readonly activeLtrModels?: number;
 }): Promise<{
   readonly runtimeStatePath: string;
   readonly manifestPath: string;
@@ -58,8 +65,51 @@ async function writeFixtureFiles(args?: {
   const manifestPath = path.join(dir, 'manifest.json');
   const runtimeStatePath = path.join(dir, 'runtime-state.json');
   const nlMappingsPath = path.join(dir, 'nl-mappings.json');
+  const entitiesPath = path.join(dir, 'entities.ndjson');
+  const aliasesPath = path.join(dir, 'aliases.ndjson');
+  const ambiguityPath = path.join(dir, 'ambiguity.ndjson');
+  const documentsPath = path.join(dir, 'documents.ndjson');
+  const vespaFeedPath = path.join(dir, 'vespa-feed.ndjson');
+  const metadataPath = path.join(dir, 'metadata.json');
+
+  const entities = Array.from({ length: args?.manifestEntities ?? 10 }, (_, index) => ({
+    entityId: `wine-${index + 1}`,
+    entityType: 'wine' as const,
+    canonicalLabel: `Wine ${index + 1}`,
+    identitySignature: `identity-${index + 1}`,
+    relations: {},
+    attributes: { wineType: index === 0 ? 'red' : 'white' },
+    metadata: {},
+  }));
+  const aliases = Array.from({ length: 10 }, (_, index) => ({
+    aliasId: `alias-${index + 1}`,
+    entityId: entities[index % entities.length]!.entityId,
+    value: `Alias ${index + 1}`,
+    normalizedValue: `alias-${index + 1}`,
+    type: 'producer',
+    scope: 'global',
+    source: 'fixture',
+    sourceTrust: 1,
+    confidencePrior: 1,
+  }));
+  const ambiguityRows: {
+    readonly registryId: string;
+    readonly normalizedForm: string;
+    readonly entityIds: readonly string[];
+    readonly ambiguityTypes: readonly string[];
+    readonly severity: 'low' | 'medium' | 'high';
+  }[] = [];
+  const entityHash = hashStableJson(canonicalizeEntitySnapshotRecords(entities));
+  const aliasHash = hashStableJson(canonicalizeAliasSnapshotRecords(aliases));
+  const ambiguityHash = hashStableJson(canonicalizeAmbiguitySnapshotRows(ambiguityRows));
 
   await fs.writeFile(nlMappingsPath, JSON.stringify({ mappings: [{ key: 'full-bodied', canonical: 'full_bodied' }] }));
+  await fs.writeFile(entitiesPath, `${entities.map((row) => JSON.stringify(row)).join('\n')}\n`);
+  await fs.writeFile(aliasesPath, `${aliases.map((row) => JSON.stringify(row)).join('\n')}\n`);
+  await fs.writeFile(ambiguityPath, '');
+  await fs.writeFile(documentsPath, '');
+  await fs.writeFile(vespaFeedPath, '');
+  await fs.writeFile(metadataPath, '{}\n');
   await fs.writeFile(
     manifestPath,
     `${JSON.stringify({
@@ -69,13 +119,13 @@ async function writeFixtureFiles(args?: {
       contentHash: 'content-hash',
       sourceInputPath: '/tmp/silver-trackc.ndjson',
       artifacts: {
-        documentsNdjson: '/tmp/documents.ndjson',
-        vespaFeedNdjson: '/tmp/vespa-feed.ndjson',
-        entitiesNdjson: '/tmp/entities.ndjson',
-        aliasesNdjson: '/tmp/aliases.ndjson',
-        ambiguityRegistryNdjson: '/tmp/ambiguity.ndjson',
+        documentsNdjson: documentsPath,
+        vespaFeedNdjson: vespaFeedPath,
+        entitiesNdjson: entitiesPath,
+        aliasesNdjson: aliasesPath,
+        ambiguityRegistryNdjson: ambiguityPath,
         nlMappingsJson: nlMappingsPath,
-        metadataJson: '/tmp/metadata.json',
+        metadataJson: metadataPath,
       },
       counts: {
         documents: 10,
@@ -88,9 +138,9 @@ async function writeFixtureFiles(args?: {
       hashes: {
         documents: 'documents-hash',
         vespaFeed: 'vespa-feed-hash',
-        entities: 'entities-hash',
-        aliases: 'aliases-hash',
-        ambiguityRegistry: 'ambiguity-hash',
+        entities: entityHash,
+        aliases: aliasHash,
+        ambiguityRegistry: ambiguityHash,
         nlMappings: 'nl-hash',
       },
       quality: {
@@ -105,6 +155,26 @@ async function writeFixtureFiles(args?: {
           populatedDocCount: 8,
           totalDocCount: 10,
           populatedDocRatio: 0.8,
+        },
+        body: {
+          populatedDocCount: 6,
+          totalDocCount: 10,
+          populatedDocRatio: 0.6,
+        },
+        sweetness: {
+          populatedDocCount: 6,
+          totalDocCount: 10,
+          populatedDocRatio: 0.6,
+        },
+        acidity: {
+          populatedDocCount: 6,
+          totalDocCount: 10,
+          populatedDocRatio: 0.6,
+        },
+        tannin: {
+          populatedDocCount: 6,
+          totalDocCount: 10,
+          populatedDocRatio: 0.6,
         },
       },
     }, null, 2)}\n`,
@@ -123,12 +193,12 @@ async function writeFixtureFiles(args?: {
         aliases: 10,
         ambiguityRegistry: 0,
         nlMappings: 1,
-        activeLtrModels: 1,
+        activeLtrModels: args?.activeLtrModels ?? 1,
       },
       hashes: {
-        entities: 'entities-hash',
-        aliases: 'aliases-hash',
-        ambiguityRegistry: 'ambiguity-hash',
+        entities: entityHash,
+        aliases: aliasHash,
+        ambiguityRegistry: ambiguityHash,
         nlMappings: 'nl-hash',
         activeLtrModels: 'ltr-hash',
       },
@@ -144,6 +214,26 @@ async function writeFixtureFiles(args?: {
           populatedDocCount: 8,
           totalDocCount: 10,
           populatedDocRatio: 0.8,
+        },
+        body: {
+          populatedDocCount: 6,
+          totalDocCount: 10,
+          populatedDocRatio: 0.6,
+        },
+        sweetness: {
+          populatedDocCount: 6,
+          totalDocCount: 10,
+          populatedDocRatio: 0.6,
+        },
+        acidity: {
+          populatedDocCount: 6,
+          totalDocCount: 10,
+          populatedDocRatio: 0.6,
+        },
+        tannin: {
+          populatedDocCount: 6,
+          totalDocCount: 10,
+          populatedDocRatio: 0.6,
         },
       },
     }, null, 2)}\n`,
@@ -169,10 +259,41 @@ describe('verifySearchSnapshotReadiness', () => {
     expect(mockVerifySearchSnapshotRuntimeStateLive).toHaveBeenCalledTimes(1);
     expect(mockCreatePgPool).toHaveBeenCalledTimes(1);
     expect(mockVerifySearchSnapshotRuntimeStateLive.mock.calls[0]?.[0]?.requirePointerParity).toBeUndefined();
+    expect(mockVerifySearchSnapshotRuntimeStateLive.mock.calls[0]?.[0]?.requireActiveLtr).toBe(false);
     expect(mockVerifySearchSnapshotRuntimeStateLive.mock.calls[0]?.[0]?.vespaMtls).toEqual({
       certPath: '/tmp/vespa-cert.pem',
       keyPath: '/tmp/vespa-key.pem',
     });
+  });
+
+  it('passes by default when runtime state has zero active LTR models', async () => {
+    const { runtimeStatePath, manifestPath } = await writeFixtureFiles({ activeLtrModels: 0 });
+
+    await expect(
+      verifySearchSnapshotReadiness({
+        runtimeStatePath,
+        manifestPath,
+        requirePointerParity: false,
+        requireActiveLtr: false,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(mockVerifySearchSnapshotRuntimeStateLive.mock.calls[0]?.[0]?.requireActiveLtr).toBe(false);
+  });
+
+  it('fails when active LTR is explicitly required and runtime state has zero active LTR models', async () => {
+    const { runtimeStatePath, manifestPath } = await writeFixtureFiles({ activeLtrModels: 0 });
+
+    await expect(
+      verifySearchSnapshotReadiness({
+        runtimeStatePath,
+        manifestPath,
+        requirePointerParity: false,
+        requireActiveLtr: true,
+      }),
+    ).rejects.toThrow(/Active LTR model count is zero/);
+
+    expect(mockVerifySearchSnapshotRuntimeStateLive.mock.calls[0]?.[0]?.requireActiveLtr).toBe(true);
   });
 
   it('fails closed when manifest entity count diverges from runtime state', async () => {

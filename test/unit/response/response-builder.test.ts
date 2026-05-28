@@ -31,6 +31,7 @@ function makeDecisionOutput(overrides?: Partial<DecisionOutput>): DecisionOutput
     nextAction: 'return_result',
     decisionConfidence: 0.9,
     confidenceSemantics: 'calibrated_decision_confidence',
+    calibrationTrusted: true,
     signalSet: {
       entity_integrity_score: 0.9,
       hard_constraint_pass: 1,
@@ -217,6 +218,20 @@ describe('ResponseBuilder', () => {
       const response = builder.build(makeBaseParams());
 
       expect(response.engineDecision).not.toHaveProperty('funnelMetrics');
+    });
+
+    it('surfaces calibrationTrusted when the decision layer marks confidence untrusted', () => {
+      const response = builder.build(
+        makeBaseParams({
+          decisionOutput: makeDecisionOutput({
+            confidenceSemantics: 'uncalibrated_decision_score',
+            calibrationTrusted: false,
+          }),
+        }),
+      );
+
+      expect(response.engineDecision.calibrationTrusted).toBe(false);
+      expect(response.engineDecision.confidenceSemantics).toBe('uncalibrated_decision_score');
     });
   });
 

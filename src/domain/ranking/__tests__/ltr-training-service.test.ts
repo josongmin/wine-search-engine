@@ -7,6 +7,7 @@ import {
 } from '../service/ltr-feature-extractor.js';
 import type { EvalResult } from '../../evaluation/model/eval-result.js';
 import type { EvalCase } from '../../evaluation/model/eval-case.js';
+import { createCanonicalEntityId } from '../../shared/types/entity-id.js';
 
 function makeEvalCase(overrides: Partial<EvalCase> = {}): EvalCase {
   return {
@@ -24,6 +25,7 @@ function makeEvalCase(overrides: Partial<EvalCase> = {}): EvalCase {
 function makeEvalResult(overrides: Partial<EvalResult> = {}): EvalResult {
   return {
     caseId: 'case-1',
+    predictedEntityId: createCanonicalEntityId('wine-test-0'),
     predictedStatus: 'resolved',
     decisionConfidence: 0.82,
     utilityScore: 0.9,
@@ -43,6 +45,7 @@ function makeEvalResult(overrides: Partial<EvalResult> = {}): EvalResult {
       feature_flags: {},
       response_contract_version: 'search-response-v1',
     },
+    runtimeQueryClass: 'semantic_preference',
     ...overrides,
   };
 }
@@ -124,5 +127,106 @@ describe('LTRTrainingService', () => {
         [makeEvalCase()],
       ),
     ).toThrow(/topResultScoreComponents/u);
+  });
+
+  it('skips non-rankable no-result cases instead of aborting the whole training run', () => {
+    const examples = buildTrainingExamples(
+      [makeEvalResult({
+        predictedStatus: 'ambiguous',
+        decisionConfidence: 0.14,
+        isCorrectResolve: false,
+        isWrongResolve: false,
+        isSafeAbstain: false,
+        isAvoidableAbstain: true,
+        predictedEntityId: undefined,
+      })],
+      [makeEvalCase({
+        expectedStatus: 'resolved',
+      })],
+    );
+
+    expect(examples).toEqual([]);
+  });
+
+  it('fails loudly when eval data omits runtime query-class metadata', () => {
+    expect(() =>
+      buildTrainingExamples(
+        [makeEvalResult({
+          runtimeQueryClass: undefined,
+          topResultScoreComponents: {
+            semantic: 0.8,
+            popularity: 0.7,
+            attributeAlignment: 0.6,
+            preferenceAlignment: 0.5,
+            entityPosterior: 0.93,
+            identityExactnessTier: 'exact',
+            lanePresence: 'corroborated',
+          },
+        })],
+        [makeEvalCase()],
+      ),
+    ).toThrow(/runtimeQueryClass/u);
+  });
+
+  it('skips failed non-rankable eval rows even when runtime query-class metadata is absent', () => {
+    const examples = buildTrainingExamples(
+      [makeEvalResult({
+        runtimeQueryClass: undefined,
+        predictedEntityId: undefined,
+        predictedStatus: 'failed',
+        isCorrectResolve: false,
+        isWrongResolve: false,
+        isSafeAbstain: false,
+        isAvoidableAbstain: false,
+        topResultScoreComponents: undefined,
+      })],
+      [makeEvalCase()],
+    );
+
+    expect(examples).toEqual([]);
+  });
+
+  it('fails loudly when gold and runtime query classes diverge', () => {
+    expect(() =>
+      buildTrainingExamples(
+        [makeEvalResult({
+          runtimeQueryClass: 'ambiguous_short_form',
+          goldRuntimeQueryClassMismatch: true,
+          topResultScoreComponents: {
+            semantic: 0.8,
+            popularity: 0.7,
+            attributeAlignment: 0.6,
+            preferenceAlignment: 0.5,
+            entityPosterior: 0.93,
+            identityExactnessTier: 'exact',
+            lanePresence: 'corroborated',
+          },
+        })],
+        [makeEvalCase()],
+      ),
+    ).toThrow(/gold\/runtime queryClass mismatch/u);
+  });
+
+  it('uses runtime query class for exact-lookup gold labels refined to short_entity', () => {
+    const examples = buildTrainingExamples(
+      [makeEvalResult({
+        runtimeQueryClass: 'short_entity',
+        topResultScoreComponents: {
+          semantic: 0.8,
+          popularity: 0.7,
+          attributeAlignment: 0.6,
+          preferenceAlignment: 0.5,
+          entityPosterior: 0.93,
+          identityExactnessTier: 'exact',
+          lanePresence: 'corroborated',
+        },
+      })],
+      [makeEvalCase({
+        queryClass: 'exact_entity',
+      })],
+    );
+
+    expect(examples).toHaveLength(3);
+    expect(examples[0]?.queryClass).toBe('short_entity');
   });
 });

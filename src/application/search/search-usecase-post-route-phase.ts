@@ -39,11 +39,15 @@ import { ConstraintReasoner } from '../../domain/query/service/constraint-reason
 import type { ConstraintReasonerOutput } from '../../domain/query/service/constraint-reasoner.js';
 import type { ChannelDegradationSummary } from '../../domain/query/model/abstain-decision.js';
 import { buildAuthorityTraceRef } from '../../domain/decision/service/authority-trace.js';
+import { deriveDecisionConfidenceSemantics } from '../../domain/shared/types/index.js';
 import { evaluateAdmissionClosure } from '../../domain/decision/service/admission-gate.js';
 import { DomainError, EvidenceObligationError } from '../../domain/shared/error/domain-error.js';
 import { buildSearchCounterfactuals } from './search-usecase-counterfactuals.js';
 import { getExplanationObligation } from '../../domain/response/service/explanation-obligation.js';
-import { deriveQueryFamily } from '../../domain/query/model/query-observability-vocab.js';
+import {
+  deriveQueryFamily,
+  planToObservabilitySlice,
+} from '../../domain/query/model/query-observability-vocab.js';
 import { buildSearchDecisionInput } from './search-usecase-decision-input.js';
 import type {
   AdmissionClosureSummary,
@@ -75,9 +79,14 @@ import { retrievalPlanVersion } from '../../domain/retrieval/service/retrieval-p
 import { getModeWeights, MODE_WEIGHT_OVERLAY_MAP } from '../../domain/ranking/model/mode-weights.js';
 import { RANKING_POLICY_VERSION } from '../../domain/ranking/service/ranker.js';
 import { pipelineDebug } from '../../domain/observability/request-pipeline-debug.js';
+import { PipelineDebugStep } from '../../domain/observability/pipeline-debug-steps.js';
 import { logSearchEvent } from '../../domain/observability/log-search-event.js';
 import type { RankingDegradationSignal } from '../../domain/ranking/model/ranking-runtime-signal.js';
 import type { DecisionSnapshot } from '../../domain/shared/types/index.js';
+
+const ADMISSION_HEALTHY_DEGRADATION_REASONS = new Set([
+  'mixed_constraint_guided_hybrid_fallback',
+]);
 import { SOFT_INTENT_STRATEGY_VERSION } from '../../domain/query/service/soft-intent-strategy-table.js';
 import {
   toSpecializedRouteMeta,
@@ -919,7 +928,9 @@ function toAdmissionHonestyContract(
 
   return {
     executionMode: routeDegradation.executionMode,
-    routeHealthy: false,
+    routeHealthy: routeDegradation.degradationReasons.every((reason) =>
+      ADMISSION_HEALTHY_DEGRADATION_REASONS.has(reason),
+    ),
   };
 }
 
@@ -960,7 +971,7 @@ export async function runRankedRouteDecisionPhase(
 ): Promise<SearchResponseV1> {
   pipelineDebug(
     {
-      step: 'decision.phase.enter',
+      step: PipelineDebugStep.DECISION_PHASE_ENTER,
       effective_route: ctx.effectiveRoute,
       resolve_status: ctx.resolveResult.status,
       ranked_count: ctx.rankedResults.length,
@@ -1028,7 +1039,7 @@ export async function runRankedRouteDecisionPhase(
   const admissionClosure = evaluateAdmissionClosure(decisionInput, snapshot);
   pipelineDebug(
     {
-      step: 'decision.engine.request',
+      step: PipelineDebugStep.DECISION_ENGINE_REQUEST,
       query_class: ctx.plan.queryClass,
     },
     'pipeline decision engine request',
@@ -1043,7 +1054,7 @@ export async function runRankedRouteDecisionPhase(
 
   pipelineDebug(
     {
-      step: 'decision.engine.response',
+      step: PipelineDebugStep.DECISION_ENGINE_RESPONSE,
       decision_status: decisionOutput.decisionStatus,
       next_action: decisionOutput.nextAction,
       decision_confidence: decisionOutput.decisionConfidence,
@@ -1234,7 +1245,7 @@ export async function runSearchPostRoutePhase(
 ): Promise<SearchResponseV1> {
   pipelineDebug(
     {
-      step: 'post_route.enter',
+      step: PipelineDebugStep.POST_ROUTE_ENTER,
       effective_route: ctx.effectiveRoute,
       resolve_status: ctx.resolveResult.status,
       ranked_count: ctx.rankedResults.length,
@@ -1301,18 +1312,22 @@ export async function runSearchPostRoutePhase(
 
   // ltrAvailable is false when:
   // - kill switch forces heuristic-only mode
-  // - LTR model is absent / unusable, so final scores remain heuristic-only
+  // - no learned LTR model actually ran (cross-encoder-only rerank is NOT an
+  //   LTR confidence substrate for RFC-013 entropy gating)
   // - LTR model loaded but saturated (all scores clamped to same value)
-  // Heuristic scores cluster in [0.2, 0.6] → entropy ≈ 0.999 always.
-  // Bypassing the entropy gate prevents false-ambiguous recommendation paths.
+  // Heuristic / cross-encoder-only scores can still cluster tightly and are
+  // not the calibrated LTR logit distribution the entropy gate was designed
+  // around. Use scoreDriftRecord presence as the authoritative witness that
+  // learned LTR actually executed.
   const rerankDecision = ctx.rankingMetadata?.rerankDecision;
-  const ltrUnavailableDecision = rerankDecision?.decision === 'no_model_for_query_class'
-    || rerankDecision?.decision === 'feature_dimension_mismatch'
-    || rerankDecision?.decision === 'normalization_failed';
+  const learnedLtrApplied =
+    ctx.rankingMetadata?.rerankExecuted === true
+    && rerankDecision?.decision === 'applied'
+    && rerankDecision.scoreDriftRecord !== undefined;
   const ltrAvailable =
     snapshot.feature_flags['killSwitchLearning'] !== true
-    && ctx.rankingMetadata?.ltrSaturated !== true
-    && !ltrUnavailableDecision;
+    && learnedLtrApplied
+    && ctx.rankingMetadata.ltrSaturated !== true;
 
   const abstainDecision = ctx.abstainPolicy.evaluate(
     topScores,
@@ -1370,7 +1385,7 @@ export async function runSearchPostRoutePhase(
   if (abstainDecision !== false && honorClarificationOptOut) {
     pipelineDebug(
       {
-        step: 'post_route.entropy_abstain_bypassed',
+        step: PipelineDebugStep.POST_ROUTE_ENTROPY_ABSTAIN_BYPASSED,
         effective_route: ctx.effectiveRoute,
         abstain_reason: abstainDecision.reason,
         retrieval_kind: ctx.retrievalKind,
@@ -1384,7 +1399,7 @@ export async function runSearchPostRoutePhase(
     const abstainEntropy = abstainDecision.entropy;
     pipelineDebug(
       {
-        step: 'post_route.entropy_abstain',
+        step: PipelineDebugStep.POST_ROUTE_ENTROPY_ABSTAIN,
         effective_route: ctx.effectiveRoute,
         abstain_reason: abstainDecision.reason,
         ...(abstainEntropy !== undefined ? { entropy: abstainEntropy } : {}),
@@ -1529,7 +1544,8 @@ export async function runSearchPostRoutePhase(
           nextAction: 'fail',
           route: ctx.effectiveRoute,
           decisionConfidence: 0,
-          confidenceSemantics: 'calibrated_decision_confidence',
+          confidenceSemantics: deriveDecisionConfidenceSemantics(false),
+          calibrationTrusted: false,
           decisionTraceRef: safeTraceRef,
           authorityTraceRef: safeTraceRef,
           decisionSnapshot: snapshot,
@@ -1624,6 +1640,11 @@ export async function runSearchPostRoutePhase(
         : {}),
       ...toSpecializedRouteMeta(ctx.specializedRouteObservability),
       route_name: ctx.effectiveRoute,
+      executed_query_observability: planToObservabilitySlice(
+        ctx.requestId,
+        ctx.plan,
+        ctx.compiled,
+      ),
       model_versions: { ...responseSnapshot.model_versions },
       kill_switch_state: { ...responseSnapshot.feature_flags },
     });
@@ -1639,7 +1660,7 @@ export async function runSearchPostRoutePhase(
       );
       if (!stored) {
         pipelineDebug(
-          { step: 'cache.set_skipped', reason: abstainDecision !== false ? 'entropy_abstain' : 'ineligible_or_breaker' },
+          { step: PipelineDebugStep.CACHE_SET_SKIPPED, reason: abstainDecision !== false ? 'entropy_abstain' : 'ineligible_or_breaker' },
           '[Search] setSearchResponse skipped',
         );
       }

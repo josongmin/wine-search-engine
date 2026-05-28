@@ -27,5 +27,6 @@ export interface SearchLogSchema {
   model_versions?: Record<string, string>;
   kill_switch_state?: Record<string, boolean>;
   query_observability?: QueryObservabilitySlice;
+  executed_query_observability?: QueryObservabilitySlice;
   decomposition_strategy?: string;
 }

@@ -13,6 +13,8 @@ import { isDirectEntityResolution, resolveEntity } from '../../domain/attribute/
 import { extractSearchConstraints } from '../../domain/query/service/search-constraint-extractor.js';
 import { hasComparisonMarkers } from '../../domain/query/service/anchor-extractor.js';
 import { extractVintageYear } from '../../domain/shared/utils/vintage.js';
+import { convertKrwToConstraintUsd } from '../../domain/shared/utils/canonical-price.js';
+import { KRW_PER_MAN_WON } from '../../domain/shared/constants.js';
 
 /**
  * Reason taxonomy for "this query MUST execute a second verify/synthesize step
@@ -53,7 +55,7 @@ const QUERY_NORMALIZER = new QueryNormalizer();
  * carries an intent cue (gift, beginner, recipient-profile, prestige, …).
  *
  * All thresholds are in normalized [0..1] space (matching domain attribute
- * scoring), or KRW for price/alcohol/year limits. Each constant documents
+ * scoring), canonical USD for price, or natural alcohol/year units. Each constant documents
  * which keyword family triggers it and the downstream filter it tightens —
  * magic numbers in scoring/gating logic are unauditable (CLAUDE.md rule 15).
  */
@@ -79,8 +81,6 @@ const PARENTS_FIRST_TIME_TANNIN_MAX = 0.3;
 const PARENTS_FIRST_TIME_ACIDITY_MAX = 0.75;
 /** Max ABV (%) for "저도수 / low-alcohol" cues. */
 const LOW_ALCOHOL_MAX_PCT = 12;
-/** KRW conversion factor for the Korean "만 원" unit (10,000 KRW). */
-const KRW_PER_MAN_WON = 10_000;
 /** Max price (KRW) inferred from "5만 원 이하 / under 50k" cues. */
 const MAX_PRICE_KRW_UNDER_FIVE_MAN_WON = 50_000;
 /** Min price (KRW) baseline for senior-colleague / promotion / retirement gifts. */
@@ -126,10 +126,9 @@ interface AgentSearchDefaults {
   readonly acidity_min?: number | undefined;
   readonly acidity_max?: number | undefined;
   readonly tannin_max?: number | undefined;
-  readonly drinking_window?: 'now' | undefined;
-  readonly drinking_window_target_year?: number | undefined;
-  readonly min_price_krw?: number | undefined;
-  readonly max_price_krw?: number | undefined;
+  readonly current_drinkability_target_year?: number | undefined;
+  readonly min_price_usd?: number | undefined;
+  readonly max_price_usd?: number | undefined;
   readonly max_alcohol_pct?: number | undefined;
   readonly gift_suitability_min?: number | undefined;
   readonly beginner_suitability_min?: number | undefined;
@@ -266,8 +265,7 @@ function buildSearchDefaults(query: string, normalized: string): AgentSearchDefa
   let acidityMin: number | undefined;
   let acidityMax: number | undefined;
   let tanninMax: number | undefined;
-  let drinkingWindow: 'now' | undefined;
-  let drinkingWindowTargetYear: number | undefined;
+  let currentDrinkabilityTargetYear: number | undefined;
   const hasBeginnerOrFirstTimeCue = /(?:입문자|초보|와인\s*잘\s*모르는|non[-\s]?expert|beginner|처음\s*마시(?:는|기|려)|처음\s*마셔보(?:기|는)?|first\s+(?:time\s+)?(?:drinking|wine))/iu.test(query);
   const hasOlderFamilyCue = /(?:부모님|어머님|아버님|parents?|older\s+family)/iu.test(normalized);
 
@@ -350,8 +348,7 @@ function buildSearchDefaults(query: string, normalized: string): AgentSearchDefa
     addUnique(styles, 'ageworthy');
   }
   if (hasCurrentDrinkabilityIntent(normalized) || hasImmediateDrinkabilityIntent(normalized)) {
-    drinkingWindow = 'now';
-    drinkingWindowTargetYear = new Date().getFullYear();
+    currentDrinkabilityTargetYear = new Date().getFullYear();
   }
   if (/(?:직장\s*상사|상사|승진|퇴직|senior\s+colleague|promotion|retirement)/iu.test(normalized)) {
     addUnique(occasion, 'gift');
@@ -362,6 +359,13 @@ function buildSearchDefaults(query: string, normalized: string): AgentSearchDefa
     giftSuitabilityMin = Math.max(giftSuitabilityMin ?? 0, GIFT_SUITABILITY_MIN_SENIOR);
     producerPrestigeMin = Math.max(producerPrestigeMin ?? 0, PRODUCER_PRESTIGE_MIN_FORMAL);
   }
+
+  const minPriceUsd = minPriceKrw !== undefined
+    ? convertKrwToConstraintUsd(minPriceKrw)
+    : undefined;
+  const maxPriceUsd = maxPriceKrw !== undefined
+    ? convertKrwToConstraintUsd(maxPriceKrw)
+    : undefined;
 
   const defaults: AgentSearchDefaults = {
     ...(grapePrimary !== undefined ? { grape_primary: grapePrimary } : {}),
@@ -374,10 +378,11 @@ function buildSearchDefaults(query: string, normalized: string): AgentSearchDefa
     ...(acidityMin !== undefined ? { acidity_min: acidityMin } : {}),
     ...(acidityMax !== undefined ? { acidity_max: acidityMax } : {}),
     ...(tanninMax !== undefined ? { tannin_max: tanninMax } : {}),
-    ...(drinkingWindow !== undefined ? { drinking_window: drinkingWindow } : {}),
-    ...(drinkingWindowTargetYear !== undefined ? { drinking_window_target_year: drinkingWindowTargetYear } : {}),
-    ...(minPriceKrw !== undefined ? { min_price_krw: minPriceKrw } : {}),
-    ...(maxPriceKrw !== undefined ? { max_price_krw: maxPriceKrw } : {}),
+    ...(currentDrinkabilityTargetYear !== undefined
+      ? { current_drinkability_target_year: currentDrinkabilityTargetYear }
+      : {}),
+    ...(minPriceUsd !== undefined ? { min_price_usd: minPriceUsd } : {}),
+    ...(maxPriceUsd !== undefined ? { max_price_usd: maxPriceUsd } : {}),
     ...(maxAlcoholPct !== undefined ? { max_alcohol_pct: maxAlcoholPct } : {}),
     ...(giftSuitabilityMin !== undefined ? { gift_suitability_min: giftSuitabilityMin } : {}),
     ...(beginnerSuitabilityMin !== undefined ? { beginner_suitability_min: beginnerSuitabilityMin } : {}),
@@ -598,8 +603,8 @@ function buildFoodPairingContract(
  *   - exclude_* atoms (one per excluded grape/region/style/wine_type/country)
  *   - pairing tag atoms (food_pairing.pairingTags)
  *   - recipient_profile atom (when present)
- *   - drinking_window atom (when set to "now")
- *   - price atoms (min/max KRW)
+ *   - current-drinkability atom (when a "drink now" target year is set)
+ *   - price atoms (canonical price_usd)
  *
  * @param query original user query
  * @param normalized accentless+normalized form (already computed by caller)
@@ -659,22 +664,22 @@ function buildVerificationStepRequirement(
     });
   }
 
-  if (searchDefaults?.drinking_window === 'now') {
+  if (searchDefaults?.current_drinkability_target_year !== undefined) {
     coverage.push({
-      key: 'drinking_window:now',
+      key: 'drinking_window:current',
       matchedConstraintKey: 'drinking_window',
       description: 'currently drinkable (post-search verification only; not a retrieval filter)',
     });
   }
 
-  if (searchDefaults?.min_price_krw !== undefined || searchConstraints.minPriceKrw !== undefined) {
+  if (searchDefaults?.min_price_usd !== undefined || searchConstraints.minPriceKrw !== undefined) {
     coverage.push({
       key: 'price:min',
       matchedConstraintKey: 'price_usd',
       description: 'min price floor',
     });
   }
-  if (searchDefaults?.max_price_krw !== undefined || searchConstraints.maxPriceKrw !== undefined) {
+  if (searchDefaults?.max_price_usd !== undefined || searchConstraints.maxPriceKrw !== undefined) {
     coverage.push({
       key: 'price:max',
       matchedConstraintKey: 'price_usd',
@@ -847,5 +852,4 @@ function isSpecificSkuLikeNormalized(query: string): boolean {
     && isSpecificSkuLikeQuery(candidate),
   );
 }
-
 

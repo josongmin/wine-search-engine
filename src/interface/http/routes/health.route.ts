@@ -54,6 +54,7 @@ let lastHeartbeatMs: number = Date.now();
 
 /** Maximum allowed event-loop silence before /health returns 503 (ms). */
 const HEARTBEAT_STALE_THRESHOLD_MS = 30_000;
+export const SNAPSHOT_HEALTH_READER_TIMEOUT_MS = 750;
 
 /**
  * Starts a 1-second interval that updates lastHeartbeatMs.
@@ -171,6 +172,45 @@ async function resolveProbeOutcome(
 export async function resolveStatus(readinessCheck?: ReadinessCheck): Promise<ReadinessStatus> {
   const outcome = await resolveProbeOutcome('legacy', readinessCheck);
   return outcome.status;
+}
+
+async function readSnapshotHealthWithTimeout(
+  snapshotHealthReader: () => Promise<SnapshotHealth | undefined>,
+): Promise<SnapshotHealth | undefined> {
+  const timeoutSentinel = Symbol('snapshot_health_timeout');
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    const result = await Promise.race<
+      SnapshotHealth | undefined | typeof timeoutSentinel
+    >([
+      snapshotHealthReader(),
+      new Promise<typeof timeoutSentinel>((resolve) => {
+        timeoutId = setTimeout(() => {
+          resolve(timeoutSentinel);
+        }, SNAPSHOT_HEALTH_READER_TIMEOUT_MS);
+      }),
+    ]);
+
+    if (result === timeoutSentinel) {
+      bootstrapLogger.warn(
+        { timeoutMs: SNAPSHOT_HEALTH_READER_TIMEOUT_MS },
+        '[health] snapshot_health reader timed out — omitting from response',
+      );
+      return undefined;
+    }
+    return result;
+  } catch (err: unknown) {
+    bootstrapLogger.warn(
+      { err },
+      '[health] snapshot_health reader threw — omitting from response',
+    );
+    return undefined;
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+    }
+  }
 }
 
 function isValidMetricsSecret(secret: string | undefined): secret is string {
@@ -291,16 +331,7 @@ export function registerHealthRoutes(
 
       let snapshotHealth: SnapshotHealth | undefined;
       if (options?.snapshotHealthReader !== undefined) {
-        try {
-          snapshotHealth = await options.snapshotHealthReader();
-        } catch (err: unknown) {
-          // Reader failure must not crash /ready. Observability is best-effort.
-          bootstrapLogger.warn(
-            { err },
-            '[health] snapshot_health reader threw — omitting from response',
-          );
-          snapshotHealth = undefined;
-        }
+        snapshotHealth = await readSnapshotHealthWithTimeout(options.snapshotHealthReader);
       }
 
       const body: ReadyResponse = {

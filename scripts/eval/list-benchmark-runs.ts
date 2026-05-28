@@ -23,8 +23,13 @@ const MAX_LIMIT = 500;
 const VALID_KINDS = new Set<string>([
   'noisy_entity',
   'offline_eval',
+  'offline_eval_in_memory_regression',
+  'offline_eval_live_runtime',
+  'offline_eval_embedding_sensitive_live_runtime',
   'entity_retrieval_fixture',
   'search_feature_behavior_fixture',
+  'search_feature_behavior_structural',
+  'search_feature_behavior_live',
   'agentic_tool_use_fixture',
 ]);
 
@@ -33,6 +38,7 @@ interface CliArgs {
   readonly snapshotId?: string;
   readonly since?: Date;
   readonly limit: number;
+  readonly includeLegacy: boolean;
 }
 
 function parseArgs(argv: readonly string[]): CliArgs {
@@ -40,6 +46,7 @@ function parseArgs(argv: readonly string[]): CliArgs {
   let snapshotId: string | undefined;
   let since: Date | undefined;
   let limit = DEFAULT_LIMIT;
+  let includeLegacy = false;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -75,13 +82,15 @@ function parseArgs(argv: readonly string[]): CliArgs {
       if (Number.isFinite(value) && value >= 1) {
         limit = Math.min(MAX_LIMIT, value);
       }
+    } else if (arg === '--include-legacy') {
+      includeLegacy = true;
     } else if (arg === '--help' || arg === '-h') {
       printUsage();
       process.exit(0);
     }
   }
 
-  return { kind, snapshotId, since, limit };
+  return { kind, snapshotId, since, limit, includeLegacy };
 }
 
 function printUsage(): void {
@@ -92,6 +101,7 @@ Options:
   --snapshot-id, -s <id>      Filter by search snapshot ID
   --since <ISO date>          Show runs created after this date
   --limit, -n <N>             Max rows to display (default: ${DEFAULT_LIMIT}, max: ${MAX_LIMIT})
+  --include-legacy            Include pre-provenance legacy rows
   --help, -h                  Show this help
 
 Valid kinds: ${Array.from(VALID_KINDS).join(', ')}
@@ -141,6 +151,7 @@ async function run(): Promise<void> {
       snapshotId: args.snapshotId,
       since: args.since,
       limit: args.limit,
+      includeLegacy: args.includeLegacy,
     });
 
     if (runs.length === 0) {
@@ -152,6 +163,7 @@ async function run(): Promise<void> {
     const colRunId = 16;
     const colKind = 38;
     const colSnapshot = 14;
+    const colRuntime = 20;
     const colQueries = 8;
     const colGate = 6;
 
@@ -159,6 +171,7 @@ async function run(): Promise<void> {
       padRight('RUN_ID', colRunId) +
       padRight('KIND', colKind) +
       padRight('SNAPSHOT', colSnapshot) +
+      padRight('RUNTIME', colRuntime) +
       padRight('QUERIES', colQueries) +
       padRight('GATE', colGate) +
       'CREATED';
@@ -172,6 +185,7 @@ async function run(): Promise<void> {
         padRight(truncate(run.runId, colRunId), colRunId) +
         padRight(truncate(run.benchmarkKind, colKind), colKind) +
         padRight(truncate(run.snapshotId ?? '-', colSnapshot), colSnapshot) +
+        padRight(truncate(run.provenance?.runtimeTarget ?? 'legacy', colRuntime), colRuntime) +
         padRight(String(run.queryCount), colQueries) +
         padRight(run.releaseGatePassed ? 'PASS' : 'FAIL', colGate) +
         formatDate(run.createdAt);

@@ -11,11 +11,13 @@ import {
 interface Args {
   input?: string;
   allowFullDataset: boolean;
+  embeddingSensitiveOnly: boolean;
 }
 
 function parseArgs(argv: readonly string[]): Args {
   let input: string | undefined;
   let allowFullDataset = false;
+  let embeddingSensitiveOnly = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -24,10 +26,12 @@ function parseArgs(argv: readonly string[]): Args {
       index += 1;
     } else if (arg === '--allow-full-dataset') {
       allowFullDataset = true;
+    } else if (arg === '--embedding-sensitive-only') {
+      embeddingSensitiveOnly = true;
     }
   }
 
-  return { input, allowFullDataset };
+  return { input, allowFullDataset, embeddingSensitiveOnly };
 }
 
 async function run(): Promise<void> {
@@ -37,6 +41,15 @@ async function run(): Promise<void> {
       OFFLINE_EVAL_GATE_CORPUS,
       'run-offline-eval-local default input resolution',
     );
+  }
+
+  if (args.embeddingSensitiveOnly) {
+    console.error(
+      'Refusing to run embedding-sensitive offline eval against the in-memory test server. ' +
+      'Use a live search runtime lane instead.',
+    );
+    process.exitCode = 1;
+    return;
   }
 
   if (args.input == null && !args.allowFullDataset) {

@@ -12,10 +12,13 @@ export const PipelineDebugStep = {
   SEARCH_PRE_ROUTE_EARLY_EXIT: 'search.pre_route.early_exit',
   SEARCH_ROUTE_RESOLUTION: 'search.route_resolution',
   SEARCH_EXECUTE_DONE: 'search.execute.done',
+  SEARCH_EXECUTE_STAGE_TIMINGS: 'search.execute.stage_timings',
 
   // Entity-only route
   ROUTE_ENTITY_ONLY_START: 'route.entity.only.start',
   ROUTE_ENTITY_ONLY_DONE: 'route.entity.only.done',
+  ROUTE_ENTITY_CORRECTIVE_RETRY_START: 'route.entity.corrective_retry.start',
+  ROUTE_ENTITY_CORRECTIVE_RETRY_CANDIDATES: 'route.entity.corrective_retry.candidates',
 
   // Hybrid anchor resolver (ranked routes)
   RESOLVER_ANCHOR_MISSING: 'resolver.anchor.missing',
@@ -41,6 +44,14 @@ export const PipelineDebugStep = {
   RETRIEVAL_COMPARE_CANDIDATES: 'retrieval.compare_candidates',
   RETRIEVAL_CANDIDATE_POOL_FALLBACK: 'retrieval.candidate_pool.fallback',
   RETRIEVAL_CANDIDATE_POOL_ASSEMBLED: 'retrieval.candidate_pool.assembled',
+  RETRIEVAL_CRITIC_BUDGET_EXHAUSTED: 'retrieval.critic.budget_exhausted',
+  RETRIEVAL_CRITIC_DECISION: 'retrieval.critic.decision',
+  RETRIEVAL_CRITIC_REWRITER_DECLINED: 'retrieval.critic.rewriter_declined',
+  RETRIEVAL_CRITIC_RETRIES_EXHAUSTED: 'retrieval.critic.retries_exhausted',
+  RETRIEVAL_BUNDLE_SELECTOR_ENGAGE: 'retrieval.bundle_selector.engage',
+  RETRIEVAL_BUNDLE_SELECTOR_SUBQUERY_FAIL_CLOSED: 'retrieval.bundle_selector.subquery_fail_closed',
+  RETRIEVAL_BUNDLE_SELECTOR_FAIL_CLOSED: 'retrieval.bundle_selector.fail_closed',
+  RETRIEVAL_BUNDLE_SELECTOR_BUDGET_VIOLATION: 'retrieval.bundle_selector.budget_violation',
   RANKING_HYBRID_COMPLETE: 'ranking.hybrid.complete',
 
   // Post-route / decision
@@ -122,6 +133,7 @@ export const PIPELINE_STAGE_STEPS: Readonly<Record<PipelineStage, readonly Pipel
     PipelineDebugStep.SEARCH_EXECUTE_START,
     PipelineDebugStep.SEARCH_PRE_ROUTE_EARLY_EXIT,
     PipelineDebugStep.SEARCH_ROUTE_RESOLUTION,
+    PipelineDebugStep.SEARCH_EXECUTE_STAGE_TIMINGS,
   ],
   pre_route: [
     PipelineDebugStep.PRE_ROUTE_DECOMPOSED_COMPARISON,
@@ -144,6 +156,8 @@ export const PIPELINE_STAGE_STEPS: Readonly<Record<PipelineStage, readonly Pipel
   entity_route: [
     PipelineDebugStep.ROUTE_ENTITY_ONLY_START,
     PipelineDebugStep.ROUTE_ENTITY_ONLY_DONE,
+    PipelineDebugStep.ROUTE_ENTITY_CORRECTIVE_RETRY_START,
+    PipelineDebugStep.ROUTE_ENTITY_CORRECTIVE_RETRY_CANDIDATES,
   ],
   hybrid_execution: [
     PipelineDebugStep.HYBRID_EXECUTE_START,
@@ -156,6 +170,14 @@ export const PIPELINE_STAGE_STEPS: Readonly<Record<PipelineStage, readonly Pipel
     PipelineDebugStep.RETRIEVAL_COMPARE_CANDIDATES,
     PipelineDebugStep.RETRIEVAL_CANDIDATE_POOL_FALLBACK,
     PipelineDebugStep.RETRIEVAL_CANDIDATE_POOL_ASSEMBLED,
+    PipelineDebugStep.RETRIEVAL_CRITIC_BUDGET_EXHAUSTED,
+    PipelineDebugStep.RETRIEVAL_CRITIC_DECISION,
+    PipelineDebugStep.RETRIEVAL_CRITIC_REWRITER_DECLINED,
+    PipelineDebugStep.RETRIEVAL_CRITIC_RETRIES_EXHAUSTED,
+    PipelineDebugStep.RETRIEVAL_BUNDLE_SELECTOR_ENGAGE,
+    PipelineDebugStep.RETRIEVAL_BUNDLE_SELECTOR_SUBQUERY_FAIL_CLOSED,
+    PipelineDebugStep.RETRIEVAL_BUNDLE_SELECTOR_FAIL_CLOSED,
+    PipelineDebugStep.RETRIEVAL_BUNDLE_SELECTOR_BUDGET_VIOLATION,
   ],
   anchor_resolution: [
     PipelineDebugStep.RESOLVER_ANCHOR_MISSING,

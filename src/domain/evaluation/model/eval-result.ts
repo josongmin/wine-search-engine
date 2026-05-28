@@ -4,9 +4,13 @@ import type {
   EvidenceItem,
   DecisionSnapshot,
 } from '../../shared/types/index.js';
+import type { QueryClass } from '../../shared/types/query-class.js';
+import type { QueryIntent } from '../../query/model/query-intent.js';
+import type { QueryRoute } from '../../query/model/query-route.js';
 import type { LTRScoreComponents } from '../../ranking/service/ltr-feature-extractor.js';
 import type { FunnelMetrics } from '../../ranking/model/ranking-stage.js';
 import type { EvalProvenanceSlice } from '../../retrieval/model/provenance.js';
+import type { ExecutionRetrievalMode } from '../../query/model/engine-execution-contract.js';
 
 /**
  * The result of evaluating a single case through the search pipeline,
@@ -27,6 +31,14 @@ export interface EvalResult {
 
   /** Calibrated decision confidence in [0, 1]. */
   readonly decisionConfidence: number;
+
+  /**
+   * Whether {@link decisionConfidence} is trusted as a calibrated probability.
+   *
+   * When `false`, the score came from a substitute-trust path over an
+   * uncalibrated resolver / ranker signal and must be excluded from ECE.
+   */
+  readonly decisionConfidenceTrusted?: boolean;
 
   /**
    * Raw (pre-calibration) top-1 resolver score, if available.
@@ -91,6 +103,13 @@ export interface EvalResult {
    * Used for channel-level offline analysis and quality regression.
    */
   readonly retrievalProvenanceSlices?: readonly EvalProvenanceSlice[];
+
+  /** Runtime planner/execution classification recorded during evaluation. */
+  readonly runtimeQueryClass?: QueryClass;
+  readonly runtimeIntent?: QueryIntent;
+  readonly runtimeRoute?: QueryRoute;
+  readonly runtimeRetrievalMode?: ExecutionRetrievalMode;
+  readonly goldRuntimeQueryClassMismatch?: boolean;
 
   /** End-to-end latency in milliseconds for this case. */
   readonly latencyMs: number;

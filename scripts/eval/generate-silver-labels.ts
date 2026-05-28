@@ -46,7 +46,7 @@ import type {
 } from '../../src/domain/evaluation/model/relevance-judgment.js';
 import type { ChatLlmPort } from '../../src/domain/ai/port/chat-llm.port.js';
 import { AnthropicChatLlm } from '../../src/infrastructure/ai/anthropic-chat-llm.js';
-import { OpenAiChatLlm } from '../../src/infrastructure/ai/openai-chat-llm.js';
+import { createChatLlmFromEnv } from '../../src/infrastructure/ai/chat-llm-from-env.js';
 
 // ── Named constants ────────────────────────────────────────────────────────
 
@@ -90,7 +90,7 @@ Options:
 
 Environment:
   ANTHROPIC_API_KEY      Required when provider=anthropic
-  OPENAI_API_KEY         Required when provider=openai
+  OPENAI_API_KEY         Optional when provider=openai; Codex login token also works
   OPENAI_BASE_URL        Optional OpenAI base URL override
 `);
 }
@@ -177,15 +177,16 @@ function buildLlm(provider: 'anthropic' | 'openai', model: string): ChatLlmPort 
       httpTimeoutMs: HTTP_TIMEOUT_MS,
     });
   }
-  const apiKey = process.env['OPENAI_API_KEY'];
-  if (!apiKey) throw new Error('OPENAI_API_KEY is required for provider=openai');
-  const baseUrl = process.env['OPENAI_BASE_URL'] ?? 'https://api.openai.com/v1';
-  return new OpenAiChatLlm({
-    apiKey,
-    baseUrl,
+  const llm = createChatLlmFromEnv({
+    env: process.env,
     defaultModel: model,
     httpTimeoutMs: HTTP_TIMEOUT_MS,
+    allowCodexFallback: true,
   });
+  if (llm === undefined) {
+    throw new Error('provider=openai requires OPENAI_API_KEY/OPENAI_API_KEYS or a valid Codex ChatGPT login token');
+  }
+  return llm;
 }
 
 // ── Input reader ───────────────────────────────────────────────────────────

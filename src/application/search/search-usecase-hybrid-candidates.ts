@@ -76,6 +76,7 @@ import {
   classifyGraphPresence,
   recordGraphPathDecision,
 } from '../../domain/observability/graph-path-telemetry.js';
+import { isConstraintGraphEmitEnabled } from '../../domain/query/service/constraint-graph-flags.js';
 import { collectApplicableSlotIdsForSubquery } from '../../domain/query/service/subquery-slot-scope.js';
 import {
   collectConjunctivelyRequiredSlotIds,
@@ -212,8 +213,12 @@ async function maybeExpandSemanticQueriesForFanout(
   input: HybridRetrievalInput,
   ports: HybridCandidateRetrievalPorts,
   intent: IntentClass,
+  requestContext?: RequestExecutionContext,
 ): Promise<HybridRetrievalInput> {
   if (!MULTI_QUERY_FANOUT_ENABLED) return input;
+  if (requestContext?.executionPrincipal === 'benchmark_trusted') {
+    return input;
+  }
   if (
     ports.multiQueryGenerator === undefined
     && ports.hydeGenerator === undefined
@@ -385,7 +390,7 @@ function buildRetrievalCoverage(
       ...(compiled.constraintGraph !== undefined
         ? { graphOrigin: compiled.constraintGraph.origin }
         : {}),
-      graphEmitFlagOn: process.env['CONSTRAINT_GRAPH_EMIT'] !== 'false',
+      graphEmitFlagOn: isConstraintGraphEmitEnabled(),
     }),
   });
   // ADR-011 Phase 1b.3a: thread `compiled.constraintGraph` so specialized +
@@ -1203,6 +1208,7 @@ export async function retrieveHybridCandidatesForPlan(
     baseRetrievalInput,
     ports,
     multiQueryIntent,
+    requestContext,
   );
 
   if (

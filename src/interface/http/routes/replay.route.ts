@@ -8,7 +8,7 @@ import { registerContractRoute } from './register-contract-route.js';
 import { ReplayRouteContract } from './route-contracts.js';
 import { toReplayRequest } from './search-request-mappers.js';
 import { getRequestId } from '../request-id.js';
-import { abortSignalFromFastifyRequest } from '../request-abort-signal.js';
+import { abortSignalFromFastifyRequest, raceWithRequestAbort } from '../request-abort-signal.js';
 import { buildSearchErrorResponse } from '../errors/error-response.js';
 import { HTTP_STATUS_FORBIDDEN, HTTP_STATUS_OK } from '../constants.js';
 
@@ -71,9 +71,14 @@ export function registerReplayRoute(
 
       const parsed = parseContractBody(request, ReplayRouteContract);
       const replayRequest = toReplayRequest(parsed);
-      const response = await deps.replayUseCase.execute(replayRequest, getRequestId(request), {
-        abortSignal: abortSignalFromFastifyRequest(request),
-      });
+      const abortSignal = abortSignalFromFastifyRequest(request, reply);
+      const response = await raceWithRequestAbort(
+        deps.replayUseCase.execute(replayRequest, getRequestId(request), {
+          abortSignal,
+        }),
+        abortSignal,
+        'Replay request aborted',
+      );
 
       sendRouteContractResponse(request, reply, ReplayRouteContract, HTTP_STATUS_OK, response);
     },

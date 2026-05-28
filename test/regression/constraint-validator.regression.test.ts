@@ -160,6 +160,21 @@ describe('validateConstraintBundle — Wave 1 Cluster E', () => {
     expect(report.unrecognized).toHaveLength(0);
   });
 
+  it('accepts trusted soft pairing constraints now that pairing is soft-promotable', () => {
+    const report = validateConstraintBundle({
+      hard: [],
+      soft: [{
+        ...makeConstraint('pairing', 'in', ['cheese', 'salmon']),
+        soft_promotion_authority: 'allow',
+      }],
+      inferred: [],
+    });
+    expect(report.accepted).toHaveLength(1);
+    expect(report.accepted[0]?.constraint.attribute).toBe('pairing');
+    expect(report.dropped).toHaveLength(0);
+    expect(report.unrecognized).toHaveLength(0);
+  });
+
   it('marks a hard-placed ranking-only attribute (style hard) as dropped, not unrecognized', () => {
     // `style` IS a recognised soft / ranking attribute. Placing it in the
     // hard tier is a planner mis-classification: the compile path's hard

@@ -58,6 +58,12 @@ interface TrendRow {
   readonly metric_name: string;
   readonly metric_value: number;
   readonly search_snapshot_id: string | null;
+  readonly corpus_hash: string;
+  readonly runtime_target: string;
+  readonly uses_live_api: boolean;
+  readonly threshold_source: string;
+  readonly gate_eligible: boolean;
+  readonly comparison_compatibility_key: string;
   readonly release_gate_passed: boolean;
   readonly created_at: Date;
   readonly run_ordinal: number;
@@ -78,7 +84,9 @@ async function queryTrends(pool: PgPool, args: TrendArgs): Promise<TrendRow[]> {
 
   const sql = `
     SELECT benchmark_kind, metric_name, metric_value,
-           search_snapshot_id, release_gate_passed, created_at, run_ordinal
+           search_snapshot_id, corpus_hash, runtime_target, uses_live_api,
+           threshold_source, gate_eligible, comparison_compatibility_key,
+           release_gate_passed, created_at, run_ordinal
     FROM eval_benchmark_run_trends_v
     WHERE ${conditions.join(' AND ')}
     ORDER BY benchmark_kind, metric_name, created_at DESC
@@ -101,7 +109,7 @@ function formatTable(rows: TrendRow[]): void {
   // Group by kind → metric
   const groups = new Map<string, TrendRow[]>();
   for (const row of rows) {
-    const key = `${row.benchmark_kind}::${row.metric_name}`;
+    const key = `${row.benchmark_kind}::${row.metric_name}::${row.comparison_compatibility_key}`;
     const existing = groups.get(key);
     if (existing !== undefined) {
       existing.push(row);
@@ -112,7 +120,11 @@ function formatTable(rows: TrendRow[]): void {
 
   for (const [key, groupRows] of groups) {
     const [kind, metric] = key.split('::');
+    const first = groupRows[0]!;
     console.log(`\n  ${kind} / ${metric}`);
+    console.log(
+      `  provenance: runtime=${first.runtime_target} live=${first.uses_live_api} gate_eligible=${first.gate_eligible} corpus=${first.corpus_hash.slice(0, 12)} threshold=${first.threshold_source}`,
+    );
     console.log(`  ${'─'.repeat(70)}`);
     console.log(`  ${'#'.padEnd(4)} ${'VALUE'.padEnd(12)} ${'GATE'.padEnd(6)} ${'SNAPSHOT'.padEnd(20)} ${'CREATED'}`);
 

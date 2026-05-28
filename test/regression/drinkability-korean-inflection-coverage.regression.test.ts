@@ -8,7 +8,7 @@
  * MISSED — its alternation only covered (`아|은|을|을까|을지`) and demanded
  * a non-letter immediately after the inflection. With "좋은지" the `은` matches
  * but the lookahead fails on the following `지` (letter), so the predicate
- * returns false; the deterministic `searchDefaults.drinking_window` never
+ * returns false; the deterministic current-drinkability target year never
  * gets set, and the verification-step requirement has ZERO constraint atoms
  * even though the user explicitly asked about current drinkability.
  *

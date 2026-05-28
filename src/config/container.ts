@@ -1,3 +1,4 @@
+import type { Pool } from 'pg';
 import type { Config } from './env.js';
 // Multi-query flag SSoT lives in wine-search-feature-flags so the same
 // constant gates BOTH container generator construction AND the runtime
@@ -65,7 +66,7 @@ import { bootstrapLogger } from '../domain/shared/bootstrap-logger.js';
 import { WineSearchOrchestrator as WineSearchOrchestratorImpl } from '../application/wine-search/wine-search-orchestrator.js';
 import type { WineSearchOrchestratorContract as WineSearchOrchestrator } from '../application/wine-search/wine-search-orchestrator.js';
 export interface Container extends LearningContainerServices {
-  /** OpenAI-compatible chat when an OpenAI credential or credential pool is set. */
+  /** Chat LLM when an OpenAI credential pool or Codex ChatGPT login token is available. */
   readonly chatLlm?: ChatLlmPort;
   readonly queryPlanner: QueryPlannerPort;
   readonly entityResolver: EntityResolverPort;
@@ -109,6 +110,18 @@ export interface Container extends LearningContainerServices {
  */
 export interface WineSearchContainerServices {
   readonly wineSearchOrchestrator: WineSearchOrchestrator;
+}
+
+function normalizeRuntimeHandles(
+  runtime: Pool | RuntimeHandles | undefined,
+): RuntimeHandles {
+  if (runtime === undefined) {
+    return {};
+  }
+  if ('totalCount' in runtime) {
+    return { pool: runtime };
+  }
+  return runtime;
 }
 
 /**
@@ -219,11 +232,7 @@ function buildWineSearchContainerServices(
 
   // ── 4b) Comparison LLM fallback. One-shot grounded synthesis for stalled
   //       comparison_nested plans (bench v9 found 4 such scenarios in the
-  //       bottom 15 — all terminated with `max_steps`). Gated by the
-  //       `COMPARISON_LLM_FALLBACK_FEATURE_FLAG_ENABLED` SSoT flag so the
-  //       lever can be flipped without code change. When the flag is OFF
-  //       we inject `undefined` and the orchestrator's stall-detection
-  //       branch is a no-op (zero-cost when disabled).
+  //       bottom 15 — all terminated with `max_steps`).
   const wineSearchOrchestrator: WineSearchOrchestrator =
     new WineSearchOrchestratorImpl({
       queryAnalyzer,
@@ -240,9 +249,10 @@ function buildWineSearchContainerServices(
 
 export async function createContainer(
   config: Config,
-  runtime: RuntimeHandles = {},
+  runtime: Pool | RuntimeHandles = {},
 ): Promise<Container> {
-  const core = await buildCoreContainerServices(config, runtime);
+  const runtimeHandles = normalizeRuntimeHandles(runtime);
+  const core = await buildCoreContainerServices(config, runtimeHandles);
 
   // Construct the shared StructuredLlmPort BEFORE feature services so
   // the multi-query / HyDE generators (consumed by `SearchUseCase`) can
@@ -267,15 +277,15 @@ export async function createContainer(
     };
   })();
 
-  const features = buildFeatureContainerServices(config, core, runtime, useCaseExtensions);
-  const watchlist = buildWatchlistContainerServices(config, runtime);
-  const learning = buildLearningContainerServices(runtime);
+  const features = buildFeatureContainerServices(config, core, runtimeHandles, useCaseExtensions);
+  const watchlist = buildWatchlistContainerServices(config, runtimeHandles);
+  const learning = buildLearningContainerServices(runtimeHandles);
   // Defense-in-depth: env validation already throws when AGENT_ENABLED=true
   // and no OpenAI credential is set (see config/env.ts). If we somehow reach here
   // without a chatLlm, fail loudly rather than silently 404 the agent route.
   if (config.agent.enabled && core.chatLlm === undefined) {
     throw new Error(
-      'AGENT_ENABLED=true but no ChatLlm was constructed — check OPENAI_API_KEY/OPENAI_API_KEYS and chatLlm wiring',
+      'AGENT_ENABLED=true but no ChatLlm was constructed — check OPENAI_API_KEY/OPENAI_API_KEYS, Codex ChatGPT login token, and chatLlm wiring',
     );
   }
 

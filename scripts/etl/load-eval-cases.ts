@@ -8,13 +8,17 @@
  */
 
 import * as fs from 'fs/promises';
+import { createHash } from 'node:crypto';
 import * as readline from 'readline';
-import { Pool } from 'pg';
+import type { Pool } from 'pg';
 import {
   OFFLINE_EVAL_SILVER_CORPUS,
   requireFixtureCorpusPath,
 } from '../eval/fixture-corpus-paths.js';
+import { config } from '../../src/config/env.js';
 import { isSourceRecordStylePublicEntityId } from '../../src/domain/shared/constants/public-entity-id-namespace.js';
+import { pgTableHasColumn } from '../../src/infrastructure/db/pg-schema-capabilities.js';
+import { createPgPool } from '../../src/infrastructure/db/pg-pool.js';
 import {
   DEFAULT_RUNTIME_STATE_PATH,
   loadSearchSnapshotRuntimeState,
@@ -58,6 +62,119 @@ interface CliArgs {
   readonly connectionString: string;
   readonly snapshotId?: string;
   readonly runtimeStatePath: string;
+}
+
+export function resolveLoadEvalCasesPgConfig(connectionString: string) {
+  return {
+    ...config.pg,
+    connectionString,
+  };
+}
+
+export function createLoadEvalCasesPool(connectionString: string): Pool {
+  return createPgPool(resolveLoadEvalCasesPgConfig(connectionString));
+}
+
+export function buildEvalCasesUpsertStatement(args: {
+  readonly hasSourceCorpusHash: boolean;
+  readonly hasRefreshedAt: boolean;
+}): {
+  readonly sql: string;
+  readonly bindCase: (
+    evalCase: ReturnType<typeof goldenQueryToEvalCase>,
+    expectedEntityId: string | null,
+    sourceCorpusHash: string,
+  ) => readonly unknown[];
+} {
+  if (args.hasSourceCorpusHash && args.hasRefreshedAt) {
+    return {
+      sql: `INSERT INTO eval_cases (
+          case_id, query, query_class, expected_entity_id, expected_status,
+          label_tier, annotator_agreement, slice_tags, created_at,
+          source_corpus_hash, refreshed_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP)
+        ON CONFLICT (case_id) DO UPDATE SET
+          query = EXCLUDED.query,
+          query_class = EXCLUDED.query_class,
+          expected_entity_id = EXCLUDED.expected_entity_id,
+          expected_status = EXCLUDED.expected_status,
+          label_tier = EXCLUDED.label_tier,
+          annotator_agreement = EXCLUDED.annotator_agreement,
+          slice_tags = EXCLUDED.slice_tags,
+          created_at = EXCLUDED.created_at,
+          source_corpus_hash = EXCLUDED.source_corpus_hash,
+          refreshed_at = CURRENT_TIMESTAMP`,
+      bindCase: (evalCase, expectedEntityId, sourceCorpusHash) => [
+        evalCase.case_id,
+        evalCase.query,
+        evalCase.query_class,
+        expectedEntityId,
+        evalCase.expected_status,
+        evalCase.label_tier,
+        evalCase.annotator_agreement,
+        evalCase.slice_tags,
+        evalCase.created_at,
+        sourceCorpusHash,
+      ],
+    };
+  }
+
+  if (args.hasRefreshedAt) {
+    return {
+      sql: `INSERT INTO eval_cases (
+          case_id, query, query_class, expected_entity_id, expected_status,
+          label_tier, annotator_agreement, slice_tags, created_at, refreshed_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
+        ON CONFLICT (case_id) DO UPDATE SET
+          query = EXCLUDED.query,
+          query_class = EXCLUDED.query_class,
+          expected_entity_id = EXCLUDED.expected_entity_id,
+          expected_status = EXCLUDED.expected_status,
+          label_tier = EXCLUDED.label_tier,
+          annotator_agreement = EXCLUDED.annotator_agreement,
+          slice_tags = EXCLUDED.slice_tags,
+          created_at = EXCLUDED.created_at,
+          refreshed_at = CURRENT_TIMESTAMP`,
+      bindCase: (evalCase, expectedEntityId) => [
+        evalCase.case_id,
+        evalCase.query,
+        evalCase.query_class,
+        expectedEntityId,
+        evalCase.expected_status,
+        evalCase.label_tier,
+        evalCase.annotator_agreement,
+        evalCase.slice_tags,
+        evalCase.created_at,
+      ],
+    };
+  }
+
+  return {
+    sql: `INSERT INTO eval_cases (
+          case_id, query, query_class, expected_entity_id, expected_status,
+          label_tier, annotator_agreement, slice_tags, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        ON CONFLICT (case_id) DO UPDATE SET
+          query = EXCLUDED.query,
+          query_class = EXCLUDED.query_class,
+          expected_entity_id = EXCLUDED.expected_entity_id,
+          expected_status = EXCLUDED.expected_status,
+          label_tier = EXCLUDED.label_tier,
+          annotator_agreement = EXCLUDED.annotator_agreement,
+          slice_tags = EXCLUDED.slice_tags,
+          created_at = EXCLUDED.created_at`,
+    bindCase: (evalCase, expectedEntityId) => [
+      evalCase.case_id,
+      evalCase.query,
+      evalCase.query_class,
+      expectedEntityId,
+      evalCase.expected_status,
+      evalCase.label_tier,
+      evalCase.annotator_agreement,
+      evalCase.slice_tags,
+      evalCase.created_at,
+    ],
+  };
 }
 
 /**
@@ -162,7 +279,7 @@ async function loadEvalCases(
     readonly runtimeStatePath: string;
   },
 ): Promise<void> {
-  const pool = new Pool({ connectionString });
+  const pool = createLoadEvalCasesPool(connectionString);
 
   try {
     // Ensure eval_cases table exists
@@ -176,7 +293,9 @@ async function loadEvalCases(
         label_tier TEXT NOT NULL,
         annotator_agreement DECIMAL(3, 2),
         slice_tags TEXT[] NOT NULL,
-        created_at TIMESTAMP WITH TIME ZONE NOT NULL
+        created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+        source_corpus_hash TEXT,
+        refreshed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
@@ -193,6 +312,7 @@ async function loadEvalCases(
     const errors: string[] = [];
     const parsedCases: Array<ReturnType<typeof goldenQueryToEvalCase>> = [];
     const legacyRefs: LegacyEvalExpectedEntityIdRef[] = [];
+    const corpusHash = createHash('sha256');
 
     for await (const line of rl) {
       lineNum++;
@@ -200,6 +320,8 @@ async function loadEvalCases(
       if (!line.trim()) {
         continue;
       }
+      corpusHash.update(line);
+      corpusHash.update('\n');
 
       try {
         const gq: GoldenQuery = JSON.parse(line);
@@ -229,6 +351,11 @@ async function loadEvalCases(
     const resolvedLegacyIds = effectiveSnapshotId == null
       ? new Map<string, string>()
       : await resolveLegacyEvalExpectedEntityIds(pool, effectiveSnapshotId, legacyRefs);
+    const sourceCorpusHash = corpusHash.digest('hex');
+    const upsert = buildEvalCasesUpsertStatement({
+      hasSourceCorpusHash: await pgTableHasColumn(pool, 'eval_cases', 'source_corpus_hash'),
+      hasRefreshedAt: await pgTableHasColumn(pool, 'eval_cases', 'refreshed_at'),
+    });
 
     for (const evalCase of parsedCases) {
       const expectedEntityId = evalCase.expected_entity_id == null
@@ -238,22 +365,8 @@ async function loadEvalCases(
           : evalCase.expected_entity_id;
 
       await pool.query(
-        `INSERT INTO eval_cases (
-          case_id, query, query_class, expected_entity_id, expected_status,
-          label_tier, annotator_agreement, slice_tags, created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-        ON CONFLICT (case_id) DO NOTHING`,
-        [
-          evalCase.case_id,
-          evalCase.query,
-          evalCase.query_class,
-          expectedEntityId,
-          evalCase.expected_status,
-          evalCase.label_tier,
-          evalCase.annotator_agreement,
-          evalCase.slice_tags,
-          evalCase.created_at,
-        ],
+        upsert.sql,
+        upsert.bindCase(evalCase, expectedEntityId, sourceCorpusHash),
       );
       successCount++;
     }
@@ -342,7 +455,9 @@ async function main(): Promise<void> {
   console.log('✓ Eval baseline loaded');
 }
 
-main().catch((err) => {
-  console.error('Fatal error:', err);
-  process.exit(1);
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((err) => {
+    console.error('Fatal error:', err);
+    process.exit(1);
+  });
+}

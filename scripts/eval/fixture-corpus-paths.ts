@@ -3,6 +3,8 @@ import { FixtureLoader } from '../../src/infrastructure/fixture/fixture-loader.j
 export const OFFLINE_EVAL_GATE_CORPUS = 'corpora/offline-eval/golden-queries-gate.jsonl';
 export const OFFLINE_EVAL_SILVER_CORPUS = 'corpora/offline-eval/golden-queries-silver.jsonl';
 export const OFFLINE_EVAL_VAL_CORPUS = 'corpora/offline-eval/golden-queries-val.jsonl';
+export const OFFLINE_EVAL_RELEASE_SILVER_CORPUS = 'corpora/offline-eval/golden-queries-release-silver.jsonl';
+export const OFFLINE_EVAL_RELEASE_GOLD_CORPUS = 'corpora/offline-eval/golden-queries-release-gold.jsonl';
 
 export const RELEVANCE_LABELING_INPUT_CORPUS = 'corpora/relevance/scenarios-labeling-input.jsonl';
 export const RELEVANCE_SILVER_STUB_CORPUS = 'corpora/relevance/scenarios-silver-stub.ndjson';

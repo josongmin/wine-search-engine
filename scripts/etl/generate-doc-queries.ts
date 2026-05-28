@@ -43,6 +43,10 @@ import type { EnrichedSilverRecord, Doc2QueryFingerprint } from './types.js';
 import { parseNdjson } from './ndjson.js';
 import { atomicWriteFile } from './etl-utils.js';
 import { ETL_ARTIFACT_FILES } from './artifact-contract.js';
+import {
+  applyCanonicalEnrichmentOverlay,
+  loadCanonicalEnrichmentOverlay,
+} from './canonical-enrichment-overlay.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -543,8 +547,12 @@ async function run(): Promise<void> {
   });
 
   console.log(`Reading enriched Silver from ${args.input} …`);
-  const content = await fs.readFile(args.input, 'utf8');
-  let records = parseNdjson<EnrichedSilverRecord>(content, args.input).records;
+  const [content, overlay] = await Promise.all([
+    fs.readFile(args.input, 'utf8'),
+    loadCanonicalEnrichmentOverlay(),
+  ]);
+  let records = parseNdjson<EnrichedSilverRecord>(content, args.input).records
+    .map((record) => applyCanonicalEnrichmentOverlay(record, overlay));
 
   if (args.limit > 0) records = records.slice(0, args.limit);
   console.log(

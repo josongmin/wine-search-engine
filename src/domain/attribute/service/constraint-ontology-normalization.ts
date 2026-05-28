@@ -3,6 +3,9 @@ import { OntologyNormalizer } from './ontology-normalizer.js';
 const COMBINING_MARKS_RE = /[\u0300-\u036f]/g;
 
 const ONTOLOGY_AXES_BY_ATTRIBUTE = {
+  grape_primary: 'grape',
+  grapes: 'grape',
+  region: 'region',
   occasion: 'occasion',
   pairing: 'pairing',
   style: 'style',

@@ -62,7 +62,7 @@ export const BUNDLE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
         'Must recommend one wine — either red OR white (XOR). Answer must state which branch was picked and why; both branches at once is wrong (XOR, not AND).',
       expectedConstraints: {
         soft: [
-          { attribute: 'max_price_krw', operator: '<=', value: 100_000 },
+          { attribute: 'price_usd', operator: '<=', value: 74.07 },
         ],
       },
       expectedEntities: [
@@ -91,7 +91,7 @@ export const BUNDLE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
           { attribute: 'wine_type', operator: '=', value: 'white' },
         ],
         soft: [
-          { attribute: 'max_price_krw', operator: '<=', value: 150_000 },
+          { attribute: 'price_usd', operator: '<=', value: 111.11 },
         ],
       },
       expectedEntities: [

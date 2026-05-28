@@ -36,6 +36,7 @@ import {
   type SearchRouteExecutionResult,
 } from './search-usecase-route-dispatch.js';
 import { buildResolverCandidatesFromGenerator } from './search-usecase-resolver-candidates.js';
+import { shouldSuppressBlockerSeedExpansion } from './search-usecase-blocker-seed-policy.js';
 import { liftEntityResolveResultToLaneArtifacts } from './search-usecase-entity-ranked-results.js';
 import type { MultiQueryGenerator } from '../../domain/retrieval/service/multi-query-generator.js';
 import type { HydeGenerator } from '../../domain/retrieval/service/hyde-generator.js';
@@ -401,7 +402,10 @@ export async function resolveEntityRouteForPlanExecution(
 
   // TA2-4: Invoke blocker to surface entity IDs not covered by alias anchors.
   let blockerOnlyIds: readonly CanonicalEntityId[] = [];
-  if (deps.blocker !== undefined) {
+  if (
+    deps.blocker !== undefined
+    && !shouldSuppressBlockerSeedExpansion(plan.anchors)
+  ) {
     const allBlockerIds = await deps.blocker.block(plan.rawQuery, plan.normalizedQuery);
     const anchorCoveredIds = new Set(
       plan.anchors.flatMap((a) => a.candidateEntityIds.map(String)),
@@ -606,6 +610,7 @@ export async function runHybridRankingPipeline(
   if (executionContract.executionTopology === 'dual_lane') {
     const dualLaneExecutionArtifacts = executionContract.executionArtifacts;
     return {
+      executedPlan: plan,
       executedCompiled: compiled,
       ...buildDualLaneRouteExecutionFacts(
         fusedResolveResult,
@@ -619,6 +624,7 @@ export async function runHybridRankingPipeline(
     };
   }
   return {
+    executedPlan: plan,
     executedCompiled: compiled,
     ...buildGeneralOnlyRouteExecutionFacts(plan, fusedResolveResult, generalOnlyIdentityExecution),
     rankedResults,
@@ -833,6 +839,7 @@ export async function executeHybridRouteRankingPipeline(
 
         return {
           ...relaxedRanked,
+          executedPlan: relaxedPlan,
           executedCompiled: relaxedCompiled,
           ...buildHybridExecutionFactsFromRetrieval(relaxedPlan, relaxedCompiled, relaxedRetrieval),
           routeDegradation: mergedDegradation,
@@ -882,6 +889,7 @@ export async function executeHybridRouteRankingPipeline(
       const mergedWithExhaustion = mergeRouteDegradation(ranked.routeDegradation, exhaustionDegradation);
       return {
         ...ranked,
+        executedPlan: plan,
         executedCompiled: compiled,
         ...buildHybridExecutionFactsFromRetrieval(plan, compiled, retrieval),
         routeDegradation: mergedWithExhaustion,
@@ -908,6 +916,7 @@ export async function executeHybridRouteRankingPipeline(
   if (retrieval.routeDegradation === undefined) {
     return {
       ...ranked,
+      executedPlan: plan,
       executedCompiled: compiled,
       ...buildHybridExecutionFactsFromRetrieval(plan, compiled, retrieval),
       ...(retrieval.specializedRouteObservability !== undefined
@@ -924,6 +933,7 @@ export async function executeHybridRouteRankingPipeline(
 
   return {
     ...ranked,
+    executedPlan: plan,
     executedCompiled: compiled,
     ...buildHybridExecutionFactsFromRetrieval(plan, compiled, retrieval),
     routeDegradation: mergeRouteDegradation(ranked.routeDegradation, retrieval.routeDegradation),

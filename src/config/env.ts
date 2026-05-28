@@ -11,6 +11,7 @@ import { KillSwitchEnvSchema } from './env-schemas/kill-switch.schema.js';
 import { RetrievalEnvSchema } from './env-schemas/retrieval.schema.js';
 import { VespaEnvSchema } from './env-schemas/vespa.schema.js';
 import { CLAUDE_HAIKU_MODEL_ID } from '../domain/shared/constants/claude-models.js';
+import { hasCodexChatGptAuthSync } from '../infrastructure/ai/codex-chatgpt-auth.js';
 
 /** sysexits.h EX_CONFIG — invalid configuration at startup. */
 const SYSEXITS_EX_CONFIG = 78;
@@ -70,26 +71,33 @@ function parseOpenAiApiKeyPool(
   return ordered;
 }
 
-function buildConfig(parsed: EnvVars) {
+function buildConfig(
+  parsed: EnvVars,
+  rawEnv: NodeJS.ProcessEnv | Record<string, string | undefined>,
+) {
   const watchlistEnabled = parsed.WATCHLIST_ENABLED ?? parsed.WEBHOOK_SECRET !== undefined;
   const openAiApiKeys = parseOpenAiApiKeyPool(parsed.OPENAI_API_KEY, parsed.OPENAI_API_KEYS);
   const hasOpenAiApiKey = openAiApiKeys.length > 0;
+  const hasCodexChatCredential = hasCodexChatGptAuthSync(rawEnv, {
+    allowProcessFallback: rawEnv === process.env,
+  });
+  const hasChatCredential = hasOpenAiApiKey || hasCodexChatCredential;
 
   if (watchlistEnabled && parsed.WEBHOOK_SECRET === undefined) {
     throw new Error('WATCHLIST_ENABLED requires WEBHOOK_SECRET to be set');
   }
 
-  if (parsed.AGENT_ENABLED && !hasOpenAiApiKey) {
+  if (parsed.AGENT_ENABLED && !hasChatCredential) {
     throw new Error(
-      'AGENT_ENABLED=true requires OPENAI_API_KEY or OPENAI_API_KEYS to be set. ' +
-        'Set an OpenAI credential or unset AGENT_ENABLED — silently disabling the agent route (POST /v1/agent/*) is not allowed.',
+      'AGENT_ENABLED=true requires OPENAI_API_KEY, OPENAI_API_KEYS, or a Codex ChatGPT login token. ' +
+        'Set a chat credential or unset AGENT_ENABLED — silently disabling the agent route (POST /v1/agent/*) is not allowed.',
     );
   }
 
-  if (parsed.LLM_QUERY_INTERPRETER && !hasOpenAiApiKey) {
+  if (parsed.LLM_QUERY_INTERPRETER && !hasChatCredential) {
     throw new Error(
-      'LLM_QUERY_INTERPRETER=true requires OPENAI_API_KEY or OPENAI_API_KEYS to be set. ' +
-        'Set an OpenAI credential or unset LLM_QUERY_INTERPRETER — silently falling back to the rule-only NLMapper is not allowed.',
+      'LLM_QUERY_INTERPRETER=true requires OPENAI_API_KEY, OPENAI_API_KEYS, or a Codex ChatGPT login token. ' +
+        'Set a chat credential or unset LLM_QUERY_INTERPRETER — silently falling back to the rule-only NLMapper is not allowed.',
     );
   }
 
@@ -183,7 +191,6 @@ function buildConfig(parsed: EnvVars) {
 
     /** Embedding settings (OpenAI API — no separate embedding service). */
     embedding: {
-      model: parsed.EMBEDDING_MODEL,
       dimension: parsed.EMBEDDING_DIMENSION,
       httpTimeoutMs: parsed.EMBEDDING_HTTP_TIMEOUT_MS,
     },
@@ -300,7 +307,7 @@ function buildConfig(parsed: EnvVars) {
 export type Config = ReturnType<typeof buildConfig>;
 
 export function parseEnv(env: NodeJS.ProcessEnv = process.env): Config {
-  return buildConfig(envSchema.parse(env));
+  return buildConfig(envSchema.parse(env), env);
 }
 
 export function loadConfig(options?: {

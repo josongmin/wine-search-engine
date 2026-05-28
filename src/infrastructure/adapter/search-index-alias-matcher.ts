@@ -2,6 +2,7 @@ import type { SearchIndexPort } from '../../domain/retrieval/port/search-index.p
 import type {
   AliasMatchResult,
   AliasMatcher,
+  AliasLookupOptions,
 } from '../../domain/query/service/anchor-extractor.js';
 import {
   buildAliasPrefixTerms,
@@ -9,6 +10,7 @@ import {
   isDisallowedWholeLeadingTokenExpansion,
   matchesAliasPrefixTerm,
 } from '../../domain/query/service/alias-prefix-terms.js';
+import { buildAliasSurfaceLookupPlan } from '../../domain/query/service/alias-lookup-plan.js';
 import {
   resolveAliasMatchConfidence,
   type AliasMatchConfidenceStrategy,
@@ -227,7 +229,7 @@ function buildSearchQueries(query: string): readonly string[] {
   const seen = new Set<string>();
   const add = (value: string): void => {
     const trimmed = value.trim();
-    if (trimmed.length === 0 || seen.has(trimmed)) {
+    if (trimmed.length === 0 || !hasSearchableQuery(trimmed) || seen.has(trimmed)) {
       return;
     }
     seen.add(trimmed);
@@ -255,12 +257,26 @@ function buildSearchQueries(query: string): readonly string[] {
   return ordered;
 }
 
+function buildSurfaceOnlySearchQueries(query: string): readonly string[] {
+  const plan = buildAliasSurfaceLookupPlan(query);
+  return trimDedupedQueries([
+    ...plan.tokenList,
+    ...plan.compactList,
+    ...plan.transliteratedList,
+    ...plan.phoneticList,
+  ]);
+}
+
+function hasSearchableQuery(query: string): boolean {
+  return /[\p{L}\p{N}]/u.test(query);
+}
+
 function trimDedupedQueries(queries: readonly string[]): readonly string[] {
   const ordered: string[] = [];
   const seen = new Set<string>();
   for (const query of queries) {
     const trimmed = query.trim();
-    if (trimmed.length === 0 || seen.has(trimmed)) {
+    if (trimmed.length === 0 || !hasSearchableQuery(trimmed) || seen.has(trimmed)) {
       continue;
     }
     seen.add(trimmed);
@@ -297,8 +313,15 @@ function resolveBaseConfidence(hit: SparseHit, fallbackField: AliasFieldName): n
   return FIELD_CONFIDENCE[fallbackField];
 }
 
+interface SearchIndexAliasMatcherOptions {
+  readonly surfaceOnly?: boolean;
+}
+
 export class SearchIndexAliasMatcher implements AliasMatcher {
-  constructor(private readonly searchIndex: SearchIndexPort) {}
+  constructor(
+    private readonly searchIndex: SearchIndexPort,
+    private readonly options: SearchIndexAliasMatcherOptions = {},
+  ) {}
 
   private resolveMatchesForQuery(
     normalizedQuery: string,
@@ -363,15 +386,40 @@ export class SearchIndexAliasMatcher implements AliasMatcher {
 
   async findMatchesBatch(
     normalizedQueries: readonly string[],
+    options?: AliasLookupOptions,
   ): Promise<ReadonlyMap<string, readonly AliasMatchResult[]>> {
-    const trimmedQueries = trimDedupedQueries(normalizedQueries);
+    const results = new Map<string, readonly AliasMatchResult[]>();
+    const dedupedInput: string[] = [];
+    const seenInput = new Set<string>();
+    for (const query of normalizedQueries) {
+      const trimmed = query.trim();
+      if (trimmed.length === 0 || seenInput.has(trimmed)) {
+        continue;
+      }
+      seenInput.add(trimmed);
+      dedupedInput.push(trimmed);
+      if (!hasSearchableQuery(trimmed)) {
+        results.set(trimmed, []);
+      }
+    }
+
+    const trimmedQueries = trimDedupedQueries(dedupedInput);
     if (trimmedQueries.length === 0) {
-      return new Map();
+      return results;
     }
 
     const mergedSearchQueries = trimDedupedQueries(
-      trimmedQueries.flatMap((query) => buildSearchQueries(query)),
+      trimmedQueries.flatMap((query) =>
+        this.options.surfaceOnly === true || options?.scope === 'surface'
+          ? buildSurfaceOnlySearchQueries(query)
+          : buildSearchQueries(query)),
     );
+    if (mergedSearchQueries.length === 0) {
+      for (const query of trimmedQueries) {
+        results.set(query, []);
+      }
+      return results;
+    }
 
     let hits: readonly SparseHit[];
     try {
@@ -394,23 +442,28 @@ export class SearchIndexAliasMatcher implements AliasMatcher {
         '[SearchIndexAliasMatcher] Vespa alias lookup failed — degrading to empty alias matches',
       );
       return new Map(
-        trimmedQueries.map((query) => [query, [] satisfies readonly AliasMatchResult[]]),
+        [
+          ...results.entries(),
+          ...trimmedQueries.map((query) => [query, [] satisfies readonly AliasMatchResult[]] as const),
+        ],
       );
     }
-    const matchesByQuery = new Map<string, readonly AliasMatchResult[]>();
     for (const query of trimmedQueries) {
-      matchesByQuery.set(query, this.resolveMatchesForQuery(query, hits));
+      results.set(query, this.resolveMatchesForQuery(query, hits));
     }
-    return matchesByQuery;
+    return results;
   }
 
-  async findMatches(normalizedQuery: string): Promise<readonly AliasMatchResult[]> {
+  async findMatches(
+    normalizedQuery: string,
+    options?: AliasLookupOptions,
+  ): Promise<readonly AliasMatchResult[]> {
     const trimmed = normalizedQuery.trim();
     if (trimmed.length === 0) {
       return [];
     }
 
-    const batch = await this.findMatchesBatch([trimmed]);
+    const batch = await this.findMatchesBatch([trimmed], options);
     return batch.get(trimmed) ?? [];
   }
 }
@@ -421,16 +474,20 @@ export class CascadingAliasMatcher implements AliasMatcher {
     private readonly secondary: AliasMatcher,
   ) {}
 
-  async findMatches(normalizedQuery: string): Promise<readonly AliasMatchResult[]> {
-    const primaryMatches = await this.primary.findMatches(normalizedQuery);
+  async findMatches(
+    normalizedQuery: string,
+    options?: AliasLookupOptions,
+  ): Promise<readonly AliasMatchResult[]> {
+    const primaryMatches = await this.primary.findMatches(normalizedQuery, options);
     if (primaryMatches.length > 0) {
       return primaryMatches;
     }
-    return this.secondary.findMatches(normalizedQuery);
+    return this.secondary.findMatches(normalizedQuery, options);
   }
 
   async findMatchesBatch(
     normalizedQueries: readonly string[],
+    options?: AliasLookupOptions,
   ): Promise<ReadonlyMap<string, readonly AliasMatchResult[]>> {
     const trimmedQueries = trimDedupedQueries(normalizedQueries);
     if (trimmedQueries.length === 0) {
@@ -439,13 +496,13 @@ export class CascadingAliasMatcher implements AliasMatcher {
 
     const results = new Map<string, readonly AliasMatchResult[]>();
     const primaryBatch = this.primary.findMatchesBatch !== undefined
-      ? await this.primary.findMatchesBatch(trimmedQueries)
+      ? await this.primary.findMatchesBatch(trimmedQueries, options)
       : undefined;
 
     const unresolved: string[] = [];
     if (primaryBatch === undefined) {
       const primaryMatches = await Promise.all(
-        trimmedQueries.map((query) => this.primary.findMatches(query)),
+        trimmedQueries.map((query) => this.primary.findMatches(query, options)),
       );
       for (const [index, query] of trimmedQueries.entries()) {
         const matched = primaryMatches[index] ?? [];
@@ -471,11 +528,11 @@ export class CascadingAliasMatcher implements AliasMatcher {
     }
 
     const secondaryBatch = this.secondary.findMatchesBatch !== undefined
-      ? await this.secondary.findMatchesBatch(unresolved)
+      ? await this.secondary.findMatchesBatch(unresolved, options)
       : undefined;
     if (secondaryBatch === undefined) {
       const secondaryMatches = await Promise.all(
-        unresolved.map((query) => this.secondary.findMatches(query)),
+        unresolved.map((query) => this.secondary.findMatches(query, options)),
       );
       for (const [index, query] of unresolved.entries()) {
         results.set(query, secondaryMatches[index] ?? []);
@@ -487,5 +544,41 @@ export class CascadingAliasMatcher implements AliasMatcher {
     }
 
     return results;
+  }
+}
+
+/**
+ * Secondary exact-fallback wrapper.
+ *
+ * When a higher-trust alias substrate (PG / snapshot in-memory overlay) is
+ * present, the search-index matcher must only recover direct whole-surface
+ * misses. Allowing it to participate in batch unresolved-span fallback turns a
+ * degraded exact fallback into a second alias substrate and explodes generic
+ * browse/semantic queries into Vespa alias traffic.
+ *
+ * Contract:
+ * - single-surface `findMatches()` delegates
+ * - batch lookups return empty for every query, forcing the caller to treat the
+ *   secondary matcher as non-participating for span/batch recovery
+ */
+export class ExactOnlySecondaryAliasMatcher implements AliasMatcher {
+  constructor(private readonly inner: AliasMatcher) {}
+
+  findMatches(
+    normalizedQuery: string,
+    options?: AliasLookupOptions,
+  ): Promise<readonly AliasMatchResult[]> {
+    return this.inner.findMatches(normalizedQuery, options);
+  }
+
+  findMatchesBatch(
+    normalizedQueries: readonly string[],
+    _options?: AliasLookupOptions,
+  ): Promise<ReadonlyMap<string, readonly AliasMatchResult[]>> {
+    return Promise.resolve(
+      new Map(
+        trimDedupedQueries(normalizedQueries).map((query) => [query, []] as const),
+      ),
+    );
   }
 }

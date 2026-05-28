@@ -11,8 +11,17 @@ function makeRunInput(): BenchmarkLedgerRunInput {
     evalDatasetVersion: 'v1',
     featureSchemaHash: 'feature-hash',
     queryCount: 3,
-    releaseGatePassed: true,
-    activationStatus: 'shadow_only',
+    provenance: {
+      provenanceSchemaVersion: 1,
+      corpusId: 'fixture:agentic_answer_quality',
+      corpusHash: 'corpus-hash',
+      runtimeTarget: 'fixture_structural_predictions',
+      usesLiveApi: false,
+      smokeSynthesized: true,
+      thresholdSource: 'external_fixture_thresholds',
+      gateEligible: false,
+      suiteGatePassed: true,
+    },
     report: { benchmark: 'agentic-answer-quality-fixture', query_count: 3 },
     metrics: {
       rubric_pass_rate: 1,
@@ -46,6 +55,7 @@ describe('benchmark ledger bootstrap helper', () => {
           { table_schema: 'public', column_name: 'run_id', is_nullable: 'NO' },
           { table_schema: 'public', column_name: 'search_snapshot_id', is_nullable: 'YES' },
           { table_schema: 'public', column_name: 'metrics', is_nullable: 'YES' },
+          { table_schema: 'public', column_name: 'provenance_schema_version', is_nullable: 'NO' },
         ],
       })
       .mockResolvedValueOnce({ rows: [] });

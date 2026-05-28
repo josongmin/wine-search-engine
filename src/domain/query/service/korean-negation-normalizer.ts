@@ -1,28 +1,34 @@
 /**
  * Korean Negation Normalizer
  *
- * Structural preprocessing layer that canonicalizes ALL Korean predicative
- * negation forms to the postpositional form "말고" before constraint extraction.
+ * Structural preprocessing layer that canonicalizes Korean copular negation
+ * (`아니다` family) to the postpositional form "말고" before constraint extraction.
  *
- * This eliminates the need to enumerate every Korean negation ending
- * (아닌, 아니고, 않고, 않은, 않는, 않았던, ...) in the extraction regex.
+ * This eliminates the need to enumerate every Korean copular negation ending
+ * (아닌, 아니고, 아닌데, 아니라, ...) in the extraction regex.
  * The existing NEGATION_SUBJECT_AFTER pattern already handles "말고" — this
  * normalizer ensures all other negation forms route through the same path.
  *
- * Korean predicative negation forms:
- *   아니다 conjugations: 아닌, 아니고, 아닌데, 아니라, 아니면
- *   않다 conjugations:   않고, 않은, 않는, 않았던, 않으면
+ * IMPORTANT: `않다` conjugations are intentionally EXCLUDED here. They are
+ * not a safe structural synonym for postpositional exclusion:
+ *
+ *   "존재하지않는 와인"  -> non-existence / failure signal
+ *   "달지 않은 와인"     -> local attribute negation
+ *
+ * Rewriting those to `X 말고` corrupts the query into an exclusion clause and
+ * can fabricate region/grape NOT-filters downstream. Dedicated phrase-level
+ * parsers must handle `않다` forms instead of this global subject rewriter.
  *
  * Emphasis particles (도/조차/까지) between subject and negation are stripped:
  *   "샴페인도 아니고" → "샴페인 말고"
  *   "이탈리아산도 아닌" → "이탈리아산 말고"
  *
- * This is a well-defined morphological transformation — Korean negation
- * endings are regular and finite (copula 이다/아니다 + auxiliary 않다).
+ * This is a well-defined copular transformation — Korean `아니다`
+ * endings are regular and finite.
  */
 
 /**
- * Korean predicative negation suffixes (endings of 아니다/않다 conjugations).
+ * Korean copular negation suffixes (`아니다` conjugations).
  * Ordered longest-first to prevent partial matches.
  * Anchored to Unicode non-letter/non-digit boundary via the consuming regex.
  */
@@ -33,12 +39,6 @@ const PREDICATIVE_NEGATION_ENDINGS: readonly string[] = [
   '아니면',
   '아니고',
   '아닌',
-  // 않다 conjugations (longer first)
-  '않았던',
-  '않으면',
-  '않는',
-  '않은',
-  '않고',
 ];
 
 /**
@@ -74,8 +74,6 @@ const NEGATION_NORMALIZE_RE = new RegExp(
  * "프랑스 아닌 유럽" → "프랑스 말고 유럽"
  * "샴페인도 아니고"  → "샴페인 말고"
  * "이탈리아산도 아닌" → "이탈리아산 말고"
- * "카베르네 않고"    → "카베르네 말고"
- *
  * English text passes through unchanged (no Korean negation endings to match).
  */
 export function normalizeKoreanNegation(query: string): string {

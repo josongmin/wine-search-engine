@@ -347,4 +347,43 @@ describe('SignalComputer specialized signals', () => {
 
     expect(score).toBeCloseTo(1.0, 5);
   });
+
+  it('ignores descriptive compositional inferred constraints in soft scoring and attribute alignment', () => {
+    const candidate = makeCandidate({
+      matchedConstraints: ['wine_type', 'region'],
+    });
+    const queryPlan = {
+      constraints: {
+        hard: [],
+        soft: [],
+        inferred: [
+          {
+            attribute: 'acidity',
+            operator: '>=',
+            value: 0.8,
+            source_phrase: 'composition(champagne)',
+            confidence: 0.7,
+            inferred_binding: 'descriptive',
+          },
+        ],
+      },
+    } as never;
+
+    expect(
+      computer.computeSoftConstraint(candidate, {
+        hard: [],
+        soft: [],
+        inferred: queryPlan.constraints.inferred,
+      }),
+    ).toBe(1);
+    expect(
+      computer.computeAttributeAlignment(candidate, queryPlan),
+    ).toBeUndefined();
+    expect(
+      computer.computeUncertaintyPenalty(candidate, {
+        ...queryPlan,
+        uncertainty: { overall: 0, ambiguitySignals: [], decisionEffect: 'trace_only' },
+      } as never),
+    ).toBe(0);
+  });
 });

@@ -127,6 +127,8 @@ export const KOREAN_WINE_ALIAS_CORRECTION_ENTRIES = [
   // Entity / variety abbreviations
   ['까쇼', '카베르네 소비뇽'],
   ['까소', '카베르네 소비뇽'],
+  ['까베르네', '카베르네'],
+  ['까베르네 소비뇽', '카베르네 소비뇽'],
   ['쇼비', '소비뇽 블랑'],
   ['피누', '피노 누아르'],
   ['리즐링', '리슬링'],

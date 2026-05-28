@@ -1,7 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
+import type { FastifyReply } from 'fastify';
 import type { FastifyRequest } from 'fastify';
-import { abortSignalFromFastifyRequest } from '../../../../src/interface/http/request-abort-signal.js';
+import { isAbortError } from '../../../../src/domain/shared/cooperative-abort.js';
+import {
+  abortSignalFromFastifyRequest,
+  raceWithRequestAbort,
+} from '../../../../src/interface/http/request-abort-signal.js';
 
 describe('abortSignalFromFastifyRequest', () => {
   it('returns the same AbortSignal for the same Fastify request object', () => {
@@ -17,18 +22,30 @@ describe('abortSignalFromFastifyRequest', () => {
   });
 
   it('aborts when the TCP socket emits close', () => {
-    // The fix listens on raw.socket (TCP socket), NOT on raw (IncomingMessage).
-    // IncomingMessage 'close' fires immediately after JSON body parse (~100ms),
-    // which was aborting every request. Socket 'close' fires only on TCP disconnect.
+    // Pre-body socket close is still an authoritative transport abort.
     const socket = new EventEmitter();
     const raw = new EventEmitter() as FastifyRequest['raw'];
-    Object.assign(raw, { aborted: false, socket });
+    Object.assign(raw, { aborted: false, complete: false, socket });
     const request = { raw } as FastifyRequest;
     const signal = abortSignalFromFastifyRequest(request);
 
     expect(signal.aborted).toBe(false);
     socket.emit('close');
     expect(signal.aborted).toBe(true);
+  });
+
+  it('does NOT abort when the TCP socket closes after the request fully completed', () => {
+    // Regression: after body parsing, socket close can be server-initiated
+    // (request timeout / reply transport shutdown). Do not reinterpret that as
+    // a client abort unless raw.aborted is also true.
+    const socket = new EventEmitter();
+    const raw = new EventEmitter() as FastifyRequest['raw'];
+    Object.assign(raw, { aborted: false, complete: true, socket });
+    const request = { raw } as FastifyRequest;
+    const signal = abortSignalFromFastifyRequest(request);
+
+    socket.emit('close');
+    expect(signal.aborted).toBe(false);
   });
 
   it('does NOT abort when IncomingMessage itself emits close (body-consumed false positive)', () => {
@@ -77,15 +94,24 @@ describe('abortSignalFromFastifyRequest', () => {
     expect(signal.aborted).toBe(false);
   });
 
-  it('is already aborted when raw.destroyed is true (stream closed before signal creation)', () => {
-    // raw.destroyed covers socket-already-gone cases that raw.aborted misses.
+  it('is already aborted when raw.destroyed is true before request completion', () => {
     const socket = new EventEmitter();
     const raw = new EventEmitter() as FastifyRequest['raw'];
-    Object.assign(raw, { aborted: false, destroyed: true, socket });
+    Object.assign(raw, { aborted: false, complete: false, destroyed: true, socket });
     const request = { raw } as FastifyRequest;
 
     const signal = abortSignalFromFastifyRequest(request);
     expect(signal.aborted).toBe(true);
+  });
+
+  it('does NOT treat raw.destroyed as aborted after request completion', () => {
+    const socket = new EventEmitter();
+    const raw = new EventEmitter() as FastifyRequest['raw'];
+    Object.assign(raw, { aborted: false, complete: true, destroyed: true, socket });
+    const request = { raw } as FastifyRequest;
+
+    const signal = abortSignalFromFastifyRequest(request);
+    expect(signal.aborted).toBe(false);
   });
 
   it('cleans up raw "aborted" listener when socket closes (no memory leak)', () => {
@@ -117,5 +143,104 @@ describe('abortSignalFromFastifyRequest', () => {
 
     raw.emit('aborted');
     expect(socket.listenerCount('close')).toBe(0); // cleaned up after raw aborted
+  });
+
+  it('cleans up socket "close" listener when reply finishes on a keep-alive socket', () => {
+    const socket = new EventEmitter();
+    const raw = new EventEmitter() as FastifyRequest['raw'];
+    const replyRaw = new EventEmitter();
+    Object.assign(raw, { aborted: false, socket });
+    const request = { raw } as FastifyRequest;
+    const reply = { raw: replyRaw } as FastifyReply;
+
+    abortSignalFromFastifyRequest(request, reply);
+    expect(socket.listenerCount('close')).toBe(1);
+
+    replyRaw.emit('finish');
+    expect(socket.listenerCount('close')).toBe(0);
+    expect(raw.listenerCount('aborted')).toBe(0);
+  });
+
+  it('aborts when reply closes before finish even after the request body completed', () => {
+    const socket = new EventEmitter();
+    const raw = new EventEmitter() as FastifyRequest['raw'];
+    const replyRaw = new EventEmitter();
+    Object.assign(raw, { aborted: false, complete: true, socket });
+    const request = { raw } as FastifyRequest;
+    const reply = { raw: replyRaw } as FastifyReply;
+
+    const signal = abortSignalFromFastifyRequest(request, reply);
+    replyRaw.emit('close');
+
+    expect(signal.aborted).toBe(true);
+  });
+
+  it('aborts before Fastify requestTimeout closes the socket', () => {
+    vi.useFakeTimers();
+    try {
+      const socket = new EventEmitter();
+      const raw = new EventEmitter() as FastifyRequest['raw'];
+      const replyRaw = new EventEmitter();
+      Object.assign(raw, { aborted: false, complete: true, socket });
+      const request = { raw } as FastifyRequest;
+      const reply = { raw: replyRaw } as FastifyReply;
+
+      const signal = abortSignalFromFastifyRequest(request, reply, { requestTimeoutMs: 2_500 });
+      vi.advanceTimersByTime(1_499);
+      expect(signal.aborted).toBe(false);
+
+      vi.advanceTimersByTime(1);
+      expect(signal.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('falls back to the HTTP default budget when no route-specific timeout is provided', () => {
+    vi.useFakeTimers();
+    try {
+      const socket = new EventEmitter();
+      const raw = new EventEmitter() as FastifyRequest['raw'];
+      const replyRaw = new EventEmitter();
+      Object.assign(raw, { aborted: false, complete: true, socket });
+      const request = { raw } as FastifyRequest;
+      const reply = { raw: replyRaw } as FastifyReply;
+
+      const signal = abortSignalFromFastifyRequest(request, reply);
+      vi.advanceTimersByTime(28_999);
+      expect(signal.aborted).toBe(false);
+
+      vi.advanceTimersByTime(1);
+      expect(signal.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('raceWithRequestAbort', () => {
+  it('rejects with AbortError when the request signal aborts before the operation settles', async () => {
+    const controller = new AbortController();
+    const pending = new Promise<never>(() => undefined);
+    const raced = raceWithRequestAbort(pending, controller.signal, 'Search request aborted');
+
+    controller.abort();
+
+    await expect(raced).rejects.toMatchObject({ name: 'AbortError', message: 'Search request aborted' });
+  });
+
+  it('passes through the operation result when no abort occurs', async () => {
+    await expect(
+      raceWithRequestAbort(Promise.resolve('ok'), new AbortController().signal, 'unused'),
+    ).resolves.toBe('ok');
+  });
+
+  it('treats an already-aborted signal as AbortError', async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      raceWithRequestAbort(Promise.resolve('late'), controller.signal, 'aborted early'),
+    ).rejects.toSatisfy((error: unknown) => isAbortError(error));
   });
 });

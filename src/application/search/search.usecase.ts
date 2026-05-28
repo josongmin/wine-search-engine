@@ -15,6 +15,7 @@ import type { ComparisonSearchResponse } from '../../domain/response/model/compa
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
 import type { QueryEntrySecurityObserver } from '../../domain/security/port/security-observer.port.js';
 import { pipelineDebug, sanitizeQueryForDebug } from '../../domain/observability/request-pipeline-debug.js';
+import { PipelineDebugStep } from '../../domain/observability/pipeline-debug-steps.js';
 import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import { DomainError } from '../../domain/shared/error/domain-error.js';
 import { PIPELINE_DEFECT_CODES } from '../../domain/shared/error/pipeline-defect-codes.js';
@@ -55,6 +56,7 @@ import { buildSearchRouteResolutionContext } from './search-usecase-route-resolu
 import { resolveExecutionTopologyFromRequestSurface } from './search-usecase-route-resolution.js';
 import { runSearchPostRoutePhase } from './search-usecase-post-route-phase.js';
 import { buildResolverCandidatesFromGenerator } from './search-usecase-resolver-candidates.js';
+import { shouldSuppressBlockerSeedExpansion } from './search-usecase-blocker-seed-policy.js';
 import {
   executeHybridRouteRankingPipeline,
   resolveEntityRouteForPlan,
@@ -76,6 +78,7 @@ import {
   searchResponseToEvalProvenanceSlices,
 } from './search-usecase-eval-provenance.js';
 import { buildRetrievalPlan } from '../../domain/retrieval/service/retrieval-plan-builder.js';
+import { buildRetrievalObjective } from '../../domain/retrieval/model/retrieval-objective.js';
 import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
 import { executeDualLaneHybridRoute } from './search-usecase-dual-lane-execution.js';
 import type { SearchSnapshotFieldAvailability } from '../../domain/shared/types/search-field-availability.js';
@@ -264,7 +267,7 @@ export class SearchUseCase {
 
     pipelineDebug(
       {
-        step: 'search.execute.start',
+        step: PipelineDebugStep.SEARCH_EXECUTE_START,
         eval_mode: includeEvalProvenance,
         query_len: request.query.length,
         query_preview: sanitizeQueryForDebug(request.query),
@@ -311,7 +314,7 @@ export class SearchUseCase {
       stageTimer?.end('search.total');
       pipelineDebug(
         {
-          step: 'search.pre_route.early_exit',
+          step: PipelineDebugStep.SEARCH_PRE_ROUTE_EARLY_EXIT,
           query_type: preRoute.response.queryType,
         },
         'pipeline pre_route return',
@@ -375,7 +378,7 @@ export class SearchUseCase {
 
     pipelineDebug(
       {
-        step: 'search.route_resolution',
+        step: PipelineDebugStep.SEARCH_ROUTE_RESOLUTION,
         query_class: plan.queryClass,
         effective_route: effectiveRoute,
         execution_topology: surfaceCompiled.execution.executionTopology,
@@ -389,6 +392,7 @@ export class SearchUseCase {
     // Step 3: Execute based on route
     stageTimer?.start('search.route_execution');
     const {
+      executedPlan,
       executedCompiled,
       executionTopology,
       identityResolveResult,
@@ -430,7 +434,11 @@ export class SearchUseCase {
                 fallbackExecution.compiled,
                 routeRequestContext,
               );
-              return buildMixedHybridFallbackExecution(plan, mixedResult, hybridFallback);
+              return buildMixedHybridFallbackExecution(
+                fallbackExecution.plan,
+                mixedResult,
+                hybridFallback,
+              );
             }
             return mixedQueryResultToSearchRouteExecution(plan, mixedResult, compiled);
           } catch (error) {
@@ -449,8 +457,10 @@ export class SearchUseCase {
 
     // Steps 3b–7: Entropy abstain (RFC-013) → DecisionEngine → response → cache write
     stageTimer?.start('search.post_route');
+    const postRouteEffectiveRoute = executedCompiled.execution.effectiveRoute;
+    const postRoutePlannerSuggestedMode = executedCompiled.execution.effectiveRetrievalMode;
     const response = await runSearchPostRoutePhase({
-      plan,
+      plan: executedPlan,
       compiled: executedCompiled,
       request,
       requestId,
@@ -459,8 +469,8 @@ export class SearchUseCase {
       identityResolveResult,
       rankedResults,
       decisionContext,
-      effectiveRoute,
-      plannerSuggestedMode,
+      effectiveRoute: postRouteEffectiveRoute,
+      plannerSuggestedMode: postRoutePlannerSuggestedMode,
       retrievalModeSource,
       abstainPolicy: this.abstainPolicy,
       snapshotVersions: this.deps.snapshotVersions,
@@ -505,7 +515,7 @@ export class SearchUseCase {
 
     pipelineDebug(
       {
-        step: 'search.execute.done',
+        step: PipelineDebugStep.SEARCH_EXECUTE_DONE,
         latency_ms: Date.now() - startTime,
         ranked_count: rankedResults.length,
         resolve_status: resolveResult.status,
@@ -523,6 +533,12 @@ export class SearchUseCase {
       response,
       ...(retrievalProvenanceSlices.length > 0 ? { retrievalProvenanceSlices } : {}),
       ...(evaluationFunnelMetrics !== undefined ? { funnelMetrics: evaluationFunnelMetrics } : {}),
+      runtimeClassification: {
+        queryClass: executedPlan.queryClass,
+        intent: executedPlan.intent,
+        route: postRouteEffectiveRoute,
+        retrievalMode: postRoutePlannerSuggestedMode,
+      },
     };
   }
 
@@ -563,7 +579,7 @@ export class SearchUseCase {
 
     pipelineDebug(
       {
-        step: 'route.entity.only.start',
+        step: PipelineDebugStep.ROUTE_ENTITY_ONLY_START,
         query_class: plan.queryClass,
         resolver_candidate_count: candidateEntities.length,
         blocker_seed_count: blockerOnlyIds.length,
@@ -598,7 +614,7 @@ export class SearchUseCase {
       const topRankedResult = rankedResults[0];
       pipelineDebug(
         {
-          step: 'route.entity.only.done',
+          step: PipelineDebugStep.ROUTE_ENTITY_ONLY_DONE,
           resolve_status: firstResult.status,
           candidate_count: firstResult.candidates.length,
           ranked_count: rankedResults.length,
@@ -620,6 +636,7 @@ export class SearchUseCase {
       );
       return {
         executionTopology: 'entity_only',
+        executedPlan: plan,
         executedCompiled: compiled,
         identityResolveResult: firstResult,
         fusedResolveResult: firstResult,
@@ -646,7 +663,7 @@ export class SearchUseCase {
     // the Pass 1 candidate set so the resolver sees a strictly larger pool.
     pipelineDebug(
       {
-        step: 'route.entity.corrective_retry.start',
+        step: PipelineDebugStep.ROUTE_ENTITY_CORRECTIVE_RETRY_START,
         query_class: plan.queryClass,
         first_pass_confidence: firstResult.decisionConfidenceC,
         first_pass_status: firstResult.status,
@@ -687,7 +704,7 @@ export class SearchUseCase {
 
     pipelineDebug(
       {
-        step: 'route.entity.corrective_retry.candidates',
+        step: PipelineDebugStep.ROUTE_ENTITY_CORRECTIVE_RETRY_CANDIDATES,
         pass2_blocker_seed_count: broaderBlockerIds.length,
         additional_ids_count: additionalIds.length,
         retry_candidate_count: retryCandidateEntities.length,
@@ -729,7 +746,7 @@ export class SearchUseCase {
 
     pipelineDebug(
       {
-        step: 'route.entity.only.done',
+        step: PipelineDebugStep.ROUTE_ENTITY_ONLY_DONE,
         resolve_status: resolved.status,
         candidate_count: resolved.candidates.length,
         ranked_count: rankedResults.length,
@@ -756,6 +773,7 @@ export class SearchUseCase {
 
     return {
       executionTopology: 'entity_only',
+      executedPlan: plan,
       executedCompiled: compiled,
       identityResolveResult: resolved,
       fusedResolveResult: resolved,
@@ -788,7 +806,10 @@ export class SearchUseCase {
     plan: QueryPlanV1,
     broader: boolean,
   ): Promise<readonly CanonicalEntityId[]> {
-    if (this.deps.blocker === undefined) {
+    if (
+      this.deps.blocker === undefined
+      || shouldSuppressBlockerSeedExpansion(plan.anchors)
+    ) {
       return [];
     }
     const allBlockerIds = await this.deps.blocker.block(
@@ -919,15 +940,15 @@ function emitSearchStageTimingSnapshot(
   }
   pipelineDebug(
     {
-      step: 'search.execute.stage_timings',
+      step: PipelineDebugStep.SEARCH_EXECUTE_STAGE_TIMINGS,
       stages: snapshot,
     },
     'pipeline search stage timings',
   );
 }
 
-function buildMixedHybridFallbackExecution(
-  plan: QueryPlanV1,
+export function buildMixedHybridFallbackExecution(
+  fallbackPlan: QueryPlanV1,
   mixedResult: Awaited<ReturnType<MixedSolverPort['solve']>>,
   hybridFallback: SearchRouteExecutionResult,
 ): SearchRouteExecutionResult {
@@ -935,9 +956,10 @@ function buildMixedHybridFallbackExecution(
     (result) => result.entityId !== mixedResult.anchor.entityId,
   );
   const fusedResolveResult = buildMixedRouteResolveResult(
-    plan,
+    fallbackPlan,
     filteredRankedResults,
     mixedResult,
+    hybridFallback.executedCompiled.execution.effectiveRetrievalMode,
   );
   const degradationReasons = new Set<string>([
     ...(mixedResult.routeDegradation?.degradationReasons ?? []),
@@ -947,6 +969,7 @@ function buildMixedHybridFallbackExecution(
 
   return {
     ...hybridFallback,
+    executedPlan: fallbackPlan,
     fusedResolveResult,
     laneTrace: buildSearchExecutionLaneTrace({
       executionTopology: hybridFallback.executionTopology,
@@ -971,7 +994,7 @@ function buildMixedHybridFallbackExecution(
   };
 }
 
-function buildMixedConstraintFallbackExecution(
+export function buildMixedConstraintFallbackExecution(
   plan: QueryPlanV1,
   compiled: CompiledWineQuery,
 ): { readonly plan: QueryPlanV1; readonly compiled: CompiledWineQuery } {
@@ -1010,6 +1033,7 @@ function buildMixedConstraintFallbackExecution(
         queryClass: fallbackPlan.queryClass,
         constraints: fallbackPlan.constraints,
         retrievalPlan: buildRetrievalPlan(fallbackPlan.constraints),
+        retrievalObjective: buildRetrievalObjective(fallbackPlan.constraints),
       },
       execution: {
         ...compiled.execution,

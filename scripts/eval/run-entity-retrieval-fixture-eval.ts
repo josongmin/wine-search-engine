@@ -6,6 +6,7 @@
  * - exact_entity_recovery
  * - ambiguous_shortform
  * - mixed_script_entity
+ * - noisy_attribute_recovery
  *
  * Reads benchmark truth from wine-engine-fixture (ADR-004 SSOT), not from
  * in-repo JSONL artifacts.
@@ -31,18 +32,26 @@ import {
 } from './run-noisy-entity-eval.js';
 import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 import {
+  collectLiveBenchmarkRuntimeMetadata,
   runLiveBenchmarkPreflight,
   type BenchmarkExecutionLane,
 } from './live-benchmark-preflight.js';
 import { resolveCliDataPathArg } from './cli-data-path.js';
 import { PgEvalBenchmarkRunStore } from '../../src/infrastructure/adapter/pg-eval-benchmark-run-store.js';
 import { getCurrentFeatureSchemaHash } from '../../src/domain/ranking/service/feature-parity-hash.js';
+import {
+  countStringMix,
+  toReportProvenance,
+  type EvalBenchmarkReportProvenance,
+} from './benchmark-provenance.js';
+import { hashStableJson } from '../../src/domain/shared/utils/stable-json.js';
 
 const DEFAULT_OUTPUT = resolveDataPath('data/entity-retrieval-fixture-eval-results.json');
-const DEFAULT_SUITES = [
+export const DEFAULT_SUITES = [
   'exact_entity_recovery',
   'ambiguous_shortform',
   'mixed_script_entity',
+  'noisy_attribute_recovery',
 ] as const satisfies readonly EntityRetrievalSuiteId[];
 
 interface CliArgs {
@@ -89,11 +98,12 @@ interface EntityRetrievalFixtureReport {
   readonly benchmark: 'entity-retrieval-fixture';
   readonly suite_ids: readonly EntityRetrievalSuiteId[];
   readonly source: 'live-api' | 'predictions';
+  readonly provenance?: EvalBenchmarkReportProvenance;
   readonly evaluated_at: string;
   readonly suites: readonly SuiteMetrics[];
 }
 
-function parseArgs(argv: readonly string[]): CliArgs {
+export function parseArgs(argv: readonly string[]): CliArgs {
   let output = DEFAULT_OUTPUT;
   let apiUrl = process.env['SEARCH_API_URL'] ?? 'http://localhost:3000';
   let predictions: string | null = null;
@@ -372,10 +382,70 @@ async function run(): Promise<void> {
       );
 
   const report = scoreEntityRetrievalFixtureCases(cases, predictions);
-  const finalReport: EntityRetrievalFixtureReport = {
+  const finalReportBase: EntityRetrievalFixtureReport = {
     ...report,
     source: args.predictions !== null || args.smokePredictions ? 'predictions' : 'live-api',
     evaluated_at: new Date().toISOString(),
+  };
+
+  // Check thresholds, capturing pass/fail before persisting
+  let thresholdsPassed = true;
+  let thresholdError: unknown;
+  if (args.useThresholds) {
+    try {
+      await assertEntityRetrievalFixtureThresholds(finalReportBase);
+    } catch (err: unknown) {
+      thresholdsPassed = false;
+      thresholdError = err;
+    }
+  }
+
+  const featureSchemaHash = getCurrentFeatureSchemaHash();
+  const runtimeMetadata = args.predictions === null && !args.smokePredictions
+    ? await collectLiveBenchmarkRuntimeMetadata(args.apiUrl)
+    : undefined;
+  const languageMix = countStringMix(cases.map((benchmarkCase) => benchmarkCase.language));
+  const storeProvenance = {
+    provenanceSchemaVersion: 1 as const,
+    corpusId: `fixture:entity_retrieval:${args.suites.join(',')}`,
+    corpusHash: hashStableJson(cases),
+    runtimeTarget: args.smokePredictions
+      ? 'fixture_structural_predictions'
+      : args.predictions !== null
+        ? 'prediction_file'
+        : 'search_api_http',
+    usesLiveApi: args.predictions === null && !args.smokePredictions,
+    smokeSynthesized: args.smokePredictions,
+    thresholdSource: args.useThresholds ? 'external_fixture_thresholds' : 'thresholds_disabled',
+    gateEligible:
+      args.predictions === null
+      && !args.smokePredictions
+      && args.useThresholds
+      && runtimeMetadata?.readinessPassed === true,
+    suiteGatePassed: thresholdsPassed,
+    ...(runtimeMetadata?.searchSnapshotId !== undefined
+      ? { searchSnapshotId: runtimeMetadata.searchSnapshotId }
+      : {}),
+    ...(runtimeMetadata?.runtimeActivationStatus !== undefined
+      ? { runtimeActivationStatus: runtimeMetadata.runtimeActivationStatus }
+      : {}),
+    ...(runtimeMetadata?.readinessPassed !== undefined
+      ? { readinessPassed: runtimeMetadata.readinessPassed }
+      : {}),
+    ...(runtimeMetadata?.activeLtrModels !== undefined
+      ? { activeLtrModels: runtimeMetadata.activeLtrModels }
+      : {}),
+    ...(languageMix !== undefined
+      ? { sliceMix: languageMix }
+      : {}),
+  };
+  const finalReport: EntityRetrievalFixtureReport = {
+    ...finalReportBase,
+    provenance: toReportProvenance({
+      benchmarkKind: 'entity_retrieval_fixture',
+      provenance: storeProvenance,
+      featureSchemaHash,
+    }),
   };
 
   await fs.writeFile(args.output, `${JSON.stringify(finalReport, null, 2)}\n`, 'utf8');
@@ -390,18 +460,6 @@ async function run(): Promise<void> {
     );
   }
   console.log(`  output: ${args.output}`);
-
-  // Check thresholds, capturing pass/fail before persisting
-  let thresholdsPassed = true;
-  let thresholdError: unknown;
-  if (args.useThresholds) {
-    try {
-      await assertEntityRetrievalFixtureThresholds(finalReport);
-    } catch (err: unknown) {
-      thresholdsPassed = false;
-      thresholdError = err;
-    }
-  }
 
   // Persist benchmark run to DB (best-effort — eval succeeds even if DB is unavailable)
   const totalQueryCount = finalReport.suites.reduce((sum, s) => sum + s.query_count, 0);
@@ -424,13 +482,12 @@ async function run(): Promise<void> {
       const evalBenchmarkRunStore = new PgEvalBenchmarkRunStore(pool);
       await evalBenchmarkRunStore.saveRun({
         benchmarkKind: 'entity_retrieval_fixture',
-        evalDatasetVersion: 'v1',
-        featureSchemaHash: getCurrentFeatureSchemaHash(),
+        evalDatasetVersion: storeProvenance.corpusId,
+        featureSchemaHash,
         queryCount: totalQueryCount,
         ...(suitesWithTop1.length > 0 ? { recallAt1: avgTop1 } : {}),
         ...(suitesWithTopK.length > 0 ? { recallAt3: avgTopK } : {}),
-        releaseGatePassed: thresholdsPassed,
-        activationStatus: 'shadow_only',
+        provenance: storeProvenance,
         report: finalReport as unknown as Readonly<Record<string, unknown>>,
         metrics: {
           top1_accuracy: avgTop1,

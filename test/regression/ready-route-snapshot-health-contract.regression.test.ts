@@ -9,7 +9,10 @@
  */
 import Fastify from 'fastify';
 import { describe, expect, it } from 'vitest';
-import { registerHealthRoutes } from '../../src/interface/http/routes/health.route.js';
+import {
+  registerHealthRoutes,
+  SNAPSHOT_HEALTH_READER_TIMEOUT_MS,
+} from '../../src/interface/http/routes/health.route.js';
 
 async function buildApp(
   snapshotHealthReader?: () => Promise<{
@@ -77,6 +80,21 @@ describe('/ready snapshot_health contract', () => {
       expect(res.statusCode).toBe(200);
       const body = res.json();
       expect(body.snapshot_health).toBeUndefined();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('omits snapshot_health when reader stalls beyond the route budget', async () => {
+    const app = await buildApp(async () => await new Promise(() => {}));
+    try {
+      const start = Date.now();
+      const res = await app.inject({ method: 'GET', url: '/ready' });
+      const elapsedMs = Date.now() - start;
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.snapshot_health).toBeUndefined();
+      expect(elapsedMs).toBeLessThan(SNAPSHOT_HEALTH_READER_TIMEOUT_MS + 250);
     } finally {
       await app.close();
     }

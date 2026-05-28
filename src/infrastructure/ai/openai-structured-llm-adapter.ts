@@ -61,6 +61,8 @@ import { runUnderLlmBreaker } from './llm-circuit-breaker-classifier.js';
 import {
   createCircuitBreaker,
   DEFAULT_BREAKER_FAILURE_THRESHOLD,
+  DEFAULT_RECOVERY_TIMEOUT_MS,
+  DEFAULT_HALF_OPEN_ATTEMPTS,
   type CircuitBreaker,
 } from '../../domain/shared/circuit-breaker/circuit-breaker.js';
 import { globalCircuitBreakerRegistry } from '../../domain/observability/circuit-breaker-registry.js';
@@ -77,8 +79,8 @@ const OPENAI_CHAT_PATH = '/chat/completions';
 
 const OPENAI_STRUCTURED_BREAKER_NAME = 'openai-structured';
 const BREAKER_FAILURE_THRESHOLD = DEFAULT_BREAKER_FAILURE_THRESHOLD;
-const BREAKER_RECOVERY_TIMEOUT_MS = 60_000;
-const BREAKER_HALF_OPEN_MAX_ATTEMPTS = 3;
+const BREAKER_RECOVERY_TIMEOUT_MS = DEFAULT_RECOVERY_TIMEOUT_MS;
+const BREAKER_HALF_OPEN_MAX_ATTEMPTS = DEFAULT_HALF_OPEN_ATTEMPTS;
 
 /** Function name used for the single forced tool in `analyze`/`synthesize`. */
 const ANALYZE_FN_NAME = 'analyze';

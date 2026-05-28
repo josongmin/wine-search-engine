@@ -64,6 +64,19 @@ describe('SearchResponseSchema', () => {
     expect(parsed.success).toBe(true);
   });
 
+  it('accepts uncalibrated decision score semantics when calibration is untrusted', () => {
+    const parsed = SearchResponseSchema.safeParse({
+      ...makeValidV1SearchResponse(),
+      engine_decision: {
+        ...makeValidV1SearchResponse().engine_decision,
+        confidence_semantics: 'uncalibrated_decision_score',
+        calibration_trusted: false,
+      },
+    });
+
+    expect(parsed.success).toBe(true);
+  });
+
   it('accepts stable execution_contract metadata on the V1 search contract', () => {
     const laneTrace = makeLaneTrace();
     const parsed = SearchResponseSchema.safeParse({

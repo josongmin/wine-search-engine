@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildAliasLookupPlan } from '../alias-lookup-plan.js';
+import { buildAliasLookupPlan, buildAliasSurfaceLookupPlan } from '../alias-lookup-plan.js';
 
 describe('buildAliasLookupPlan — Korean ↔ Latin transliteration tokenization', () => {
   /**
@@ -80,5 +80,12 @@ describe('buildAliasLookupPlan — Korean ↔ Latin transliteration tokenization
     for (const token of plan.tokenList) {
       expect(token.length).toBeGreaterThan(0);
     }
+  });
+
+  it('surface lookup plan excludes reordered whole-query variants', () => {
+    const plan = buildAliasSurfaceLookupPlan('wine for cheese');
+
+    expect(plan.tokenList).not.toContain('cheese for wine');
+    expect(plan.tokenList).not.toContain('for wine cheese');
   });
 });

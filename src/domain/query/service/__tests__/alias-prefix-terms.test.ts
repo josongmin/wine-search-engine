@@ -39,6 +39,11 @@ describe('alias-prefix-terms', () => {
     expect(matchesAliasPrefixTerm('opus', 'opus one')).toBe(false);
   });
 
+  it('rejects whole-leading-phrase expansion once the query already consumed a complete phrase', () => {
+    expect(matchesAliasPrefixTerm('opus one', 'opus one overture')).toBe(false);
+    expect(matchesAliasPrefixTerm('chateau margaux', 'chateau margaux pavillon rouge')).toBe(false);
+  });
+
   it('keeps genuine incomplete prefix matches', () => {
     expect(matchesAliasPrefixTerm('opu', 'opus one')).toBe(true);
     expect(matchesAliasPrefixTerm('marg', 'margaux 2015')).toBe(true);

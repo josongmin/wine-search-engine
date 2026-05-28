@@ -9,8 +9,15 @@
  *
  * @see search-usecase-ranked-route-resolve.ts — single calibrator insertion point
  */
-import type { DecisionStatus, NextAction, DecisionSnapshot } from '../../shared/types/index.js';
-import { isCorruptedSnapshot } from '../../shared/types/index.js';
+import type {
+  DecisionStatus,
+  NextAction,
+  DecisionSnapshot,
+} from '../../shared/types/index.js';
+import {
+  deriveDecisionConfidenceSemantics,
+  isCorruptedSnapshot,
+} from '../../shared/types/index.js';
 import { isLegacyRequireClarificationHardGate } from '../../query/model/query-policy.js';
 import type { ExecutionRetrievalMode } from '../../query/model/engine-execution-contract.js';
 import { isExploratoryRetrievalMode } from '../../query/model/retrieval-mode-classification.js';
@@ -62,6 +69,38 @@ function requireDecisionEvidenceItems(input: DecisionInput): readonly EvidenceIt
   }
   return input.evidenceItems;
 }
+
+function buildPreferenceModeFallbackDecision(
+  fallbackMode: DecisionInput['policy']['fallbackMode'],
+  rulesApplied: readonly string[],
+  finalReason: string,
+): DecisionState {
+  if (fallbackMode === 'hybrid') {
+    return {
+      status: 'ambiguous',
+      nextAction: 'hybrid_search',
+      rulesApplied: [...rulesApplied, 'FALLBACK_HYBRID_SEARCH'],
+      finalReason,
+    };
+  }
+
+  if (fallbackMode === 'clarify') {
+    return {
+      status: 'ambiguous',
+      nextAction: 'clarify',
+      rulesApplied: [...rulesApplied, 'FALLBACK_CLARIFY'],
+      finalReason,
+    };
+  }
+
+  return {
+    status: 'failed',
+    nextAction: 'fail',
+    rulesApplied: [...rulesApplied, 'FALLBACK_FAIL'],
+    finalReason,
+  };
+}
+
 const NOISY_SHORT_QUERY_MAX_COMPACT_LENGTH = 12;
 const NOISY_SHORT_QUERY_CONFIDENCE_FLOOR = 0.9;
 const NOISY_SHORT_QUERY_GAP_FLOOR = 0.08;
@@ -78,6 +117,15 @@ const DECISION_TRACE_FLOAT_DECIMAL_PLACES = 4;
  * not by changing this constant — this should rarely fire.
  */
 const EMERGENCY_FALLBACK_RESOLVE_TAU = 0.85;
+
+function shouldForceClarifyKnownAmbiguousSurface(input: DecisionInput): boolean {
+  return (
+    input.queryPlan.queryClass === 'ambiguous_short_form' &&
+    input.uncertainty.decisionEffect === 'force_clarify' &&
+    input.uncertainty.ambiguitySeverity === 'high' &&
+    input.uncertainty.ambiguityTypes.includes(KNOWN_AMBIGUOUS_SURFACE_TYPE)
+  );
+}
 
 function requireEffectiveRetrievalMode(input: DecisionInput): ExecutionRetrievalMode {
   if (input.effectiveRetrievalMode === undefined) {
@@ -189,7 +237,8 @@ export class DecisionEngine {
         decisionStatus: 'failed',
         nextAction: 'fail',
         decisionConfidence: 0,
-        confidenceSemantics: 'calibrated_decision_confidence',
+        confidenceSemantics: deriveDecisionConfidenceSemantics(false),
+        calibrationTrusted: false,
         candidates: input.resolveResult.candidates,
         signalSet: input.rankingSignals ?? {
           entity_integrity_score: 0,
@@ -383,6 +432,22 @@ export class DecisionEngine {
     input: DecisionInput,
     rulesApplied: string[],
   ): DecisionState | null {
+    if (
+      requireEffectiveRetrievalMode(input) === 'no_match_detection'
+      && !hasExactMatchCandidate(input.evidenceSummary)
+      && !hasUniqueFuzzyIdentityWitness(input.evidenceSummary, input.resolveResult.decisionTrace)
+    ) {
+      rulesApplied.push('NO_MATCH_DETECTION_FAIL_CLOSED');
+      return {
+        status: 'failed',
+        nextAction: 'fail',
+        rulesApplied: [...rulesApplied],
+        finalReason:
+          'Planner classified the query as no_match_detection and no exact or unique fuzzy identity witness exists; ' +
+          'decision short-circuited to FAILED.',
+      };
+    }
+
     // require_clarification policy override (legacy hard gate)
     if (isLegacyRequireClarificationHardGate(input.policy)) {
       rulesApplied.push('POLICY_REQUIRE_CLARIFICATION');
@@ -395,11 +460,7 @@ export class DecisionEngine {
     }
 
     // Uncertainty-driven overrides.
-    if (
-      input.uncertainty.decisionEffect === 'force_clarify' &&
-      input.uncertainty.ambiguitySeverity === 'high' &&
-      input.uncertainty.ambiguityTypes.includes(KNOWN_AMBIGUOUS_SURFACE_TYPE)
-    ) {
+    if (shouldForceClarifyKnownAmbiguousSurface(input)) {
       rulesApplied.push('KNOWN_AMBIGUOUS_SURFACE_FORCE_CLARIFY');
       return {
         status: 'ambiguous',
@@ -575,6 +636,9 @@ export class DecisionEngine {
 
     const cMeetsThreshold = C >= thresholds.resolveTau;
     const numericGateMode: NumericGateMode = thresholds.numericGateMode ?? 'strict';
+    const exploratoryListMode = isExploratoryRetrievalMode(input.effectiveRetrievalMode);
+    const preferenceLikeNumericGate =
+      numericGateMode === 'preference' || exploratoryListMode;
     // thresholds.gapTau is already the dynamic gap threshold computed by
     // loadThresholds() via computeDynamicGapThreshold(). Using it directly
     // avoids a redundant computation with identical arguments (Rule 30: SSoT).
@@ -585,10 +649,38 @@ export class DecisionEngine {
     const gapMeetsThreshold = delta === undefined ? true : delta >= effectiveGapTau;
     const deltaForLog = delta === undefined ? 'n/a' : delta.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES);
 
-    // Recommendation-style queries do not need identity-style disambiguation.
-    // Gap and conformal remain part of the trace, but they are not hard gates.
-    if (numericGateMode === 'preference') {
+    // List-shaped exploratory queries do not need identity-style
+    // disambiguation. Gap and conformal remain part of the trace, but they
+    // are not hard gates when the execution contract itself says the user is
+    // asking for a candidate list (recommendation / constraint_filter /
+    // attribute_search / similar_items / compare_candidates / *_browse).
+    //
+    // IMPORTANT: a near-tied top-2 is only a blocking ambiguity when the
+    // contract asks us to identify a SINGLE winner. For exploratory list
+    // queries the answer shape is the shortlist itself, so a tiny top-1/top-2
+    // gap must not force clarification. Doing so would leak entity-style
+    // winner-selection semantics into list retrieval and suppress valid
+    // recommendation / attribute-search results (`풀바디 레드 와인` class).
+    if (preferenceLikeNumericGate) {
+      if (numericGateMode !== 'preference' && exploratoryListMode) {
+        rulesApplied.push('NUMERIC_GATE_EXPLORATORY_LIST_MODE');
+      }
       if (cMeetsThreshold) {
+        if (
+          !exploratoryListMode &&
+          !gapMeetsThreshold &&
+          !hasExactMatchCandidate(input.evidenceSummary) &&
+          input.resolveResult.candidates.length > 1
+        ) {
+          rulesApplied.push('NUMERIC_GATE_PREFERENCE_MODE_TINY_GAP');
+          return buildPreferenceModeFallbackDecision(
+            input.policy.fallbackMode,
+            rulesApplied,
+            `Preference-mode tie guard: calibrated C=${C.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)} ` +
+              `>= T_resolve=${thresholds.resolveTau}, but gap=${deltaForLog} < T_gap=${effectiveGapTau} ` +
+              'without exact identity evidence.',
+          );
+        }
         rulesApplied.push('NUMERIC_GATE_PREFERENCE_MODE');
         return {
           status: 'resolved',
@@ -627,35 +719,15 @@ export class DecisionEngine {
       }
 
       rulesApplied.push('NUMERIC_GATE_LOW_CONFIDENCE');
-      const fallbackMode = input.policy.fallbackMode;
-      if (fallbackMode === 'hybrid') {
-        rulesApplied.push('FALLBACK_HYBRID_SEARCH');
-        return {
-          status: 'ambiguous',
-          nextAction: 'hybrid_search',
-          rulesApplied: [...rulesApplied],
-          finalReason: `Low confidence C=${C.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)} < T_resolve=${thresholds.resolveTau}; falling back to hybrid search.`,
-        };
-      }
-
-      if (fallbackMode === 'clarify') {
-        rulesApplied.push('FALLBACK_CLARIFY');
-        return {
-          status: 'ambiguous',
-          nextAction: 'clarify',
-          rulesApplied: [...rulesApplied],
-          finalReason: `Low confidence C=${C.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)} < T_resolve=${thresholds.resolveTau}; requesting clarification.`,
-        };
-      }
-
-      // fallbackMode === 'fail'
-      rulesApplied.push('FALLBACK_FAIL');
-      return {
-        status: 'failed',
-        nextAction: 'fail',
-        rulesApplied: [...rulesApplied],
-        finalReason: `Low confidence C=${C.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)} < T_resolve=${thresholds.resolveTau}; no viable path.`,
-      };
+      return buildPreferenceModeFallbackDecision(
+        input.policy.fallbackMode,
+        rulesApplied,
+        input.policy.fallbackMode === 'hybrid'
+          ? `Low confidence C=${C.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)} < T_resolve=${thresholds.resolveTau}; falling back to hybrid search.`
+          : input.policy.fallbackMode === 'clarify'
+            ? `Low confidence C=${C.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)} < T_resolve=${thresholds.resolveTau}; requesting clarification.`
+            : `Low confidence C=${C.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)} < T_resolve=${thresholds.resolveTau}; no viable path.`,
+      );
     }
 
     // Gate 1: Full resolution (conformal set size blocks resolution per §6.2)
@@ -1179,7 +1251,10 @@ export class DecisionEngine {
       decisionStatus: state.status,
       nextAction: state.nextAction,
       decisionConfidence: resolverTrace.decisionConfidenceC,
-      confidenceSemantics: 'calibrated_decision_confidence',
+      confidenceSemantics: deriveDecisionConfidenceSemantics(
+        resolverTrace.calibrationTrusted,
+      ),
+      calibrationTrusted: resolverTrace.calibrationTrusted,
       ...(isResolved
         ? {
             selectedEntity: {

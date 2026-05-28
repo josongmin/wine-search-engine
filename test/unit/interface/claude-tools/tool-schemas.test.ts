@@ -202,11 +202,20 @@ describe('WINE_SEARCH_TOOLS', () => {
       expect(props.max_alcohol_pct?.maximum).toBe(100);
     });
 
-    it('should describe drinking_window as verification-only rather than retrieval filtering', () => {
+    it('should omit drinking_window fields from the search_wines manifest', () => {
       const props = tool.input_schema.properties as Record<string, any>;
-      expect(props.drinking_window?.description).toContain('post-search verification only');
-      expect(props.drinking_window?.description).toContain('NOT a canonical retrieval filter');
-      expect(props.drinking_window_target_year?.description).toContain('not retrieval filtering');
+      expect(props).not.toHaveProperty('drinking_window');
+      expect(props).not.toHaveProperty('drinking_window_target_year');
+    });
+
+    it('should reject drinking_window fields at the validator boundary', () => {
+      const parsed = SearchToolInputSchema.safeParse({
+        query: 'Barolo',
+        drinking_window: 'now',
+        drinking_window_target_year: 2026,
+      });
+
+      expect(parsed.success).toBe(false);
     });
 
     it('does not lower drinking_window into canonical retrieval preferences', () => {

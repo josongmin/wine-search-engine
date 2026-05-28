@@ -253,6 +253,38 @@ describe('W2-01 + IDX-05: all SOFT_CONSTRAINT_ATTRIBUTES must be SOFT in Constra
     );
   });
 
+  it('prefers longer direct grape entity spans over shorter conflicting generic grape mappings', async () => {
+    const compiler = new ConstraintCompiler(new DefaultNLMapper(new NullMappingTablePort()));
+    const result = await compiler.compile('2014 Camille Benitah Pomme Roll Cabernet Franc');
+
+    expect(result.bundle.hard).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ attribute: 'grape_primary', value: 'Cabernet Franc' }),
+      ]),
+    );
+    expect(result.bundle.hard).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ attribute: 'grape_primary', value: 'Cabernet Sauvignon' }),
+      ]),
+    );
+  });
+
+  it('treats appellation-shaped ontology surfaces as appellation constraints, not hard region duplicates', async () => {
+    const compiler = new ConstraintCompiler(new DefaultNLMapper(new NullMappingTablePort()));
+    const result = await compiler.compile('2013 Villa Poggio Salvi Brunello di Montalcino');
+
+    expect(result.bundle.hard).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ attribute: 'appellation', value: 'Brunello di Montalcino' }),
+      ]),
+    );
+    expect(result.bundle.hard).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ attribute: 'region', value: 'Brunello di Montalcino' }),
+      ]),
+    );
+  });
+
   it('ambiguous short alias 피노 does not promote to a grape constraint without disambiguating context', async () => {
     const compiler = new ConstraintCompiler(new DefaultNLMapper(new NullMappingTablePort()));
     const result = await compiler.compile('피노 추천');
@@ -515,6 +547,21 @@ describe('W2-01 + IDX-05: all SOFT_CONSTRAINT_ATTRIBUTES must be SOFT in Constra
     );
   });
 
+  it('infers canonical pairing evidence from generic cheese pairing intent', async () => {
+    const compiler = new ConstraintCompiler(new DefaultNLMapper(new NullMappingTablePort()));
+    const result = await compiler.compile('wine for cheese');
+
+    expect(result.bundle.inferred).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          attribute: 'pairing',
+          operator: 'in',
+          value: ['cheese'],
+        }),
+      ]),
+    );
+  });
+
   it('extracts explicit USD ceiling as canonical price_usd through the compiler path', async () => {
     const compiler = new ConstraintCompiler(new DefaultNLMapper(new NullMappingTablePort()));
     const result = await compiler.compile('best Bordeaux under 100 dollars');
@@ -528,5 +575,33 @@ describe('W2-01 + IDX-05: all SOFT_CONSTRAINT_ATTRIBUTES must be SOFT in Constra
         }),
       ]),
     );
+  });
+
+  it('canonicalizes sweet lexical intent onto numeric sweetness and drops duplicate categorical drift', async () => {
+    const compiler = new ConstraintCompiler(new DefaultNLMapper(new NullMappingTablePort()));
+    const result = await compiler.compile('달달한 와인');
+
+    const sweetnessConstraints = result.bundle.soft.filter((constraint) => constraint.attribute === 'sweetness');
+    expect(sweetnessConstraints).toEqual([
+      expect.objectContaining({
+        attribute: 'sweetness',
+        operator: '>=',
+        value: 0.5,
+      }),
+    ]);
+  });
+
+  it('canonicalizes full-bodied lexical intent onto numeric body and drops duplicate categorical drift', async () => {
+    const compiler = new ConstraintCompiler(new DefaultNLMapper(new NullMappingTablePort()));
+    const result = await compiler.compile('풀바디 레드 와인');
+
+    const bodyConstraints = result.bundle.soft.filter((constraint) => constraint.attribute === 'body');
+    expect(bodyConstraints).toEqual([
+      expect.objectContaining({
+        attribute: 'body',
+        operator: '>=',
+        value: 0.7,
+      }),
+    ]);
   });
 });

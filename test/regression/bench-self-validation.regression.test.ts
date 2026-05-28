@@ -162,7 +162,7 @@ describe('annotation schema — round-trip', () => {
       notes: 'round trip',
       expectedConstraints: {
         hard: [{ attribute: 'wine_type', operator: '=', value: 'red' }],
-        soft: [{ attribute: 'max_price_krw', operator: '<=', value: 100000 }],
+        soft: [{ attribute: 'price_usd', operator: '<=', value: 74.07 }],
       },
       expectedEntities: [
         { surface: '레드', canonical: 'red', type: 'wine_type' },

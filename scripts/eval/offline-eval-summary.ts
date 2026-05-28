@@ -41,6 +41,10 @@ export function buildOfflineEvalMarkdownSummary(
     | 'mrr_at_10'
     | 'recall_at_3'
     | 'decision_utility'
+    | 'ece'
+    | 'calibration_eligible_resolved_count'
+    | 'ece_scope'
+    | 'provenance'
     | 'release_report'
     | 'baseline_comparison'
   >,
@@ -53,7 +57,33 @@ export function buildOfflineEvalMarkdownSummary(
     `- MRR@10: \`${result.mrr_at_10.toFixed(4)}\``,
     `- Recall@3: \`${result.recall_at_3.toFixed(4)}\``,
     `- Decision utility: \`${result.decision_utility.toFixed(4)}\``,
+    `- ECE (trusted only): \`${result.ece.toFixed(4)}\` (n=${result.calibration_eligible_resolved_count}, scope=\`${result.ece_scope}\`)`,
   ];
+
+  if (result.provenance !== undefined) {
+    lines.push('');
+    lines.push('### Provenance');
+    lines.push('');
+    lines.push(`- Runtime target: \`${result.provenance.runtime_target}\``);
+    lines.push(`- Uses live API: \`${result.provenance.uses_live_api}\``);
+    lines.push(`- Gate eligible: \`${result.provenance.gate_eligible}\``);
+    lines.push(`- Corpus ID: \`${result.provenance.corpus_id}\``);
+    lines.push(`- Corpus hash: \`${result.provenance.corpus_hash}\``);
+    lines.push(`- Threshold source: \`${result.provenance.threshold_source}\``);
+    if (result.provenance.embedding_sensitive_eval === true) {
+      lines.push(`- Embedding-sensitive eval: \`true\``);
+    }
+    if (result.provenance.dense_retrieval_enabled != null) {
+      lines.push(`- Dense retrieval enabled: \`${result.provenance.dense_retrieval_enabled}\``);
+    }
+    if (result.provenance.query_embedding_model != null) {
+      lines.push(`- Query embedding model: \`${result.provenance.query_embedding_model}\``);
+    }
+    if (result.provenance.query_embedding_model_version != null) {
+      lines.push(`- Query embedding model version: \`${result.provenance.query_embedding_model_version}\``);
+    }
+    lines.push(`- Compatibility key: \`${result.provenance.comparison_compatibility_key}\``);
+  }
 
   const releaseReport = result.release_report;
   if (releaseReport !== undefined) {
@@ -99,16 +129,20 @@ export function buildOfflineEvalMarkdownSummary(
     lines.push('### Baseline Comparison');
     lines.push('');
     lines.push(`- Baseline: \`${baseline.baseline_path}\``);
-    lines.push(`- NDCG@10 delta: \`${baseline.deltas.ndcg_at_10.toFixed(4)}\``);
-    lines.push(`- MRR@10 delta: \`${baseline.deltas.mrr_at_10.toFixed(4)}\``);
-    lines.push(`- Recall@3 delta: \`${baseline.deltas.recall_at_3.toFixed(4)}\``);
-    lines.push(`- Decision utility delta: \`${baseline.deltas.decision_utility.toFixed(4)}\``);
-    lines.push(
-      `- Degraded mix delta: \`${formatDeltaBucket(baseline.deltas.execution_mode_mix?.degraded)}\``,
-    );
-    lines.push(
-      `- Blocking mix delta: \`${formatDeltaBucket(baseline.deltas.blocking_eligible_share?.blocking_eligible)}\``,
-    );
+    if (baseline.compatibility_status === 'skipped') {
+      lines.push(`- Compatibility: skipped (\`${baseline.compatibility_reason ?? 'unknown'}\`)`);
+    } else {
+      lines.push(`- NDCG@10 delta: \`${baseline.deltas.ndcg_at_10.toFixed(4)}\``);
+      lines.push(`- MRR@10 delta: \`${baseline.deltas.mrr_at_10.toFixed(4)}\``);
+      lines.push(`- Recall@3 delta: \`${baseline.deltas.recall_at_3.toFixed(4)}\``);
+      lines.push(`- Decision utility delta: \`${baseline.deltas.decision_utility.toFixed(4)}\``);
+      lines.push(
+        `- Degraded mix delta: \`${formatDeltaBucket(baseline.deltas.execution_mode_mix?.degraded)}\``,
+      );
+      lines.push(
+        `- Blocking mix delta: \`${formatDeltaBucket(baseline.deltas.blocking_eligible_share?.blocking_eligible)}\``,
+      );
+    }
     if ((baseline.highlights?.length ?? 0) > 0) {
       lines.push(`- Highlights: ${baseline.highlights?.map((item) => `\`${item}\``).join(', ')}`);
     }

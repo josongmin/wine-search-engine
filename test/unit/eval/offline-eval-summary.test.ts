@@ -9,6 +9,32 @@ describe('offline-eval-summary', () => {
       mrr_at_10: 0.75,
       recall_at_3: 0.7,
       decision_utility: 0.6,
+      ece: 0.02,
+      calibration_eligible_resolved_count: 8,
+      ece_scope: 'trusted_resolved_only',
+      provenance: {
+        benchmark_kind: 'offline_eval_in_memory_regression',
+        provenance_schema_version: 1,
+        corpus_id: 'engine_local:regression_smoke',
+        corpus_hash: 'corpus-hash',
+        runtime_target: 'in_memory_test_server',
+        uses_live_api: false,
+        smoke_synthesized: false,
+        threshold_source: 'external_fixture_thresholds',
+        gate_eligible: false,
+        suite_gate_passed: true,
+        search_snapshot_id: null,
+        runtime_activation_status: null,
+        readiness_passed: null,
+        active_ltr_models: null,
+        dense_retrieval_enabled: true,
+        query_embedding_model: 'text-embedding-3-large',
+        query_embedding_model_version: 'text-embedding-3-large@v2',
+        embedding_sensitive_eval: true,
+        feature_schema_hash: 'feature-hash',
+        comparison_compatibility_key: 'compat-key',
+        run_provenance_key: 'run-key',
+      },
       release_report: {
         degraded_query_share: { query_count: 2, share: 0.2 },
         heuristic_query_share: { query_count: 1, share: 0.1 },
@@ -54,8 +80,14 @@ describe('offline-eval-summary', () => {
     });
 
     expect(summary).toContain('## Offline Eval Regression');
+    expect(summary).toContain('### Provenance');
+    expect(summary).toContain('Runtime target: `in_memory_test_server`');
+    expect(summary).toContain('Embedding-sensitive eval: `true`');
+    expect(summary).toContain('Dense retrieval enabled: `true`');
+    expect(summary).toContain('Query embedding model: `text-embedding-3-large`');
     expect(summary).toContain('### Release Report');
     expect(summary).toContain('### Baseline Comparison');
+    expect(summary).toContain('ECE (trusted only): `0.0200` (n=8, scope=`trusted_resolved_only`)');
     expect(summary).toContain('`reranker_timeout` 2 (20.0%)');
     expect(summary).toContain('Degraded mix delta: `+1 (10.0pp)`');
     expect(summary).toContain('Blocking mix delta: `-1 (-10.0pp)`');

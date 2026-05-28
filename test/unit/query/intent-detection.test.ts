@@ -316,6 +316,15 @@ describe('Intent Detection — SOTA++ Improvements', () => {
       expect(plan.intent).toBe('pairing_search');
     });
 
+    it('should keep generic cheese pairing queries on semantic_preference instead of ambiguous_short_form', async () => {
+      const matcher = new StubAliasMatcher(new Map());
+      const planner = createPlanner(matcher);
+
+      const plan = await planner.plan('wine for cheese');
+      expect(plan.intent).toBe('pairing_search');
+      expect(plan.queryClass).toBe('semantic_preference');
+    });
+
     it('should treat gift occasions as pairing_search so recommendation mode is used', async () => {
       const matcher = new StubAliasMatcher(new Map());
       const planner = createPlanner(matcher);

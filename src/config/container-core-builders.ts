@@ -2,7 +2,6 @@ import { Planner } from '../domain/query/service/planner.js';
 import { AnchorExtractor } from '../domain/query/service/anchor-extractor.js';
 import { ExpansionBuilder } from '../domain/query/service/expansion-builder.js';
 import type { Pool } from 'pg';
-import { FuzzyMatcher } from '../domain/query/service/fuzzy-matcher.js';
 import type { FuzzyMatcherPort } from '../domain/query/port/fuzzy-matcher.port.js';
 import { Resolver } from '../domain/resolver/service/resolver.js';
 import { Blocker } from '../domain/resolver/service/blocker.js';
@@ -46,6 +45,7 @@ import { validateFeatureFlagsAtStartup } from './feature-flag-coherence.js';
 import { resolveActiveSnapshot } from '../infrastructure/db/active-snapshot-resolver.js';
 import { globalSilentSkipCounter } from '../domain/observability/silent-skip-counters.js';
 import { getRetrievalDegradationCollector } from '../infrastructure/observability/retrieval-degradation-metrics.js';
+import { LazyFuzzyMatcher } from '../infrastructure/adapter/lazy-fuzzy-matcher.js';
 import type {
   BlockingUseCasePort,
   BrowseRetrieverPort,
@@ -60,7 +60,7 @@ const BLOCKER_BROADER_LIMIT = 200;
 export function buildSnapshotVersions(config: Config): SnapshotVersions {
   return {
     modelVersions: {
-      dense_model: config.embedding.model,
+      dense_model: config.openai.embeddingModel,
       reranker_model: process.env['COHERE_RERANK_MODEL'] ?? 'rerank-v4.0-pro',
     },
     indexVersions: { wine_content: config.vespa.contentCluster },
@@ -82,6 +82,7 @@ export async function buildQueryPlanner(
   llmQueryInterpreter?: boolean,
   llmQueryInterpreterTimeoutMs?: number,
   phraseCache?: PhraseCachePort,
+  searchSnapshotId?: string,
 ): Promise<Planner> {
   // ADR-018 Wave F3: reject incoherent feature flag combinations BEFORE
   // constructing any planner dependencies. A mis-configured container
@@ -91,16 +92,17 @@ export async function buildQueryPlanner(
   // invocations in tests do not re-read env.
   validateFeatureFlagsAtStartup();
 
-  let fuzzyMatcher: FuzzyMatcherPort | undefined;
+  let fuzzyMatcher: FuzzyMatcherPort | undefined = adapters.fuzzyMatcher;
 
-  if (pool !== undefined) {
+  if (fuzzyMatcher === undefined && pool !== undefined) {
     try {
       // Migration 016: snapshot-scoped read. Warmup must not blend surface
       // forms across snapshots — reaped or stale snapshot aliases would
       // poison the fuzzy-matcher corpus otherwise. `resolveActiveSnapshot`
       // returns the authoritative pointer; if the pointer table itself is
       // missing we degrade cleanly below.
-      const { activeSnapshotId } = await resolveActiveSnapshot(pool);
+      const activeSnapshotId = searchSnapshotId
+        ?? (await resolveActiveSnapshot(pool)).activeSnapshotId;
       const { rows } = await pool.query<{ surface_form: string }>(
         `SELECT DISTINCT surface_form
          FROM aliases
@@ -110,9 +112,7 @@ export async function buildQueryPlanner(
       );
       const terms = rows.map((r) => r.surface_form);
       if (terms.length > 0) {
-        const fm = new FuzzyMatcher();
-        fm.initialize(terms);
-        fuzzyMatcher = fm;
+        fuzzyMatcher = new LazyFuzzyMatcher(terms);
       }
     } catch (err: unknown) {
       const code = (err as { code?: string } | undefined)?.code;
@@ -136,7 +136,7 @@ export async function buildQueryPlanner(
   // silently falling back to the rule-only mapper.
   if (llmQueryInterpreter === true && chatLlm === undefined) {
     throw new Error(
-      'LLM_QUERY_INTERPRETER=true but no ChatLlm was constructed — check OPENAI_API_KEY and chatLlm wiring',
+      'LLM_QUERY_INTERPRETER=true but no ChatLlm was constructed — check OPENAI_API_KEY/OPENAI_API_KEYS, Codex ChatGPT login token, and chatLlm wiring',
     );
   }
   const nlMapper = llmQueryInterpreter && chatLlm !== undefined
@@ -225,7 +225,7 @@ export function buildCandidatePool(
     adapters.embeddingService,
     new FusionService(),
     support.cacheService,
-    config.embedding.model,
+    config.openai.embeddingModel,
     config.killSwitch.learning,
     getRetrievalDegradationCollector(),
     config.killSwitch.denseRetrieval,

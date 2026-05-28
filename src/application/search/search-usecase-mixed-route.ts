@@ -52,6 +52,7 @@ export function mixedQueryResultToSearchRouteExecution(
   );
   const laneArtifacts = buildEmptySearchExecutionLaneArtifacts();
   return {
+    executedPlan: plan,
     executedCompiled: compiled,
     executionTopology: 'general_only',
     identityResolveResult: null,
@@ -118,6 +119,7 @@ export function buildFailedMixedRouteExecution(
   const laneArtifacts = buildEmptySearchExecutionLaneArtifacts();
 
   return {
+    executedPlan: plan,
     executedCompiled: compiled,
     executionTopology: 'general_only',
     identityResolveResult: null,

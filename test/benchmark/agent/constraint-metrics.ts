@@ -12,6 +12,10 @@
 
 import type { ConstraintBundle, NormalizedConstraint } from '../../../src/domain/shared/types/index.js';
 import type { ConstraintGraph } from '../../../src/domain/query/model/constraint-graph.js';
+import {
+  canonicalizePriceConstraintAttribute,
+  canonicalizePriceConstraintLike,
+} from '../../../src/domain/shared/utils/canonical-price.js';
 import type { ExpectedConstraint, ExpectedEntity } from './scenario.js';
 import { resolveEntity } from '../../../src/domain/attribute/service/entity-resolver.js';
 import {
@@ -111,23 +115,26 @@ export function constraintMatches(
   expected: ExpectedConstraint,
   mode: MatchMode,
 ): boolean {
-  if (!attributeMatches(actual.attribute, expected.attribute)) return false;
+  const canonicalActual = canonicalizePriceConstraintLike(actual);
+  const canonicalExpected = canonicalizePriceConstraintLike(expected);
+
+  if (!attributeMatches(canonicalActual.attribute, canonicalExpected.attribute)) return false;
   if (mode === 'type_only') return true;
 
   // Operator compatibility
-  if (mode === 'strict' && actual.operator !== expected.operator) return false;
+  if (mode === 'strict' && canonicalActual.operator !== canonicalExpected.operator) return false;
   if (mode === 'relaxed') {
     // Allow >= / <= to match range if the single-bound operator lies within the range
     const compatible =
-      actual.operator === expected.operator ||
-      (actual.operator === 'range' && (expected.operator === '<=' || expected.operator === '>=')) ||
-      (expected.operator === 'range' && (actual.operator === '<=' || actual.operator === '>='));
+      canonicalActual.operator === canonicalExpected.operator ||
+      (canonicalActual.operator === 'range' && (canonicalExpected.operator === '<=' || canonicalExpected.operator === '>=')) ||
+      (canonicalExpected.operator === 'range' && (canonicalActual.operator === '<=' || canonicalActual.operator === '>='));
     if (!compatible) return false;
   }
 
   // Value matching
-  const a = actual.value;
-  const e = expected.value;
+  const a = canonicalActual.value;
+  const e = canonicalExpected.value;
 
   // String vs string
   if (typeof a === 'string' && typeof e === 'string') return stringMatches(a, e);
@@ -452,7 +459,7 @@ interface ConstraintSatisfactionScore {
 // CSR uses the same tier weights as SCR (TIER_WEIGHT_HARD/SOFT/INFERRED above).
 
 function normalizeEvidenceAttribute(value: string): string {
-  return normalizeComparableString(value);
+  return normalizeComparableString(canonicalizePriceConstraintAttribute(value));
 }
 
 function extractGroundingJsonObjects(observation: string): readonly Record<string, unknown>[] {

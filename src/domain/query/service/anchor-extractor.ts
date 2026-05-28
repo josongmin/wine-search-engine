@@ -6,7 +6,7 @@ import type { NormalizedQueryViews } from '../model/query-views.js';
 import { parseSpans } from '../../attribute/service/span-parser.js';
 import { RelativeQueryExtractor } from './relative-query-extractor.js';
 import { compareScoreWithTiebreaker } from '../../shared/utils/stable-comparator.js';
-import { buildAliasLookupPlan } from './alias-lookup-plan.js';
+import { buildAliasSurfaceLookupPlan } from './alias-lookup-plan.js';
 import { isExactLikeLookupStrategy } from './lookup-strategy-taxonomy.js';
 import { pickHigherTrustAliasType } from '../../alias/service/conflict-resolver.js';
 
@@ -36,6 +36,12 @@ export interface AliasMatchResult {
   readonly aliasType?: AliasType | undefined;
 }
 
+export type AliasLookupScope = 'surface' | 'span';
+
+export interface AliasLookupOptions {
+  readonly scope?: AliasLookupScope;
+}
+
 /**
  * Adapter interface for alias-based entity matching.
  *
@@ -48,7 +54,10 @@ export interface AliasMatcher {
    * @param normalizedQuery - The lowercased, accent-stripped query.
    * @returns Zero or more alias match results, ordered by confidence descending.
    */
-  findMatches(normalizedQuery: string): Promise<readonly AliasMatchResult[]>;
+  findMatches(
+    normalizedQuery: string,
+    options?: AliasLookupOptions,
+  ): Promise<readonly AliasMatchResult[]>;
   /**
    * Optional bulk lookup for request-scoped batches of normalized queries.
    *
@@ -58,6 +67,7 @@ export interface AliasMatcher {
    */
   findMatchesBatch?(
     normalizedQueries: readonly string[],
+    options?: AliasLookupOptions,
   ): Promise<ReadonlyMap<string, readonly AliasMatchResult[]>>;
 }
 
@@ -133,7 +143,21 @@ function normalizeLookupStrategyPart(part: string): string {
   return part.startsWith('index_') ? part.slice('index_'.length) : part;
 }
 
-function splitLookupStrategies(strategy: string | undefined): readonly string[] {
+function trimDeduped(values: Iterable<string>): readonly string[] {
+  const ordered: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (trimmed.length === 0 || seen.has(trimmed)) {
+      continue;
+    }
+    seen.add(trimmed);
+    ordered.push(trimmed);
+  }
+  return ordered;
+}
+
+export function splitLookupStrategies(strategy: string | undefined): readonly string[] {
   if (strategy === undefined) {
     return [];
   }
@@ -148,6 +172,11 @@ function splitLookupStrategies(strategy: string | undefined): readonly string[] 
 interface LookupQuerySet {
   readonly baseQueries: readonly string[];
   readonly spanQueries: readonly string[];
+}
+
+interface ScopedLookupQuery {
+  readonly query: string;
+  readonly scope: AliasLookupScope;
 }
 
 export function hasKoreanMixedQueryMarkers(normalizedQuery: string): boolean {
@@ -239,8 +268,9 @@ export class AnchorExtractor {
   ): LookupQuerySet {
     const baseQueries: string[] = [];
     const spanQueries: string[] = [];
-    const seen = new Set<string>();
-    const add = (target: string[], value: string): void => {
+    const seenBase = new Set<string>();
+    const seenSpan = new Set<string>();
+    const add = (target: string[], seen: Set<string>, value: string): void => {
       const trimmed = value.trim();
       if (trimmed.length === 0 || seen.has(trimmed)) {
         return;
@@ -249,17 +279,27 @@ export class AnchorExtractor {
       target.push(trimmed);
     };
 
-    const primaryQueries = buildAliasLookupPlan(normalizedQuery, queryViews).tokenList;
+    const lookupPlan = buildAliasSurfaceLookupPlan(normalizedQuery, queryViews);
+    const primaryQueries = lookupPlan.tokenList;
     for (const query of primaryQueries) {
-      add(baseQueries, query);
+      add(baseQueries, seenBase, query);
     }
     for (const query of extraBaseQueries) {
-      add(baseQueries, query);
+      add(baseQueries, seenBase, query);
     }
 
-    for (const query of baseQueries) {
+    // Exact substrate keeps the aggressive whole-surface variants (compact,
+    // transliterated compact, phonetic) because those are exact-owner rails.
+    // Span expansion is different: synthetic compact full-surface variants do
+    // not add new span structure, but they can open broad-recall indexes on
+    // the first cold request. Restrict span seeds to human-readable variants.
+    const spanSeedQueries = trimDeduped([
+      ...lookupPlan.views.semanticVariants,
+      ...extraBaseQueries,
+    ]);
+    for (const query of spanSeedQueries) {
       for (const span of parseSpans(query)) {
-        add(spanQueries, span.text);
+        add(spanQueries, seenSpan, span.text);
       }
     }
 
@@ -300,16 +340,12 @@ export class AnchorExtractor {
   private async lookupAliasMatchesWithSpanFallback(
     lookupQueries: LookupQuerySet,
   ): Promise<readonly (AliasMatchResult & { readonly lookupVariants: readonly string[] })[]> {
-    const combinedQueries = [
-      ...lookupQueries.baseQueries,
-      ...lookupQueries.spanQueries,
-    ];
-    const batchMatches = this.aliasMatcher.findMatchesBatch !== undefined
-      ? await this.aliasMatcher.findMatchesBatch(combinedQueries)
-      : undefined;
+    const baseQueries = lookupQueries.baseQueries.map((query) => ({
+      query,
+      scope: 'surface' as const,
+    }));
     const baseMatches = await this.lookupAliasMatches(
-      lookupQueries.baseQueries,
-      batchMatches,
+      baseQueries,
     );
     if (
       lookupQueries.spanQueries.length === 0 ||
@@ -318,7 +354,13 @@ export class AnchorExtractor {
       return baseMatches;
     }
 
-    return this.lookupAliasMatches(combinedQueries, batchMatches);
+    const spanMatches = await this.lookupAliasMatches(
+      lookupQueries.spanQueries.map((query) => ({
+        query,
+        scope: 'span' as const,
+      })),
+    );
+    return this.mergeLookupMatches(baseMatches, spanMatches);
   }
 
   private shouldShortCircuitSpanExpansion(
@@ -347,18 +389,12 @@ export class AnchorExtractor {
   }
 
   private async lookupAliasMatches(
-    lookupQueries: readonly string[],
-    batchMatches?: ReadonlyMap<string, readonly AliasMatchResult[]>,
+    lookupQueries: readonly ScopedLookupQuery[],
   ): Promise<readonly (AliasMatchResult & { readonly lookupVariants: readonly string[] })[]> {
     const normalizedLookupQueries = lookupQueries
-      .map((query) => query.trim())
-      .filter((query) => query.length > 0);
-    const effectiveBatchMatches = batchMatches
-      ?? (
-        this.aliasMatcher.findMatchesBatch !== undefined
-          ? await this.aliasMatcher.findMatchesBatch(normalizedLookupQueries)
-          : undefined
-      );
+      .map(({ query, scope }) => ({ query: query.trim(), scope }))
+      .filter(({ query }) => query.length > 0);
+    const effectiveBatchMatches = await this.lookupAliasMatchesBatch(normalizedLookupQueries);
     const merged = new Map<
       string,
       {
@@ -371,14 +407,17 @@ export class AnchorExtractor {
       }
     >();
 
-    for (const [priority, lookupQuery] of lookupQueries.entries()) {
-      const trimmedLookupQuery = lookupQuery.trim();
+    for (const [priority, lookupQuery] of normalizedLookupQueries.entries()) {
+      const trimmedLookupQuery = lookupQuery.query;
       if (trimmedLookupQuery.length === 0) {
         continue;
       }
 
-      const aliasMatches = effectiveBatchMatches?.get(trimmedLookupQuery)
-        ?? await this.aliasMatcher.findMatches(trimmedLookupQuery);
+      const lookupKey = this.createScopedLookupKey(lookupQuery);
+      const aliasMatches = effectiveBatchMatches.get(lookupKey)
+        ?? await this.aliasMatcher.findMatches(trimmedLookupQuery, {
+          scope: lookupQuery.scope,
+        });
       for (const match of aliasMatches) {
         const key = `${match.surfaceForm}\u0000${match.normalizedForm}\u0000${match.entityIds.map(String).join(',')}`;
         const existing = merged.get(key);
@@ -415,6 +454,104 @@ export class AnchorExtractor {
         return this.materializeMergedMatches(merged);
       }
     }
+
+    return this.materializeMergedMatches(merged);
+  }
+
+  private async lookupAliasMatchesBatch(
+    lookupQueries: readonly ScopedLookupQuery[],
+  ): Promise<ReadonlyMap<string, readonly AliasMatchResult[]>> {
+    const byScope = new Map<AliasLookupScope, string[]>();
+    for (const lookupQuery of lookupQueries) {
+      const trimmed = lookupQuery.query.trim();
+      if (trimmed.length === 0) {
+        continue;
+      }
+      const queries = byScope.get(lookupQuery.scope) ?? [];
+      queries.push(trimmed);
+      byScope.set(lookupQuery.scope, queries);
+    }
+
+    const scopedMatches = new Map<string, readonly AliasMatchResult[]>();
+    for (const [scope, queries] of byScope.entries()) {
+      if (queries.length === 0) {
+        continue;
+      }
+      const batch = this.aliasMatcher.findMatchesBatch !== undefined
+        ? await this.aliasMatcher.findMatchesBatch(queries, { scope })
+        : undefined;
+      if (batch === undefined) {
+        continue;
+      }
+      for (const query of queries) {
+        scopedMatches.set(
+          this.createScopedLookupKey({ query, scope }),
+          batch.get(query) ?? [],
+        );
+      }
+    }
+
+    return scopedMatches;
+  }
+
+  private createScopedLookupKey(lookupQuery: ScopedLookupQuery): string {
+    return `${lookupQuery.scope}\u0000${lookupQuery.query.trim()}`;
+  }
+
+  private mergeLookupMatches(
+    primary: readonly (AliasMatchResult & { readonly lookupVariants: readonly string[] })[],
+    secondary: readonly (AliasMatchResult & { readonly lookupVariants: readonly string[] })[],
+  ): readonly (AliasMatchResult & { readonly lookupVariants: readonly string[] })[] {
+    const merged = new Map<
+      string,
+      {
+        match: AliasMatchResult;
+        confidence: number;
+        priority: number;
+        readonly lookupVariants: Set<string>;
+        readonly lookupStrategies: Set<string>;
+        aliasType: AliasType | undefined;
+      }
+    >();
+
+    const addMatches = (
+      matches: readonly (AliasMatchResult & { readonly lookupVariants: readonly string[] })[],
+      priority: number,
+    ): void => {
+      for (const match of matches) {
+        const key = `${match.surfaceForm}\u0000${match.normalizedForm}\u0000${match.entityIds.map(String).join(',')}`;
+        const existing = merged.get(key);
+        if (
+          existing === undefined ||
+          match.matchConfidence > existing.confidence ||
+          (match.matchConfidence === existing.confidence && priority < existing.priority)
+        ) {
+          merged.set(key, {
+            match,
+            confidence: match.matchConfidence,
+            priority,
+            lookupVariants: existing?.lookupVariants ?? new Set<string>(),
+            lookupStrategies: existing?.lookupStrategies ?? new Set<string>(),
+            aliasType: pickHigherTrustAliasType(existing?.aliasType, match.aliasType),
+          });
+        } else {
+          existing.aliasType = pickHigherTrustAliasType(existing.aliasType, match.aliasType);
+        }
+
+        const mergedEntry = merged.get(key);
+        if (mergedEntry !== undefined) {
+          for (const lookupVariant of match.lookupVariants) {
+            mergedEntry.lookupVariants.add(lookupVariant);
+          }
+        }
+        for (const strategy of splitLookupStrategies(match.lookupStrategy)) {
+          mergedEntry?.lookupStrategies.add(strategy);
+        }
+      }
+    };
+
+    addMatches(primary, 0);
+    addMatches(secondary, 1);
 
     return this.materializeMergedMatches(merged);
   }

@@ -1,6 +1,7 @@
 import type {
   CanonicalEntityId,
   DecisionStatus,
+  DecisionConfidenceSemantics,
   NextAction,
   EvidenceItem,
   DecisionSnapshot,
@@ -26,13 +27,25 @@ export interface DecisionOutput {
   readonly nextAction: NextAction;
 
   /**
-   * Calibrated decision confidence in [0, 1].
-   * This is the *only* confidence value surfaced to external consumers.
+   * Decision-layer confidence scalar in [0, 1].
+   *
+   * Interpret this number according to {@link confidenceSemantics}. Only the
+   * calibrated variant may be treated as a probability.
    */
   readonly decisionConfidence: number;
 
-  /** Semantic label — always `'calibrated_decision_confidence'`. */
-  readonly confidenceSemantics: 'calibrated_decision_confidence';
+  /** Semantic label for {@link decisionConfidence}. */
+  readonly confidenceSemantics: DecisionConfidenceSemantics;
+
+  /**
+   * Whether {@link decisionConfidence} was produced from trusted calibration
+   * parameters rather than a substitute-trust path over an uncalibrated score.
+   *
+   * When `false`, the numeric value is still monotonic for ranking/ordering,
+   * but it MUST NOT be treated as a calibrated probability in ECE/reliability
+   * analysis.
+   */
+  readonly calibrationTrusted?: boolean;
 
   /** The selected entity, present only when status is 'resolved'. */
   readonly selectedEntity?: {

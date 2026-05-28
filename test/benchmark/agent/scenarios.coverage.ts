@@ -833,7 +833,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
           { attribute: 'region', operator: '=', value: 'Bordeaux' },
         ],
         soft: [
-          { attribute: 'max_price_krw', operator: '<=', value: 135000 },
+          { attribute: 'price_usd', operator: '<=', value: 100 },
         ],
         inferred: [
           { attribute: 'country', operator: '=', value: 'France' },
@@ -942,7 +942,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
         + 'Structured reds (Barolo, Bordeaux, Brunello) or sweet wines expected.',
       expectedConstraints: {
         soft: [
-          { attribute: 'max_price_krw', operator: '<=', value: 200000 },
+          { attribute: 'price_usd', operator: '<=', value: 148.15 },
         ],
       },
     },
@@ -2203,7 +2203,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       ],
       expectedConstraints: {
         soft: [
-          { attribute: 'max_price_krw', operator: 'range', value: { min: 50000, max: 150000 } },
+          { attribute: 'price_usd', operator: 'range', value: { min: 37.04, max: 111.11 } },
           { attribute: 'style', operator: 'in', value: ['crowd_pleasing'] },
           { attribute: 'occasion', operator: 'in', value: ['gift'] },
         ],
@@ -2302,7 +2302,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       ],
       expectedConstraints: {
         soft: [
-          { attribute: 'max_price_krw', operator: '<=', value: 50000 },
+          { attribute: 'price_usd', operator: '<=', value: 37.04 },
         ],
       },
       rubric:

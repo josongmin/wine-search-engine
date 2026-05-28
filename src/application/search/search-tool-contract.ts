@@ -4,6 +4,12 @@ import { resolveSemanticStyleQueryTerms } from '../../domain/query/service/seman
 import { RECIPIENT_PROFILE_VALUES } from '../../domain/query/service/recipient-situation-profile.js';
 import type { NormalizedConstraint } from '../../domain/shared/types/index.js';
 import { convertKrwToConstraintUsd } from '../../domain/shared/utils/canonical-price.js';
+import {
+  SWEETNESS_DRY_MAX as SEARCH_TOOL_SWEETNESS_DRY_MAX,
+  SWEETNESS_SWEET_MIN as SEARCH_TOOL_SWEETNESS_SWEET_MIN,
+  SWEETNESS_OFF_DRY_MIN as SEARCH_TOOL_SWEETNESS_OFF_DRY_MIN,
+  SWEETNESS_OFF_DRY_MAX as SEARCH_TOOL_SWEETNESS_OFF_DRY_MAX,
+} from '../../domain/shared/constants/sensory-thresholds.js';
 
 export const SEARCH_TOOL_RETRIEVAL_MODES = ['auto', 'entity', 'hybrid', 'mixed'] as const;
 export const SEARCH_TOOL_WINE_TYPES = ['red', 'white', 'rosé', 'sparkling', 'fortified', 'dessert', 'orange', 'natural'] as const;
@@ -123,10 +129,6 @@ export const SEARCH_FAMILY_UNSUPPORTED_TOOL_FIELDS = [
 const SEARCH_TOOL_PLACEHOLDER_PATTERN =
   /__[a-z_]+__|<[a-z_]+>|\{\{[^}]+\}\}|^(tbd|todo|placeholder|to_be_filled|unknown)$/i;
 
-const SEARCH_TOOL_SWEETNESS_DRY_MAX = 0.2;
-const SEARCH_TOOL_SWEETNESS_SWEET_MIN = 0.5;
-const SEARCH_TOOL_SWEETNESS_OFF_DRY_MIN = 0.2;
-const SEARCH_TOOL_SWEETNESS_OFF_DRY_MAX = 0.6;
 const SearchToolOccasionArraySchema = z.preprocess(
   (value) => (typeof value === 'string' ? [value] : value),
   z.array(z.enum(SEARCH_TOOL_OCCASION_VALUES)).max(SEARCH_TOOL_MAX_STYLES),

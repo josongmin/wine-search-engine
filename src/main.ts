@@ -3,6 +3,7 @@ import { createContainer } from './config/container.js';
 import { buildHealthRouteOptions } from './config/readiness.js';
 import { expectsRedisAtStartup, isWatchlistEnabled } from './config/watchlist.js';
 import {
+  bindLiveSearchSnapshotRuntimeHandles,
   createManagedRuntimeHandles,
   type RuntimeHandles,
 } from './config/runtime-handles.js';
@@ -98,7 +99,7 @@ async function main(): Promise<void> {
       );
     }
   }
-  const runtimeHandles: RuntimeHandles = {
+  const runtimeHandles = await bindLiveSearchSnapshotRuntimeHandles({
     ...(pool ? { pool } : {}),
     ...(redisClient ? { redisClient } : {}),
     createWatchlistPublisher: () =>
@@ -106,7 +107,7 @@ async function main(): Promise<void> {
         ...(redisClient ? { client: redisClient } : { redisConfig: config.redis }),
       }),
     createWatchlistSubscriber: () => new RedisWatchlistSubscriber(config.redis),
-  };
+  } satisfies RuntimeHandles);
   const managedRuntime = createManagedRuntimeHandles(runtimeHandles, { telemetrySdk });
   const container = await createContainer(config, managedRuntime);
   const healthOptions = buildHealthRouteOptions(

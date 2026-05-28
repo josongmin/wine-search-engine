@@ -1,18 +1,15 @@
 /**
- * Bench-scorer adapter — pure mapping from orchestrator outputs into the
- * `ScenarioExecution` contract the bench scorer (`test/benchmark/agent/scorer.ts`)
- * consumes.
+ * Bench-scorer adapter — pure mapping from `WineSearchResult` (the new
+ * orchestrator's output) into the `ScenarioExecution` contract the bench
+ * scorer (`test/benchmark/agent/scorer.ts`) consumes.
  *
  * Why this module exists:
  *   The bench scorer is orchestrator-agnostic: it takes a `ScenarioExecution`
  *   (answer, tool trace, observations, termination, etc.) and returns a
- *   `ScenarioResult` with per-dimension scores. To run the *new*
- *   `WineSearchOrchestrator` against the existing 18k-line scenario corpus we
- *   need a `WineSearchResult → ScenarioExecution` projection. The legacy
- *   `AgentResult` projection already lives inline in
- *   `test/benchmark/agent/runner.ts` (around line 1316); we re-implement it
- *   faithfully here so both projections live side-by-side and can be diffed by
- *   the cutover-validation harness.
+ *   `ScenarioResult` with per-dimension scores. To run the
+ *   `WineSearchOrchestrator` against the existing scenario corpus we need a
+ *   `WineSearchResult → ScenarioExecution` projection — that projection lives
+ *   here.
  *
  * Invariants (CLAUDE.md SOTA+++++ schema-quality bar):
  *   - PURE: no IO, no logging, no clock reads — every output is a function of
@@ -21,9 +18,9 @@
  *     tool-call arguments is the only structural transform.
  *   - Termination mapping is exhaustive across `AgentTerminationReason`.
  *     A new union variant added upstream MUST surface a tsc error here.
- *   - `evidenceFrames` is intentionally OMITTED for the new orchestrator —
- *     `WineSearchResult` does not (yet) plumb `ToolCallEvidenceFrame[]` to
- *     the top level; downstream claim-level evaluation degrades gracefully.
+ *   - `evidenceFrames` is intentionally OMITTED — `WineSearchResult` does
+ *     not (yet) plumb `ToolCallEvidenceFrame[]` to the top level; downstream
+ *     claim-level evaluation degrades gracefully.
  *
  * Mapping notes (verify-by-reading `ScenarioExecution` at
  *  `test/benchmark/agent/scorer.ts:134`):
@@ -36,16 +33,10 @@
  *     steps, set by the orchestrator and validated by its Zod schema).
  *   - `totalTokens` keeps only `{ input, output }`. Cache tokens
  *     (`cacheReadTokens` + `cacheCreationTokens`) are dropped — the scorer's
- *     `costEfficiency` budgets are anchored to raw input/output and the legacy
- *     orchestrator never plumbed cache fields.
- *   - `terminationReason` is mapped via `mapAgentTerminationToScenario` so
- *     `'max_steps' / 'budget' / 'loop_detected' / 'aborted'` collapse to
- *     `'fallback'` exactly the way the existing bench harness does
- *     (`test/benchmark/agent/runner.ts:631`).
+ *     `costEfficiency` budgets are anchored to raw input/output.
  */
 
-import type { AgentResult } from '@domain/agent/model/agent-result.js';
-import type { AgentStep, AgentTerminationReason, AgentToolCall } from '@domain/agent/model/agent-step.js';
+import type { AgentTerminationReason } from '@domain/agent/model/agent-step.js';
 import type { ToolCallEvidenceFrame } from '@domain/agent/model/tool-call-evidence-frame.js';
 import type { WineSearchResult, ExecutionStep } from './wine-search-result-schemas.js';
 
@@ -229,121 +220,3 @@ export function wineSearchResultToScenarioExecution(
   };
 }
 
-// ---------------------------------------------------------------------------
-// AgentResult → ScenarioExecution
-//
-// Re-implements the inline projection at
-// `test/benchmark/agent/runner.ts:1316-1359`. The original is not exportable
-// (defined as a block inside the runner driver); re-implementing here keeps
-// the legacy ↔ new comparison symmetric — both sides flow through *this*
-// module so any drift is local and testable.
-// ---------------------------------------------------------------------------
-
-/**
- * Flatten `AgentResult.steps[]` → `ToolCallTrace[]`. Mirrors the legacy
- * `result.steps.flatMap(...)` pattern. Handles both the modern `actionPairs`
- * (parallel batch) and the legacy `action` (sequential) step shapes.
- */
-function extractLegacyToolsUsed(steps: readonly AgentStep[]): ScenarioToolCallTrace[] {
-  const calls: ScenarioToolCallTrace[] = [];
-  for (const step of steps) {
-    const pairs = step.actionPairs;
-    if (pairs !== undefined) {
-      for (const pair of pairs) {
-        calls.push({
-          tool: pair.action.tool,
-          input: JSON.stringify(pair.action.input),
-        });
-      }
-      continue;
-    }
-    const action = step.action;
-    if (action !== undefined) {
-      calls.push({
-        tool: action.tool,
-        input: JSON.stringify(action.input),
-      });
-      continue;
-    }
-    // TODO(cleanup): the deprecated `step.actions` field is read for
-    // backward-compatibility with older bench fixtures (CLAUDE.md rule 31).
-    const fallbackBatch = readDeprecatedLegacyActions(step);
-    for (const a of fallbackBatch) {
-      calls.push({ tool: a.tool, input: JSON.stringify(a.input) });
-    }
-  }
-  return calls;
-}
-
-/**
- * Single suppressed-deprecation access to `step.actions` — isolates the
- * `@typescript-eslint/no-deprecated` lint suppression to one line, which is
- * permitted during migration windows per CLAUDE.md rule 31.
- */
-function readDeprecatedLegacyActions(step: AgentStep): readonly AgentToolCall[] {
-  // eslint-disable-next-line @typescript-eslint/no-deprecated -- migration fallback for older fixtures.
-  return step.actions ?? [];
-}
-
-/**
- * Flatten `AgentResult.steps[]` → observation strings. Prefers typed
- * `evidenceFrames[].observationSnapshot` when present (ADR-009 Phase 0) — the
- * snapshots are byte-equivalent to what the LLM saw but are sourced from a
- * structured frame. Falls back to step-level `actionPairs[].observation` /
- * `step.observation` otherwise. Mirrors `test/benchmark/agent/runner.ts:1330`.
- */
-function extractLegacyObservations(result: AgentResult): string[] {
-  const frames = result.evidenceFrames;
-  if (frames !== undefined && frames.length > 0) {
-    const out: string[] = [];
-    for (const f of frames) {
-      if (f.observationSnapshot.length > 0) out.push(f.observationSnapshot);
-    }
-    return out;
-  }
-  const out: string[] = [];
-  for (const step of result.steps) {
-    const pairs = step.actionPairs;
-    if (pairs !== undefined) {
-      for (const p of pairs) {
-        if (p.observation.length > 0) out.push(p.observation);
-      }
-      continue;
-    }
-    if (step.observation !== undefined && step.observation.length > 0) {
-      out.push(step.observation);
-    }
-  }
-  return out;
-}
-
-/**
- * Project a legacy `AgentResult` from the ReAct orchestrator into a
- * `ScenarioExecution`. Mirrors the inline projection at
- * `test/benchmark/agent/runner.ts:1316`.
- */
-export function agentResultToScenarioExecution(
-  result: AgentResult,
-): ScenarioExecutionLike {
-  const toolsUsed = extractLegacyToolsUsed(result.steps);
-  const observations = extractLegacyObservations(result);
-  return {
-    answer: result.answer,
-    stepCount: result.steps.length,
-    toolCallCount: result.toolCallCount,
-    toolsUsed,
-    observations,
-    ...(result.evidenceFrames !== undefined && result.evidenceFrames.length > 0
-      ? { evidenceFrames: result.evidenceFrames }
-      : {}),
-    terminationReason: mapAgentTerminationToScenario(result.terminationReason),
-    totalDurationMs: result.totalDurationMs,
-    totalTokens: {
-      input: result.totalTokens.input,
-      output: result.totalTokens.output,
-    },
-    ...(result.evidenceFrames !== undefined
-      ? { evidenceFrameCount: result.evidenceFrames.length }
-      : {}),
-  };
-}

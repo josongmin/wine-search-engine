@@ -34,7 +34,14 @@ export function sendContractResponse<T>(
   payload: unknown,
 ): void {
   const body = validateContractResponse(request, schema, payload);
-  void reply.status(statusCode).send(body);
+  const serialized =
+    typeof body === 'string'
+      ? body
+      : JSON.stringify(body);
+  if (reply.getHeader('Content-Type') === undefined) {
+    void reply.header('Content-Type', 'application/json; charset=utf-8');
+  }
+  void reply.status(statusCode).send(serialized);
 }
 
 export function parseContractBody<TBody extends z.ZodTypeAny>(

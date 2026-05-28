@@ -8,6 +8,7 @@ import type { EntityResolveResult } from '../../domain/resolver/model/resolve-re
 import type { ResolverCandidate } from '../../domain/resolver/model/resolved-candidate.js';
 import type { EntityLaneCandidateArtifact, IdentityExactnessTier, IdentityLaneProvenance } from '../../domain/retrieval/model/dual-lane-artifact.js';
 import type { EvidenceItem } from '../../domain/shared/types/index.js';
+import { GEOGRAPHY_ATTRIBUTES } from '../../domain/shared/constants/constraint-attributes.js';
 import type { HybridCandidate } from '../../domain/retrieval/model/hybrid-candidate.js';
 import { annotateCandidateConstraintEvidenceBatch } from '../../domain/retrieval/service/candidate-constraint-evidence.js';
 import { applyAttributeHintsToSyntheticHybridCandidate } from './search-usecase-entity-attribute-projection.js';
@@ -32,6 +33,14 @@ const log = bootstrapLogger.child({ component: ENTITY_ROUTE_RANKED_RESULTS_COMPO
 
 function unique(values: readonly string[]): readonly string[] {
   return [...new Set(values)];
+}
+
+function normalizeSurfaceText(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
 }
 
 function deriveLexicalContributionFromAliasType(
@@ -169,6 +178,7 @@ function buildConstraintEvidenceItems(
   plan: QueryPlanV1,
   matchedSet: ReadonlySet<string>,
   unmetHardConstraints: readonly string[],
+  identityBackedHardConstraintAttributes: ReadonlySet<string> = new Set(),
 ): readonly EvidenceItem[] {
   const hardConstraintAttributes = unique(
     plan.constraints.hard.map((constraint) => constraint.attribute),
@@ -182,7 +192,9 @@ function buildConstraintEvidenceItems(
         source: CONSTRAINT_EVIDENCE_SOURCE,
         contribution: POSITIVE_CONSTRAINT_CONTRIBUTION,
         strength: 'high',
-        provenance: `Matched hard constraint ${attribute}`,
+        provenance: identityBackedHardConstraintAttributes.has(attribute)
+          ? `Matched hard constraint ${attribute} via exact identity alias coverage`
+          : `Matched hard constraint ${attribute}`,
       });
       continue;
     }
@@ -206,6 +218,7 @@ function buildEntityRouteEvidenceItems(
   plan: QueryPlanV1,
   matchedSet: ReadonlySet<string>,
   unmetHardConstraints: readonly string[],
+  identityBackedHardConstraintAttributes: ReadonlySet<string> = new Set(),
 ): readonly EvidenceItem[] {
   return [
     {
@@ -231,7 +244,12 @@ function buildEntityRouteEvidenceItems(
           }
         : {}),
     },
-    ...buildConstraintEvidenceItems(plan, matchedSet, unmetHardConstraints),
+    ...buildConstraintEvidenceItems(
+      plan,
+      matchedSet,
+      unmetHardConstraints,
+      identityBackedHardConstraintAttributes,
+    ),
   ];
 }
 
@@ -318,6 +336,120 @@ function logTopConstraintProjectionGap(
   );
 }
 
+function exactIdentityConstraintCoverageSurfaces(
+  identityProvenance: IdentityLaneProvenance,
+  canonicalLabel: string,
+): readonly string[] {
+  const surfaces = [
+    identityProvenance.strongestAliasMatch?.aliasValue,
+    canonicalLabel,
+  ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+  return unique(surfaces);
+}
+
+function resolvePositiveConstraintTerms(
+  constraint: QueryPlanV1['constraints']['hard'][number],
+): readonly string[] {
+  if (constraint.operator === '=') {
+    return typeof constraint.value === 'string' && constraint.value.trim().length > 0
+      ? [constraint.value]
+      : [];
+  }
+  if (constraint.operator === 'in') {
+    return Array.isArray(constraint.value)
+      ? constraint.value.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      : typeof constraint.value === 'string' && constraint.value.trim().length > 0
+        ? [constraint.value]
+        : [];
+  }
+  return [];
+}
+
+function identityBackedHardConstraintCoverage(
+  plan: QueryPlanV1,
+  identityProvenance: IdentityLaneProvenance,
+  canonicalLabel: string,
+  matchedConstraints: readonly string[],
+  unmetHardConstraints: readonly string[],
+): {
+  readonly matchedConstraints: readonly string[];
+  readonly unmetHardConstraints: readonly string[];
+  readonly identityBackedHardConstraintAttributes: ReadonlySet<string>;
+} {
+  if (
+    identityProvenance.exactnessTier !== MATCH_TYPE_EXACT
+    && identityProvenance.exactnessTier !== MATCH_TYPE_ALIAS_EXACT
+  ) {
+    return {
+      matchedConstraints,
+      unmetHardConstraints,
+      identityBackedHardConstraintAttributes: new Set(),
+    };
+  }
+
+  const unmetSet = new Set(unmetHardConstraints);
+  if (unmetSet.size === 0) {
+    return {
+      matchedConstraints,
+      unmetHardConstraints,
+      identityBackedHardConstraintAttributes: new Set(),
+    };
+  }
+
+  const hardConstraintCountByAttribute = new Map<string, number>();
+  for (const constraint of plan.constraints.hard) {
+    hardConstraintCountByAttribute.set(
+      constraint.attribute,
+      (hardConstraintCountByAttribute.get(constraint.attribute) ?? 0) + 1,
+    );
+  }
+
+  const surfaces = exactIdentityConstraintCoverageSurfaces(identityProvenance, canonicalLabel)
+    .map(normalizeSurfaceText);
+  const identityBackedHardConstraintAttributes = new Set<string>();
+  for (const constraint of plan.constraints.hard) {
+    if (!unmetSet.has(constraint.attribute)) {
+      continue;
+    }
+    if ((hardConstraintCountByAttribute.get(constraint.attribute) ?? 0) !== 1) {
+      continue;
+    }
+    if (!GEOGRAPHY_ATTRIBUTES.has(constraint.attribute)) {
+      continue;
+    }
+    const terms = resolvePositiveConstraintTerms(constraint)
+      .map(normalizeSurfaceText)
+      .filter((value) => value.length > 0);
+    if (terms.length === 0) {
+      continue;
+    }
+    if (surfaces.some((surface) => terms.some((term) => surface.includes(term)))) {
+      identityBackedHardConstraintAttributes.add(constraint.attribute);
+    }
+  }
+
+  if (identityBackedHardConstraintAttributes.size === 0) {
+    return {
+      matchedConstraints,
+      unmetHardConstraints,
+      identityBackedHardConstraintAttributes,
+    };
+  }
+
+  const nextMatchedConstraints = unique([
+    ...matchedConstraints,
+    ...identityBackedHardConstraintAttributes,
+  ]);
+  const nextUnmetHardConstraints = unmetHardConstraints
+    .filter((attribute) => !identityBackedHardConstraintAttributes.has(attribute));
+
+  return {
+    matchedConstraints: nextMatchedConstraints,
+    unmetHardConstraints: nextUnmetHardConstraints,
+    identityBackedHardConstraintAttributes,
+  };
+}
+
 export function liftEntityResolveResultToLaneArtifacts(
   plan: QueryPlanV1,
   resolveResult: EntityResolveResult,
@@ -381,13 +513,42 @@ export function liftEntityResolveResultToLaneArtifacts(
     if (identityProvenance === undefined) {
       throw invariantError('identity provenance missing for annotated entity');
     }
-    const matchedSet = new Set(annotatedCandidate.matchedConstraints);
-    const unmetHardConstraints = annotatedCandidate.unmetHardConstraints ?? [];
+    const rawUnmetHardConstraints = annotatedCandidate.unmetHardConstraints ?? [];
+    const rawMatchedConstraints = annotatedCandidate.matchedConstraints
+      .filter((attribute) => !rawUnmetHardConstraints.includes(attribute));
+    const {
+      matchedConstraints,
+      unmetHardConstraints,
+      identityBackedHardConstraintAttributes,
+    } = identityBackedHardConstraintCoverage(
+      plan,
+      identityProvenance,
+      resolvedCandidate.canonicalLabel,
+      rawMatchedConstraints,
+      rawUnmetHardConstraints,
+    );
+    const matchedSet = new Set(matchedConstraints);
+
+    const {
+      unmetHardConstraints: _staleUnmetHardConstraints,
+      ...candidateWithoutStaleUnmetHardConstraints
+    } = annotatedCandidate;
+    void _staleUnmetHardConstraints;
+    const nextCandidate = unmetHardConstraints.length > 0
+      ? {
+          ...candidateWithoutStaleUnmetHardConstraints,
+          matchedConstraints,
+          unmetHardConstraints,
+        }
+      : {
+          ...candidateWithoutStaleUnmetHardConstraints,
+          matchedConstraints,
+        };
 
     return {
       entityId: resolvedCandidate.entityId,
       candidate: {
-        ...annotatedCandidate,
+        ...nextCandidate,
         entityPosteriorScore: identityProvenance.calibratedScore,
         identityExactnessTier: identityProvenance.exactnessTier,
         lanePresence: 'entity_only',
@@ -395,11 +556,15 @@ export function liftEntityResolveResultToLaneArtifacts(
       resolvedCandidate,
       ...(rawCandidate !== undefined ? { rawCandidate } : {}),
       identityProvenance,
+      ...(identityBackedHardConstraintAttributes.size > 0
+        ? { identityBackedHardConstraintAttributes: [...identityBackedHardConstraintAttributes] }
+        : {}),
       evidenceItems: buildEntityRouteEvidenceItems(
         identityProvenance,
         plan,
         matchedSet,
         unmetHardConstraints,
+        identityBackedHardConstraintAttributes,
       ),
     };
   });

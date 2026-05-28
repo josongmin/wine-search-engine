@@ -2,7 +2,10 @@ import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
 import type { AmbiguousEntityHint } from '../../domain/attribute/model/ambiguous-entity-hint.js';
 import type { HybridRetrievalInput } from '../../domain/retrieval/model/retrieval-input.js';
-import type { CanonicalEntityId } from '../../domain/shared/types/index.js';
+import {
+  filterBindingInferredConstraints,
+  type CanonicalEntityId,
+} from '../../domain/shared/types/index.js';
 import type { RequestExecutionContext } from '../../domain/shared/request-execution-context.js';
 import { buildRetrievalPlan } from '../../domain/retrieval/service/retrieval-plan-builder.js';
 import { buildRetrievalObjective } from '../../domain/retrieval/model/retrieval-objective.js';
@@ -274,7 +277,7 @@ function hasExplicitWineTypeConstraint(
 }
 
 function hasGiftOccasionPreference(plan: QueryPlanV1): boolean {
-  return [...plan.constraints.soft, ...plan.constraints.inferred].some((constraint) =>
+  return [...plan.constraints.soft, ...filterBindingInferredConstraints(plan.constraints.inferred)].some((constraint) =>
     constraint.attribute === 'occasion'
     && constraintValueToStrings(constraint.value)
       .some((value) => value.trim().toLowerCase() === 'gift'),
@@ -282,13 +285,13 @@ function hasGiftOccasionPreference(plan: QueryPlanV1): boolean {
 }
 
 function hasTypedRecommendationSoftIntent(plan: QueryPlanV1): boolean {
-  return [...plan.constraints.soft, ...plan.constraints.inferred].some((constraint) =>
+  return [...plan.constraints.soft, ...filterBindingInferredConstraints(plan.constraints.inferred)].some((constraint) =>
     shouldRunTypedRecommendationDiscoveryForSoftIntent(constraint.attribute, constraint.value),
   );
 }
 
 function hasClosurePreference(plan: QueryPlanV1): boolean {
-  return [...plan.constraints.soft, ...plan.constraints.inferred].some((constraint) =>
+  return [...plan.constraints.soft, ...filterBindingInferredConstraints(plan.constraints.inferred)].some((constraint) =>
     constraint.attribute === 'closure',
   );
 }

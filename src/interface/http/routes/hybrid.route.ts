@@ -12,7 +12,7 @@ import { getRequestId } from '../request-id.js';
 import { MEDIA_TYPE_HUMAN, wantsHumanResponse } from '../content-negotiation.js';
 import { projectToHumanResponse } from './search-human-projection.js';
 import { SearchResponseV2HumanSchema } from '../schemas/search-response-v2.schema.js';
-import { abortSignalFromFastifyRequest } from '../request-abort-signal.js';
+import { abortSignalFromFastifyRequest, raceWithRequestAbort } from '../request-abort-signal.js';
 import { HTTP_STATUS_OK } from '../constants.js';
 
 /**
@@ -34,11 +34,16 @@ export function registerHybridRoute(
       const parsed = parseContractBody(request, HybridRouteContract);
       const hybridRequest = toHybridSearchRequest(parsed);
       const requestId = getRequestId(request);
+      const abortSignal = abortSignalFromFastifyRequest(request, reply);
 
-      const response = await deps.hybridUseCase.execute(hybridRequest, requestId, {
-        abortSignal: abortSignalFromFastifyRequest(request),
-        debugRequest: request.debugRequest,
-      });
+      const response = await raceWithRequestAbort(
+        deps.hybridUseCase.execute(hybridRequest, requestId, {
+          abortSignal,
+          debugRequest: request.debugRequest,
+        }),
+        abortSignal,
+        'Hybrid search request aborted',
+      );
 
       void reply.header('Vary', 'Accept');
 

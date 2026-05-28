@@ -209,11 +209,8 @@ describe('Planner – constraint extraction metadata', () => {
 
     expect(plan.anchors.length).toBeGreaterThan(0);
     expect(plan.anchors.some((anchor) => anchor.source === 'planner_heuristic')).toBe(true);
-    expect(batchLookup).toHaveBeenCalledTimes(2);
-    expect(batchLookup).toHaveBeenNthCalledWith(
-      2,
-      expect.arrayContaining(['opus one']),
-    );
+    expect(batchLookup).toHaveBeenCalledTimes(3);
+    expect(batchLookup.mock.calls[2]?.[0]).toEqual(expect.arrayContaining(['opus one']));
   });
 
   it('promotes queryClass to ambiguous_short_form when constraint parsing emits ambiguity hints', async () => {
@@ -440,6 +437,436 @@ describe('Planner – suggestedRoute matches expected routing', () => {
     const plan = await planner.plan('풀바디 레드 와인');
 
     expect(plan.suggestedRoute).toBe('hybrid');
+  });
+
+  it.each([
+    ['풀바디 레드 와인'],
+    ['상큼한 화이트 와인'],
+    ['호주 쉬라즈 풀바디'],
+    ['강한 타닌 네비올로'],
+    ['medium body United States / United States red'],
+    ['미디엄 Spain / Spain 레드'],
+  ])('sensory preference query %s → semantic_discovery / attribute_search / semantic_preference', async (query) => {
+    const planner = makePlanner(new Map());
+    const plan = await planner.plan(query);
+
+    expect(plan.intent).toBe('semantic_discovery');
+    expect(plan.suggestedRoute).toBe('hybrid');
+    expect(plan.suggestedRetrievalMode).toBe('attribute_search');
+    expect(plan.queryClass).toBe('semantic_preference');
+  });
+
+  it('keeps sensory preference promotion when only low-confidence catalog noise anchors exist', async () => {
+    const noisyMatcher = new ExactAliasMatcher(new Map([
+      ['medium body united states / united states red', [
+        {
+          surfaceForm: 'United States Red Collection',
+          normalizedForm: 'united states red collection',
+          entityIds: ['noise-us-red-collection'] as unknown as AliasMatchResult['entityIds'],
+          matchConfidence: 0.25,
+          lookupStrategy: 'lexical_exact',
+          aliasType: 'catalog_noise_alias',
+        },
+      ]],
+    ]));
+    const planner = new Planner(
+      noAmbiguityDict,
+      new AnchorExtractor(noisyMatcher),
+      new ExpansionBuilder(),
+      noOpNLMapper,
+    );
+
+    const plan = await planner.plan('medium body United States / United States red');
+
+    expect(plan.intent).toBe('semantic_discovery');
+    expect(plan.suggestedRoute).toBe('hybrid');
+    expect(plan.suggestedRetrievalMode).toBe('attribute_search');
+    expect(plan.queryClass).toBe('semantic_preference');
+  });
+
+  it('does not apply fuzzy entity fallback to parsed semantic preference queries', async () => {
+    const fuzzyMatcher: FuzzyMatcherPort = {
+      match: vi.fn(() => [{ term: 'dallaan wine', editDistance: 1, combinedScore: 0.93 }]),
+    };
+    const planner = new Planner(
+      noAmbiguityDict,
+      new AnchorExtractor(new ExactAliasMatcher(new Map([
+        ['dallaan wine', [makeMatchResult('Dallaan Wine', 0.94, ['noise-dallaan'])]],
+      ]))),
+      new ExpansionBuilder(),
+      noOpNLMapper,
+      fuzzyMatcher,
+    );
+
+    const plan = await planner.plan('달달한 와인');
+
+    expect(plan.intent).toBe('semantic_discovery');
+    expect(plan.suggestedRoute).toBe('hybrid');
+    expect(plan.suggestedRetrievalMode).toBe('attribute_search');
+    expect(plan.queryClass).toBe('semantic_preference');
+    expect(plan.anchors).toHaveLength(0);
+    expect(plan.expansions.fuzzyEntityHypotheses).toBeUndefined();
+  });
+
+  it('suppresses generic pairing-token anchors before final pairing classification', async () => {
+    const noisyMatcher = new ExactAliasMatcher(
+      new Map([
+        ['wine', [{
+          surfaceForm: '2014 1849 Wine Company Declaration',
+          normalizedForm: '2014 1849 wine company declaration',
+          entityIds: ['wine-company-2014'] as unknown as AliasMatchResult['entityIds'],
+          matchConfidence: 1,
+          lookupStrategy: 'lexical_exact',
+          aliasType: 'canonical',
+        }]],
+        ['for', [{
+          surfaceForm: '2015 Foradori Granato',
+          normalizedForm: '2015 foradori granato',
+          entityIds: ['foradori-2015'] as unknown as AliasMatchResult['entityIds'],
+          matchConfidence: 0.9,
+          lookupStrategy: 'prefix_exact',
+          aliasType: 'canonical',
+        }]],
+      ]),
+    );
+    const planner = new Planner(
+      noAmbiguityDict,
+      new AnchorExtractor(noisyMatcher),
+      new ExpansionBuilder(),
+      noOpNLMapper,
+    );
+
+    const plan = await planner.plan('wine for cheese');
+
+    expect(plan.intent).toBe('pairing_search');
+    expect(plan.suggestedRoute).toBe('hybrid');
+    expect(plan.suggestedRetrievalMode).toBe('recommendation');
+    expect(plan.queryClass).toBe('semantic_preference');
+    expect(plan.constraints.soft).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          attribute: 'pairing',
+          operator: 'in',
+          value: ['cheese'],
+          soft_promotion_authority: 'allow',
+        }),
+      ]),
+    );
+  });
+
+  it('collapses multiple pairing tags into one promotable OR constraint', async () => {
+    const planner = new Planner(
+      noAmbiguityDict,
+      new AnchorExtractor(new ExactAliasMatcher()),
+      new ExpansionBuilder(),
+      noOpNLMapper,
+    );
+
+    const plan = await planner.plan('wine for cheese and salmon');
+    const pairingConstraints = plan.constraints.soft.filter((constraint) => constraint.attribute === 'pairing');
+
+    expect(pairingConstraints).toHaveLength(1);
+    expect(pairingConstraints[0]).toEqual(
+      expect.objectContaining({
+        operator: 'in',
+        value: ['salmon', 'cheese'],
+        soft_promotion_authority: 'allow',
+        mapping_version: 'pairing-taxonomy-v1.0',
+      }),
+    );
+  });
+
+  it('routes mixed-script food pairing queries through pairing_search instead of entity_fuzzy', async () => {
+    const planner = new Planner(
+      noAmbiguityDict,
+      new AnchorExtractor(new ExactAliasMatcher()),
+      new ExpansionBuilder(),
+      noOpNLMapper,
+    );
+
+    const plan = await planner.plan('Cheese에 어울리는 와인');
+
+    expect(plan.intent).toBe('pairing_search');
+    expect(plan.suggestedRoute).toBe('hybrid');
+    expect(plan.suggestedRetrievalMode).toBe('recommendation');
+    expect(plan.queryClass).toBe('semantic_preference');
+    expect(plan.constraints.soft).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          attribute: 'pairing',
+          operator: 'in',
+          value: ['cheese'],
+          soft_promotion_authority: 'allow',
+        }),
+      ]),
+    );
+  });
+
+  it('suppresses noisy exact-like anchors for semantic preference queries', async () => {
+    const noisyMatcher = new ExactAliasMatcher(
+      new Map([
+        ['a', [
+          {
+            surfaceForm: 'à느이므아 느에그르아 à느',
+            normalizedForm: 'à느이므아 느에그르아 à느',
+            entityIds: ['noise-a-1'] as unknown as AliasMatchResult['entityIds'],
+            matchConfidence: 0.66,
+            lookupStrategy: 'phonetic_exact',
+            aliasType: 'translation',
+          },
+          {
+            surfaceForm: 'à느이므아 느에그르아 스오느 느에그르에',
+            normalizedForm: 'à느이므아 느에그르아 스오느 느에그르에',
+            entityIds: ['noise-a-2'] as unknown as AliasMatchResult['entityIds'],
+            matchConfidence: 0.66,
+            lookupStrategy: 'phonetic_exact',
+            aliasType: 'translation',
+          },
+        ]],
+        ['red', [
+          {
+            surfaceForm: 'Rotie',
+            normalizedForm: 'rotie',
+            entityIds: ['rotie-noise'] as unknown as AliasMatchResult['entityIds'],
+            matchConfidence: 0.792,
+            lookupStrategy: 'phonetic_exact',
+            aliasType: 'translation',
+          },
+          {
+            surfaceForm: 'Red Noise',
+            normalizedForm: 'red noise',
+            entityIds: ['red-noise-2'] as unknown as AliasMatchResult['entityIds'],
+            matchConfidence: 0.792,
+            lookupStrategy: 'phonetic_exact',
+            aliasType: 'translation',
+          },
+        ]],
+        ['spain', [
+          {
+            surfaceForm: 'Spain Noise',
+            normalizedForm: 'spain noise',
+            entityIds: ['spain-noise-1'] as unknown as AliasMatchResult['entityIds'],
+            matchConfidence: 0.9,
+            lookupStrategy: 'prefix_exact',
+            aliasType: 'canonical',
+          },
+          {
+            surfaceForm: 'Spain Noise Deux',
+            normalizedForm: 'spain noise deux',
+            entityIds: ['spain-noise-2'] as unknown as AliasMatchResult['entityIds'],
+            matchConfidence: 0.9,
+            lookupStrategy: 'prefix_exact',
+            aliasType: 'canonical',
+          },
+        ]],
+      ]),
+    );
+    const planner = new Planner(
+      noAmbiguityDict,
+      new AnchorExtractor(noisyMatcher),
+      new ExpansionBuilder(),
+      noOpNLMapper,
+    );
+
+    const plan = await planner.plan('recommend a light-bodied Spain red');
+
+    expect(plan.intent).toBe('semantic_discovery');
+    expect(plan.suggestedRoute).toBe('hybrid');
+    expect(plan.suggestedRetrievalMode).toBe('attribute_search');
+    expect(plan.queryClass).toBe('semantic_preference');
+    expect(plan.constraints.soft).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          attribute: 'body',
+          operator: '<=',
+          value: 0.3,
+        }),
+      ]),
+    );
+  });
+
+  it('suppresses noisy prefix anchors for budget/constraint queries before mixed fallback contamination', async () => {
+    const noisyMatcher = new ExactAliasMatcher(
+      new Map([
+        ['france', [
+          {
+            surfaceForm: '1967 Francesco Rinaldi & Figli Barolo',
+            normalizedForm: '1967 francesco rinaldi & figli barolo',
+            entityIds: ['francesco-rinaldi-1967'] as unknown as AliasMatchResult['entityIds'],
+            matchConfidence: 0.9,
+            lookupStrategy: 'prefix_exact',
+            aliasType: 'canonical',
+          },
+          {
+            surfaceForm: '2018 Francesca Fiasco Difesa Rosso',
+            normalizedForm: '2018 francesca fiasco difesa rosso',
+            entityIds: ['francesca-fiasco-2018'] as unknown as AliasMatchResult['entityIds'],
+            matchConfidence: 0.9,
+            lookupStrategy: 'prefix_exact',
+            aliasType: 'canonical',
+          },
+        ]],
+        ['for', [
+          {
+            surfaceForm: '2015 Foradori Granato',
+            normalizedForm: '2015 foradori granato',
+            entityIds: ['foradori-2015'] as unknown as AliasMatchResult['entityIds'],
+            matchConfidence: 0.9,
+            lookupStrategy: 'prefix_exact',
+            aliasType: 'canonical',
+          },
+          {
+            surfaceForm: '2018 Fortunate Son The Diplomat',
+            normalizedForm: '2018 fortunate son the diplomat',
+            entityIds: ['fortunate-son-2018'] as unknown as AliasMatchResult['entityIds'],
+            matchConfidence: 0.9,
+            lookupStrategy: 'prefix_exact',
+            aliasType: 'canonical',
+          },
+        ]],
+      ]),
+    );
+    const planner = new Planner(
+      noAmbiguityDict,
+      new AnchorExtractor(noisyMatcher),
+      new ExpansionBuilder(),
+      noOpNLMapper,
+    );
+
+    const plan = await planner.plan('good France red for under $50');
+
+    expect(plan.intent).toBe('budget_search');
+    expect(plan.suggestedRoute).toBe('hybrid');
+    expect(plan.suggestedRetrievalMode).toBe('constraint_filter');
+    expect(plan.queryClass).toBe('pure_constraint');
+  });
+
+  it('suppresses generic wine-noun fuzzy anchors for sweetness preference queries', async () => {
+    const noisyMatcher = new ExactAliasMatcher(
+      new Map([
+        ['와인', [{
+          surfaceForm: '1848 와이너리',
+          normalizedForm: '1848 와이너리',
+          entityIds: ['1848-winery'] as unknown as AliasMatchResult['entityIds'],
+          matchConfidence: 0.54,
+          lookupStrategy: 'transliterated_fuzzy',
+          aliasType: 'phonetic',
+        }]],
+      ]),
+    );
+    const planner = new Planner(
+      noAmbiguityDict,
+      new AnchorExtractor(noisyMatcher),
+      new ExpansionBuilder(),
+      noOpNLMapper,
+    );
+
+    const plan = await planner.plan('달달한 와인');
+
+    expect(plan.anchors).toHaveLength(0);
+    expect(plan.intent).toBe('semantic_discovery');
+    expect(plan.suggestedRoute).toBe('hybrid');
+    expect(plan.suggestedRetrievalMode).toBe('attribute_search');
+    expect(plan.queryClass).toBe('semantic_preference');
+  });
+
+  it('suppresses generic wine-noun fuzzy anchors for typed category queries', async () => {
+    const noisyMatcher = new ExactAliasMatcher(
+      new Map([
+        ['와인', [{
+          surfaceForm: '1848 와이너리',
+          normalizedForm: '1848 와이너리',
+          entityIds: ['1848-winery'] as unknown as AliasMatchResult['entityIds'],
+          matchConfidence: 0.54,
+          lookupStrategy: 'hangul_ime_completion',
+          aliasType: 'phonetic',
+        }]],
+      ]),
+    );
+    const planner = new Planner(
+      noAmbiguityDict,
+      new AnchorExtractor(noisyMatcher),
+      new ExpansionBuilder(),
+      noOpNLMapper,
+    );
+
+    const plan = await planner.plan('스파클링 와인');
+
+    expect(plan.anchors).toHaveLength(0);
+    expect(plan.intent).toBe('facet_search');
+    expect(plan.suggestedRoute).toBe('hybrid');
+    expect(plan.suggestedRetrievalMode).toBe('constraint_filter');
+    expect(plan.queryClass).toBe('pure_constraint');
+  });
+
+  it('suppresses multi-entity category anchors when parsed constraints already explain the surface', async () => {
+    const noisyMatcher = new ExactAliasMatcher(
+      new Map([
+        ['샴페인', [{
+          surfaceForm: '샴페인',
+          normalizedForm: '샴페인',
+          entityIds: [
+            'champagne-entity-1',
+            'champagne-entity-2',
+            'champagne-entity-3',
+          ] as unknown as AliasMatchResult['entityIds'],
+          matchConfidence: 0.75,
+          lookupStrategy: 'exact',
+          aliasType: 'translation',
+        }]],
+      ]),
+    );
+    const planner = new Planner(
+      noAmbiguityDict,
+      new AnchorExtractor(noisyMatcher),
+      new ExpansionBuilder(),
+      noOpNLMapper,
+    );
+
+    const plan = await planner.plan('샴페인 추천');
+
+    expect(plan.anchors).toHaveLength(0);
+    expect(plan.intent).toBe('facet_search');
+    expect(plan.suggestedRoute).toBe('hybrid');
+    expect(plan.suggestedRetrievalMode).toBe('constraint_filter');
+    expect(plan.queryClass).toBe('pure_constraint');
+  });
+
+  it('does not suppress single-token relative anchors when comparison intent is explicit', async () => {
+    const anchorMatcher = new ExactAliasMatcher(
+      new Map([
+        ['barolo', [{
+          surfaceForm: 'Barolo',
+          normalizedForm: 'barolo',
+          entityIds: ['barolo-appellation'] as unknown as AliasMatchResult['entityIds'],
+          matchConfidence: 0.95,
+          lookupStrategy: 'lexical_exact',
+          aliasType: 'canonical',
+        }]],
+      ]),
+    );
+    const planner = new Planner(
+      noAmbiguityDict,
+      new AnchorExtractor(anchorMatcher),
+      new ExpansionBuilder(),
+      noOpNLMapper,
+    );
+
+    const plan = await planner.plan('barolo 같은 10만원 와인');
+
+    expect(plan.suggestedRoute).toBe('mixed');
+    expect(plan.anchors[0]?.surfaceForm).toBe('Barolo');
+  });
+
+  it('explicit non-existent Korean query → entity no_match_detection fail-closed lane', async () => {
+    const planner = makePlanner(new Map());
+    const plan = await planner.plan('존재하지않는 와인 12345');
+
+    expect(plan.suggestedRoute).toBe('entity');
+    expect(plan.suggestedRetrievalMode).toBe('no_match_detection');
+    expect(plan.queryClass).toBe('unknown');
+    expect(plan.constraints.hard).toHaveLength(0);
+    expect(plan.constraints.soft).toHaveLength(0);
   });
 
   it('anchor-conditioned negation keeps anchor semantics and does not leak anchor text into exclude constraints', async () => {
@@ -857,6 +1284,47 @@ describe('Planner – regression (same query → same intent, anchors, constrain
       ...plan.constraints.inferred,
     ];
     expect(allConstraints.length).toBeGreaterThan(0);
+  });
+
+  it('drops lexical_exact generic appellation anchors once the span is compiled as a hard constraint', async () => {
+    const targetEntityId = 'wine-davide-fregonese-prapo';
+    const genericEntityId = 'wine-generic-barolo';
+    const query = '2019 Davide Fregonese Barolo Prapò';
+    const planner = new Planner(
+      noAmbiguityDict,
+      new AnchorExtractor(new ExactAliasMatcher(new Map([
+        ['2019 davide fregonese barolo prapò', [{
+          surfaceForm: '2019 Davide Fregonese Barolo Prapò',
+          normalizedForm: '2019 davide fregonese barolo prapò',
+          entityIds: [targetEntityId] as unknown as AliasMatchResult['entityIds'],
+          matchConfidence: 0.99,
+          lookupStrategy: 'exact',
+        }]],
+        ['barolo', [{
+          surfaceForm: '1961 Marchesi di Barolo Barolo (Tradizione)',
+          normalizedForm: '1961 marchesi di barolo barolo (tradizione)',
+          entityIds: [genericEntityId] as unknown as AliasMatchResult['entityIds'],
+          matchConfidence: 1,
+          lookupStrategy: 'lexical_exact',
+        }]],
+      ]))),
+      new ExpansionBuilder(),
+      noOpNLMapper,
+    );
+
+    const plan = await planner.plan(query);
+
+    expect(plan.constraints.hard).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ attribute: 'appellation', value: 'Barolo' }),
+      ]),
+    );
+    expect(plan.anchors.map((anchor) => anchor.normalizedForm)).toContain('2019 davide fregonese barolo prapò');
+    expect(plan.anchors.map((anchor) => anchor.normalizedForm)).not.toContain(
+      '1961 marchesi di barolo barolo (tradizione)',
+    );
+    expect(plan.suggestedRoute).toBe('entity');
+    expect(plan.suggestedRetrievalMode).toBe('entity_lookup');
   });
 
   it('uncertainty is populated with expected shape', async () => {

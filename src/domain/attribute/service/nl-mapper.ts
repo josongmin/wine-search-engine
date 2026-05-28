@@ -397,6 +397,8 @@ const DEFAULT_MAPPINGS: ReadonlyMap<string, NLMapping> = new Map<string, NLMappi
   ['데이트', { phrase: '데이트', mappedAttribute: 'occasion', operator: 'in', value: 'date_night', mappingConfidence: 0.9, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['소개팅', { phrase: '소개팅', mappedAttribute: 'occasion', operator: 'in', value: 'date_night', mappingConfidence: 0.88, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['소개팅인데', { phrase: '소개팅인데', mappedAttribute: 'occasion', operator: 'in', value: 'date_night', mappingConfidence: 0.86, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['결혼식', { phrase: '결혼식', mappedAttribute: 'occasion', operator: 'in', value: 'wedding', mappingConfidence: 0.92, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['결혼식용', { phrase: '결혼식용', mappedAttribute: 'occasion', operator: 'in', value: 'wedding', mappingConfidence: 0.9, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['혼술', { phrase: '혼술', mappedAttribute: 'occasion', operator: 'in', value: 'solo', mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['집들이', { phrase: '집들이', mappedAttribute: 'occasion', operator: 'in', value: 'housewarming', mappingConfidence: 0.9, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['힐링', { phrase: '힐링', mappedAttribute: 'occasion', operator: 'in', value: 'healing', mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
@@ -562,6 +564,8 @@ const DEFAULT_MAPPINGS: ReadonlyMap<string, NLMapping> = new Map<string, NLMappi
   // ── Grape varieties (top-15) ──────────────────────────────────────
   ['카베르네', { phrase: '카베르네', mappedAttribute: 'grape_primary', operator: '=', value: 'Cabernet Sauvignon', mappingConfidence: 0.9, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['카베르네 소비뇽', { phrase: '카베르네 소비뇽', mappedAttribute: 'grape_primary', operator: '=', value: 'Cabernet Sauvignon', mappingConfidence: 0.95, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['까베르네', { phrase: '까베르네', mappedAttribute: 'grape_primary', operator: '=', value: 'Cabernet Sauvignon', mappingConfidence: 0.88, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['까베르네 소비뇽', { phrase: '까베르네 소비뇽', mappedAttribute: 'grape_primary', operator: '=', value: 'Cabernet Sauvignon', mappingConfidence: 0.92, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['cabernet', { phrase: 'cabernet', mappedAttribute: 'grape_primary', operator: '=', value: 'Cabernet Sauvignon', mappingConfidence: 0.9, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['cabernet sauvignon', { phrase: 'cabernet sauvignon', mappedAttribute: 'grape_primary', operator: '=', value: 'Cabernet Sauvignon', mappingConfidence: 0.95, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['까쇼', { phrase: '까쇼', mappedAttribute: 'grape_primary', operator: '=', value: 'Cabernet Sauvignon', mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],

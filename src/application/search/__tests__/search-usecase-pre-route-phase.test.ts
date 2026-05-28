@@ -4,6 +4,22 @@ import type { SearchPreRoutePhaseContext } from '../search-usecase-pre-route-pha
 import type { QueryPlanV1 } from '../../../domain/query/model/query-plan.js';
 import { PolicyBlockedError } from '../../../domain/shared/error/policy-blocked.js';
 
+const HIGH_SENSORY_FIELD_AVAILABILITY = {
+  appellation: { populatedDocCount: 8, totalDocCount: 10, populatedDocRatio: 0.8 },
+  body: { populatedDocCount: 8, totalDocCount: 10, populatedDocRatio: 0.8 },
+  sweetness: { populatedDocCount: 8, totalDocCount: 10, populatedDocRatio: 0.8 },
+  acidity: { populatedDocCount: 8, totalDocCount: 10, populatedDocRatio: 0.8 },
+  tannin: { populatedDocCount: 8, totalDocCount: 10, populatedDocRatio: 0.8 },
+} as const;
+
+const LOW_SENSORY_FIELD_AVAILABILITY = {
+  appellation: { populatedDocCount: 8, totalDocCount: 10, populatedDocRatio: 0.8 },
+  body: { populatedDocCount: 4, totalDocCount: 10, populatedDocRatio: 0.4 },
+  sweetness: { populatedDocCount: 4, totalDocCount: 10, populatedDocRatio: 0.4 },
+  acidity: { populatedDocCount: 4, totalDocCount: 10, populatedDocRatio: 0.4 },
+  tannin: { populatedDocCount: 4, totalDocCount: 10, populatedDocRatio: 0.4 },
+} as const;
+
 /** Minimal V1 plan fixture. */
 function makeV1Plan(overrides: Partial<QueryPlanV1> = {}): QueryPlanV1 {
   return {
@@ -131,6 +147,69 @@ describe('runSearchPreRoutePhase – fallback path (plan() only, no planWithComp
     expect(result.compiled.execution.budget).toBeDefined();
 
     expect(plannerWithUndefinedCompiled.plan).toHaveBeenCalledOnce();
+  });
+
+  it('grants sensory soft-promotion authority only when runtime field coverage is available', async () => {
+    const plannerWithoutCompiled = {
+      plan: vi.fn().mockResolvedValue(makeV1Plan({
+        constraints: {
+          hard: [],
+          soft: [{
+            attribute: 'acidity',
+            operator: '>=',
+            value: 0.6,
+            source_phrase: '상큼/산미',
+            confidence: 0.8,
+            mapping_version: 'rule-based-v1.0',
+          }],
+          inferred: [],
+        },
+      })),
+    };
+
+    const ctx = makeBaseContext({
+      queryPlanner: plannerWithoutCompiled,
+      fieldAvailability: HIGH_SENSORY_FIELD_AVAILABILITY,
+    });
+
+    const result = await runSearchPreRoutePhase(ctx);
+
+    expect(result.outcome).toBe('continue');
+    if (result.outcome !== 'continue') throw new Error('narrowing guard');
+    expect(result.plan.constraints.soft[0]?.soft_promotion_authority).toBe('allow');
+    expect(result.compiled.query.constraints.soft[0]?.soft_promotion_authority).toBe('allow');
+  });
+
+  it('strips sensory soft-promotion authority when runtime field coverage is below the capability gate', async () => {
+    const plannerWithoutCompiled = {
+      plan: vi.fn().mockResolvedValue(makeV1Plan({
+        constraints: {
+          hard: [],
+          soft: [{
+            attribute: 'acidity',
+            operator: '>=',
+            value: 0.6,
+            source_phrase: 'acidity>=0.6',
+            confidence: 1,
+            soft_promotion_authority: 'allow',
+            mapping_version: 'claude_tool_v1',
+          }],
+          inferred: [],
+        },
+      })),
+    };
+
+    const ctx = makeBaseContext({
+      queryPlanner: plannerWithoutCompiled,
+      fieldAvailability: LOW_SENSORY_FIELD_AVAILABILITY,
+    });
+
+    const result = await runSearchPreRoutePhase(ctx);
+
+    expect(result.outcome).toBe('continue');
+    if (result.outcome !== 'continue') throw new Error('narrowing guard');
+    expect(result.plan.constraints.soft[0]?.soft_promotion_authority).toBeUndefined();
+    expect(result.compiled.query.constraints.soft[0]?.soft_promotion_authority).toBeUndefined();
   });
 
   it('skips decomposed search when request latency budget is already exhausted', async () => {

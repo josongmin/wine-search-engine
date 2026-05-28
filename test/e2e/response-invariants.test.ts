@@ -145,22 +145,27 @@ describe('queryTimeMs is a non-negative integer', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('confidenceSemantics for resolved responses', () => {
-  it("entity response has confidenceSemantics === 'calibrated_decision_confidence' (regardless of decisionStatus)", async () => {
+  it('keeps entity-mode confidence semantics aligned with calibration_trusted', async () => {
     const decision = getSearchDecision(await search({
       query: 'Opus One 2018',
       options: { mode: 'entity', explain: false, clarification: false },
     }));
     expect(decision.decision_status).toMatch(/^(resolved|ambiguous|failed)$/);
-    expect(decision.confidence_semantics).toBe('calibrated_decision_confidence');
+    expect(decision.confidence_semantics).toBe(
+      decision.calibration_trusted === false
+        ? 'uncalibrated_decision_score'
+        : 'calibrated_decision_confidence',
+    );
   });
 
-  it("'DRC' entity mode → confidenceSemantics is 'calibrated_decision_confidence'", async () => {
+  it('maps untrusted semantic list scores to uncalibrated semantics', async () => {
     const decision = getSearchDecision(await search({
-      query: 'DRC',
-      options: { mode: 'entity', explain: false, clarification: false },
+      query: '풀바디 레드 와인',
+      options: { mode: 'hybrid', explain: false, clarification: false },
     }));
     expect(decision.decision_status).toMatch(/^(resolved|ambiguous)$/);
-    expect(decision.confidence_semantics).toBe('calibrated_decision_confidence');
+    expect(decision.calibration_trusted).toBe(false);
+    expect(decision.confidence_semantics).toBe('uncalibrated_decision_score');
   });
 });
 

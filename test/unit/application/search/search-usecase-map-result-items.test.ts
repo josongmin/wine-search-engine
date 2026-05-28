@@ -350,4 +350,62 @@ describe('mapRankedResultsToResultItems', () => {
       modelVersion: 'dw-v1',
     });
   });
+
+  it('omits predicted drinking-window blocks when predictor returns non-projectable years', async () => {
+    vi.useFakeTimers();
+    const drinkingWindow = {
+      check: vi.fn().mockResolvedValue({
+        drinkingWindowStart: 1,
+        drinkingWindowEnd: 12,
+        peakYear: 6,
+        currentlyDrinkable: false,
+        confidence: 'high',
+        evidenceLevel: 'deterministic',
+        blockingEligible: true,
+        modelVersion: 'onnx:predictor-v1',
+      }),
+    };
+
+    const pending = mapRankedResultsToResultItems([{
+      ...makeRankedResult(),
+      vintageYear: 2018,
+    }], drinkingWindow as never, 2025);
+    await vi.runAllTimersAsync();
+    const items = await pending;
+
+    expect(drinkingWindow.check).toHaveBeenCalledOnce();
+    expect(items[0]?.drinkingWindow).toBeUndefined();
+    vi.useRealTimers();
+  });
+
+  it('skips drinking-window prediction for non-projectable vintages', async () => {
+    vi.useFakeTimers();
+    const drinkingWindow = {
+      check: vi.fn(),
+    };
+
+    const pending = mapRankedResultsToResultItems([{
+      ...makeRankedResult(),
+      vintageYear: 1,
+    }], drinkingWindow as never, 2025);
+    await vi.runAllTimersAsync();
+    const items = await pending;
+
+    expect(drinkingWindow.check).not.toHaveBeenCalled();
+    expect(items[0]?.drinkingWindow).toBeUndefined();
+    vi.useRealTimers();
+  });
+
+  it('omits indexed drinking-window blocks with out-of-range years', async () => {
+    const items = await mapRankedResultsToResultItems([
+      {
+        ...makeRankedResult(),
+        drinkingWindowStart: 1,
+        drinkingWindowEnd: 12,
+        drinkingWindowModelVersion: 'dw-v1',
+      },
+    ], undefined, 2025);
+
+    expect(items[0]?.drinkingWindow).toBeUndefined();
+  });
 });

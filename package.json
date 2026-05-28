@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "wine": "dist/interface/cli/main.js"
+  },
   "packageManager": "pnpm@9.15.9",
   "engines": {
     "node": ">=22"
@@ -15,6 +18,7 @@
     "deadcode": "knip --no-exit-code",
     "dev": "tsx watch src/main.ts",
     "build": "pnpm run artifacts:link && tsc --project tsconfig.build.json --pretty false",
+    "cli": "tsx src/interface/cli/main.ts",
     "start": "node dist/main.js",
     "test": "vitest run --config config/vitest/dev.config.ts",
     "test:watch": "vitest --config config/vitest/dev.config.ts",
@@ -111,6 +115,10 @@
     "eval:offline:smoke:assert-baseline": "pnpm run eval:offline:smoke && tsx scripts/eval/assert-baseline-regression.ts --kind offline --current /tmp/offline-eval-smoke-results.json --baseline data/eval-baselines/offline-smoke-v1.json",
     "eval:offline:smoke:with-baseline": "tsx scripts/eval/run-offline-eval-smoke.ts --tier bronze --input data/eval-smoke-queries.jsonl --output /tmp/offline-eval-smoke-results.json --baseline-report data/eval-baselines/offline-smoke-v1.json",
     "eval:offline:smoke:refresh-baseline": "pnpm run eval:offline:smoke:with-baseline && cp /tmp/offline-eval-smoke-results.json data/eval-baselines/offline-smoke-v1.json",
+    "eval:offline:embedding": "tsx scripts/eval/run-offline-eval-embedding-sensitive.ts",
+    "eval:offline:embedding:ablation": "tsx scripts/eval/run-offline-eval-embedding-sensitive.ts --compare-dense-off",
+    "eval:offline:embedding:isolated": "tsx scripts/eval/run-offline-eval-embedding-sensitive-isolated.ts",
+    "eval:offline:embedding:isolated:ablation": "tsx scripts/eval/run-offline-eval-embedding-sensitive-isolated.ts --compare-dense-off",
     "eval:claim:bootstrap": "tsx scripts/eval/analyze-legacy-claim-bootstrap.ts --out /tmp/legacy-claim-bootstrap-analysis.json",
     "eval:noisy": "node --import tsx scripts/eval/run-noisy-entity-eval.ts",
     "eval:noisy:smoke": "node --import tsx scripts/eval/run-noisy-entity-eval.ts --smoke-predictions --output data/noisy-entity-eval-smoke-results.json",

@@ -143,7 +143,23 @@ export function errorHandler(
   // reset is always safe and never causes double-conversion.
   reply.snakeCaseApplied = false;
 
-  const fastifyError = error as { code?: string; statusCode?: number; message?: string };
+  // Narrow `error` to the Fastify-error-like shape using runtime typeof checks
+  // rather than a blanket `as` cast (rule 12 spirit: don't coerce external/
+  // foreign types without validation). Each field is independently optional
+  // because Fastify's typings reflect that — only some throw paths set `code`
+  // or `statusCode`.
+  const fastifyError: { code?: string; statusCode?: number; message?: string } = {
+    ...(typeof (error as { code?: unknown }).code === 'string'
+      ? { code: (error as { code: string }).code }
+      : {}),
+    ...(typeof (error as { statusCode?: unknown }).statusCode === 'number'
+    && Number.isFinite((error as { statusCode: number }).statusCode)
+      ? { statusCode: (error as { statusCode: number }).statusCode }
+      : {}),
+    ...(typeof (error as { message?: unknown }).message === 'string'
+      ? { message: (error as { message: string }).message }
+      : {}),
+  };
 
   // Body too large — 413 Payload Too Large
   // Fastify throws FST_ERR_CTP_BODY_TOO_LARGE when the body exceeds bodyLimit.

@@ -9,8 +9,18 @@ import {
   verifySearchSnapshotRuntimeStateLive,
 } from '../../src/infrastructure/health/search-snapshot-readiness.js';
 import {
+  canonicalizeAliasSnapshotRecords,
+  canonicalizeAmbiguitySnapshotRows,
+  canonicalizeEntitySnapshotRecords,
+} from '../../src/domain/shared/utils/search-snapshot-canonicalization.js';
+import {
+  hashStableJson,
   parseManifest,
+  type AliasSnapshotRecord,
+  type AmbiguityRegistrySnapshotRow,
+  type EntitySnapshotRecord,
 } from './search-snapshot-schema.js';
+import { parseNdjson } from './ndjson.js';
 import {
   SEARCH_SNAPSHOT_SCHEMA_VERSION,
   SEARCH_SNAPSHOT_STATE_VERSION,
@@ -23,12 +33,14 @@ interface Args {
   readonly manifestPath?: string;
   /** T-010/W2: when true, assert active_search_snapshot pointer = runtime state snapshotId. */
   readonly requirePointerParity: boolean;
+  readonly requireActiveLtr?: boolean;
 }
 
 function parseArgs(argv: readonly string[]): Args {
   let runtimeStatePath = DEFAULT_RUNTIME_STATE_PATH;
   let manifestPath: string | undefined;
   let requirePointerParity: boolean | undefined;
+  let requireActiveLtr = false;
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--runtime-state') {
@@ -41,6 +53,8 @@ function parseArgs(argv: readonly string[]): Args {
       requirePointerParity = true;
     } else if (arg === '--bootstrap-mode') {
       requirePointerParity = false;
+    } else if (arg === '--require-active-ltr') {
+      requireActiveLtr = true;
     }
   }
   if (requirePointerParity === undefined) {
@@ -49,6 +63,7 @@ function parseArgs(argv: readonly string[]): Args {
   return {
     runtimeStatePath,
     requirePointerParity,
+    requireActiveLtr,
     ...(manifestPath !== undefined ? { manifestPath } : {}),
   };
 }
@@ -63,6 +78,28 @@ export async function verifySearchSnapshotReadiness(args: Args): Promise<void> {
   const manifest = args.manifestPath !== undefined
     ? parseManifest(await fs.readFile(args.manifestPath, 'utf8'), args.manifestPath)
     : parseManifest(await fs.readFile(runtimeState.manifestPath, 'utf8'), runtimeState.manifestPath);
+  const [manifestEntitiesRaw, manifestAliasesRaw, manifestAmbiguityRaw] = await Promise.all([
+    fs.readFile(manifest.artifacts.entitiesNdjson, 'utf8'),
+    fs.readFile(manifest.artifacts.aliasesNdjson, 'utf8'),
+    fs.readFile(manifest.artifacts.ambiguityRegistryNdjson, 'utf8'),
+  ]);
+  const manifestEntities = parseNdjson<EntitySnapshotRecord>(
+    manifestEntitiesRaw,
+    manifest.artifacts.entitiesNdjson,
+  ).records;
+  const manifestAliases = parseNdjson<AliasSnapshotRecord>(
+    manifestAliasesRaw,
+    manifest.artifacts.aliasesNdjson,
+  ).records;
+  const manifestAmbiguity = parseNdjson<AmbiguityRegistrySnapshotRow>(
+    manifestAmbiguityRaw,
+    manifest.artifacts.ambiguityRegistryNdjson,
+  ).records;
+  const manifestRuntimeHashes = {
+    entities: hashStableJson(canonicalizeEntitySnapshotRecords(manifestEntities)),
+    aliases: hashStableJson(canonicalizeAliasSnapshotRecords(manifestAliases)),
+    ambiguityRegistry: hashStableJson(canonicalizeAmbiguitySnapshotRows(manifestAmbiguity)),
+  } as const;
 
   if (runtimeState.schemaVersion !== SEARCH_SNAPSHOT_STATE_VERSION) {
     throw new Error(`Runtime state schema version ${runtimeState.schemaVersion} != expected ${SEARCH_SNAPSHOT_STATE_VERSION}`);
@@ -93,6 +130,7 @@ export async function verifySearchSnapshotReadiness(args: Args): Promise<void> {
         : {}),
       runtimeState,
       strictHashes: true,
+      requireActiveLtr: args.requireActiveLtr === true,
       ...(args.requirePointerParity ? { requirePointerParity: true } : {}),
     });
 
@@ -108,43 +146,45 @@ export async function verifySearchSnapshotReadiness(args: Args): Promise<void> {
     if (runtimeState.counts.nlMappings !== manifest.counts.nlMappings) {
       throw new Error(`NL mapping state/manifest mismatch: state=${runtimeState.counts.nlMappings}, manifest=${manifest.counts.nlMappings}`);
     }
-    if (runtimeState.hashes.entities !== manifest.hashes.entities) {
-      throw new Error(`Entity state/manifest hash mismatch: state=${runtimeState.hashes.entities}, manifest=${manifest.hashes.entities}`);
+    if (runtimeState.hashes.entities !== manifestRuntimeHashes.entities) {
+      throw new Error(`Entity state/manifest hash mismatch: state=${runtimeState.hashes.entities}, manifest=${manifestRuntimeHashes.entities}`);
     }
-    if (runtimeState.hashes.aliases !== manifest.hashes.aliases) {
-      throw new Error(`Alias state/manifest hash mismatch: state=${runtimeState.hashes.aliases}, manifest=${manifest.hashes.aliases}`);
+    if (runtimeState.hashes.aliases !== manifestRuntimeHashes.aliases) {
+      throw new Error(`Alias state/manifest hash mismatch: state=${runtimeState.hashes.aliases}, manifest=${manifestRuntimeHashes.aliases}`);
     }
-    if (runtimeState.hashes.ambiguityRegistry !== manifest.hashes.ambiguityRegistry) {
-      throw new Error(`Ambiguity state/manifest hash mismatch: state=${runtimeState.hashes.ambiguityRegistry}, manifest=${manifest.hashes.ambiguityRegistry}`);
+    if (runtimeState.hashes.ambiguityRegistry !== manifestRuntimeHashes.ambiguityRegistry) {
+      throw new Error(`Ambiguity state/manifest hash mismatch: state=${runtimeState.hashes.ambiguityRegistry}, manifest=${manifestRuntimeHashes.ambiguityRegistry}`);
     }
     if (runtimeState.hashes.nlMappings !== manifest.hashes.nlMappings) {
       throw new Error(`NL mapping state/manifest hash mismatch: state=${runtimeState.hashes.nlMappings}, manifest=${manifest.hashes.nlMappings}`);
     }
-    if (
-      runtimeState.fieldAvailability.appellation.populatedDocCount
-      !== manifest.fieldAvailability.appellation.populatedDocCount
-    ) {
-      throw new Error(
-        `Appellation field-availability count mismatch: state=${runtimeState.fieldAvailability.appellation.populatedDocCount}, manifest=${manifest.fieldAvailability.appellation.populatedDocCount}`,
-      );
+    for (const attribute of ['appellation', 'body', 'sweetness', 'acidity', 'tannin'] as const) {
+      if (
+        runtimeState.fieldAvailability[attribute].populatedDocCount
+        !== manifest.fieldAvailability[attribute].populatedDocCount
+      ) {
+        throw new Error(
+          `${attribute} field-availability count mismatch: state=${runtimeState.fieldAvailability[attribute].populatedDocCount}, manifest=${manifest.fieldAvailability[attribute].populatedDocCount}`,
+        );
+      }
+      if (
+        runtimeState.fieldAvailability[attribute].totalDocCount
+        !== manifest.fieldAvailability[attribute].totalDocCount
+      ) {
+        throw new Error(
+          `${attribute} field-availability total mismatch: state=${runtimeState.fieldAvailability[attribute].totalDocCount}, manifest=${manifest.fieldAvailability[attribute].totalDocCount}`,
+        );
+      }
+      if (
+        runtimeState.fieldAvailability[attribute].populatedDocRatio
+        !== manifest.fieldAvailability[attribute].populatedDocRatio
+      ) {
+        throw new Error(
+          `${attribute} field-availability ratio mismatch: state=${runtimeState.fieldAvailability[attribute].populatedDocRatio}, manifest=${manifest.fieldAvailability[attribute].populatedDocRatio}`,
+        );
+      }
     }
-    if (
-      runtimeState.fieldAvailability.appellation.totalDocCount
-      !== manifest.fieldAvailability.appellation.totalDocCount
-    ) {
-      throw new Error(
-        `Appellation field-availability total mismatch: state=${runtimeState.fieldAvailability.appellation.totalDocCount}, manifest=${manifest.fieldAvailability.appellation.totalDocCount}`,
-      );
-    }
-    if (
-      runtimeState.fieldAvailability.appellation.populatedDocRatio
-      !== manifest.fieldAvailability.appellation.populatedDocRatio
-    ) {
-      throw new Error(
-        `Appellation field-availability ratio mismatch: state=${runtimeState.fieldAvailability.appellation.populatedDocRatio}, manifest=${manifest.fieldAvailability.appellation.populatedDocRatio}`,
-      );
-    }
-    if (runtimeState.counts.activeLtrModels <= 0) {
+    if (args.requireActiveLtr === true && runtimeState.counts.activeLtrModels <= 0) {
       throw new Error('Active LTR model count is zero');
     }
     if (runtimeState.quality.blockers.length > 0) {

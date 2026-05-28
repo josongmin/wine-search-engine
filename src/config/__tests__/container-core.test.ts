@@ -48,6 +48,8 @@ const buildDecisionEngine = vi.fn(() => decisionEngine);
 const buildMixedSolver = vi.fn(() => mixedSolver);
 const buildResponseBuilder = vi.fn(() => responseBuilder);
 const buildBlockingUseCaseAdapter = vi.fn(() => ({ block: vi.fn() }));
+const snapshotEntityLookup = { getDocuments: vi.fn(), getDrinkingWindowDocuments: vi.fn() };
+const loadSnapshotEntityLookup = vi.fn(async () => snapshotEntityLookup);
 // ADR-013 Phase 1c.x: expose a minimal factory mock so
 // `buildCoreContainerServices` can populate `budgetLedgerFactory`
 // without pulling the concrete InMemoryBudgetLedger through the unit
@@ -65,6 +67,12 @@ const buildBudgetLedgerFactory = vi.fn(() => () => ({
 
 vi.mock('../container-adapters.js', () => ({
   buildCoreAdapterServices,
+}));
+
+vi.mock('../../infrastructure/adapter/search-snapshot-entity-lookup.js', () => ({
+  SearchSnapshotEntityLookup: {
+    loadFromManifest: loadSnapshotEntityLookup,
+  },
 }));
 
 vi.mock('../startup-preflight.js', () => ({
@@ -103,7 +111,7 @@ describe('buildCoreContainerServices', () => {
     const core = await buildCoreContainerServices(config);
 
     expect(buildRuntimeSupportServices).toHaveBeenCalledWith(config, {});
-    expect(buildCoreAdapterServices).toHaveBeenCalledWith(config, undefined);
+    expect(buildCoreAdapterServices).toHaveBeenCalledWith(config, {});
     expect(buildRanker).toHaveBeenCalledWith(adapters, config, support);
     expect(buildRankingPipeline).toHaveBeenCalledWith(baseRanker);
     expect(buildMixedSolver).toHaveBeenCalledWith(adapters, rankingPipeline);
@@ -125,5 +133,42 @@ describe('buildCoreContainerServices', () => {
     const warnOrder = vi.mocked(warnStartupMisconfigurations).mock.invocationCallOrder[0];
     const supportOrder = vi.mocked(buildRuntimeSupportServices).mock.invocationCallOrder[0];
     expect(warnOrder).toBeLessThan(supportOrder!);
+  });
+
+  it('passes the snapshot override into planner warmup wiring', async () => {
+    const { buildCoreContainerServices } = await import('../container-core.js');
+    const config = parseEnv({ NODE_ENV: 'test' });
+
+    await buildCoreContainerServices(config, {
+      searchSnapshotId: 'search-snapshot:v1:target',
+    });
+
+    expect(buildCoreAdapterServices).toHaveBeenCalledWith(config, {
+      searchSnapshotId: 'search-snapshot:v1:target',
+    });
+    expect(buildQueryPlanner).toHaveBeenCalledWith(
+      adapters,
+      undefined,
+      undefined,
+      config.openai.llmQueryInterpreter,
+      config.openai.llmQueryInterpreterTimeoutMs,
+      support.phraseCache,
+      'search-snapshot:v1:target',
+    );
+  });
+
+  it('uses manifest-backed entity lookup for snapshot-scoped runtime overrides', async () => {
+    const { buildCoreContainerServices } = await import('../container-core.js');
+    const config = parseEnv({ NODE_ENV: 'test' });
+
+    const core = await buildCoreContainerServices(config, {
+      searchSnapshotId: 'search-snapshot:v1:target',
+      searchSnapshotManifestPath: '/tmp/search-snapshot:v1:target/manifest.json',
+    });
+
+    expect(loadSnapshotEntityLookup).toHaveBeenCalledWith(
+      '/tmp/search-snapshot:v1:target/manifest.json',
+    );
+    expect(core.entityLookup).toBe(snapshotEntityLookup);
   });
 });

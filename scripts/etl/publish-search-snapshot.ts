@@ -121,7 +121,7 @@ function parseArgs(argv: readonly string[]): Args {
       runtimeNlMappingsPath = argv[i + 1] ?? runtimeNlMappingsPath;
       i += 1;
     } else if (arg === '--allow-missing-ltr') {
-      throw new Error('--allow-missing-ltr has been removed; canonical snapshot publish now hard-fails on missing active LTR models');
+      throw new Error('--allow-missing-ltr has been removed; LTR is now optional for canonical snapshot publish and the flag is obsolete');
     } else if (arg === '--skip-index') {
       skipIndex = true;
     } else if (arg === '--fixture-repo') {
@@ -1062,12 +1062,13 @@ async function ensureSnapshotBoundLtrModels(args: {
     }
 
     if (candidateSnapshotIds.length === 0) {
-      throw new Error(
-        `No active LTR models found for snapshot ${args.nextManifest.snapshotId}; train LTR for the snapshot before publish`,
+      console.warn(
+        `⚠️ No active LTR models found for snapshot ${args.nextManifest.snapshotId}; continuing canonical publish with search-core only`,
       );
+      return;
     }
-    throw new Error(
-      `No compatible active snapshot-bound LTR source could be cloned into ${args.nextManifest.snapshotId}; retrain LTR for the new snapshot`,
+    console.warn(
+      `⚠️ No compatible active snapshot-bound LTR source could be cloned into ${args.nextManifest.snapshotId}; continuing canonical publish with search-core only`,
     );
   } finally {
     await pool.end();

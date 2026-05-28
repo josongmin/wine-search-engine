@@ -5,6 +5,34 @@ import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 import { resolveCliDataPathArg } from './cli-data-path.js';
+import type { EvalBenchmarkReportProvenance } from './benchmark-provenance.js';
+
+const BenchmarkReportProvenanceSchema: z.ZodType<EvalBenchmarkReportProvenance> = z.object({
+  benchmark_kind: z.string().min(1),
+  provenance_schema_version: z.literal(1),
+  corpus_id: z.string().min(1),
+  corpus_hash: z.string().min(1),
+  runtime_target: z.string().min(1),
+  uses_live_api: z.boolean(),
+  smoke_synthesized: z.boolean(),
+  threshold_source: z.string().min(1),
+  gate_eligible: z.boolean(),
+  suite_gate_passed: z.boolean(),
+  search_snapshot_id: z.string().nullable(),
+  runtime_activation_status: z.string().nullable(),
+  readiness_passed: z.boolean().nullable(),
+  active_ltr_models: z.number().nullable(),
+  dense_retrieval_enabled: z.boolean().nullable().optional(),
+  query_embedding_model: z.string().nullable().optional(),
+  query_embedding_model_version: z.string().nullable().optional(),
+  embedding_sensitive_eval: z.boolean().optional(),
+  label_tier_mix: z.record(z.number()).optional(),
+  slice_mix: z.record(z.number()).optional(),
+  query_class_mix: z.record(z.number()).optional(),
+  feature_schema_hash: z.string().min(1),
+  comparison_compatibility_key: z.string().min(1),
+  run_provenance_key: z.string().min(1),
+}).strict();
 
 const OfflineEvalSchema = z.object({
   dataset_tier: z.string().min(1),
@@ -37,6 +65,7 @@ const OfflineEvalSchema = z.object({
     wrong_top1_rate: z.number(),
     decision_utility: z.number(),
   })).optional(),
+  provenance: BenchmarkReportProvenanceSchema.optional(),
 });
 
 const NoisyEvalSchema = z.object({
@@ -97,6 +126,22 @@ export function compareOfflineRegression(
   thresholds: BaselineManifest['thresholds']['offline'],
 ): readonly RegressionViolation[] {
   const violations: RegressionViolation[] = [];
+
+  if (
+    current.provenance?.comparison_compatibility_key !== undefined
+    && baseline.provenance?.comparison_compatibility_key !== undefined
+    && current.provenance.comparison_compatibility_key
+      !== baseline.provenance.comparison_compatibility_key
+  ) {
+    return [{
+      metric: 'provenance.comparison_compatibility_key',
+      baseline: 0,
+      current: 0,
+      message:
+        'offline baseline provenance mismatch: ' +
+        `${baseline.provenance.comparison_compatibility_key} != ${current.provenance.comparison_compatibility_key}`,
+    }];
+  }
 
   if (current.ndcg_at_10 < baseline.ndcg_at_10 - thresholds.ndcg_at_10_max_drop) {
     violations.push({

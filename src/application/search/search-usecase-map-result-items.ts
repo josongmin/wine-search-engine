@@ -11,6 +11,10 @@ import {
   inferDrinkingWindowEvidenceLevel,
   isProjectableDrinkingWindowModelVersion,
 } from './drinking-window-confidence.js';
+import {
+  isProjectableDrinkingWindowVintage,
+  projectDrinkingWindowBlock,
+} from '../drinking-window/drinking-window-block-projection.js';
 import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import { clamp01 } from '../../domain/shared/utils/clamp.js';
 import type { EvidenceItem } from '../../domain/shared/types/index.js';
@@ -213,7 +217,7 @@ function needsDrinkingWindowPrediction(r: RankedResult, priors?: QueryLevelSenso
   if (r.drinkingWindowStart !== undefined) return false;
   // Rule 28: vintageYear=undefined is guarded above, but a NaN vintage from a
   // corrupted index row would pass the undefined check and propagate into arithmetic.
-  if (r.vintageYear === undefined || !Number.isFinite(r.vintageYear)) return false;
+  if (!isProjectableDrinkingWindowVintage(r.vintageYear)) return false;
   if (r.grapePrimaryEnc === undefined) return false;
   if (r.regionEnc === undefined) return false;
   if (r.countryEnc === undefined) return false;
@@ -355,20 +359,46 @@ export async function mapRankedResultsToResultItems(
         && isProjectableDrinkingWindowModelVersion(r.drinkingWindowModelVersion)) {
       // Guard: inverted windows (start > end) from ETL bugs or Track-C backfill errors
       // would fail the Zod response schema refine → HTTP 500. Omit the block instead.
-      drinkingWindowBlock = {
+      const projectedIndexedWindow = projectDrinkingWindowBlock({
         drinkingWindowStart: r.drinkingWindowStart,
         drinkingWindowEnd: r.drinkingWindowEnd,
-        currentlyDrinkable:
-          targetYear >= r.drinkingWindowStart && targetYear <= r.drinkingWindowEnd,
+        currentlyDrinkable: false,
         confidence: inferDrinkingWindowConfidence(r.drinkingWindowModelVersion),
         evidenceLevel: inferDrinkingWindowEvidenceLevel(r.drinkingWindowModelVersion),
         blockingEligible: inferDrinkingWindowBlockingEligibility(r.drinkingWindowModelVersion),
         modelVersion: r.drinkingWindowModelVersion,
-      };
+      }, targetYear);
+      if (projectedIndexedWindow === undefined) {
+        drinkingWindowLogger.warn(
+          {
+            entityId: r.entityId,
+            drinkingWindowStart: r.drinkingWindowStart,
+            drinkingWindowEnd: r.drinkingWindowEnd,
+            modelVersion: r.drinkingWindowModelVersion,
+          },
+          'indexed_drinking_window_projection_dropped',
+        );
+      } else {
+        drinkingWindowBlock = projectedIndexedWindow;
+      }
     } else {
       const predicted = predictionMap.get(r.entityId);
       if (predicted) {
-        drinkingWindowBlock = predicted;
+        const projectedPredictedWindow = projectDrinkingWindowBlock(predicted, targetYear);
+        if (projectedPredictedWindow === undefined) {
+          drinkingWindowLogger.warn(
+            {
+              entityId: r.entityId,
+              drinkingWindowStart: predicted.drinkingWindowStart,
+              drinkingWindowEnd: predicted.drinkingWindowEnd,
+              peakYear: predicted.peakYear,
+              modelVersion: predicted.modelVersion,
+            },
+            'predicted_drinking_window_projection_dropped',
+          );
+        } else {
+          drinkingWindowBlock = projectedPredictedWindow;
+        }
       }
     }
 

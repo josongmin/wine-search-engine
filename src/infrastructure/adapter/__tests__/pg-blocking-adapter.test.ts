@@ -40,6 +40,21 @@ describe('PgBlockingAdapter', () => {
     );
   });
 
+  it('uses the explicit snapshot override instead of resolving the active pointer', async () => {
+    const query = vi.fn().mockResolvedValue({
+      rows: [{ entity_id: 'wine-opus-one' }],
+    });
+    const pool = { query };
+    const adapter = new PgBlockingAdapter(pool as never, 'search-snapshot:v1:target');
+
+    await expect(adapter.block('opus one', 'opus one')).resolves.toEqual(['wine-opus-one']);
+
+    expect(query).toHaveBeenCalledTimes(1);
+    const aliasQueryArgs = query.mock.calls[0];
+    const params = aliasQueryArgs?.[1] as readonly unknown[];
+    expect(params[4]).toBe('search-snapshot:v1:target');
+  });
+
   describe('phase 4 — pg_trgm fuzzy match', () => {
     function makeMockedPool() {
       const query = vi.fn()

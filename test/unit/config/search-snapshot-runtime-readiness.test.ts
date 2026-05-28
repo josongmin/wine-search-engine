@@ -53,6 +53,26 @@ const FIELD_AVAILABILITY = {
     totalDocCount: 10,
     populatedDocRatio: 0.8,
   },
+  body: {
+    populatedDocCount: 6,
+    totalDocCount: 10,
+    populatedDocRatio: 0.6,
+  },
+  sweetness: {
+    populatedDocCount: 6,
+    totalDocCount: 10,
+    populatedDocRatio: 0.6,
+  },
+  acidity: {
+    populatedDocCount: 6,
+    totalDocCount: 10,
+    populatedDocRatio: 0.6,
+  },
+  tannin: {
+    populatedDocCount: 6,
+    totalDocCount: 10,
+    populatedDocRatio: 0.6,
+  },
 } as const;
 
 describe('search snapshot runtime readiness', () => {
@@ -97,7 +117,7 @@ describe('search snapshot runtime readiness', () => {
     await expect(probeSearchSnapshotRuntimeState(runtimeStatePath)).resolves.toBe('up');
   });
 
-  it('returns down when zero active LTR models are present without explicit no-LTR mode', async () => {
+  it('returns up for core runtime readiness when zero active LTR models are present', async () => {
     const dir = await makeTempDir();
     const nlMappingsPath = path.join(dir, 'nl-mappings.json');
     const runtimeStatePath = path.join(dir, 'runtime-search-snapshot.json');
@@ -129,10 +149,10 @@ describe('search snapshot runtime readiness', () => {
       quality: CANONICAL_QUALITY,
     }));
 
-    await expect(probeSearchSnapshotRuntimeState(runtimeStatePath)).resolves.toBe('down');
+    await expect(probeSearchSnapshotRuntimeState(runtimeStatePath)).resolves.toBe('up');
   });
 
-  it('returns down when zero active LTR models are present', async () => {
+  it('returns down when explicit LTR runtime readiness is requested and no active LTR models are present', async () => {
     const dir = await makeTempDir();
     const nlMappingsPath = path.join(dir, 'nl-mappings.json');
     const runtimeStatePath = path.join(dir, 'runtime-search-snapshot.json');
@@ -164,7 +184,9 @@ describe('search snapshot runtime readiness', () => {
       quality: CANONICAL_QUALITY,
     }));
 
-    await expect(probeSearchSnapshotRuntimeState(runtimeStatePath)).resolves.toBe('down');
+    await expect(
+      probeSearchSnapshotRuntimeState(runtimeStatePath, { requireActiveLtr: true }),
+    ).resolves.toBe('down');
   });
 
   it('returns down when NL mappings hash does not match runtime state', async () => {
@@ -203,6 +225,43 @@ describe('search snapshot runtime readiness', () => {
     await expect(probeSearchSnapshotRuntimeState(runtimeStatePath)).resolves.toBe('down');
   });
 
+  it('returns down when runtime state omits sensory field availability metrics', async () => {
+    const dir = await makeTempDir();
+    const nlMappingsPath = path.join(dir, 'nl-mappings.json');
+    const runtimeStatePath = path.join(dir, 'runtime-search-snapshot.json');
+    const nlMappingsPayload = { mappings: [{ key: 'full-bodied', canonical: 'full' }] };
+
+    await fs.writeFile(nlMappingsPath, JSON.stringify(nlMappingsPayload));
+    await fs.writeFile(runtimeStatePath, JSON.stringify({
+      schemaVersion: 'search_snapshot_runtime_state.v3',
+      snapshotId: 'search-snapshot:v1:test',
+      contentHash: 'abc123',
+      publishedAt: '2026-04-12T00:00:00.000Z',
+      manifestPath: '/tmp/manifest.json',
+      nlMappingsRuntimePath: nlMappingsPath,
+      counts: {
+        entities: 10,
+        aliases: 10,
+        ambiguityRegistry: 0,
+        nlMappings: 1,
+        activeLtrModels: 1,
+      },
+      hashes: {
+        entities: 'entities-hash',
+        aliases: 'aliases-hash',
+        ambiguityRegistry: 'ambiguity-hash',
+        nlMappings: hashRuntimeNlMappings(nlMappingsPayload),
+        activeLtrModels: 'ltr-hash',
+      },
+      fieldAvailability: {
+        appellation: FIELD_AVAILABILITY.appellation,
+      },
+      quality: CANONICAL_QUALITY,
+    }));
+
+    await expect(probeSearchSnapshotRuntimeState(runtimeStatePath)).resolves.toBe('down');
+  });
+
   it('registers search snapshot runtime readiness as required in all environments (T-E7-02 strict fail-closed)', () => {
     const prodConfig = parseEnv({
       NODE_ENV: 'production',
@@ -223,6 +282,15 @@ describe('search snapshot runtime readiness', () => {
   });
 
   it('uses strict hash verification when the runtime readiness probe runs with a pool', async () => {
+    mockLoadSearchSnapshotRuntimeState.mockResolvedValue({
+      snapshotId: 'search-snapshot:v1:test',
+      contentHash: 'abc123',
+      quality: CANONICAL_QUALITY,
+      counts: {
+        activeLtrModels: 1,
+      },
+    });
+
     const config = parseEnv({
       NODE_ENV: 'test',
       WEBHOOK_SECRET: 'watchlist-secret-1234',
@@ -230,21 +298,19 @@ describe('search snapshot runtime readiness', () => {
     });
 
     const health = buildHealthRouteOptions(config, {
-      pool: { query: async () => ({ rows: [] }) } as never,
+      pool: {
+        query: async () => ({
+          rows: [{ active_snapshot_id: 'search-snapshot:v1:test', content_hash: 'abc123' }],
+        }),
+      } as never,
     });
 
     await expect(health.readiness?.search_snapshot_runtime?.check?.()).resolves.toBe('up');
-    expect(mockVerifySearchSnapshotRuntimeStateLive).toHaveBeenCalledTimes(1);
-    expect(mockVerifySearchSnapshotRuntimeStateLive).toHaveBeenCalledWith(
-      expect.objectContaining({
-        pool: expect.anything(),
-        vespaUrl: config.vespa.url,
-        strictHashes: true,
-      }),
-    );
+    expect(mockLoadSearchSnapshotRuntimeState).toHaveBeenCalledTimes(1);
+    expect(mockVerifySearchSnapshotRuntimeStateLive).not.toHaveBeenCalled();
   });
 
-  it('surfaces the no-active-LTR runtime state explicitly when no pool is available', async () => {
+  it('keeps search_snapshot_runtime up but marks search_snapshot_ltr down when no pool is available and no active LTR exists', async () => {
     mockLoadSearchSnapshotRuntimeState.mockResolvedValue({
       quality: CANONICAL_QUALITY,
       counts: {
@@ -259,9 +325,11 @@ describe('search snapshot runtime readiness', () => {
 
     const health = buildHealthRouteOptions(config, {});
 
-    await expect(health.readiness?.search_snapshot_runtime?.check?.()).rejects.toThrow(
+    await expect(health.readiness?.search_snapshot_runtime?.check?.()).resolves.toBe('up');
+    await expect(health.readiness?.search_snapshot_ltr?.check?.()).rejects.toThrow(
       /Active LTR runtime count is zero/,
     );
+    expect(health.readiness?.search_snapshot_ltr?.required).toBe(false);
   });
 
   it('surfaces an unloaded drinking-window predictor as a degraded readiness check', async () => {
@@ -364,6 +432,21 @@ describe('search snapshot runtime readiness', () => {
             { column_name: 'false_exact_rate' },
             { column_name: 'release_gate_passed' },
             { column_name: 'activation_status' },
+            { column_name: 'provenance_schema_version' },
+            { column_name: 'corpus_id' },
+            { column_name: 'corpus_hash' },
+            { column_name: 'runtime_target' },
+            { column_name: 'uses_live_api' },
+            { column_name: 'smoke_synthesized' },
+            { column_name: 'threshold_source' },
+            { column_name: 'gate_eligible' },
+            { column_name: 'suite_gate_passed' },
+            { column_name: 'readiness_passed' },
+            { column_name: 'active_ltr_models' },
+            { column_name: 'label_tier_mix' },
+            { column_name: 'slice_mix' },
+            { column_name: 'query_class_mix' },
+            { column_name: 'runtime_activation_status' },
             { column_name: 'report_json' },
             { column_name: 'metrics' },
             { column_name: 'created_at' },

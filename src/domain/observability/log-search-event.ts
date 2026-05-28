@@ -6,6 +6,7 @@ import {
 } from '../decision/service/id-schema-decoder.js';
 
 const log = bootstrapLogger.child({ component: 'search_observability' });
+const CLI_SUPPRESS_OBSERVABILITY_LOGS_ENV = 'WINE_CLI_SUPPRESS_OBSERVABILITY_LOGS';
 
 export function buildSearchLogEvent(event: SearchLogSchema): SearchLogSchema {
   const authorityTraceRef = event.authority_trace_ref;
@@ -31,6 +32,9 @@ export function buildSearchLogEvent(event: SearchLogSchema): SearchLogSchema {
 }
 
 export function logSearchEvent(event: SearchLogSchema): void {
+  if (process.env[CLI_SUPPRESS_OBSERVABILITY_LOGS_ENV] === 'true') {
+    return;
+  }
   log.info({
     event_type: 'search_execution',
     ...buildSearchLogEvent(event),

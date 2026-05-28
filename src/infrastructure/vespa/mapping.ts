@@ -27,6 +27,7 @@ import {
 } from '../../domain/query/service/search-constraint-extractor.js';
 import { parseSourceRecordRefsFromVespa } from '../../domain/entity/model/source-record-ref.js';
 import { stableJsonStringify } from '../../domain/shared/utils/stable-json.js';
+import { coerceFiniteNumber as coerceFiniteNumberSchema } from '../../domain/shared/utils/zod-coerce.js';
 
 /** Decimal radix for parseInt on external filter tokens. */
 const DECIMAL_RADIX = 10;
@@ -67,6 +68,11 @@ function isNumber(v: unknown): v is number {
   return typeof v === 'number' && isFinite(v);
 }
 
+function parseFiniteNumberLike(value: unknown): number | undefined {
+  const parsed = coerceFiniteNumberSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
+}
+
 function isBoolean(v: unknown): v is boolean {
   return typeof v === 'boolean';
 }
@@ -91,8 +97,8 @@ function getRequiredString(fields: Record<string, unknown>, key: string): string
 }
 
 function getRequiredNumber(fields: Record<string, unknown>, key: string): number {
-  const v = fields[key];
-  if (isNumber(v)) return v;
+  const v = parseFiniteNumberLike(fields[key]);
+  if (v !== undefined) return v;
   throw new MalformedVespaDocumentError(
     'fromVespaFields: malformed Vespa document — required retrieval payload missing or invalid',
     key,
@@ -167,8 +173,7 @@ function getOptionalNumber(
   fields: Record<string, unknown>,
   key: string,
 ): number | undefined {
-  const v = fields[key];
-  return isNumber(v) ? v : undefined;
+  return parseFiniteNumberLike(fields[key]);
 }
 
 /**
@@ -204,8 +209,8 @@ function getOptionalNumberStrict(
   if (!(key in fields) || fields[key] === undefined) {
     return undefined;
   }
-  const value = fields[key];
-  if (isNumber(value)) {
+  const value = parseFiniteNumberLike(fields[key]);
+  if (value !== undefined) {
     return value;
   }
   throw new Error('fromVespaFields: malformed Vespa document — required retrieval payload missing or invalid');
@@ -936,6 +941,7 @@ const FILTER_TOKEN_REGISTRY: ReadonlyMap<string, TokenSpec> = new Map([
   ['country',          { type: 'contains',  field: 'country' }],
   ['region',           { type: 'contains',  field: 'region' }],
   ['appellation',      { type: 'contains',  field: 'appellation' }],
+  ['search_snapshot_id', { type: 'contains', field: 'search_snapshot_id' }],
   ['pairing',          { type: 'contains',  field: 'pairing' }],
   ['occasion',         { type: 'contains',  field: 'occasion' }],
   ['grape_primary',    { type: 'contains',  field: 'grape_primary' }],
@@ -1200,10 +1206,16 @@ export function buildNumericRangeFilters(constraints: SearchConstraints): string
 function buildTokenClause(_key: string, spec: TokenSpec, value: string): string | null {
   switch (spec.type) {
     case 'contains':
+      if (_key === 'region') {
+        return buildRegionGeographyClause(value);
+      }
       return `${spec.field} contains ${yqlString(value)}`;
     case 'matches':
       return `${spec.field} matches ${yqlString(escapeRegex(value))}`;
     case 'not_contains':
+      if (_key === 'region_not') {
+        return buildRegionGeographyNegationClause(value);
+      }
       return `!(${spec.field} contains ${yqlString(value)})`;
     case 'not_matches':
       // Attribute-only fields (e.g. style) whose values are multi-token compounds:
@@ -1251,6 +1263,24 @@ function buildTokenClause(_key: string, spec: TokenSpec, value: string): string 
       return null;
     }
   }
+}
+
+function buildRegionGeographyDisjuncts(value: string): readonly string[] {
+  const escaped = yqlString(value);
+  return [
+    `region contains ${escaped}`,
+    `appellation contains ${escaped}`,
+    `region_hierarchy contains ${escaped}`,
+  ];
+}
+
+function buildRegionGeographyClause(value: string): string {
+  const disjuncts = buildRegionGeographyDisjuncts(value);
+  return `(${disjuncts.join(' OR ')})`;
+}
+
+function buildRegionGeographyNegationClause(value: string): string {
+  return `!${buildRegionGeographyClause(value)}`;
 }
 
 export function buildSparseFilters(filters: readonly string[]): string {
@@ -1307,6 +1337,10 @@ export function buildSparseFilters(filters: readonly string[]): string {
         // on attribute-only multi-token fields silently no-ops ("full" vs "full red").
         const useNotMatches = notSpec?.type === 'not_matches';
         for (const v of vals) {
+          if (fieldWithSuffix === 'region_not') {
+            clauses.push(buildRegionGeographyNegationClause(v));
+            continue;
+          }
           clauses.push(
             useNotMatches
               ? `!(${actualField} matches ${yqlString(escapeRegex(v))})`
@@ -1320,6 +1354,11 @@ export function buildSparseFilters(filters: readonly string[]): string {
         );
         clauses.push(vals.length === 1 ? disjuncts[0]! : `(${disjuncts.join(' OR ')})`);
       } else {
+        if (fieldWithSuffix === 'region') {
+          const disjuncts = vals.map((v) => buildRegionGeographyClause(v));
+          clauses.push(vals.length === 1 ? disjuncts[0]! : `(${disjuncts.join(' OR ')})`);
+          continue;
+        }
         // Positive IN: use the registered operator for this base key.
         // CRITICAL: style_matches_in must use `matches`, not `contains` — look up the
         // base spec to determine the correct YQL operator instead of hardcoding `contains`.

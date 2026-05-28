@@ -39,13 +39,6 @@ const ENTITY_METADATA_KEYWORDS: readonly RegExp[] = [
   ...DRINKABILITY_KEYWORDS,
 ] as const;
 
-/** Direct lookup / info tails that still target a specific known wine label. */
-const EXACT_ENTITY_LOOKUP_KEYWORDS: readonly RegExp[] = [
-  ...ENTITY_METADATA_KEYWORDS,
-  /(?<!\p{L})(?<!\p{N})(?:info(?:rmation)?|tell\s+me\s+about|what\s+is\s+it|recommend(?:\s+me)?|suggest(?:ion)?)(?!\p{L})(?!\p{N})/iu,
-  /(?:^|[^\p{L}\p{N}])(?:정보|설명(?:해줘|해주세요)?|어떤\s*와인이(?:야|에요|예요)?|무슨\s*와인이(?:야|에요|예요)?|추천(?:해줘|해주세요)?)($|[^\p{L}\p{N}])/u,
-] as const;
-
 /** Metadata-only tails that should be removed before exact entity lookup. */
 const EXACT_ENTITY_METADATA_SUFFIX_PATTERNS: readonly RegExp[] = [
   /(?:\s*(?:가격(?:이|은|는)?\s*)?얼마(?:야|예요|에요|지|인지)?)[?？!！]*$/u,
@@ -77,7 +70,8 @@ export function hasEntityMetadataKeyword(normalizedQuery: string): boolean {
 }
 
 export function hasExactEntityLookupKeyword(normalizedQuery: string): boolean {
-  return EXACT_ENTITY_LOOKUP_KEYWORDS.some((re) => re.test(normalizedQuery));
+  return ENTITY_METADATA_KEYWORDS.some((re) => re.test(normalizedQuery))
+    || EXACT_ENTITY_LOOKUP_SUFFIX_PATTERNS.some((re) => re.test(normalizedQuery.trim()));
 }
 
 export function stripExactEntityMetadataSuffix(rawQuery: string): string {

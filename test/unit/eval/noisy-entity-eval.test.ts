@@ -1,3 +1,5 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -215,6 +217,96 @@ describe('noisy entity benchmark eval', () => {
     });
 
     expect(ids).toEqual(['entity-a', 'entity-b', 'entity-c', 'entity-d']);
+  });
+
+  it('falls back to eval provenance slices when the response intentionally hides result cards', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'noisy-entity-eval-'));
+    const inputPath = path.join(dir, 'single-case.jsonl');
+    await fs.writeFile(
+      inputPath,
+      `${JSON.stringify({
+        benchmark_id: 'case-1',
+        query: 'opuss one',
+        expected_entity_id: 'opus-one-2018',
+        category: 'adversarial_near_miss',
+        language: 'en',
+        difficulty: 'hard',
+      })}\n`,
+      'utf8',
+    );
+
+    const report = await evaluateNoisyEntityBenchmarkWithSearchExecutor(
+      {
+        executeForEvaluation: async () => ({
+          response: {
+            queryType: 'search',
+            engineDecision: { decisionStatus: 'ambiguous' },
+            results: [],
+            meta: {
+              retrievalProvenanceSlices: [
+                {
+                  queryId: 'case-1',
+                  candidateEntityId: 'opus-one-2018',
+                  channels: ['sparse_bm25'],
+                  topChannel: 'sparse_bm25',
+                  anchorConditioned: false,
+                  protected: true,
+                  protectedReason: 'known_item_lookup',
+                  fusionScore: 0.9,
+                  rank: 1,
+                },
+              ],
+            },
+          } as never,
+          retrievalProvenanceSlices: [
+            {
+              queryId: 'case-1',
+              candidateEntityId: 'opus-one-2018',
+              channels: ['sparse_bm25'],
+              topChannel: 'sparse_bm25',
+              anchorConditioned: false,
+              protected: true,
+              protectedReason: 'known_item_lookup',
+              fusionScore: 0.9,
+              rank: 1,
+            },
+          ],
+        }),
+      },
+      {
+        input: inputPath,
+        concurrency: 1,
+      },
+    );
+
+    expect(report.query_count).toBe(1);
+    expect(report.recall_at_1).toBe(1);
+    expect(report.recall_at_3).toBe(1);
+    expect(report.misses).toHaveLength(0);
+  });
+
+  it('skips provenance matching when runtime output omits provenance metadata', () => {
+    const cases: NoisyEntityBenchmarkCase[] = [{
+      benchmark_id: 'case-1',
+      query: '오푸스원',
+      expected_entity_id: 'opus-one-2018',
+      category: 'transliteration',
+      language: 'ko',
+      difficulty: 'easy',
+      expected_provenance_stage: 'transliteration',
+      expected_provenance_source: 'rule:transliteration_ko_v1',
+    }];
+
+    const report = scoreNoisyEntityBenchmark(
+      cases,
+      new Map([
+        ['case-1', [{ entity_id: 'opus-one-2018' }]],
+      ]),
+    );
+
+    expect(report.provenance_checked_count).toBe(0);
+    expect(report.provenance_match_rate).toBeNull();
+    expect(report.provenance_misses).toHaveLength(0);
   });
 
   it('runs the noisy benchmark against an in-process search executor using camelCase runtime fields', async () => {

@@ -36,6 +36,7 @@ import { fileURLToPath } from 'node:url';
 import { loadConfig } from '../../../src/config/env.js';
 import { createContainer } from '../../../src/config/container.js';
 import type { ChatLlmPort } from '../../../src/domain/ai/port/chat-llm.port.js';
+import { createChatLlmFromEnv } from '../../../src/infrastructure/ai/chat-llm-from-env.js';
 import { wineSearchResultToScenarioExecution } from '../../../src/application/wine-search/bench-scorer-adapter.js';
 import type { WineSearchOrchestratorContract } from '../../../src/application/wine-search/wine-search-orchestrator.js';
 import { AGENT_SCENARIOS } from '../agent/scenarios.js';
@@ -379,9 +380,15 @@ async function main(): Promise<void> {
     );
   }
   const orchestrator = wineSearch.wineSearchOrchestrator;
-  const judgeLlm = container.chatLlm;
+  const judgeLlm = createChatLlmFromEnv({
+    env: process.env,
+    openAiBaseUrl: config.openai.baseUrl,
+    defaultModel: config.openai.chatModel,
+    httpTimeoutMs: config.openai.httpTimeoutMs,
+    allowCodexFallback: true,
+  });
   if (judgeLlm === undefined) {
-    throw new Error('chatLlm undefined — judge cannot run. Check OPENAI_API_KEY.');
+    throw new Error('chatLlm undefined — judge cannot run. Check OPENAI_API_KEY/OPENAI_API_KEYS or Codex ChatGPT login token.');
   }
 
   // Per-run JSONL stream: one record per scenario as it completes. The

@@ -16,6 +16,7 @@ import {
   SOURCE_SYSTEM_BENCHMARK_ANCHOR_CATALOG,
   SOURCE_SYSTEM_VIVINO_SILVER,
 } from '../../../src/domain/shared/constants/source-systems.js';
+import { createCanonicalEntityId } from '../../../src/domain/shared/types/entity-id.js';
 import { stableJsonStringify } from '../../../src/domain/shared/utils/stable-json.js';
 import {
   LEARNED_SPARSE_EVAL_KEY,
@@ -134,6 +135,39 @@ describe('index-to-vespa bridge', () => {
     expect(fields['bottle_size_ml']).toBe(750);
     expect(fields['bottle_size']).toBe('750ml');
     expect(fields['closure']).toBe('Cork');
+  });
+
+  it('honors source continuity lookup when deriving runtime public ids for retrieval docs', () => {
+    const record = makeEnrichedRecord({
+      sourceId: 'vivino-59e3c85e4a4f3928',
+      canonicalLabel: "1979 Col d'Orcia Brunello di Montalcino",
+      producer: "Col d'Orcia",
+      country: '',
+      region: 'Toscana',
+    });
+    const embedding = deterministicEmbedding(
+      record.body,
+      record.sweetness,
+      record.acidity,
+      record.tannin,
+    );
+    const continuityEntityId = createCanonicalEntityId(
+      'wine-ce-6b8577026b0378895eb6e113173cd145643f4c47c62024fa8a4781073d839aff',
+    );
+    const doc = silverToRetrievalDoc(
+      record,
+      embedding,
+      'search-snapshot:v1:test-1234',
+      new Map(),
+      new Map([
+        [record.sourceId, {
+          entityId: continuityEntityId,
+          identitySignature: '6b8577026b0378895eb6e113173cd145643f4c47c62024fa8a4781073d839aff',
+        }],
+      ]),
+    );
+
+    expect(doc.entityId).toBe(continuityEntityId);
   });
 
   it('preserves benchmark-anchor canonical ids and lineage authority through retrieval projection', () => {

@@ -508,4 +508,158 @@ describe('buildEntityRouteRankedResults', () => {
         } satisfies ResolverCandidate],
       )).toThrow(/duplicate entity IDs/);
   });
+
+  it('preserves strongestAliasMatch when aliasType is unavailable on degraded substrates', () => {
+    const artifacts = liftEntityResolveResultToLaneArtifacts(
+      makePlan(),
+      makeResolveResult(),
+      [{
+        entityId: ENTITY_ID,
+        entityType: 'wine',
+        canonicalLabel: '2014 Kalaris Merlot',
+        aliasMatches: [{ aliasValue: 'Kalaris Merlot', matchScore: 0.95 }],
+        attributeHints: {
+          grape_primary: 'Merlot',
+        },
+        sourceSignals: {
+          canonicalExactMatch: 1,
+          canonicalNormalizedMatch: 1,
+          aliasExactMatch: 1,
+          aliasFuzzyMatch: 0,
+          aliasTypePrior: 1,
+          producerMatch: 0,
+          vintageMatch: 0,
+          regionMatch: 0,
+          grapeHintMatch: 0,
+          phoneticMatch: 0,
+          editDistanceScore: 0,
+          ambiguityPenalty: 0,
+        },
+        source: 'alias',
+        sources: ['alias'],
+      } satisfies ResolverCandidate],
+    );
+
+    expect(artifacts).toHaveLength(1);
+    expect(artifacts[0]?.identityProvenance.strongestAliasMatch).toEqual({
+      aliasValue: 'Kalaris Merlot',
+      aliasType: undefined,
+      matchScore: 0.95,
+    });
+    expect(artifacts[0]?.evidenceItems[0]?.metadata).toMatchObject({
+      matchType: 'exact',
+      matchedAlias: 'Kalaris Merlot',
+    });
+  });
+
+  it('does not surface inferred-only matches as hard passes when the same attribute is unmet on hard constraints', () => {
+    const plan = makePlan();
+    const artifacts = liftEntityResolveResultToLaneArtifacts(
+      {
+        ...plan,
+        constraints: {
+          hard: [{ attribute: 'region', operator: '=', value: 'Chambolle-Musigny', source_phrase: 'Chambolle-Musigny', confidence: 1 }],
+          soft: [],
+          inferred: [{ attribute: 'region', operator: '=', value: 'Bourgogne', source_phrase: 'Bourgogne', confidence: 1 }],
+        },
+      },
+      makeResolveResult(),
+      [{
+        entityId: ENTITY_ID,
+        entityType: 'wine',
+        canonicalLabel: '2014 Kalaris Merlot',
+        aliasMatches: [{ aliasValue: 'Kalaris Merlot', aliasType: 'canonical', matchScore: 0.95 }],
+        attributeHints: {
+          region: 'Bourgogne',
+        },
+        sourceSignals: {
+          canonicalExactMatch: 1,
+          canonicalNormalizedMatch: 1,
+          aliasExactMatch: 1,
+          aliasFuzzyMatch: 0,
+          aliasTypePrior: 1,
+          producerMatch: 0,
+          vintageMatch: 0,
+          regionMatch: 0,
+          grapeHintMatch: 0,
+          phoneticMatch: 0,
+          editDistanceScore: 0,
+          ambiguityPenalty: 0,
+        },
+        source: 'alias',
+        sources: ['alias'],
+      } satisfies ResolverCandidate],
+    );
+
+    expect(artifacts[0]?.candidate.matchedConstraints).not.toContain('region');
+    expect(artifacts[0]?.candidate.unmetHardConstraints).toContain('region');
+    expect(artifacts[0]?.evidenceItems.some((item) => item.type === 'constraint_pass')).toBe(false);
+  });
+
+  it('promotes exact identity alias coverage into geography constraint evidence when structured geography is missing', () => {
+    const resolveResult = makeResolveResult();
+    const rankedResults = buildEntityRouteRankedResults(
+      {
+        ...makePlan(),
+        constraints: {
+          hard: [{
+            attribute: 'region',
+            operator: '=',
+            value: 'Chambolle-Musigny',
+            source_phrase: 'Chambolle-Musigny',
+            confidence: 1,
+          }],
+          soft: [],
+          inferred: [],
+        },
+      },
+      {
+        ...resolveResult,
+        topEntity: {
+          ...resolveResult.topEntity,
+          canonicalLabel: '2020 Jacques-Frederic Mugnier Chambolle-Musigny',
+        },
+        candidates: resolveResult.candidates.map((candidate) => ({
+          ...candidate,
+          canonicalLabel: '2020 Jacques-Frederic Mugnier Chambolle-Musigny',
+        })),
+      },
+      [{
+        entityId: ENTITY_ID,
+        entityType: 'wine',
+        canonicalLabel: '2020 Jacques-Frederic Mugnier Chambolle-Musigny',
+        aliasMatches: [{
+          aliasValue: '2020 Jacques-Frederic Mugnier Chambolle-Musigny',
+          aliasType: 'canonical',
+          matchScore: 1,
+        }],
+        attributeHints: {
+          region: 'Bourgogne',
+        },
+        sourceSignals: {
+          canonicalExactMatch: 1,
+          canonicalNormalizedMatch: 1,
+          aliasExactMatch: 1,
+          aliasFuzzyMatch: 0,
+          aliasTypePrior: 1,
+          producerMatch: 0,
+          vintageMatch: 0,
+          regionMatch: 0,
+          grapeHintMatch: 0,
+          phoneticMatch: 0,
+          editDistanceScore: 0,
+          ambiguityPenalty: 0,
+        },
+        source: 'alias',
+        sources: ['alias'],
+      } satisfies ResolverCandidate],
+    );
+
+    expect(rankedResults[0]?.componentScores.hardConstraintPass).toBe(true);
+    expect(rankedResults[0]?.matchedConstraints).toContain('region');
+    expect(rankedResults[0]?.unmetConstraints).toEqual([]);
+    expect(rankedResults[0]?.evidenceItems.some((item) =>
+      item.type === 'constraint_pass'
+      && item.provenance.includes('exact identity alias coverage'))).toBe(true);
+  });
 });

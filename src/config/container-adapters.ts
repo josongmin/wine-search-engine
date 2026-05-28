@@ -7,18 +7,21 @@ import { PgRefusalThresholdStore } from '../infrastructure/adapter/pg-refusal-th
 import { isAliasTableAvailable } from '../infrastructure/adapter/pg-alias-matcher.js';
 import {
   CascadingAliasMatcher,
+  ExactOnlySecondaryAliasMatcher,
   SearchIndexAliasMatcher,
 } from '../infrastructure/adapter/search-index-alias-matcher.js';
 import { FileMappingTableAdapter } from '../infrastructure/adapter/file-mapping-table.js';
 import { HttpLearnedMatcherAdapter } from '../infrastructure/adapter/http-learned-matcher.js';
 import { SearchSnapshotAliasMatcher } from '../infrastructure/adapter/search-snapshot-alias-matcher.js';
+import { SnapshotScopedSearchIndex } from '../infrastructure/adapter/snapshot-scoped-search-index.js';
 import { CachedAliasMatcher } from '../infrastructure/adapter/cached-alias-matcher.js';
+import { LazyFuzzyMatcher } from '../infrastructure/adapter/lazy-fuzzy-matcher.js';
 import { VespaClient } from '../infrastructure/vespa/vespa-client.js';
 import { VespaSearchIndex } from '../infrastructure/vespa/vespa-search-index.js';
-import { OpenAiChatLlm } from '../infrastructure/ai/openai-chat-llm.js';
 import { OpenAiEmbeddingService } from '../infrastructure/ai/openai-embedding-service.js';
 import { OpenAiDoc2QueryGenerator } from '../infrastructure/ai/openai-doc2query-generator.js';
 import { StubDoc2QueryGenerator } from '../infrastructure/adapter/stub-doc2query-generator.js';
+import { createChatLlmFromEnv } from '../infrastructure/ai/chat-llm-from-env.js';
 import { CohereReranker } from '../infrastructure/ai/cohere-reranker.js';
 import { CachedReranker } from '../infrastructure/ai/cached-reranker.js';
 import { VespaAnchorResolver } from '../infrastructure/vespa/vespa-anchor-resolver.js';
@@ -37,6 +40,7 @@ import type { SearchIndexPort } from '../domain/retrieval/port/search-index.port
 import type { ChatLlmPort } from '../domain/ai/port/chat-llm.port.js';
 import type { EmbeddingServicePort } from '../domain/retrieval/port/embedding-service.port.js';
 import type { ThresholdStore } from '../domain/query/port/threshold-store.port.js';
+import type { FuzzyMatcherPort } from '../domain/query/port/fuzzy-matcher.port.js';
 import type { RefusalThresholdProvider } from '../domain/decision/port/refusal-threshold-provider.port.js';
 import type { AliasMatcher } from '../domain/query/service/anchor-extractor.js';
 import type { MappingTablePort } from '../domain/attribute/port/mapping-table.port.js';
@@ -63,7 +67,7 @@ import {
 export interface CoreAdapterServices {
   readonly searchIndex: SearchIndexPort;
   readonly embeddingService: EmbeddingServicePort;
-  /** Present when an OpenAI credential or credential pool is set. */
+  /** Present when an OpenAI credential pool or Codex ChatGPT login token is available. */
   readonly chatLlm?: ChatLlmPort;
   readonly reranker?: RerankerPort;
   /**
@@ -78,6 +82,7 @@ export interface CoreAdapterServices {
   readonly calibrationStore: CalibrationStore;
   readonly ambiguityDict: AmbiguityDictionary;
   readonly thresholdStore: ThresholdStore;
+  readonly fuzzyMatcher?: FuzzyMatcherPort | undefined;
   /**
    * P0.2: per-class refusal threshold provider. Undefined when no PG pool is
    * wired (dev/test stub mode); the runtime policy degrades to the legacy
@@ -144,7 +149,7 @@ export async function buildCoreAdapterServices(
     vespaMtls,
   );
   const baseSearchIndex: SearchIndexPort = new VespaSearchIndex(vespaClient);
-  const searchIndex: SearchIndexPort = isWatchlistEnabled(config)
+  const watchlistAwareSearchIndex: SearchIndexPort = isWatchlistEnabled(config)
     ? new WatchlistAwareSearchIndex({
         inner: baseSearchIndex,
         publisher: runtimeHandles.createWatchlistPublisher?.()
@@ -155,19 +160,25 @@ export async function buildCoreAdapterServices(
           }),
       })
     : baseSearchIndex;
+  const searchIndex: SearchIndexPort = runtimeHandles.searchSnapshotId !== undefined
+    ? new SnapshotScopedSearchIndex({
+        inner: watchlistAwareSearchIndex,
+        snapshotId: runtimeHandles.searchSnapshotId,
+      })
+    : watchlistAwareSearchIndex;
 
   const embeddingService: EmbeddingServicePort = (() => {
     if (config.killSwitch.denseRetrieval) {
       return new StubEmbeddingService(config.embedding.dimension);
     }
     if (config.openai.apiKeys.length > 0) {
-      return new OpenAiEmbeddingService({
-        baseUrl: config.openai.baseUrl,
-        apiKeys: config.openai.apiKeys,
-        model: config.openai.embeddingModel,
-        httpTimeoutMs: config.openai.httpTimeoutMs,
-        dimensions: config.embedding.dimension,
-      });
+        return new OpenAiEmbeddingService({
+          baseUrl: config.openai.baseUrl,
+          apiKeys: config.openai.apiKeys,
+          model: config.openai.embeddingModel,
+          httpTimeoutMs: config.embedding.httpTimeoutMs,
+          dimensions: config.embedding.dimension,
+        });
     }
     // No embedding source configured — dense retrieval won't work.
     // Return stub so the process boots; the kill switch guard downstream
@@ -178,24 +189,35 @@ export async function buildCoreAdapterServices(
     return new StubEmbeddingService(config.embedding.dimension);
   })();
 
-  const chatLlm: ChatLlmPort | undefined =
-    config.openai.apiKeys.length > 0
-      ? new OpenAiChatLlm({
-          baseUrl: config.openai.baseUrl,
-          apiKeys: config.openai.apiKeys,
-          defaultModel: config.openai.chatModel,
-          httpTimeoutMs: config.openai.httpTimeoutMs,
-        })
-      : undefined;
+  const chatLlm: ChatLlmPort | undefined = createChatLlmFromEnv({
+    env: process.env,
+    openAiBaseUrl: config.openai.baseUrl,
+    defaultModel: config.openai.chatModel,
+    httpTimeoutMs: config.openai.httpTimeoutMs,
+    allowCodexFallback: true,
+  });
 
   const isPgAliasOverlayAvailable = pool !== undefined && !config.killSwitch.aliasOverlay
     ? await isAliasTableAvailable(pool)
     : false;
 
-  const inMemoryAliasMatcher = pool !== undefined && isPgAliasOverlayAvailable
-    && !config.killSwitch.aliasOverlay
-    ? await SearchSnapshotAliasMatcher.loadFromPostgres(pool)
-    : undefined;
+  let inMemoryAliasMatcher: SearchSnapshotAliasMatcher | undefined;
+  if (!config.killSwitch.aliasOverlay) {
+    const loadSnapshotBoundAliasMatcher = async (): Promise<SearchSnapshotAliasMatcher | undefined> => (
+      runtimeHandles.searchSnapshotManifestPath !== undefined
+        ? SearchSnapshotAliasMatcher.loadFromManifest(runtimeHandles.searchSnapshotManifestPath)
+        : undefined
+    );
+    if (pool !== undefined && isPgAliasOverlayAvailable) {
+      inMemoryAliasMatcher = await SearchSnapshotAliasMatcher.loadFromPostgres(
+        pool,
+        runtimeHandles.searchSnapshotId,
+      );
+      inMemoryAliasMatcher ??= await loadSnapshotBoundAliasMatcher();
+    } else {
+      inMemoryAliasMatcher = await loadSnapshotBoundAliasMatcher();
+    }
+  }
 
   // Doc2Query generator (index-time only). Prefer the OpenAI-backed
   // implementation when a chat adapter is available so it inherits the
@@ -207,6 +229,10 @@ export async function buildCoreAdapterServices(
     chatLlm !== undefined
       ? new OpenAiDoc2QueryGenerator({ chatLlm, model: config.openai.doc2queryModel })
       : new StubDoc2QueryGenerator();
+  const fuzzyMatcher: FuzzyMatcherPort | undefined =
+    inMemoryAliasMatcher !== undefined
+      ? new LazyFuzzyMatcher(inMemoryAliasMatcher.getSurfaceForms())
+      : undefined;
 
   return {
     searchIndex,
@@ -227,13 +253,18 @@ export async function buildCoreAdapterServices(
           }),
         }
       : {}),
-    blockingPort: pool ? new PgBlockingAdapter(pool) : new StubBlockingPort(),
+    blockingPort: pool
+      ? new PgBlockingAdapter(pool, runtimeHandles.searchSnapshotId)
+      : new StubBlockingPort(),
     calibrationStore: pool ? new PgCalibrationStore(pool) : new StubCalibrationStore(),
     ambiguityDict: new FallbackAmbiguityDictionary(
-      pool ? new PgAmbiguityDictionary(pool) : new StubAmbiguityDictionary(),
+      pool
+        ? new PgAmbiguityDictionary(pool, runtimeHandles.searchSnapshotId)
+        : new StubAmbiguityDictionary(),
       new StaticAmbiguityDictionary(),
     ),
     thresholdStore: pool ? new PgThresholdStore(pool) : new StubThresholdStore(),
+    ...(fuzzyMatcher !== undefined ? { fuzzyMatcher } : {}),
     ...(pool !== undefined
       ? {
           refusalThresholdProvider: new PgRefusalThresholdStore(pool, {
@@ -244,7 +275,14 @@ export async function buildCoreAdapterServices(
         }
       : {}),
     aliasMatcher: ((): AliasMatcher => {
-      const indexAliasMatcher = new SearchIndexAliasMatcher(searchIndex);
+      const indexAliasMatcher = new SearchIndexAliasMatcher(searchIndex, {
+        // When the PG/snapshot alias overlay is available, the search-index
+        // matcher is a degraded exact fallback only. Keep it on full-surface
+        // variants so generic browse/semantic queries do not explode into
+        // span-level Vespa alias lookups on misses.
+        surfaceOnly: inMemoryAliasMatcher !== undefined,
+      });
+      const degradedExactFallback = new ExactOnlySecondaryAliasMatcher(indexAliasMatcher);
       if (config.killSwitch.aliasOverlay) {
         bootstrapLogger.warn(
           {
@@ -257,6 +295,23 @@ export async function buildCoreAdapterServices(
         );
         return new CachedAliasMatcher(indexAliasMatcher);
       }
+      if (inMemoryAliasMatcher !== undefined) {
+        if (runtimeHandles.searchSnapshotId !== undefined) {
+          bootstrapLogger.info(
+            {
+              nodeEnv: config.nodeEnv,
+              searchSnapshotId: runtimeHandles.searchSnapshotId,
+              manifestPath: runtimeHandles.searchSnapshotManifestPath,
+            },
+            '[container] using snapshot-scoped in-memory alias substrate only',
+          );
+          return new CachedAliasMatcher(inMemoryAliasMatcher);
+        }
+        return new CachedAliasMatcher(new CascadingAliasMatcher(
+          inMemoryAliasMatcher,
+          degradedExactFallback,
+        ));
+      }
       if (!pool) {
         bootstrapLogger.warn(
           {
@@ -267,12 +322,6 @@ export async function buildCoreAdapterServices(
           '[container] PostgreSQL alias substrate unavailable: using SearchIndexAliasMatcher',
         );
         return new CachedAliasMatcher(indexAliasMatcher);
-      }
-      if (inMemoryAliasMatcher !== undefined) {
-        return new CachedAliasMatcher(new CascadingAliasMatcher(
-          inMemoryAliasMatcher,
-          indexAliasMatcher,
-        ));
       }
       return new CachedAliasMatcher(indexAliasMatcher);
     })(),

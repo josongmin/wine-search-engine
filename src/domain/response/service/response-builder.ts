@@ -53,7 +53,10 @@ import { deterministicHash } from '../../shared/utils/hash.js';
 import type { SpecializedRouteObservability } from '../model/specialized-route.js';
 import { toSpecializedRouteMeta } from '../model/specialized-route.js';
 import { EvidenceObligationError } from '../../shared/error/domain-error.js';
-import { isCorruptedSnapshot } from '../../shared/types/index.js';
+import {
+  filterBindingInferredConstraints,
+  isCorruptedSnapshot,
+} from '../../shared/types/index.js';
 import {
   buildClarificationCandidateSignature,
   buildDisplayIdentitySignature,
@@ -89,7 +92,7 @@ export interface ResponseBuildParams {
   readonly retrievalProvenanceSlices?: readonly EvalProvenanceSlice[] | undefined;
 
   /**
-   * Typed abstain reason for ambiguous clarification responses.
+   * Typed abstain reason for abstain-driven outcomes.
    * MUST come from TypedAbstainDecision.reason, never from free-text traces.
    */
   readonly abstainReason?: AbstainReason | undefined;
@@ -340,6 +343,9 @@ export class ResponseBuilder {
       route,
       decisionConfidence: output.decisionConfidence,
       confidenceSemantics: output.confidenceSemantics,
+      ...(output.calibrationTrusted !== undefined
+        ? { calibrationTrusted: output.calibrationTrusted }
+        : {}),
       decisionTraceRef: output.decisionTraceRef,
       authorityTraceRef: output.decisionTraceRef,
       decisionSnapshot: output.decisionSnapshot,
@@ -667,10 +673,11 @@ export class ResponseBuilder {
    */
   private buildParsedConstraints(plan: QueryPlanV1): ParsedConstraintsExtern | undefined {
     const constraints = plan.constraints;
+    const bindingInferred = filterBindingInferredConstraints(constraints.inferred);
     const hasConstraints =
       constraints.hard.length > 0 ||
       constraints.soft.length > 0 ||
-      constraints.inferred.length > 0;
+      bindingInferred.length > 0;
 
     if (!hasConstraints) {
       return undefined;
@@ -689,7 +696,7 @@ export class ResponseBuilder {
     }));
 
     // Inferred constraints are included in soft for LLM visibility
-    const inferredSoft = constraints.inferred.map((c) => ({
+    const inferredSoft = bindingInferred.map((c) => ({
       field: c.attribute,
       op: c.operator,
       value: this.constraintValueToString(c.value),

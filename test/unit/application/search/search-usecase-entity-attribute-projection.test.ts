@@ -21,6 +21,7 @@ function makeDocument(): RetrievalDocument {
     region: 'Napa Valley',
     appellation: 'Oak Knoll District',
     country: 'United States',
+    regionHierarchy: ['United States', 'California', 'Napa Valley'],
     grapes: ['Merlot', 'Cabernet Sauvignon'],
     grapePrimary: 'Merlot',
     searchTextKo: '칼라리스 메를로',
@@ -85,6 +86,7 @@ describe('entity attribute projection SSOT', () => {
     expect(projected.region).toBe('Napa Valley');
     expect(projected.appellation).toBe('Oak Knoll District');
     expect(projected.country).toBe('United States');
+    expect(projected.regionHierarchy).toEqual(['United States', 'California', 'Napa Valley']);
     expect(projected.grapePrimary).toBe('Merlot');
     expect(projected.grapes).toEqual(['Merlot', 'Cabernet Sauvignon']);
     expect(projected.style).toBe('velvety red');

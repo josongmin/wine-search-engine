@@ -13,6 +13,7 @@ describe('SearchPipelineEvaluator', () => {
           engineDecision: {
             decisionStatus: 'resolved',
             decisionConfidence: 0.91,
+            calibrationTrusted: false,
             executionMode: 'degraded',
             blockingEligible: false,
             degradationReasons: ['reranker_timeout'],
@@ -51,11 +52,17 @@ describe('SearchPipelineEvaluator', () => {
           scoreGapRank1Rank2: 0.12,
           producerDiversity: 1,
         },
+        runtimeClassification: {
+          queryClass: 'semantic_preference' as const,
+          intent: 'semantic_discovery' as const,
+          route: 'hybrid' as const,
+          retrievalMode: 'attribute_search' as const,
+        },
       })),
     };
 
     const evaluator = new SearchPipelineEvaluator(searchUseCase as never);
-    const output = await evaluator.execute('Opus One', 'known_item_lookup');
+    const output = await evaluator.execute('Opus One', 'exact_entity');
 
     expect(searchUseCase.executeForEvaluation).toHaveBeenCalledOnce();
     expect(output.retrievalProvenanceSlices).toEqual([
@@ -71,9 +78,78 @@ describe('SearchPipelineEvaluator', () => {
         rerankChangedTopK: true,
       }),
     );
+    expect(output.runtimeQueryClass).toBe('semantic_preference');
+    expect(output.runtimeIntent).toBe('semantic_discovery');
+    expect(output.runtimeRoute).toBe('hybrid');
+    expect(output.runtimeRetrievalMode).toBe('attribute_search');
+    expect(output.goldRuntimeQueryClassMismatch).toBe(true);
+    expect(output.decisionConfidenceTrusted).toBe(false);
     expect(output.executionMode).toBe('degraded');
     expect(output.blockingEligible).toBe(false);
     expect(output.degradationReasons).toEqual(['reranker_timeout']);
+  });
+
+  it('does not mark exact_entity -> short_entity as mismatch', async () => {
+    const searchUseCase = {
+      execute: vi.fn(async () => ({
+        queryType: 'search' as const,
+        engineDecision: {
+          decisionStatus: 'resolved',
+          decisionConfidence: 0.91,
+          decisionSnapshot: {
+            model_versions: {},
+            index_versions: {},
+            policy_rule_version: '1',
+            threshold_profile_id: 'default',
+            planner_version: '1',
+            feature_flags: {},
+          },
+        },
+        results: [],
+        meta: {
+          queryTimeMs: 1,
+          route: 'entity',
+          version: '1.0.0',
+          engine_schema_version: 'search_response_v1',
+        },
+      })),
+      executeForEvaluation: vi.fn(async () => ({
+        response: {
+          queryType: 'search' as const,
+          engineDecision: {
+            decisionStatus: 'resolved',
+            decisionConfidence: 0.91,
+            decisionSnapshot: {
+              model_versions: {},
+              index_versions: {},
+              policy_rule_version: '1',
+              threshold_profile_id: 'default',
+              planner_version: '1',
+              feature_flags: {},
+            },
+          },
+          results: [],
+          meta: {
+            queryTimeMs: 1,
+            route: 'entity',
+            version: '1.0.0',
+            engine_schema_version: 'search_response_v1',
+          },
+        },
+        runtimeClassification: {
+          queryClass: 'short_entity' as const,
+          intent: 'entity_exact' as const,
+          route: 'entity' as const,
+          retrievalMode: 'entity_lookup' as const,
+        },
+      })),
+    };
+
+    const evaluator = new SearchPipelineEvaluator(searchUseCase as never);
+    const output = await evaluator.execute('Opus One', 'exact_entity');
+
+    expect(output.runtimeQueryClass).toBe('short_entity');
+    expect(output.goldRuntimeQueryClassMismatch).toBeUndefined();
   });
 
   it('reuses runtime-produced response meta provenance slices when direct slices are absent', async () => {

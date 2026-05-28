@@ -40,7 +40,7 @@ function makeRecord(overrides?: Partial<EnrichedSilverRecord>): EnrichedSilverRe
         {
           value: 'Opus One',
           type: 'translation',
-          source: 'rule:producer_identity_v1',
+          source: 'rule:no_vintage_v1',
           confidencePrior: 0.95,
           needsReview: false,
         },
@@ -64,12 +64,47 @@ describe('buildAliasArtifact', () => {
     const transliteratedProducer = aliases.find(
       (alias) =>
         alias.scope === 'locale_ko'
-        && alias.source.includes('rule:producer_identity_v1'),
+        && alias.source.includes('rule:no_vintage_v1'),
     );
 
     expect(transliteratedProducer).toBeDefined();
     expect(transliteratedProducer?.value).toContain('오');
     // EXCEPTIONS: 'opus one' → '오푸스원' (compound form includes typo correction)
     expect(transliteratedProducer?.value.replace(/\s+/g, '')).toContain('오푸스');
+  });
+
+  it('materializes approved abbreviation overlays into the alias artifact', () => {
+    const record = makeRecord({
+      sourceId: 'wine-romanee',
+      externalId: 'romanee-ext',
+      canonicalLabel: 'DRC Romanée-Conti 2015',
+      producer: 'Domaine de la Romanée-Conti',
+    });
+    const goldLookup = new Map<string, string>([[silverGoldMatchKey(record), 'romanee-conti-2015']]);
+    const entityIdBySourceId = buildEntityIdBySourceId([record], goldLookup);
+    const runtimeEntityId = entityIdBySourceId.get(record.sourceId);
+    expect(runtimeEntityId).toBeDefined();
+    const aliases = buildAliasArtifact(
+      [record],
+      entityIdBySourceId,
+      new Map([
+        [runtimeEntityId!, [{
+          value: 'DRC',
+          type: 'abbreviation',
+          source: 'etl:abbreviation_derivation_v1',
+          sourceTrust: 1,
+          confidencePrior: 0.82,
+          scope: 'global',
+        }]],
+      ]),
+    );
+
+    expect(
+      aliases.some((alias) =>
+        alias.entityId === runtimeEntityId
+        && alias.value === 'DRC'
+        && alias.type === 'abbreviation'
+        && alias.source === 'etl:abbreviation_derivation_v1'),
+    ).toBe(true);
   });
 });

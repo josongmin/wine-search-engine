@@ -116,7 +116,7 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       rubric: 'All recommended wines must be ≤100,000 KRW and pair with steak. Reject if any wine is clearly over budget.',
       expectedConstraints: {
         soft: [
-          { attribute: 'max_price_krw', operator: '<=', value: 100000 },
+          { attribute: 'price_usd', operator: '<=', value: 74.07 },
         ],
       },
     } },
@@ -184,7 +184,7 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
           { attribute: 'wine_type', operator: 'exclude', value: ['white'] },
         ],
         soft: [
-          { attribute: 'max_price_krw', operator: '<=', value: 50000 },
+          { attribute: 'price_usd', operator: '<=', value: 37.04 },
         ],
       },
       expectedEntities: [
@@ -287,7 +287,7 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
           { attribute: 'wine_type', operator: '=', value: 'red' },
         ],
         soft: [
-          { attribute: 'max_price_krw', operator: '<=', value: 30000 },
+          { attribute: 'price_usd', operator: '<=', value: 22.22 },
           { attribute: 'tannin', operator: '<=', value: 0.4 },
         ],
         inferred: [
@@ -373,7 +373,7 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
           { attribute: 'grape_primary', operator: '=', value: 'Cabernet Sauvignon' },
         ],
         soft: [
-          { attribute: 'max_price_krw', operator: '<=', value: 100000 },
+          { attribute: 'price_usd', operator: '<=', value: 74.07 },
         ],
       },
       expectedEntities: [
@@ -478,7 +478,7 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
           { attribute: 'wine_type', operator: '=', value: 'white' },
         ],
         soft: [
-          { attribute: 'max_price_krw', operator: '<=', value: 200000 },
+          { attribute: 'price_usd', operator: '<=', value: 148.15 },
         ],
       },
       expectedEntities: [
@@ -631,7 +631,7 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       rubric: 'Must recommend 3 wines (white appetizer, red main, sweet dessert) totaling ≤150,000 KRW for an anniversary dinner.',
       expectedConstraints: {
         soft: [
-          { attribute: 'max_price_krw', operator: '<=', value: 150000 },
+          { attribute: 'price_usd', operator: '<=', value: 111.11 },
         ],
       },
       expectedEntities: [
@@ -740,7 +740,7 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       rubric: 'All recommendations must be in the 100,000-199,999 KRW range (10만원대 means "100,000-something thousand").',
       expectedConstraints: {
         soft: [
-          { attribute: 'max_price_krw', operator: 'range', value: { min: 100000, max: 199999 } },
+          { attribute: 'price_usd', operator: 'range', value: { min: 74.07, max: 148.15 } },
         ],
       },
     } },
@@ -770,7 +770,7 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       rubric: 'Must recommend 3 DIFFERENT wines, each ≤50,000 KRW. Should emphasize variety (different grapes, regions, or styles).',
       expectedConstraints: {
         soft: [
-          { attribute: 'max_price_krw', operator: '<=', value: 50000 },
+          { attribute: 'price_usd', operator: '<=', value: 37.04 },
         ],
       },
     } },
@@ -937,7 +937,7 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       ],
       expectedConstraints: {
         soft: [
-          { attribute: 'max_price_krw', operator: 'range', value: { min: 10000, max: 20000 } },
+          { attribute: 'price_usd', operator: 'range', value: { min: 7.41, max: 14.81 } },
           { attribute: 'occasion', operator: 'in', value: ['housewarming', 'gift'] },
         ],
       },

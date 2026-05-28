@@ -21,6 +21,11 @@ import { SEARCH_SNAPSHOT_STATE_VERSION } from '../../src/domain/shared/constants
 import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 import { applyFullCanonicalGraphSync } from './canonical-entity-graph-sync.js';
 import { pgTableHasColumn } from '../../src/infrastructure/db/pg-schema-capabilities.js';
+import {
+  canonicalizeAliasSnapshotRecords,
+  canonicalizeAmbiguitySnapshotRows,
+  canonicalizeEntitySnapshotRecords,
+} from '../../src/domain/shared/utils/search-snapshot-canonicalization.js';
 
 const DEFAULT_RUNTIME_STATE_PATH = resolveDataPath('data/runtime-search-snapshot.json');
 const DEFAULT_RUNTIME_NL_MAPPINGS_PATH = resolveDataPath('data/nl-mappings.json');
@@ -102,6 +107,18 @@ interface Args {
   readonly refreshActiveRuntimeSubstrates: boolean;
 }
 
+interface StageSnapshotRuntimeSubstratesArgs {
+  readonly manifestPath: string;
+  readonly allowExistingActiveSnapshot?: boolean;
+}
+
+interface StagedSnapshotRuntimeSubstratesResult {
+  readonly snapshotId: string;
+  readonly entities: number;
+  readonly aliases: number;
+  readonly ambiguityRegistry: number;
+}
+
 function parseArgs(argv: readonly string[]): Args {
   let manifestPath = '';
   let runtimeStatePath = DEFAULT_RUNTIME_STATE_PATH;
@@ -121,7 +138,7 @@ function parseArgs(argv: readonly string[]): Args {
     } else if (arg === '--refresh-active-runtime-substrates') {
       refreshActiveRuntimeSubstrates = true;
     } else if (arg === '--allow-missing-ltr') {
-      throw new Error('--allow-missing-ltr has been removed; canonical runtime publish now hard-fails on missing active LTR models');
+      throw new Error('--allow-missing-ltr has been removed; LTR is now optional for canonical runtime publish and the flag is obsolete');
     }
   }
   if (manifestPath.length === 0) {
@@ -203,6 +220,241 @@ export async function restoreRuntimeSubstrateArtifacts(args: {
     await fs.rm(args.activeRuntimeStatePath, { force: true });
   } else {
     await atomicWriteFile(args.activeRuntimeStatePath, args.previousRuntimeStateContents);
+  }
+}
+
+export async function ensureSnapshotScopedAmbiguityRegistryIndexes(
+  client: PoolClient,
+): Promise<void> {
+  const legacyIndexResult = await client.query<{ exists: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1
+       FROM pg_indexes
+       WHERE schemaname = 'public'
+         AND tablename = 'ambiguity_registry'
+         AND indexname = 'idx_ambiguity_normalized'
+     ) AS exists`,
+  );
+  if (legacyIndexResult.rows[0]?.exists === true) {
+    await client.query('DROP INDEX IF EXISTS idx_ambiguity_normalized');
+  }
+  await client.query(
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_ambiguity_snapshot_normalized ON ambiguity_registry(search_snapshot_id, normalized_form)',
+  );
+  await client.query(
+    'CREATE INDEX IF NOT EXISTS idx_ambiguity_registry_search_snapshot ON ambiguity_registry(search_snapshot_id)',
+  );
+}
+
+async function isSnapshotRuntimeSubstratePlaneAlreadyStaged(args: {
+  readonly client: PoolClient;
+  readonly manifest: SearchSnapshotManifest;
+}): Promise<boolean> {
+  const snapshotId = args.manifest.snapshotId;
+  const [entityCount, aliasCount, ambiguityCount] = await Promise.all([
+    args.client.query<{ count: string }>(
+      'SELECT COUNT(*)::text AS count FROM entities WHERE search_snapshot_id = $1',
+      [snapshotId],
+    ),
+    args.client.query<{ count: string }>(
+      'SELECT COUNT(*)::text AS count FROM aliases WHERE search_snapshot_id = $1',
+      [snapshotId],
+    ),
+    args.client.query<{ count: string }>(
+      'SELECT COUNT(*)::text AS count FROM ambiguity_registry WHERE search_snapshot_id = $1',
+      [snapshotId],
+    ),
+  ]);
+
+  return Number(entityCount.rows[0]?.count ?? '0') === args.manifest.counts.entities
+    && Number(aliasCount.rows[0]?.count ?? '0') === args.manifest.counts.aliases
+    && Number(ambiguityCount.rows[0]?.count ?? '0') === args.manifest.counts.ambiguityRegistry;
+}
+
+async function stageSnapshotRuntimeRowsInPg(args: {
+  readonly client: PoolClient;
+  readonly manifest: SearchSnapshotManifest;
+  readonly entities: readonly EntitySnapshotRecord[];
+  readonly aliases: readonly AliasSnapshotRecord[];
+  readonly ambiguityRows: readonly AmbiguityRegistrySnapshotRow[];
+  readonly allowExistingActiveSnapshot: boolean;
+}): Promise<void> {
+  await ensureSnapshotScopedAmbiguityRegistryIndexes(args.client);
+  if (await isSnapshotRuntimeSubstratePlaneAlreadyStaged(args)) {
+    return;
+  }
+  const entityRowsJson = buildEntityRowsJson(args.entities, args.manifest.snapshotId);
+  const entitySnapshotRowsJson = buildEntitySnapshotRowsJson(
+    args.entities,
+    args.manifest.snapshotId,
+    args.manifest.generatedAt,
+  );
+  const aliasRowsJson = buildAliasRowsJson(args.aliases, args.manifest.snapshotId);
+  const ambiguityRowsJson = buildAmbiguityRowsJson(args.ambiguityRows, args.manifest.snapshotId);
+  const entityIds = args.entities.map((entity) => entity.entityId);
+
+  await assertEntityIdentitySignatureConsistency(args.client, args.entities);
+  await assertSnapshotNotAlreadyPublished(args.client, args.manifest.snapshotId, {
+    allowExistingActiveSnapshot: args.allowExistingActiveSnapshot,
+  });
+  await args.client.query(
+    `WITH input AS (
+       SELECT *
+     FROM jsonb_to_recordset($1::jsonb) AS rows(
+         entity_id text,
+         search_snapshot_id text,
+         entity_type text,
+         canonical_label text,
+         identity_signature text,
+         relations jsonb,
+         attributes jsonb,
+         metadata jsonb
+       )
+     )
+     INSERT INTO entities (
+       entity_id, search_snapshot_id, entity_type, canonical_label, identity_signature,
+       relations, attributes, metadata
+     )
+     SELECT
+       entity_id, search_snapshot_id, entity_type, canonical_label, identity_signature,
+       relations, attributes, metadata
+     FROM input
+     ON CONFLICT (search_snapshot_id, entity_id) DO NOTHING`,
+    [entityRowsJson],
+  );
+  await args.client.query(
+    `WITH input AS (
+       SELECT *
+       FROM jsonb_to_recordset($1::jsonb) AS rows(
+         snapshot_id text,
+         entity_id text,
+         snapshot_data jsonb
+       )
+     )
+     INSERT INTO entity_snapshots (snapshot_id, entity_id, snapshot_data)
+     SELECT snapshot_id, entity_id, snapshot_data
+     FROM input
+     ON CONFLICT (snapshot_id) DO NOTHING`,
+    [entitySnapshotRowsJson],
+  );
+  void entityIds;
+  await args.client.query(
+    `WITH input AS (
+       SELECT *
+       FROM jsonb_to_recordset($1::jsonb) AS rows(
+         alias_id text,
+         search_snapshot_id text,
+         entity_id text,
+         alias_type text,
+         alias_scope text,
+         surface_form text,
+         normalized_value text,
+         source text,
+         source_trust double precision,
+         confidence double precision
+       )
+     )
+     INSERT INTO aliases (
+       alias_id, search_snapshot_id, entity_id, alias_type, alias_scope, surface_form,
+       normalized_value, source, source_trust, confidence, is_suppressed
+     )
+     SELECT
+       alias_id, search_snapshot_id, entity_id, alias_type, alias_scope, surface_form,
+       normalized_value, source, source_trust, confidence, FALSE
+     FROM input
+     ON CONFLICT (search_snapshot_id, alias_id) DO NOTHING`,
+    [aliasRowsJson],
+  );
+  await args.client.query(
+    `WITH input AS (
+       SELECT *
+       FROM jsonb_to_recordset($1::jsonb) AS rows(
+         registry_id text,
+         search_snapshot_id text,
+         normalized_form text,
+         entity_ids jsonb,
+         ambiguity_types jsonb,
+         severity text
+       )
+     )
+     INSERT INTO ambiguity_registry (
+       registry_id, search_snapshot_id, normalized_form, entity_ids, ambiguity_types, severity
+     )
+     SELECT
+       registry_id,
+       search_snapshot_id,
+       normalized_form,
+       ARRAY(SELECT jsonb_array_elements_text(entity_ids)),
+       ARRAY(SELECT jsonb_array_elements_text(ambiguity_types)),
+       severity
+     FROM input
+     ON CONFLICT (search_snapshot_id, registry_id) DO NOTHING`,
+    [ambiguityRowsJson],
+  );
+
+  await applyFullCanonicalGraphSync(args.client, {
+    entities: args.entities,
+    aliases: args.aliases,
+    ambiguityRows: args.ambiguityRows,
+    searchSnapshotId: args.manifest.snapshotId,
+  });
+}
+
+export async function stageSnapshotRuntimeSubstratesToPg(
+  args: StageSnapshotRuntimeSubstratesArgs,
+): Promise<StagedSnapshotRuntimeSubstratesResult> {
+  const manifest = await loadManifest(args.manifestPath);
+  await assertSnapshotArtifactLearnedFacetCoverage(manifest);
+  const config = loadConfig();
+  if (!shouldUsePgPool(config.pg)) {
+    throw new Error('Postgres configuration is required to stage search snapshot runtime substrates');
+  }
+
+  const [entities, aliases, ambiguityRows] = await Promise.all([
+    loadEntities(manifest),
+    loadAliases(manifest),
+    loadAmbiguityRows(manifest),
+  ]);
+
+  if (entities.length === 0) {
+    throw new Error('Refusing to stage runtime substrates with zero entities');
+  }
+  if (aliases.length === 0) {
+    throw new Error('Refusing to stage runtime substrates with zero aliases');
+  }
+
+  const pool = createPgPool(config.pg, {
+    statementTimeoutMs: RUNTIME_SUBSTRATE_PUBLISH_STATEMENT_TIMEOUT_MS,
+    idleInTransactionSessionTimeoutMs: RUNTIME_SUBSTRATE_PUBLISH_STATEMENT_TIMEOUT_MS,
+    queryTimeoutMs: RUNTIME_SUBSTRATE_PUBLISH_STATEMENT_TIMEOUT_MS + 5_000,
+  });
+  try {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await stageSnapshotRuntimeRowsInPg({
+        client,
+        manifest,
+        entities,
+        aliases,
+        ambiguityRows,
+        allowExistingActiveSnapshot: args.allowExistingActiveSnapshot ?? false,
+      });
+      await client.query('COMMIT');
+      return {
+        snapshotId: manifest.snapshotId,
+        entities: entities.length,
+        aliases: aliases.length,
+        ambiguityRegistry: ambiguityRows.length,
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  } finally {
+    await pool.end();
   }
 }
 
@@ -538,138 +790,14 @@ export async function publishRuntimeSubstrates(args: Args): Promise<SearchSnapsh
     const client = await pool.connect();
     let committed = false;
     try {
-      const entityRowsJson = buildEntityRowsJson(entities, manifest.snapshotId);
-      const entitySnapshotRowsJson = buildEntitySnapshotRowsJson(
-        entities,
-        manifest.snapshotId,
-        manifest.generatedAt,
-      );
-      const aliasRowsJson = buildAliasRowsJson(aliases, manifest.snapshotId);
-      const ambiguityRowsJson = buildAmbiguityRowsJson(ambiguityRows, manifest.snapshotId);
-      const entityIds = entities.map((entity) => entity.entityId);
-
       await client.query('BEGIN');
-      await assertEntityIdentitySignatureConsistency(client, entities);
-      // T-010/W1: Snapshot-bound append-only publish.
-      // No TRUNCATE/DELETE — old snapshot rows stay in place so rollback is
-      // a pointer-swap only (see active_search_snapshot). Read path filters
-      // by the active snapshot_id. Old snapshots are reaped by a separate
-      // GC step after the pointer has been promoted off of them.
-      await assertSnapshotNotAlreadyPublished(client, manifest.snapshotId, {
-        allowExistingActiveSnapshot: args.refreshActiveRuntimeSubstrates,
-      });
-      await client.query(
-        `WITH input AS (
-           SELECT *
-         FROM jsonb_to_recordset($1::jsonb) AS rows(
-             entity_id text,
-             search_snapshot_id text,
-             entity_type text,
-             canonical_label text,
-             identity_signature text,
-             relations jsonb,
-             attributes jsonb,
-             metadata jsonb
-           )
-         )
-         INSERT INTO entities (
-           entity_id, search_snapshot_id, entity_type, canonical_label, identity_signature,
-           relations, attributes, metadata
-         )
-         SELECT
-           entity_id, search_snapshot_id, entity_type, canonical_label, identity_signature,
-           relations, attributes, metadata
-         FROM input
-         -- Composite PK conflict target (migration 016). Re-publishing the same
-         -- snapshot is idempotent; cross-snapshot writes append new rows without
-         -- touching other snapshots' data.
-         ON CONFLICT (search_snapshot_id, entity_id) DO NOTHING`,
-        [entityRowsJson],
-      );
-      await client.query(
-        `WITH input AS (
-           SELECT *
-           FROM jsonb_to_recordset($1::jsonb) AS rows(
-             snapshot_id text,
-             entity_id text,
-             snapshot_data jsonb
-           )
-         )
-         INSERT INTO entity_snapshots (snapshot_id, entity_id, snapshot_data)
-         SELECT snapshot_id, entity_id, snapshot_data
-         FROM input
-         -- Archive is append-only. Rewriting an existing archive row indicates
-         -- a publisher bug, not an idempotent retry. If this path starts throwing
-         -- in production, debug the publisher — don't re-enable DO UPDATE.
-         ON CONFLICT (snapshot_id) DO NOTHING`,
-        [entitySnapshotRowsJson],
-      );
-      // T-010/W1: No cleanup DELETE. Old-snapshot rows remain in place for
-      // rollback. A separate GC step (ops: reap-snapshots) removes rows whose
-      // search_snapshot_id is older than active+previous after the pointer
-      // swap has been green for a grace period.
-      void entityIds; // retained for readability; no longer used as a cleanup filter
-      await client.query(
-        `WITH input AS (
-           SELECT *
-           FROM jsonb_to_recordset($1::jsonb) AS rows(
-             alias_id text,
-             search_snapshot_id text,
-             entity_id text,
-             alias_type text,
-             alias_scope text,
-             surface_form text,
-             normalized_value text,
-             source text,
-             source_trust double precision,
-             confidence double precision
-           )
-         )
-         INSERT INTO aliases (
-           alias_id, search_snapshot_id, entity_id, alias_type, alias_scope, surface_form,
-           normalized_value, source, source_trust, confidence, is_suppressed
-         )
-         SELECT
-           alias_id, search_snapshot_id, entity_id, alias_type, alias_scope, surface_form,
-           normalized_value, source, source_trust, confidence, FALSE
-         FROM input
-         -- Composite PK conflict target (migration 016).
-         ON CONFLICT (search_snapshot_id, alias_id) DO NOTHING`,
-        [aliasRowsJson],
-      );
-      await client.query(
-        `WITH input AS (
-           SELECT *
-           FROM jsonb_to_recordset($1::jsonb) AS rows(
-             registry_id text,
-             search_snapshot_id text,
-             normalized_form text,
-             entity_ids jsonb,
-             ambiguity_types jsonb,
-             severity text
-           )
-         )
-         INSERT INTO ambiguity_registry (
-           registry_id, search_snapshot_id, normalized_form, entity_ids, ambiguity_types, severity
-         )
-         SELECT
-           registry_id,
-           search_snapshot_id,
-           normalized_form,
-           ARRAY(SELECT jsonb_array_elements_text(entity_ids)),
-           ARRAY(SELECT jsonb_array_elements_text(ambiguity_types)),
-           severity
-         FROM input
-         -- Composite PK conflict target (migration 016).
-         ON CONFLICT (search_snapshot_id, registry_id) DO NOTHING`,
-        [ambiguityRowsJson],
-      );
-
-      await applyFullCanonicalGraphSync(client, {
+      await stageSnapshotRuntimeRowsInPg({
+        client,
+        manifest,
         entities,
         aliases,
         ambiguityRows,
-        searchSnapshotId: manifest.snapshotId,
+        allowExistingActiveSnapshot: args.refreshActiveRuntimeSubstrates,
       });
 
       const ltrFeatureSchemaHashSupported = await pgTableHasColumn(
@@ -712,9 +840,6 @@ export async function publishRuntimeSubstrates(args: Args): Promise<SearchSnapsh
         [manifest.snapshotId],
       );
       const activeLtrModels = Number(ltrActiveResult.rows[0]?.count ?? '0');
-      if (activeLtrModels <= 0) {
-        throw new Error('Refusing to publish runtime substrates with zero active LTR models');
-      }
       const activeLtrHash = buildActiveLtrModelHash(
         ltrActiveResult.rows.map((row) => ({
           query_class: row.query_class,
@@ -745,9 +870,9 @@ export async function publishRuntimeSubstrates(args: Args): Promise<SearchSnapsh
           activeLtrModels,
         },
         hashes: {
-          entities: manifest.hashes.entities,
-          aliases: manifest.hashes.aliases,
-          ambiguityRegistry: manifest.hashes.ambiguityRegistry,
+          entities: hashStableJson(canonicalizeEntitySnapshotRecords(entities)),
+          aliases: hashStableJson(canonicalizeAliasSnapshotRecords(aliases)),
+          ambiguityRegistry: hashStableJson(canonicalizeAmbiguitySnapshotRows(ambiguityRows)),
           nlMappings: manifest.hashes.nlMappings,
           activeLtrModels: activeLtrHash,
         },

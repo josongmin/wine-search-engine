@@ -1,4 +1,9 @@
-import type { DecisionStatus, NextAction, DecisionSnapshot } from '../../shared/types/index.js';
+import type {
+  DecisionStatus,
+  DecisionConfidenceSemantics,
+  NextAction,
+  DecisionSnapshot,
+} from '../../shared/types/index.js';
 import type { FailureReason } from '../../decision/model/failure-reason.js';
 import type { AbstainReason } from '../../query/model/abstain-decision.js';
 import type {
@@ -25,14 +30,25 @@ export interface EngineDecision {
   /** The execution route that handled this query. */
   readonly route: QueryRoute;
 
-  /**
-   * Calibrated decision confidence in [0, 1].
-   * This is the ONLY confidence value surfaced to external consumers.
+ /**
+   * Decision-layer confidence scalar in [0, 1].
+   *
+   * Interpret this number according to {@link confidenceSemantics}. Only the
+   * calibrated variant may be treated as a probability.
    */
   readonly decisionConfidence: number;
 
-  /** Semantic tag — always `'calibrated_decision_confidence'`. */
-  readonly confidenceSemantics: 'calibrated_decision_confidence';
+  /** Semantic tag for {@link decisionConfidence}. */
+  readonly confidenceSemantics: DecisionConfidenceSemantics;
+
+  /**
+   * Whether {@link decisionConfidence} came from trusted calibration params.
+   *
+   * `false` means the engine resolved via a substitute-trust path over an
+   * uncalibrated score. Callers may still use the value for ordering, but
+   * MUST NOT treat it as a calibrated probability.
+   */
+  readonly calibrationTrusted?: boolean | undefined;
 
   /**
    * Legacy trace string — same value as {@link authorityTraceRef} in Wave 3+.
@@ -69,8 +85,8 @@ export interface EngineDecision {
   readonly admission_trace_ref?: string | undefined;
 
   /**
-   * Reason for abstention when decisionStatus is 'ambiguous' but not due to
-   * hard constraint violation (Epic 9).
+   * Reason for an abstain-driven outcome (for example `ambiguous` clarify or
+   * fail-closed `no_match`).
    *
    * MUST be sourced from TypedAbstainDecision.reason. Never populate this from
    * free-text trace strings such as decisionTrace.finalReason.

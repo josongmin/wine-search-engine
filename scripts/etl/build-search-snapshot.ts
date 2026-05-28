@@ -21,6 +21,7 @@ import {
 import { resolveAliasClaimsAndBuildAmbiguityRegistry } from './build-ambiguity-registry.js';
 import { SEARCH_SNAPSHOT_SCHEMA_VERSION } from '../../src/domain/shared/constants/search-snapshot.js';
 import { buildAliasArtifact } from './build-alias-artifact.js';
+import type { SnapshotAliasOverlayProposal } from './build-alias-artifact.js';
 import {
   loadActiveSourceEntityContinuity,
   loadGoldCanonicalLookupForBuild,
@@ -32,6 +33,7 @@ import type {
   CanonicalEntityId,
   SourceRecordId,
 } from '../../src/domain/shared/types/entity-id.js';
+import { parseAliasType } from '../../src/domain/alias/model/alias.js';
 import {
   SOURCE_SYSTEM_BENCHMARK_ANCHOR_CATALOG,
   SOURCE_SYSTEM_VIVINO_SILVER,
@@ -45,7 +47,15 @@ import {
   BEGINNER_SUITABILITY_VERSION,
   GIFT_SUITABILITY_VERSION,
 } from '../../src/domain/attribute/service/ontology-normalizer.js';
-import type { SearchSnapshotFieldAvailability } from '../../src/domain/shared/types/search-field-availability.js';
+import {
+  SEARCH_SNAPSHOT_SENSORY_FIELD_AVAILABILITY_ATTRIBUTES,
+  type SearchSnapshotFieldAvailability,
+} from '../../src/domain/shared/types/search-field-availability.js';
+import {
+  canonicalizeAliasSnapshotRecords,
+  canonicalizeAmbiguitySnapshotRows,
+  canonicalizeEntitySnapshotRecords,
+} from '../../src/domain/shared/utils/search-snapshot-canonicalization.js';
 
 export const DEFAULT_INPUT = ETL_ARTIFACT_FILES.trackc;
 export const DEFAULT_OUTPUT_DIR = ETL_ARTIFACT_FILES.searchSnapshotsDir;
@@ -120,16 +130,31 @@ function buildFieldAvailability(
   records: readonly SnapshotBuildRecord[],
 ): SearchSnapshotFieldAvailability {
   const totalDocCount = records.length;
-  const populatedDocCount = records.filter((record) =>
+  const appellationPopulatedDocCount = records.filter((record) =>
     typeof record.appellation === 'string' && record.appellation.trim().length > 0,
   ).length;
-  return {
+  const fieldAvailability: SearchSnapshotFieldAvailability = {
     appellation: {
+      populatedDocCount: appellationPopulatedDocCount,
+      totalDocCount,
+      populatedDocRatio: totalDocCount > 0 ? appellationPopulatedDocCount / totalDocCount : 0,
+    },
+    body: { populatedDocCount: 0, totalDocCount, populatedDocRatio: 0 },
+    sweetness: { populatedDocCount: 0, totalDocCount, populatedDocRatio: 0 },
+    acidity: { populatedDocCount: 0, totalDocCount, populatedDocRatio: 0 },
+    tannin: { populatedDocCount: 0, totalDocCount, populatedDocRatio: 0 },
+  };
+
+  for (const attribute of SEARCH_SNAPSHOT_SENSORY_FIELD_AVAILABILITY_ATTRIBUTES) {
+    const populatedDocCount = records.filter((record) => record[attribute] != null).length;
+    fieldAvailability[attribute] = {
       populatedDocCount,
       totalDocCount,
       populatedDocRatio: totalDocCount > 0 ? populatedDocCount / totalDocCount : 0,
-    },
-  };
+    };
+  }
+
+  return fieldAvailability;
 }
 
 /**
@@ -624,7 +649,7 @@ export function attachBenchmarkAnchorSuitability(
   };
 }
 
-function buildArtifactsForRecords(args: {
+async function buildArtifactsForRecords(args: {
   readonly records: readonly SnapshotBuildRecord[];
   readonly goldLookup: ReadonlyMap<string, string>;
   readonly sourceContinuityLookup: ReadonlyMap<SourceRecordId, {
@@ -632,11 +657,11 @@ function buildArtifactsForRecords(args: {
     readonly identitySignature: string;
     readonly benchmarkEntityId?: CanonicalEntityId;
   }>;
-}): {
+}): Promise<{
   readonly entityArtifact: readonly EntitySnapshotRecord[];
   readonly resolvedAliases: ReturnType<typeof resolveAliasClaimsAndBuildAmbiguityRegistry>['resolvedAliases'];
   readonly ambiguityRows: ReturnType<typeof resolveAliasClaimsAndBuildAmbiguityRegistry>['ambiguityRows'];
-} {
+}> {
   const entityArtifact: EntitySnapshotRecord[] = [];
   const entityIdBySourceId = new Map<SourceRecordId, CanonicalEntityId>();
 
@@ -652,6 +677,7 @@ function buildArtifactsForRecords(args: {
       identitySignature: resolved.identitySignature,
       relations: {},
       attributes: {
+        ...(record.grapePrimary != null ? { grapePrimary: record.grapePrimary } : {}),
         grapes: record.grapes,
         wineType: record.wineType,
         style: record.wineType,
@@ -687,9 +713,117 @@ function buildArtifactsForRecords(args: {
     entityIdBySourceId.set(record.sourceId, runtimeEntityId);
   }
   entityArtifact.sort((left, right) => left.entityId.localeCompare(right.entityId));
-  const aliasArtifact = buildAliasArtifact(args.records, entityIdBySourceId);
+  const approvedAbbreviationOverlay = await loadApprovedAbbreviationAliasOverlay(
+    entityArtifact.map((entity) => entity.entityId),
+  );
+  const aliasArtifact = buildAliasArtifact(
+    args.records,
+    entityIdBySourceId,
+    approvedAbbreviationOverlay,
+  );
   const { resolvedAliases, ambiguityRows } = resolveAliasClaimsAndBuildAmbiguityRegistry(aliasArtifact);
   return { entityArtifact, resolvedAliases, ambiguityRows };
+}
+
+interface ApprovedAbbreviationAliasProposalRow {
+  readonly surface_form: string;
+  readonly target_entity_id: string;
+  readonly proposed_type: string;
+  readonly evidence: unknown;
+  readonly confidence: number;
+}
+
+function isRecordValue(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseApprovedAbbreviationAliasProposal(
+  row: ApprovedAbbreviationAliasProposalRow,
+): { readonly targetEntityId: CanonicalEntityId; readonly proposal: SnapshotAliasOverlayProposal } {
+  const aliasType = parseAliasType(row.proposed_type);
+  if (aliasType !== 'abbreviation') {
+    throw new Error(`Unsupported approved alias proposal type=${JSON.stringify(row.proposed_type)}`);
+  }
+  if (typeof row.surface_form !== 'string' || row.surface_form.length === 0) {
+    throw new Error(`Approved abbreviation proposal is missing surface_form for ${row.target_entity_id}`);
+  }
+  if (!Number.isFinite(row.confidence) || row.confidence <= 0) {
+    throw new Error(`Approved abbreviation proposal has invalid confidence for ${row.target_entity_id}`);
+  }
+  if (!isRecordValue(row.evidence)) {
+    throw new Error(`Approved abbreviation proposal evidence is malformed for ${row.target_entity_id}`);
+  }
+
+  const source = row.evidence['source'];
+  const sourceTrust = row.evidence['sourceTrust'];
+  const aliasScope = row.evidence['aliasScope'];
+  if (
+    typeof source !== 'string'
+    || source.length === 0
+    || typeof aliasScope !== 'string'
+    || aliasScope.length === 0
+    || typeof sourceTrust !== 'number'
+    || !Number.isFinite(sourceTrust)
+  ) {
+    throw new Error(`Approved abbreviation proposal evidence is incomplete for ${row.target_entity_id}`);
+  }
+
+  return {
+    targetEntityId: row.target_entity_id as CanonicalEntityId,
+    proposal: {
+      value: row.surface_form,
+      type: aliasType,
+      source,
+      sourceTrust,
+      confidencePrior: row.confidence,
+      scope: aliasScope,
+    },
+  };
+}
+
+async function loadApprovedAbbreviationAliasOverlay(
+  entityIds: readonly CanonicalEntityId[],
+): Promise<ReadonlyMap<CanonicalEntityId, readonly SnapshotAliasOverlayProposal[]>> {
+  const uniqueEntityIds = [...new Set(entityIds)];
+  if (uniqueEntityIds.length === 0) {
+    return new Map();
+  }
+  if (process.env['DATABASE_URL'] === undefined && process.env['PG_HOST'] === undefined) {
+    return new Map();
+  }
+
+  const [{ loadConfig }, { createPgPool, shouldUsePgPool }] = await Promise.all([
+    import('../../src/config/env.js'),
+    import('../../src/infrastructure/db/pg-pool.js'),
+  ]);
+  const config = loadConfig();
+  if (!shouldUsePgPool(config.pg)) {
+    return new Map();
+  }
+
+  const pool = createPgPool(config.pg);
+  try {
+    const result = await pool.query<ApprovedAbbreviationAliasProposalRow>(
+      `SELECT surface_form, target_entity_id, proposed_type, evidence, confidence
+         FROM alias_proposals
+        WHERE proposed_type = 'abbreviation'
+          AND status IN ('approved', 'promoted')
+          AND target_entity_id = ANY($1::text[])
+        ORDER BY target_entity_id ASC, confidence DESC, proposal_id ASC`,
+      [uniqueEntityIds],
+    );
+
+    const overlay = new Map<CanonicalEntityId, SnapshotAliasOverlayProposal[]>();
+    for (const row of result.rows) {
+      const parsed = parseApprovedAbbreviationAliasProposal(row);
+      const existing = overlay.get(parsed.targetEntityId) ?? [];
+      existing.push(parsed.proposal);
+      overlay.set(parsed.targetEntityId, existing);
+    }
+    return overlay;
+  } finally {
+    await pool.end();
+  }
 }
 
 export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapshotResult> {
@@ -720,7 +854,7 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     entityArtifact,
     resolvedAliases,
     ambiguityRows,
-  } = buildArtifactsForRecords({
+  } = await buildArtifactsForRecords({
     records: finalRecords,
     goldLookup,
     sourceContinuityLookup,
@@ -737,7 +871,7 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
       entityArtifact,
       resolvedAliases,
       ambiguityRows,
-    } = buildArtifactsForRecords({
+    } = await buildArtifactsForRecords({
       records: finalRecords,
       goldLookup,
       sourceContinuityLookup,
@@ -758,9 +892,9 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
   const hashes = {
     documents: hashText(documentsNdjson),
     vespaFeed: hashText(''),
-    entities: hashStableJson(entityArtifact),
-    aliases: hashStableJson(resolvedAliases),
-    ambiguityRegistry: hashStableJson(ambiguityRows),
+    entities: hashStableJson(canonicalizeEntitySnapshotRecords(entityArtifact)),
+    aliases: hashStableJson(canonicalizeAliasSnapshotRecords(resolvedAliases)),
+    ambiguityRegistry: hashStableJson(canonicalizeAmbiguitySnapshotRows(ambiguityRows)),
     nlMappings: hashText(nlMappingsCanonical),
   } as const;
 

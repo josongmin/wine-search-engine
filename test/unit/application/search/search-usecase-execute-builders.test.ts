@@ -186,6 +186,65 @@ describe('search-usecase-execute-builders synthetic decision traces', () => {
     expect(params.decisionOutput.decisionTrace.signals.calibratedGap).toBeUndefined();
   });
 
+  it('emits abstain-specific trace semantics for insufficient_evidence responses', () => {
+    const params = buildEntropyAbstainResponseParams({
+      plan: makePlan(),
+      compiled: makeCompiled(),
+      snapshot: makeSnapshot(),
+      requestId: 'req-insufficient-evidence',
+      startTime: Date.now(),
+      effectiveRoute: 'hybrid',
+      retrievalModeSource: 'planner',
+      plannerSuggestedMode: 'attribute_search',
+      abstainDecision: {
+        shouldAbstain: true,
+        reason: 'insufficient_evidence',
+        detail: 'Dense and anchor retrieval channels are both degraded; sparse-only results are insufficient for confident ranking.',
+        recoverableBy: 'retry_with_dense',
+      },
+      entropy: Number.NaN,
+      results: [],
+      rankedResults: [],
+    });
+
+    expect(params.decisionOutput.decisionTrace.rulesApplied).toEqual([
+      'ABSTAIN_INSUFFICIENT_EVIDENCE',
+    ]);
+    expect(params.decisionOutput.decisionTrace.finalReason).toBe(
+      'Dense and anchor retrieval channels are both degraded; sparse-only results are insufficient for confident ranking.',
+    );
+    expect(params.clarification.reason).toBe(
+      'Dense and anchor retrieval channels are both degraded; sparse-only results are insufficient for confident ranking.',
+    );
+  });
+
+  it('maps no_match abstains to failed/fail instead of ambiguous/clarify', () => {
+    const params = buildEntropyAbstainResponseParams({
+      plan: makePlan(),
+      compiled: makeCompiled(),
+      snapshot: makeSnapshot(),
+      requestId: 'req-no-match',
+      startTime: Date.now(),
+      effectiveRoute: 'entity',
+      retrievalModeSource: 'planner',
+      plannerSuggestedMode: 'no_match_detection',
+      abstainDecision: {
+        shouldAbstain: true,
+        reason: 'no_match',
+        detail: 'Hard constraint filter produced zero candidates.',
+        recoverableBy: 'relax_constraints',
+      },
+      entropy: Number.NaN,
+      results: [],
+      rankedResults: [],
+    });
+
+    expect(params.decisionOutput.decisionStatus).toBe('failed');
+    expect(params.decisionOutput.nextAction).toBe('fail');
+    expect(params.decisionOutput.decisionTrace.signals.ambiguity).toBe(false);
+    expect(params.abstainReason).toBe('no_match');
+  });
+
   it('uses alias-aware clarification payload for ambiguous short-form low-confidence responses instead of generic top labels', () => {
     const plan = {
       ...makePlan(),

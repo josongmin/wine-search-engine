@@ -5,6 +5,7 @@ import { parseAliasType } from '../../domain/alias/model/alias.js';
 import { pickHigherTrustAliasType } from '../../domain/alias/service/conflict-resolver.js';
 import {
   buildAliasLookupPlan,
+  buildAliasSurfaceLookupPlan,
   isPhoneticAliasSurfaceCompatible,
 } from '../../domain/query/service/alias-lookup-plan.js';
 import {
@@ -749,7 +750,7 @@ export class PgAliasMatcher implements AliasMatcher {
   }
 
   private buildMatchPlan(normalizedQuery: string): MatchPlan | null {
-    const lookupPlan = buildAliasLookupPlan(normalizedQuery);
+    const lookupPlan = buildAliasSurfaceLookupPlan(normalizedQuery);
     const { views, tokenList, compactList, transliteratedList, phoneticList } = lookupPlan;
 
     const fuzzyVariants = Array.from(

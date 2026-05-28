@@ -13,6 +13,7 @@
  */
 
 import fs from 'node:fs/promises';
+import path from 'node:path';
 import { Pool } from 'pg';
 import { EvalRunner } from '../../src/domain/evaluation/service/eval-runner.js';
 import type { ReleaseGateResult } from '../../src/domain/evaluation/service/eval-runner.js';
@@ -23,6 +24,9 @@ import { SearchPipelineEvaluator } from '../../src/infrastructure/adapter/search
 import { buildTrainingExamples, trainAllModels } from '../../src/domain/ranking/training.js';
 import { PgLtrModelRegistry } from '../../src/infrastructure/adapter/pg-ltr-model-registry.js';
 import type { SearchUseCase } from '../../src/application/search/search.usecase.js';
+import type { RuntimeHandles } from '../../src/config/runtime-handles.js';
+import type { GoldSetFilter } from '../../src/domain/evaluation/port/gold-set-store.port.js';
+import { isQueryClass } from '../../src/domain/shared/types/query-class.js';
 import {
   DEFAULT_RUNTIME_STATE_PATH,
   loadSearchSnapshotRuntimeState,
@@ -30,6 +34,7 @@ import {
 import { getCurrentFeatureSchemaHash } from '../../src/domain/ranking/service/feature-parity-hash.js';
 import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 import { hashText } from '../../src/domain/shared/utils/stable-json.js';
+import { parseManifest } from '../etl/search-snapshot-schema.js';
 import {
   evaluateNoisyEntityBenchmarkWithSearchExecutor,
   getNoisyEntityQualityViolations,
@@ -37,12 +42,15 @@ import {
   type NoisyEntityBenchmarkThresholds,
 } from './run-noisy-entity-eval.js';
 import { atomicWriteFile } from '../etl/etl-utils.js';
+import { stageSnapshotRuntimeSubstratesToPg } from '../etl/publish-runtime-substrates.js';
+import { toReportProvenance } from './benchmark-provenance.js';
 
 const DEFAULT_EVAL_DATASET_VERSION = 'pg_gold_set_store.v1';
 const DEFAULT_NOISY_ENTITY_INPUT = 'fixture://noisy_attribute_recovery';
 const DEFAULT_NOISY_ENTITY_OUTPUT = resolveDataPath('data/noisy-entity-eval-results.json');
 const DEFAULT_RELEASE_SUMMARY_OUTPUT = resolveDataPath('data/eval-training-release-summary.json');
 const DEFAULT_RELEASE_SUMMARY_MARKDOWN_OUTPUT = resolveDataPath('data/eval-training-release-summary.md');
+const DEFAULT_SEARCH_SNAPSHOT_ROOT_DIR = resolveDataPath('data/search-snapshots');
 const DEFAULT_NOISY_ENTITY_GATE_THRESHOLDS = {
   minRecallAt3: 1,
   minResolutionMatchRate: 1,
@@ -55,8 +63,11 @@ const DEFAULT_NOISY_ENTITY_GATE_THRESHOLDS = {
 interface CliArgs {
   readonly snapshotId?: string;
   readonly evalDatasetVersion: string;
+  readonly evalCaseFilter: GoldSetFilter;
+  readonly caseLimit?: number;
   readonly noisyEntityInput: string;
   readonly noisyEntityOutput: string;
+  readonly skipNoisyEntity: boolean;
   readonly runtimeStatePath: string;
   readonly releaseSummaryOutput: string;
   readonly releaseSummaryMarkdownOutput: string;
@@ -74,6 +85,17 @@ export interface AuxiliaryReleaseGateResult {
 export interface CombinedReleaseGateStatus {
   readonly passed: boolean;
   readonly failures: readonly string[];
+}
+
+function isDebugPartialRun(args: CliArgs): boolean {
+  return (
+    args.caseLimit != null
+    || args.skipNoisyEntity
+    || args.evalCaseFilter.queryClass != null
+    || args.evalCaseFilter.sliceTag != null
+    || args.evalCaseFilter.labelTier != null
+    || args.evalCaseFilter.since != null
+  );
 }
 
 export interface EvalTrainingReleaseSummary {
@@ -113,6 +135,88 @@ export interface RuntimeStateReleaseProvenanceLinkResult {
   readonly status: 'linked' | 'skipped';
   readonly runtimeStatePath: string;
   readonly reason?: string;
+}
+
+interface ResolvedEvalTrainingArtifactPaths {
+  readonly noisyEntityOutputPath: string;
+  readonly releaseSummaryOutputPath: string;
+  readonly releaseSummaryMarkdownOutputPath: string;
+}
+
+export async function buildEvalTrainingRuntimeHandles(args: {
+  readonly pool: Pool;
+  readonly snapshotId?: string;
+  readonly snapshotRootDir?: string;
+}): Promise<RuntimeHandles> {
+  if (args.snapshotId === undefined) {
+    return { pool: args.pool };
+  }
+  const snapshotRootDir = args.snapshotRootDir ?? DEFAULT_SEARCH_SNAPSHOT_ROOT_DIR;
+  const manifestPath = path.join(snapshotRootDir, args.snapshotId, 'manifest.json');
+  const manifestRaw = await fs.readFile(manifestPath, 'utf8');
+  const manifest = parseManifest(manifestRaw, manifestPath);
+  return {
+    pool: args.pool,
+    searchSnapshotId: manifest.snapshotId,
+    searchSnapshotManifestPath: manifestPath,
+    searchSnapshotFieldAvailability: manifest.fieldAvailability,
+  };
+}
+
+export async function stageEvalTrainingSnapshotRuntimeSubstrates(args: {
+  readonly snapshotId?: string;
+  readonly snapshotRootDir?: string;
+}): Promise<void> {
+  if (args.snapshotId === undefined) {
+    return;
+  }
+  const snapshotRootDir = args.snapshotRootDir ?? DEFAULT_SEARCH_SNAPSHOT_ROOT_DIR;
+  const manifestPath = path.join(snapshotRootDir, args.snapshotId, 'manifest.json');
+  const staged = await stageSnapshotRuntimeSubstratesToPg({
+    manifestPath,
+    allowExistingActiveSnapshot: true,
+  });
+  console.log(
+    `🗄️ Staged snapshot-bound PG substrates: ${staged.snapshotId} `
+    + `(entities=${staged.entities}, aliases=${staged.aliases}, ambiguity=${staged.ambiguityRegistry})`,
+  );
+}
+
+function appendPartialDebugSuffix(filePath: string): string {
+  const ext = path.extname(filePath);
+  if (ext.length === 0) {
+    return `${filePath}.partial-debug`;
+  }
+  return `${filePath.slice(0, -ext.length)}.partial-debug${ext}`;
+}
+
+export function resolveEvalTrainingArtifactPaths(args: {
+  readonly partialDebugRun: boolean;
+  readonly noisyEntityOutput: string;
+  readonly releaseSummaryOutput: string;
+  readonly releaseSummaryMarkdownOutput: string;
+}): ResolvedEvalTrainingArtifactPaths {
+  if (!args.partialDebugRun) {
+    return {
+      noisyEntityOutputPath: args.noisyEntityOutput,
+      releaseSummaryOutputPath: args.releaseSummaryOutput,
+      releaseSummaryMarkdownOutputPath: args.releaseSummaryMarkdownOutput,
+    };
+  }
+  return {
+    noisyEntityOutputPath:
+      args.noisyEntityOutput === DEFAULT_NOISY_ENTITY_OUTPUT
+        ? appendPartialDebugSuffix(args.noisyEntityOutput)
+        : args.noisyEntityOutput,
+    releaseSummaryOutputPath:
+      args.releaseSummaryOutput === DEFAULT_RELEASE_SUMMARY_OUTPUT
+        ? appendPartialDebugSuffix(args.releaseSummaryOutput)
+        : args.releaseSummaryOutput,
+    releaseSummaryMarkdownOutputPath:
+      args.releaseSummaryMarkdownOutput === DEFAULT_RELEASE_SUMMARY_MARKDOWN_OUTPUT
+        ? appendPartialDebugSuffix(args.releaseSummaryMarkdownOutput)
+        : args.releaseSummaryMarkdownOutput,
+  };
 }
 
 export function evaluateNoisyEntityReleaseGate(
@@ -274,7 +378,17 @@ export async function linkEvalTrainingReleaseToRuntimeState(
     throw error;
   }
 
-  const runtimeState = await loadSearchSnapshotRuntimeState(args.runtimeStatePath);
+  let runtimeState;
+  try {
+    runtimeState = await loadSearchSnapshotRuntimeState(args.runtimeStatePath);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      status: 'skipped',
+      runtimeStatePath: args.runtimeStatePath,
+      reason: `runtime_state_unreadable:${message}`,
+    };
+  }
   if (runtimeState.snapshotId !== args.snapshotId) {
     return {
       status: 'skipped',
@@ -312,15 +426,18 @@ export async function linkEvalTrainingReleaseToRuntimeState(
   };
 }
 
-function parseArgs(argv: readonly string[]): CliArgs {
+export function parseArgs(argv: readonly string[]): CliArgs {
   let snapshotId: string | undefined;
   let evalDatasetVersion = DEFAULT_EVAL_DATASET_VERSION;
+  let evalCaseFilter: GoldSetFilter = {};
+  let caseLimit: number | undefined;
   let noisyEntityInput = DEFAULT_NOISY_ENTITY_INPUT;
   let noisyEntityOutput = DEFAULT_NOISY_ENTITY_OUTPUT;
+  let skipNoisyEntity = false;
   let runtimeStatePath = DEFAULT_RUNTIME_STATE_PATH;
   let releaseSummaryOutput = DEFAULT_RELEASE_SUMMARY_OUTPUT;
   let releaseSummaryMarkdownOutput = DEFAULT_RELEASE_SUMMARY_MARKDOWN_OUTPUT;
-  let noisyEntityMode: CliArgs['noisyEntityMode'] = 'hybrid';
+  let noisyEntityMode: CliArgs['noisyEntityMode'] = 'auto';
   let noisyEntityConcurrency = 4;
   let noisyEntityGateThresholds: NoisyEntityBenchmarkThresholds = {
     ...DEFAULT_NOISY_ENTITY_GATE_THRESHOLDS,
@@ -334,12 +451,47 @@ function parseArgs(argv: readonly string[]): CliArgs {
     } else if (arg === '--eval-dataset-version') {
       evalDatasetVersion = argv[index + 1] ?? DEFAULT_EVAL_DATASET_VERSION;
       index += 1;
+    } else if (arg === '--query-class') {
+      const value = argv[index + 1];
+      if (value != null && isQueryClass(value)) {
+        evalCaseFilter = { ...evalCaseFilter, queryClass: value };
+      }
+      index += 1;
+    } else if (arg === '--slice-tag') {
+      const value = argv[index + 1];
+      if (value != null && value.length > 0) {
+        evalCaseFilter = { ...evalCaseFilter, sliceTag: value };
+      }
+      index += 1;
+    } else if (arg === '--label-tier') {
+      const value = argv[index + 1];
+      if (value === 'gold' || value === 'silver' || value === 'bronze') {
+        evalCaseFilter = { ...evalCaseFilter, labelTier: value };
+      }
+      index += 1;
+    } else if (arg === '--since') {
+      const value = argv[index + 1];
+      if (value != null) {
+        const parsed = new Date(value);
+        if (!Number.isNaN(parsed.getTime())) {
+          evalCaseFilter = { ...evalCaseFilter, since: parsed };
+        }
+      }
+      index += 1;
+    } else if (arg === '--case-limit') {
+      const value = Number.parseInt(argv[index + 1] ?? '', 10);
+      if (Number.isFinite(value) && value >= 1) {
+        caseLimit = value;
+      }
+      index += 1;
     } else if (arg === '--noisy-entity-input') {
       noisyEntityInput = argv[index + 1] ?? DEFAULT_NOISY_ENTITY_INPUT;
       index += 1;
     } else if (arg === '--noisy-entity-output') {
       noisyEntityOutput = argv[index + 1] ?? DEFAULT_NOISY_ENTITY_OUTPUT;
       index += 1;
+    } else if (arg === '--skip-noisy-entity') {
+      skipNoisyEntity = true;
     } else if (arg === '--runtime-state-path') {
       runtimeStatePath = argv[index + 1] ?? DEFAULT_RUNTIME_STATE_PATH;
       index += 1;
@@ -395,8 +547,11 @@ function parseArgs(argv: readonly string[]): CliArgs {
   return {
     snapshotId,
     evalDatasetVersion,
+    evalCaseFilter,
+    caseLimit,
     noisyEntityInput,
     noisyEntityOutput,
+    skipNoisyEntity,
     runtimeStatePath,
     releaseSummaryOutput,
     releaseSummaryMarkdownOutput,
@@ -419,12 +574,31 @@ async function runEvaluationAndTraining(
 ): Promise<void> {
   const searchSnapshotId = args.snapshotId ?? (await loadSearchSnapshotRuntimeState()).snapshotId;
   const featureSchemaHash = getCurrentFeatureSchemaHash();
+  const partialDebugRun = isDebugPartialRun(args);
+  const artifactPaths = resolveEvalTrainingArtifactPaths({
+    partialDebugRun,
+    noisyEntityOutput: args.noisyEntityOutput,
+    releaseSummaryOutput: args.releaseSummaryOutput,
+    releaseSummaryMarkdownOutput: args.releaseSummaryMarkdownOutput,
+  });
   {
     console.log('🚀 Starting Evaluation + LTR Training Pipeline\n');
     console.log('='.repeat(60));
     console.log(`🔒 Binding trained models to search snapshot: ${searchSnapshotId}`);
     console.log(`🧪 Eval dataset version: ${args.evalDatasetVersion}`);
     console.log(`🧬 Feature schema hash: ${featureSchemaHash}`);
+    if (partialDebugRun) {
+      console.log('🧪 Debug mode: filtered/partial eval run detected; activation will be forced shadow-only');
+      if (artifactPaths.noisyEntityOutputPath !== args.noisyEntityOutput) {
+        console.log(`   • debug noisy output: ${artifactPaths.noisyEntityOutputPath}`);
+      }
+      if (artifactPaths.releaseSummaryOutputPath !== args.releaseSummaryOutput) {
+        console.log(`   • debug release summary: ${artifactPaths.releaseSummaryOutputPath}`);
+      }
+      if (artifactPaths.releaseSummaryMarkdownOutputPath !== args.releaseSummaryMarkdownOutput) {
+        console.log(`   • debug release markdown: ${artifactPaths.releaseSummaryMarkdownOutputPath}`);
+      }
+    }
 
     // Step 1: Load evaluation cases
     console.log('\n📖 Step 1: Loading evaluation cases from database...');
@@ -432,8 +606,24 @@ async function runEvaluationAndTraining(
       snapshotId: searchSnapshotId,
       runtimeStatePath: args.runtimeStatePath,
     });
-    const cases = await goldSetStore.getCases();
+    const loadedCases = await goldSetStore.getCases(args.evalCaseFilter);
+    const cases = args.caseLimit == null ? loadedCases : loadedCases.slice(0, args.caseLimit);
     console.log(`   ✓ Loaded ${cases.length} evaluation cases`);
+    if (args.evalCaseFilter.queryClass != null) {
+      console.log(`   • query_class filter: ${args.evalCaseFilter.queryClass}`);
+    }
+    if (args.evalCaseFilter.sliceTag != null) {
+      console.log(`   • slice_tag filter: ${args.evalCaseFilter.sliceTag}`);
+    }
+    if (args.evalCaseFilter.labelTier != null) {
+      console.log(`   • label_tier filter: ${args.evalCaseFilter.labelTier}`);
+    }
+    if (args.evalCaseFilter.since != null) {
+      console.log(`   • since filter: ${args.evalCaseFilter.since.toISOString()}`);
+    }
+    if (args.caseLimit != null) {
+      console.log(`   • case_limit: ${args.caseLimit}`);
+    }
 
     // Distribution by query class
     const classDistribution = new Map<string, number>();
@@ -461,7 +651,18 @@ async function runEvaluationAndTraining(
     console.log('\n📊 Step 2: Running evaluation...');
     const evalResultStore = new PgEvalResultStore(pool);
     const searchPipeline = new SearchPipelineEvaluator(searchUseCase);
-    const evalRunner = new EvalRunner(goldSetStore, evalResultStore, searchPipeline);
+    const selectedCaseStore = {
+      async getCases() {
+        return cases;
+      },
+      async addCase() {
+        throw new Error('selectedCaseStore is read-only for eval debug/release runs');
+      },
+      async getIAAScore(sliceTag?: string) {
+        return goldSetStore.getIAAScore(sliceTag);
+      },
+    };
+    const evalRunner = new EvalRunner(selectedCaseStore, evalResultStore, searchPipeline);
 
     const evalReport = await evalRunner.run();
     console.log(`   ✓ Evaluated ${evalReport.caseCount} cases`);
@@ -489,40 +690,65 @@ async function runEvaluationAndTraining(
       }
     }
 
-    console.log('\n🧪 Step 2b: Running noisy entity benchmark gate...');
-    const noisyEntityReport = await evaluateNoisyEntityBenchmarkWithSearchExecutor(searchUseCase, {
-      input: args.noisyEntityInput,
-      mode: args.noisyEntityMode,
-      concurrency: args.noisyEntityConcurrency,
-    });
-    await fs.writeFile(args.noisyEntityOutput, `${JSON.stringify(noisyEntityReport, null, 2)}\n`, 'utf8');
-    const noisyEntityGate = evaluateNoisyEntityReleaseGate(
-      noisyEntityReport,
-      args.noisyEntityGateThresholds,
-    );
-    console.log(`   ✓ Evaluated ${noisyEntityReport.query_count} noisy entity cases`);
-    console.log(`     recall@1: ${noisyEntityReport.recall_at_1.toFixed(3)}`);
-    console.log(`     recall@3: ${noisyEntityReport.recall_at_3.toFixed(3)}`);
-    console.log(`     mrr: ${noisyEntityReport.mrr.toFixed(3)}`);
-    console.log(`     output: ${args.noisyEntityOutput}`);
-    if (noisyEntityGate.passed) {
-      console.log('     ✅ noisy entity gate passed');
+    let noisyEntityReport: NoisyEntityBenchmarkReport = {
+      benchmark: 'noisy-entity-benchmark',
+      query_count: 0,
+      recall_at_1: 0,
+      recall_at_3: 0,
+      mrr: 0,
+      by_category: {},
+      by_language: {},
+      misses: [],
+      provenance_checked_count: 0,
+      provenance_match_rate: null,
+      provenance_misses: [],
+      resolution_checked_count: 0,
+      resolution_match_rate: null,
+      false_exact_rate: null,
+      resolution_misses: [],
+      source: 'search-executor',
+      evaluated_at: new Date().toISOString(),
+    };
+    const auxiliaryGates: AuxiliaryReleaseGateResult[] = [];
+    if (args.skipNoisyEntity) {
+      console.log('\n🧪 Step 2b: Skipping noisy entity benchmark gate (--skip-noisy-entity)');
+      await fs.writeFile(artifactPaths.noisyEntityOutputPath, `${JSON.stringify(noisyEntityReport, null, 2)}\n`, 'utf8');
     } else {
-      console.log('     ❌ noisy entity gate failed:');
-      for (const failure of noisyEntityGate.failures) {
-        console.log(`        ${failure}`);
+      console.log('\n🧪 Step 2b: Running noisy entity benchmark gate...');
+      noisyEntityReport = await evaluateNoisyEntityBenchmarkWithSearchExecutor(searchUseCase, {
+        input: args.noisyEntityInput,
+        mode: args.noisyEntityMode,
+        concurrency: args.noisyEntityConcurrency,
+      });
+      await fs.writeFile(artifactPaths.noisyEntityOutputPath, `${JSON.stringify(noisyEntityReport, null, 2)}\n`, 'utf8');
+      const noisyEntityGate = evaluateNoisyEntityReleaseGate(
+        noisyEntityReport,
+        args.noisyEntityGateThresholds,
+      );
+      auxiliaryGates.push(noisyEntityGate);
+      console.log(`   ✓ Evaluated ${noisyEntityReport.query_count} noisy entity cases`);
+      console.log(`     recall@1: ${noisyEntityReport.recall_at_1.toFixed(3)}`);
+      console.log(`     recall@3: ${noisyEntityReport.recall_at_3.toFixed(3)}`);
+      console.log(`     mrr: ${noisyEntityReport.mrr.toFixed(3)}`);
+      console.log(`     output: ${artifactPaths.noisyEntityOutputPath}`);
+      if (noisyEntityGate.passed) {
+        console.log('     ✅ noisy entity gate passed');
+      } else {
+        console.log('     ❌ noisy entity gate failed:');
+        for (const failure of noisyEntityGate.failures) {
+          console.log(`        ${failure}`);
+        }
       }
     }
 
     const combinedReleaseGate = combineReleaseGateStatuses(
       evalReport.releaseGateResult,
-      [noisyEntityGate],
+      auxiliaryGates,
     );
 
     // Step 3: Build training examples from evaluation results
     console.log('\n🧠 Step 3: Building LambdaMART training examples...');
-    const results = await evalResultStore.getResults();
-    const examples = buildTrainingExamples(results, cases);
+    const examples = buildTrainingExamples(evalReport.results, cases);
     console.log(`   ✓ Built ${examples.length} training examples`);
 
     // Step 4: Train LambdaMART models per query class
@@ -537,34 +763,38 @@ async function runEvaluationAndTraining(
       if (models.size > 0) {
         console.log(`   ✓ Trained models for ${models.size} query classes`);
 
-        // Step 5: Store trained models in registry
-        console.log('\n💾 Step 5: Persisting trained models to database...');
-        const modelRegistry = new PgLtrModelRegistry(pool);
-
-        let storedCount = 0;
-        for (const [queryClass, weights] of models.entries()) {
-          await modelRegistry.saveModel(queryClass, weights, {
-            searchSnapshotId,
-            evalDatasetVersion: args.evalDatasetVersion,
-            featureSchemaHash,
-            activate: false,
-          });
-          storedCount++;
-          console.log(
-            `   ✓ Stored model for ${queryClass} (NDCG@5: ${weights.ndcg5ValidationScore.toFixed(3)})`,
-          );
-        }
-        storedModelCount = storedCount;
-
-        if (combinedReleaseGate.passed) {
-          activatedModelCount = await modelRegistry.activateSnapshot(searchSnapshotId);
-          activationStatus = 'activated';
-          console.log(`   ✓ Activated ${activatedModelCount} LTR models for snapshot ${searchSnapshotId}`);
+        if (partialDebugRun) {
+          console.log('   ⚠️  Skipped model persistence because this was a filtered/partial debug run');
         } else {
-          console.log('   ⚠️  Skipped activation because release gates failed; models remain shadow-only');
-        }
+          // Step 5: Store trained models in registry
+          console.log('\n💾 Step 5: Persisting trained models to database...');
+          const modelRegistry = new PgLtrModelRegistry(pool);
 
-        console.log(`   ✓ Persisted ${storedCount} models to ltr_model_registry`);
+          let storedCount = 0;
+          for (const [queryClass, weights] of models.entries()) {
+            await modelRegistry.saveModel(queryClass, weights, {
+              searchSnapshotId,
+              evalDatasetVersion: args.evalDatasetVersion,
+              featureSchemaHash,
+              activate: false,
+            });
+            storedCount++;
+            console.log(
+              `   ✓ Stored model for ${queryClass} (NDCG@5: ${weights.ndcg5ValidationScore.toFixed(3)})`,
+            );
+          }
+          storedModelCount = storedCount;
+
+          if (combinedReleaseGate.passed) {
+            activatedModelCount = await modelRegistry.activateSnapshot(searchSnapshotId);
+            activationStatus = 'activated';
+            console.log(`   ✓ Activated ${activatedModelCount} LTR models for snapshot ${searchSnapshotId}`);
+          } else {
+            console.log('   ⚠️  Skipped activation because release gates failed; models remain shadow-only');
+          }
+
+          console.log(`   ✓ Persisted ${storedCount} models to ltr_model_registry`);
+        }
       } else {
         console.log('   ⚠️  No models trained (insufficient examples per class)');
       }
@@ -587,24 +817,47 @@ async function runEvaluationAndTraining(
       featureSchemaHash,
       evaluationCaseCount: cases.length,
       trainedModelCount: storedModelCount,
-      noisyEntityOutputPath: args.noisyEntityOutput,
+      noisyEntityOutputPath: artifactPaths.noisyEntityOutputPath,
       evalGate: evalReport.releaseGateResult,
-      auxiliaryGates: [noisyEntityGate],
+      auxiliaryGates,
       combinedReleaseGate,
       noisyEntityReport,
       activationStatus,
       activatedModelCount,
     });
-    await fs.writeFile(args.releaseSummaryOutput, `${JSON.stringify(releaseSummary, null, 2)}\n`, 'utf8');
+    await fs.writeFile(artifactPaths.releaseSummaryOutputPath, `${JSON.stringify(releaseSummary, null, 2)}\n`, 'utf8');
     await fs.writeFile(
-      args.releaseSummaryMarkdownOutput,
+      artifactPaths.releaseSummaryMarkdownOutputPath,
       buildEvalTrainingReleaseMarkdownSummary(releaseSummary),
       'utf8',
     );
     const evalBenchmarkRunStore = new PgEvalBenchmarkRunStore(pool);
+    const storeProvenance = {
+      provenanceSchemaVersion: 1 as const,
+      corpusId: args.evalDatasetVersion,
+      corpusHash: hashText(args.evalDatasetVersion),
+      runtimeTarget: 'ltr_training_pipeline',
+      usesLiveApi: false,
+      smokeSynthesized: false,
+      thresholdSource: 'inline_runner_thresholds',
+      gateEligible: true,
+      suiteGatePassed: combinedReleaseGate.passed,
+      searchSnapshotId,
+      runtimeActivationStatus: activationStatus,
+      queryClassMix: Object.fromEntries(
+        [...classDistribution.entries()].sort(([left], [right]) => left.localeCompare(right)),
+      ),
+    };
+    const noisyEntityReportWithProvenance = {
+      ...noisyEntityReport,
+      provenance: toReportProvenance({
+        benchmarkKind: 'noisy_entity',
+        provenance: storeProvenance,
+        featureSchemaHash,
+      }),
+    };
     await evalBenchmarkRunStore.saveRun({
       benchmarkKind: 'noisy_entity',
-      snapshotId: searchSnapshotId,
       evalDatasetVersion: args.evalDatasetVersion,
       featureSchemaHash,
       queryCount: noisyEntityReport.query_count,
@@ -614,21 +867,26 @@ async function runEvaluationAndTraining(
       ...(noisyEntityReport.false_exact_rate === null
         ? {}
         : { falseExactRate: noisyEntityReport.false_exact_rate }),
-      releaseGatePassed: combinedReleaseGate.passed,
-      activationStatus,
-      report: noisyEntityReport as unknown as Readonly<Record<string, unknown>>,
+      provenance: storeProvenance,
+      report: noisyEntityReportWithProvenance as unknown as Readonly<Record<string, unknown>>,
     });
-    const runtimeStateLinkResult = await linkEvalTrainingReleaseToRuntimeState({
-      runtimeStatePath: args.runtimeStatePath,
-      snapshotId: searchSnapshotId,
-      evalDatasetVersion: args.evalDatasetVersion,
-      featureSchemaHash,
-      noisyEntityOutputPath: args.noisyEntityOutput,
-      releaseSummaryOutput: args.releaseSummaryOutput,
-      releaseSummaryMarkdownOutput: args.releaseSummaryMarkdownOutput,
-      combinedReleaseGatePassed: combinedReleaseGate.passed,
-      activationStatus,
-    });
+    const runtimeStateLinkResult = partialDebugRun
+      ? {
+          status: 'skipped' as const,
+          runtimeStatePath: args.runtimeStatePath,
+          reason: 'partial_debug_run',
+        }
+      : await linkEvalTrainingReleaseToRuntimeState({
+          runtimeStatePath: args.runtimeStatePath,
+          snapshotId: searchSnapshotId,
+          evalDatasetVersion: args.evalDatasetVersion,
+          featureSchemaHash,
+          noisyEntityOutputPath: artifactPaths.noisyEntityOutputPath,
+          releaseSummaryOutput: artifactPaths.releaseSummaryOutputPath,
+          releaseSummaryMarkdownOutput: artifactPaths.releaseSummaryMarkdownOutputPath,
+          combinedReleaseGatePassed: combinedReleaseGate.passed,
+          activationStatus,
+        });
     if (runtimeStateLinkResult.status === 'linked') {
       console.log(`   • Runtime Release Provenance: linked (${runtimeStateLinkResult.runtimeStatePath})`);
     } else {
@@ -655,7 +913,14 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const { getPgPool } = await import('../../src/infrastructure/db/pg-pool.js');
 
     const pool = getPgPool();
-    const container = await createContainer(config, pool);
+    await stageEvalTrainingSnapshotRuntimeSubstrates({
+      snapshotId: args.snapshotId,
+    });
+    const runtimeHandles = await buildEvalTrainingRuntimeHandles({
+      pool,
+      snapshotId: args.snapshotId,
+    });
+    const container = await createContainer(config, runtimeHandles);
 
     await runEvaluationAndTraining(container.searchUseCase, pool, args);
     await pool.end();

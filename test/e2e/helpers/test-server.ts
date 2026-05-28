@@ -11,6 +11,12 @@ import {
   createTestContainer,
   type TestContainerOptions,
 } from '../../integration/helpers/test-container.js';
+import {
+  toAnchorEntityData,
+  toCandidateAttributes,
+  toHybridCandidate,
+  toSimilarityCandidate,
+} from '../../integration/helpers/test-fixtures.js';
 import { SimilarityScorer } from '../../../src/domain/mixed/service/similarity-scorer.js';
 import type { AnchorProfile } from '../../../src/domain/mixed/model/anchor-profile.js';
 import type { AnchorEntityData } from '../../../src/domain/mixed/service/anchor-profiler.js';
@@ -39,15 +45,7 @@ type FixtureDoc = RetrievalDocument;
 const mixedSimilarityScorer = new SimilarityScorer();
 
 function buildAnchorEntityData(doc: FixtureDoc): AnchorEntityData {
-  return {
-    entityId: doc.entityId,
-    canonicalLabel: doc.canonicalLabel,
-    region: doc.region,
-    grapes: doc.grapes,
-    body: doc.body,
-    sweetness: doc.sweetness,
-    style: doc.style,
-  };
+  return toAnchorEntityData(doc);
 }
 
 function buildAnchorProfile(doc: FixtureDoc): AnchorProfile {
@@ -58,51 +56,11 @@ function buildAnchorProfile(doc: FixtureDoc): AnchorProfile {
 }
 
 function buildSimilarityCandidate(doc: FixtureDoc): SimilarityCandidate {
-  return {
-    region: doc.region,
-    grapes: doc.grapes,
-    body: doc.body,
-    sweetness: doc.sweetness,
-    style: doc.style,
-  };
-}
-
-function deriveWineType(style: string): string {
-  const normalized = style.toLowerCase().trim();
-  if (normalized.includes('sparkling')) return 'sparkling';
-  if (normalized.includes('white')) return 'white';
-  return 'red';
-}
-
-function inferVintageYear(label: string): number | undefined {
-  const match = label.match(/(\d{4})$/);
-  if (match === null) {
-    return undefined;
-  }
-  const year = Number(match[1]);
-  return Number.isFinite(year) ? year : undefined;
+  return toSimilarityCandidate(doc);
 }
 
 function buildCandidateAttributes(doc: FixtureDoc): Readonly<Record<string, unknown>> {
-  const vintageYear = inferVintageYear(doc.canonicalLabel);
-
-  return {
-    entity_id: doc.entityId,
-    canonical_label: doc.canonicalLabel,
-    producer: doc.producer,
-    region: doc.region,
-    grapes: doc.grapes,
-    body: doc.body,
-    sweetness: doc.sweetness,
-    style: doc.style,
-    price_band: doc.priceBand,
-    availability: doc.availability,
-    search_text_en: doc.searchTextEn,
-    search_text_ko: doc.searchTextKo,
-    wine_type: deriveWineType(doc.style),
-    color: deriveWineType(doc.style),
-    ...(vintageYear !== undefined ? { vintage_year: vintageYear } : {}),
-  };
+  return toCandidateAttributes(doc);
 }
 
 function buildHybridCandidate(
@@ -111,28 +69,19 @@ function buildHybridCandidate(
   rank: number,
   retrievalScore: number,
 ): HybridCandidate {
+  const candidate = toHybridCandidate(
+    doc,
+    rank,
+    ['sparse_bm25', 'dense_semantic', 'anchor_similarity'],
+    'fusion',
+  );
   return {
-    entityId: doc.entityId,
-    canonicalLabel: doc.canonicalLabel,
-    producer: doc.producer,
-    region: doc.region,
-    searchTextEn: doc.searchTextEn,
-    grapePrimary: doc.grapes[0],
-    body: doc.body,
-    sweetness: doc.sweetness,
-    style: doc.style,
-    vintageYear: inferVintageYear(doc.canonicalLabel),
-    sparseRank: rank,
-    denseRank: rank,
-    anchorRank: rank,
+    ...candidate,
     fusionRrfTotal: retrievalScore,
-    matchedConstraints: [],
     retrievalTrace: {
-      retrievalProfile: 'fusion',
+      ...candidate.retrievalTrace,
       lexicalQueriesUsed: [anchorDoc.canonicalLabel],
       semanticQueriesUsed: [anchorDoc.searchTextEn],
-      filtersApplied: [],
-      candidateSources: ['sparse_bm25', 'dense_semantic', 'anchor_similarity'],
     },
   };
 }

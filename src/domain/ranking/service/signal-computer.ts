@@ -7,7 +7,11 @@ import type {
 } from '../../retrieval/model/dual-lane-artifact.js';
 import type { QueryPlanV1 } from '../../query/model/query-plan.js';
 import type { ConstraintGraph } from '../../query/model/constraint-graph.js';
-import type { ConstraintBundle, NormalizedConstraint } from '../../shared/types/index.js';
+import {
+  isBindingInferredConstraint,
+  type ConstraintBundle,
+  type NormalizedConstraint,
+} from '../../shared/types/index.js';
 import type { ComponentScores } from '../model/ranked-result.js';
 import { clamp01 } from '../../shared/utils/clamp.js';
 import { evaluateGraphHardGate } from './graph-hard-gate.js';
@@ -16,6 +20,7 @@ import {
   classifyGraphPresence,
   recordGraphPathDecision,
 } from '../../observability/graph-path-telemetry.js';
+import { isConstraintGraphEmitEnabled } from '../../query/service/constraint-graph-flags.js';
 
 /**
  * Minimum entity integrity score to be considered viable.
@@ -82,6 +87,12 @@ const ANCHOR_PRESERVE_FALLBACK_LOW = 0.4;
 const ANCHOR_PRESERVE_RETRIEVAL_BOOST = 0.05;
 /** Max structured attribute delta for 0–1 similarity (4-point style scale). */
 const ATTRIBUTE_SIMILARITY_MAX_DELTA = 4;
+
+function filterBindingInferredConstraints(
+  constraints: readonly NormalizedConstraint[],
+): readonly NormalizedConstraint[] {
+  return constraints.filter(isBindingInferredConstraint);
+}
 
 /**
  * Computes individual signal scores for each candidate in the ranking pipeline.
@@ -188,7 +199,7 @@ export class SignalComputer {
       outcome: classifyGraphPresence({
         graphPresent: graph !== undefined,
         ...(graph !== undefined ? { graphOrigin: graph.origin } : {}),
-        graphEmitFlagOn: process.env['CONSTRAINT_GRAPH_EMIT'] !== 'false',
+        graphEmitFlagOn: isConstraintGraphEmitEnabled(),
       }),
     });
     // ADR-014 Phase 1b.3b: when a ConstraintGraph is present, the hard gate
@@ -249,7 +260,7 @@ export class SignalComputer {
       outcome: classifyGraphPresence({
         graphPresent: graph !== undefined,
         ...(graph !== undefined ? { graphOrigin: graph.origin } : {}),
-        graphEmitFlagOn: process.env['CONSTRAINT_GRAPH_EMIT'] !== 'false',
+        graphEmitFlagOn: isConstraintGraphEmitEnabled(),
       }),
     });
     const softConstraints = constraints.soft;
@@ -307,7 +318,7 @@ export class SignalComputer {
         }
       }
     } else {
-      for (const constraint of constraints.inferred) {
+      for (const constraint of filterBindingInferredConstraints(constraints.inferred)) {
         const weight = constraint.confidence * INFERRED_CONSTRAINT_WEIGHT_FACTOR;
         totalWeight += weight;
         if (matchedSet.has(constraint.attribute)) {
@@ -373,7 +384,7 @@ export class SignalComputer {
     for (const c of queryPlan.constraints.soft) {
       expectedAttributes.add(c.attribute);
     }
-    for (const c of queryPlan.constraints.inferred) {
+    for (const c of filterBindingInferredConstraints(queryPlan.constraints.inferred)) {
       expectedAttributes.add(c.attribute);
     }
 
@@ -484,10 +495,11 @@ export class SignalComputer {
     const queryUncertainty = queryPlan.uncertainty.overall;
 
     // Candidate-level uncertainty: fewer matched constraints = more uncertain
+    const bindingInferredConstraints = filterBindingInferredConstraints(queryPlan.constraints.inferred);
     const totalConstraints =
       queryPlan.constraints.hard.length +
       queryPlan.constraints.soft.length +
-      queryPlan.constraints.inferred.length;
+      bindingInferredConstraints.length;
 
     let candidateUncertainty = 0;
     if (totalConstraints > 0) {

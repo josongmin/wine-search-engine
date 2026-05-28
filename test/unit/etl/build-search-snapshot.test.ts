@@ -4,9 +4,14 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildSearchSnapshot } from '../../../scripts/etl/build-search-snapshot.js';
 import { parseNdjson } from '../../../scripts/etl/ndjson.js';
-import type { EntitySnapshotRecord } from '../../../scripts/etl/search-snapshot-schema.js';
+import {
+  hashStableJson,
+  type AliasSnapshotRecord,
+  type EntitySnapshotRecord,
+} from '../../../scripts/etl/search-snapshot-schema.js';
 import type { EnrichedSilverRecord } from '../../../scripts/etl/types.js';
 import { SNAPSHOT_CANONICAL_ENTITY_FALLBACK_PREFIX } from '../../../scripts/etl/snapshot-entity-identity.js';
+import { canonicalizeAliasSnapshotRecords } from '../../../src/domain/shared/utils/search-snapshot-canonicalization.js';
 
 async function makeTempDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'build-search-snapshot-'));
@@ -122,6 +127,26 @@ describe('buildSearchSnapshot', () => {
       totalDocCount: 1,
       populatedDocRatio: 1,
     });
+    expect(result.manifest.fieldAvailability.body).toEqual({
+      populatedDocCount: 1,
+      totalDocCount: 1,
+      populatedDocRatio: 1,
+    });
+    expect(result.manifest.fieldAvailability.sweetness).toEqual({
+      populatedDocCount: 1,
+      totalDocCount: 1,
+      populatedDocRatio: 1,
+    });
+    expect(result.manifest.fieldAvailability.acidity).toEqual({
+      populatedDocCount: 1,
+      totalDocCount: 1,
+      populatedDocRatio: 1,
+    });
+    expect(result.manifest.fieldAvailability.tannin).toEqual({
+      populatedDocCount: 1,
+      totalDocCount: 1,
+      populatedDocRatio: 1,
+    });
     expect(result.manifest.hashes.entities).toMatch(/^[a-f0-9]{64}$/);
     expect(result.manifest.artifacts.vespaFeedNdjson).toMatch(/vespa-feed\.ndjson$/);
     await expect(fs.access(result.manifest.artifacts.vespaFeedNdjson)).rejects.toThrow();
@@ -131,8 +156,17 @@ describe('buildSearchSnapshot', () => {
       entitiesRaw,
       result.manifest.artifacts.entitiesNdjson,
     ).records;
+    const aliasesRaw = await fs.readFile(result.manifest.artifacts.aliasesNdjson, 'utf8');
+    const aliasRows = parseNdjson<AliasSnapshotRecord>(
+      aliasesRaw,
+      result.manifest.artifacts.aliasesNdjson,
+    ).records;
 
     expect(entityRows).toHaveLength(1);
+    expect(aliasRows.length).toBeGreaterThan(0);
+    expect(result.manifest.hashes.aliases).toBe(
+      hashStableJson(canonicalizeAliasSnapshotRecords(aliasRows)),
+    );
     expect(entityRows[0]?.entityId.startsWith(SNAPSHOT_CANONICAL_ENTITY_FALLBACK_PREFIX)).toBe(true);
     expect(entityRows[0]).toMatchObject({
       entityType: 'wine',
@@ -146,8 +180,14 @@ describe('buildSearchSnapshot', () => {
       sourceRecordRefs: [{ sourceSystem: 'vivino-silver', sourceRecordId: 'wine-opus-one' }],
     });
     expect(entityRows[0]?.attributes).toMatchObject({
+      grapePrimary: 'Cabernet Sauvignon',
+      grapes: ['Cabernet Sauvignon', 'Merlot'],
       wineType: 'red',
       style: 'red',
+      body: 0.9,
+      sweetness: 0.1,
+      acidity: 0.5,
+      tannin: 0.8,
       vintage: 2018,
       region: 'Napa Valley',
       priceBand: 'luxury',
@@ -297,6 +337,13 @@ describe('buildSearchSnapshot', () => {
             totalDocCount: 1,
             populatedDocRatio: 1,
           },
+        },
+        quality: {
+          status: 'degraded',
+          blockers: [],
+          bypasses: ['legacy_carry_forward_fixture'],
+          carryForwardBenchmarkCount: 0,
+          experimentalInputsPresent: false,
         },
       })}\n`,
     );

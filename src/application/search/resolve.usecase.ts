@@ -13,9 +13,11 @@ import type { CanonicalEntityId } from '../../domain/shared/types/index.js';
 import type { ResolveRequest } from './resolve-request.dto.js';
 import type { ResolveResponse } from './resolve-response.dto.js';
 import { buildResolverCandidatesFromGenerator } from './search-usecase-resolver-candidates.js';
+import { shouldSuppressBlockerSeedExpansion } from './search-usecase-blocker-seed-policy.js';
 import { buildPlannerContextFromSearchRequest } from './search-usecase-planner-context.js';
 import { createSearchQuerySecurityGate } from './search-usecase-security-gate.js';
 import { pipelineDebug, sanitizeQueryForDebug } from '../../domain/observability/request-pipeline-debug.js';
+import { PipelineDebugStep } from '../../domain/observability/pipeline-debug-steps.js';
 import { buildAuthorityTraceRef } from '../../domain/decision/service/authority-trace.js';
 import { buildDecisionSnapshotFromPlan } from './search-usecase-decision-snapshot.js';
 import type { SnapshotVersions } from './search.usecase.js';
@@ -64,7 +66,7 @@ export class ResolveUseCase {
 
     pipelineDebug(
       {
-        step: 'resolve.use_case.start',
+        step: PipelineDebugStep.RESOLVE_USE_CASE_START,
         query_preview: sanitizeQueryForDebug(request.query),
         ...(request.requestId !== undefined ? { request_id: request.requestId } : {}),
       },
@@ -104,7 +106,7 @@ export class ResolveUseCase {
     if (satResult.contradicted) {
       pipelineDebug(
         {
-          step: 'resolve.constraint_sat.contradicted',
+          step: PipelineDebugStep.RESOLVE_CONSTRAINT_SAT_CONTRADICTED,
           query_class: plan.queryClass,
         },
         'pipeline resolve-only early exit',
@@ -135,7 +137,10 @@ export class ResolveUseCase {
     // TA2-T5: Invoke blocker to surface entity IDs not covered by alias anchors.
     // Mirrors the pattern in resolveEntityRouteForPlan / executeEntityRoute.
     let blockerOnlyIds: readonly CanonicalEntityId[] = [];
-    if (this.deps.blocker !== undefined) {
+    if (
+      this.deps.blocker !== undefined
+      && !shouldSuppressBlockerSeedExpansion(plan.anchors)
+    ) {
       const allBlockerIds = await this.deps.blocker.block(plan.rawQuery, plan.normalizedQuery);
       const anchorCoveredIds = new Set(
         plan.anchors.flatMap((a) => a.candidateEntityIds.map(String)),
@@ -174,7 +179,7 @@ export class ResolveUseCase {
 
     pipelineDebug(
       {
-        step: 'resolve.use_case.done',
+        step: PipelineDebugStep.RESOLVE_USE_CASE_DONE,
         resolve_status: result.status,
         candidate_count: result.candidates.length,
         has_top_entity: result.topEntity !== undefined,

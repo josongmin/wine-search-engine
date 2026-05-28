@@ -2,53 +2,112 @@ import { describe, expect, it, vi } from 'vitest';
 import { PgEvalBenchmarkRunStore } from '../pg-eval-benchmark-run-store.js';
 import { EVAL_BENCHMARK_LEDGER_BOOTSTRAP_STATEMENTS } from '../../db/eval-benchmark-ledger-bootstrap.js';
 
+function makeProvenance(overrides: Partial<{
+  corpusId: string;
+  corpusHash: string;
+  runtimeTarget: string;
+  usesLiveApi: boolean;
+  smokeSynthesized: boolean;
+  thresholdSource: string;
+  gateEligible: boolean;
+  suiteGatePassed: boolean;
+  searchSnapshotId?: string;
+  runtimeActivationStatus?: 'activated' | 'shadow_only';
+  readinessPassed?: boolean;
+  activeLtrModels?: number;
+}> = {}) {
+  return {
+    provenanceSchemaVersion: 1 as const,
+    corpusId: 'fixture.v1',
+    corpusHash: 'corpus-hash',
+    runtimeTarget: 'search_api_http',
+    usesLiveApi: true,
+    smokeSynthesized: false,
+    thresholdSource: 'external_fixture_thresholds',
+    gateEligible: true,
+    suiteGatePassed: true,
+    searchSnapshotId: 'snapshot-a',
+    runtimeActivationStatus: 'activated' as const,
+    readinessPassed: true,
+    activeLtrModels: 2,
+    ...overrides,
+  };
+}
+
+function makeRow(overrides: Partial<Record<string, unknown>> = {}) {
+  const provenance = makeProvenance();
+  return {
+    run_id: 'run-1',
+    benchmark_kind: 'noisy_entity',
+    search_snapshot_id: provenance.searchSnapshotId ?? null,
+    eval_dataset_version: provenance.corpusId,
+    feature_schema_hash: 'feature-hash',
+    query_count: 10,
+    recall_at_1: 1,
+    recall_at_3: 1,
+    mrr: 1,
+    false_exact_rate: null,
+    release_gate_passed: provenance.gateEligible && provenance.suiteGatePassed,
+    activation_status: provenance.runtimeActivationStatus ?? null,
+    provenance_schema_version: provenance.provenanceSchemaVersion,
+    corpus_id: provenance.corpusId,
+    corpus_hash: provenance.corpusHash,
+    runtime_target: provenance.runtimeTarget,
+    uses_live_api: provenance.usesLiveApi,
+    smoke_synthesized: provenance.smokeSynthesized,
+    threshold_source: provenance.thresholdSource,
+    gate_eligible: provenance.gateEligible,
+    suite_gate_passed: provenance.suiteGatePassed,
+    readiness_passed: provenance.readinessPassed,
+    active_ltr_models: provenance.activeLtrModels,
+    label_tier_mix: null,
+    slice_mix: null,
+    query_class_mix: null,
+    runtime_activation_status: provenance.runtimeActivationStatus ?? null,
+    report_json: { benchmark: 'default-report' },
+    metrics: null,
+    created_at: new Date('2026-04-17T00:00:00.000Z'),
+    ...overrides,
+  };
+}
+
 describe('PgEvalBenchmarkRunStore', () => {
   it('persists and lists noisy benchmark runs with newest-first ordering', async () => {
     const query = vi.fn()
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({
         rows: [
-          {
+          makeRow({
             run_id: 'run-2',
-            benchmark_kind: 'noisy_entity',
             search_snapshot_id: 'snapshot-b',
             eval_dataset_version: 'pg_gold_set_store.v1',
-            feature_schema_hash: 'feature-hash',
+            corpus_id: 'pg_gold_set_store.v1',
             query_count: 20,
             recall_at_1: 0.95,
             recall_at_3: 1,
             mrr: 0.98,
             false_exact_rate: 0,
-            release_gate_passed: true,
-            activation_status: 'activated',
             report_json: { benchmark: 'noisy-entity-benchmark', query_count: 20 },
-            metrics: null,
             created_at: new Date('2026-04-17T01:00:00.000Z'),
-          },
-          {
+          }),
+          makeRow({
             run_id: 'run-1',
-            benchmark_kind: 'noisy_entity',
             search_snapshot_id: 'snapshot-a',
             eval_dataset_version: 'pg_gold_set_store.v1',
-            feature_schema_hash: 'feature-hash',
-            query_count: 10,
-            recall_at_1: 1,
-            recall_at_3: 1,
-            mrr: 1,
-            false_exact_rate: null,
+            corpus_id: 'pg_gold_set_store.v1',
             release_gate_passed: false,
             activation_status: 'shadow_only',
+            suite_gate_passed: false,
+            runtime_activation_status: 'shadow_only',
             report_json: { benchmark: 'noisy-entity-benchmark', query_count: 10 },
-            metrics: null,
             created_at: new Date('2026-04-17T00:00:00.000Z'),
-          },
+          }),
         ],
       });
     const store = new PgEvalBenchmarkRunStore({ query } as never);
 
     await store.saveRun({
       benchmarkKind: 'noisy_entity',
-      snapshotId: 'snapshot-b',
       evalDatasetVersion: 'pg_gold_set_store.v1',
       featureSchemaHash: 'feature-hash',
       queryCount: 20,
@@ -56,8 +115,11 @@ describe('PgEvalBenchmarkRunStore', () => {
       recallAt3: 1,
       mrr: 0.98,
       falseExactRate: 0,
-      releaseGatePassed: true,
-      activationStatus: 'activated',
+      provenance: makeProvenance({
+        corpusId: 'pg_gold_set_store.v1',
+        searchSnapshotId: 'snapshot-b',
+        runtimeActivationStatus: 'activated',
+      }),
       report: { benchmark: 'noisy-entity-benchmark', query_count: 20 },
       createdAt: new Date('2026-04-17T01:00:00.000Z'),
     });
@@ -87,14 +149,14 @@ describe('PgEvalBenchmarkRunStore', () => {
       expect.objectContaining({
         runId: 'run-2',
         snapshotId: 'snapshot-b',
-        activationStatus: 'activated',
+        runtimeActivationStatus: 'activated',
         releaseGatePassed: true,
         recallAt3: 1,
       }),
       expect.objectContaining({
         runId: 'run-1',
         snapshotId: 'snapshot-a',
-        activationStatus: 'shadow_only',
+        runtimeActivationStatus: 'shadow_only',
         releaseGatePassed: false,
       }),
     ]);
@@ -105,30 +167,27 @@ describe('PgEvalBenchmarkRunStore', () => {
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({
         rows: [
-          {
+          makeRow({
             run_id: 'run-offline-1',
-            benchmark_kind: 'offline_eval',
+            benchmark_kind: 'offline_eval_live_runtime',
             search_snapshot_id: 'snap-offline',
             eval_dataset_version: 'pg_gold_set_store.v2',
+            corpus_id: 'pg_gold_set_store.v2',
             feature_schema_hash: 'hash-offline',
             query_count: 50,
             recall_at_1: 0.9,
             recall_at_3: 0.97,
             mrr: 0.93,
             false_exact_rate: 0.02,
-            release_gate_passed: true,
-            activation_status: 'activated',
             report_json: { benchmark: 'offline-eval' },
-            metrics: null,
             created_at: new Date('2026-04-17T02:00:00.000Z'),
-          },
+          }),
         ],
       });
     const store = new PgEvalBenchmarkRunStore({ query } as never);
 
     await store.saveRun({
-      benchmarkKind: 'offline_eval',
-      snapshotId: 'snap-offline',
+      benchmarkKind: 'offline_eval_live_runtime',
       evalDatasetVersion: 'pg_gold_set_store.v2',
       featureSchemaHash: 'hash-offline',
       queryCount: 50,
@@ -136,24 +195,26 @@ describe('PgEvalBenchmarkRunStore', () => {
       recallAt3: 0.97,
       mrr: 0.93,
       falseExactRate: 0.02,
-      releaseGatePassed: true,
-      activationStatus: 'activated',
+      provenance: makeProvenance({
+        corpusId: 'pg_gold_set_store.v2',
+        searchSnapshotId: 'snap-offline',
+      }),
       report: { benchmark: 'offline-eval' },
       createdAt: new Date('2026-04-17T02:00:00.000Z'),
     });
 
-    const runs = await store.listRuns({ benchmarkKind: 'offline_eval' });
+    const runs = await store.listRuns({ benchmarkKind: 'offline_eval_live_runtime' });
 
     // saveRun INSERT에 snapshotId가 올바르게 전달되었는지 확인
     expect(query).toHaveBeenNthCalledWith(
       1,
       expect.stringContaining('INSERT INTO eval_benchmark_runs'),
-      expect.arrayContaining(['offline_eval', 'snap-offline']),
+      expect.arrayContaining(['offline_eval_live_runtime', 'snap-offline']),
     );
     expect(runs).toHaveLength(1);
     expect(runs[0]).toEqual(expect.objectContaining({
       runId: 'run-offline-1',
-      benchmarkKind: 'offline_eval',
+      benchmarkKind: 'offline_eval_live_runtime',
       snapshotId: 'snap-offline',
       recallAt1: 0.9,
       releaseGatePassed: true,
@@ -165,10 +226,11 @@ describe('PgEvalBenchmarkRunStore', () => {
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({
         rows: [
-          {
+          makeRow({
             run_id: 'run-fixture-1',
             benchmark_kind: 'entity_retrieval_fixture',
             search_snapshot_id: null,
+            corpus_id: 'fixture.v1',
             eval_dataset_version: 'fixture.v1',
             feature_schema_hash: 'hash-fixture',
             query_count: 15,
@@ -177,11 +239,18 @@ describe('PgEvalBenchmarkRunStore', () => {
             mrr: null,
             false_exact_rate: null,
             release_gate_passed: false,
-            activation_status: 'shadow_only',
+            activation_status: null,
+            runtime_target: 'prediction_file',
+            uses_live_api: false,
+            threshold_source: 'external_fixture_thresholds',
+            gate_eligible: false,
+            suite_gate_passed: false,
+            readiness_passed: null,
+            active_ltr_models: null,
+            runtime_activation_status: null,
             report_json: { benchmark: 'entity-retrieval-fixture', cases: 15 },
-            metrics: null,
             created_at: new Date('2026-04-17T03:00:00.000Z'),
-          },
+          }),
         ],
       });
     const store = new PgEvalBenchmarkRunStore({ query } as never);
@@ -192,8 +261,17 @@ describe('PgEvalBenchmarkRunStore', () => {
       evalDatasetVersion: 'fixture.v1',
       featureSchemaHash: 'hash-fixture',
       queryCount: 15,
-      releaseGatePassed: false,
-      activationStatus: 'shadow_only',
+      provenance: makeProvenance({
+        corpusId: 'fixture.v1',
+        searchSnapshotId: undefined,
+        runtimeTarget: 'prediction_file',
+        usesLiveApi: false,
+        gateEligible: false,
+        suiteGatePassed: false,
+        runtimeActivationStatus: undefined,
+        readinessPassed: undefined,
+        activeLtrModels: undefined,
+      }),
       report: { benchmark: 'entity-retrieval-fixture', cases: 15 },
       createdAt: new Date('2026-04-17T03:00:00.000Z'),
     });
@@ -213,18 +291,18 @@ describe('PgEvalBenchmarkRunStore', () => {
       benchmarkKind: 'entity_retrieval_fixture',
       queryCount: 15,
       releaseGatePassed: false,
-      activationStatus: 'shadow_only',
     }));
   });
 
   it('throws on invalid benchmark_kind from DB', async () => {
     const query = vi.fn().mockResolvedValueOnce({
       rows: [
-        {
+        makeRow({
           run_id: 'run-bad',
           benchmark_kind: 'unknown_kind',
           search_snapshot_id: null,
           eval_dataset_version: 'v1',
+          corpus_id: 'v1',
           feature_schema_hash: 'hash',
           query_count: 1,
           recall_at_1: null,
@@ -232,11 +310,18 @@ describe('PgEvalBenchmarkRunStore', () => {
           mrr: null,
           false_exact_rate: null,
           release_gate_passed: false,
-          activation_status: 'shadow_only',
+          activation_status: null,
+          runtime_target: 'prediction_file',
+          uses_live_api: false,
+          smoke_synthesized: false,
+          gate_eligible: false,
+          suite_gate_passed: false,
+          readiness_passed: null,
+          active_ltr_models: null,
+          runtime_activation_status: null,
           report_json: {},
-          metrics: null,
           created_at: new Date(),
-        },
+        }),
       ],
     });
     const store = new PgEvalBenchmarkRunStore({ query } as never);
@@ -272,35 +357,35 @@ describe('PgEvalBenchmarkRunStore', () => {
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({
         rows: [
-          {
+          makeRow({
             run_id: 'run-metrics-1',
-            benchmark_kind: 'search_feature_behavior_fixture',
+            benchmark_kind: 'search_feature_behavior_live',
             search_snapshot_id: 'snap-metrics',
             eval_dataset_version: 'fixture.v1',
+            corpus_id: 'fixture.v1',
             feature_schema_hash: 'hash-metrics',
             query_count: 30,
             recall_at_1: null,
             recall_at_3: null,
             mrr: null,
             false_exact_rate: null,
-            release_gate_passed: true,
-            activation_status: 'activated',
             report_json: { benchmark: 'feature-behavior' },
             metrics: { ndcg_at_10: 0.85, decision_utility: 0.72 },
             created_at: new Date('2026-04-17T04:00:00.000Z'),
-          },
+          }),
         ],
       });
     const store = new PgEvalBenchmarkRunStore({ query } as never);
 
     await store.saveRun({
-      benchmarkKind: 'search_feature_behavior_fixture',
-      snapshotId: 'snap-metrics',
+      benchmarkKind: 'search_feature_behavior_live',
       evalDatasetVersion: 'fixture.v1',
       featureSchemaHash: 'hash-metrics',
       queryCount: 30,
-      releaseGatePassed: true,
-      activationStatus: 'activated',
+      provenance: makeProvenance({
+        corpusId: 'fixture.v1',
+        searchSnapshotId: 'snap-metrics',
+      }),
       report: { benchmark: 'feature-behavior' },
       metrics: inputMetrics,
       createdAt: new Date('2026-04-17T04:00:00.000Z'),
@@ -308,10 +393,9 @@ describe('PgEvalBenchmarkRunStore', () => {
 
     // INSERT에 metrics JSON이 직렬화되어 전달되었는지 확인
     const insertParams = query.mock.calls[0]![1] as unknown[];
-    // param index 13 = metrics
-    expect(insertParams[13]).toBe(JSON.stringify(inputMetrics));
+    expect(insertParams).toContain(JSON.stringify(inputMetrics));
 
-    const runs = await store.listRuns({ benchmarkKind: 'search_feature_behavior_fixture' });
+    const runs = await store.listRuns({ benchmarkKind: 'search_feature_behavior_live' });
 
     expect(runs).toHaveLength(1);
     expect(runs[0]!.metrics).toEqual({ ndcg_at_10: 0.85, decision_utility: 0.72 });
@@ -330,8 +414,18 @@ describe('PgEvalBenchmarkRunStore', () => {
       evalDatasetVersion: 'fixture.v1',
       featureSchemaHash: 'hash-fixture',
       queryCount: 6,
-      releaseGatePassed: true,
-      activationStatus: 'shadow_only',
+      provenance: makeProvenance({
+        corpusId: 'fixture.v1',
+        runtimeTarget: 'fixture_structural_predictions',
+        usesLiveApi: false,
+        smokeSynthesized: true,
+        gateEligible: false,
+        suiteGatePassed: true,
+        searchSnapshotId: undefined,
+        runtimeActivationStatus: undefined,
+        readinessPassed: undefined,
+        activeLtrModels: undefined,
+      }),
       report: { benchmark: 'agentic-tool-use-fixture' },
       metrics: { tool_selection_accuracy: 1 },
       createdAt: new Date('2026-04-22T00:00:00.000Z'),
@@ -353,20 +447,24 @@ describe('PgEvalBenchmarkRunStore', () => {
     const store = new PgEvalBenchmarkRunStore({ query } as never);
 
     await store.saveRun({
-      benchmarkKind: 'search_feature_behavior_fixture',
-      snapshotId: 'snap-metrics',
+      benchmarkKind: 'search_feature_behavior_live',
       evalDatasetVersion: 'fixture.v1',
       featureSchemaHash: 'hash-metrics',
       queryCount: 30,
-      releaseGatePassed: true,
-      activationStatus: 'activated',
+      provenance: makeProvenance({
+        corpusId: 'fixture.v1',
+        searchSnapshotId: 'snap-metrics',
+      }),
       report: { benchmark: 'feature-behavior' },
       metrics: { ndcg_at_10: 0.85 },
       createdAt: new Date('2026-04-22T00:00:00.000Z'),
     });
 
     expect(query).toHaveBeenCalledTimes(2 + EVAL_BENCHMARK_LEDGER_BOOTSTRAP_STATEMENTS.length);
-    expect(query.mock.calls[3]?.[0]).toContain('ADD COLUMN IF NOT EXISTS metrics JSONB');
+    expect(
+      query.mock.calls.some(([sql]) =>
+        typeof sql === 'string' && sql.includes('ADD COLUMN IF NOT EXISTS metrics JSONB')),
+    ).toBe(true);
     expect(query.mock.calls.at(-1)?.[0]).toContain('INSERT INTO eval_benchmark_runs');
   });
 });

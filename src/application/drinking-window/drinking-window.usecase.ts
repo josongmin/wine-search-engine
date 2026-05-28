@@ -17,6 +17,7 @@ import {
   inferDrinkingWindowBlockingEligibility,
   inferDrinkingWindowEvidenceLevel,
 } from '../search/drinking-window-confidence.js';
+import { projectDrinkingWindowBlock } from './drinking-window-block-projection.js';
 
 /**
  * Request to check drinking window for a wine.
@@ -71,18 +72,24 @@ export class DrinkingWindowUseCase implements DrinkingWindowUseCasePort {
       alcoholPct: request.alcoholPct,
     };
     const prediction = await this.predictor.predict(predictionInput);
-
-    return {
+    const projected = projectDrinkingWindowBlock({
       drinkingWindowStart: prediction.drinkingWindowStart,
       drinkingWindowEnd: prediction.drinkingWindowEnd,
       peakYear: prediction.peakYear,
-      currentlyDrinkable:
-        request.targetYear >= prediction.drinkingWindowStart &&
-        request.targetYear <= prediction.drinkingWindowEnd,
+      currentlyDrinkable: false,
       confidence: prediction.confidence,
       evidenceLevel: inferDrinkingWindowEvidenceLevel(prediction.modelVersion),
       blockingEligible: inferDrinkingWindowBlockingEligibility(prediction.modelVersion),
       modelVersion: prediction.modelVersion,
-    };
+    }, request.targetYear);
+    if (projected === undefined) {
+      throw new Error(
+        `DrinkingWindowUseCase: predictor emitted non-projectable window `
+        + `(start=${String(prediction.drinkingWindowStart)}, `
+        + `end=${String(prediction.drinkingWindowEnd)}, `
+        + `peak=${String(prediction.peakYear)})`,
+      );
+    }
+    return projected;
   }
 }

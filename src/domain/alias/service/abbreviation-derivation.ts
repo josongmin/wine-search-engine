@@ -115,6 +115,17 @@ const FOUR_DIGIT_YEAR_RE = /(?<=^|[^\p{L}\p{N}])(\d{4})(?=$|[^\p{L}\p{N}])/u;
 const WHITESPACE_RE = /\s+/u;
 
 /**
+ * Explicit leading acronym token gate.
+ *
+ * Some canonical labels already start with the wine-community acronym
+ * itself ("DRC Romanée-Conti 2015"). In that shape, shorter prefix
+ * initialisms emitted by {@link deriveInitialisms} ("DR") are not
+ * alternate community shorthand — they are truncated noise. Keep only the
+ * exact leading acronym family and suppress its shorter prefixes.
+ */
+const LEADING_EXPLICIT_ACRONYM_RE = /^[A-Z]{2,6}$/u;
+
+/**
  * Stop-word set for the "first significant word" extraction (R6 / R7).
  * Mirrors the Romance-language wine-article vocabulary used by
  * {@link deriveInitialisms} so the two modules stay aligned. SSoT note
@@ -225,6 +236,19 @@ function stripElidedArticle(token: string): string {
   return stripped;
 }
 
+function extractLeadingExplicitAcronym(canonicalLabel: string): string | null {
+  const deVintaged = canonicalLabel.replace(FOUR_DIGIT_YEAR_RE, ' ').trim();
+  if (deVintaged.length === 0) {
+    return null;
+  }
+  const [firstToken] = deVintaged.split(WHITESPACE_RE);
+  if (firstToken === undefined) {
+    return null;
+  }
+  const stripped = stripElidedArticle(firstToken);
+  return LEADING_EXPLICIT_ACRONYM_RE.test(stripped) ? stripped : null;
+}
+
 /**
  * Returns every "significant" whitespace-separated token from the
  * canonical label (stop-words and articles dropped, leading elided
@@ -289,7 +313,11 @@ export function deriveAbbreviations(
   const out: DerivedAbbreviation[] = [];
 
   // R1: Bare initialism — delegate to the existing audited deriver.
-  const initialisms = deriveInitialisms(input.canonicalLabel);
+  const leadingExplicitAcronym = extractLeadingExplicitAcronym(input.canonicalLabel);
+  const initialisms = deriveInitialisms(input.canonicalLabel)
+    .filter((initialism) =>
+      leadingExplicitAcronym === null || initialism.surface === leadingExplicitAcronym,
+    );
   for (const init of initialisms) {
     out.push({
       surface: init.surface,

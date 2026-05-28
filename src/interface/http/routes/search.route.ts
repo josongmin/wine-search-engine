@@ -12,7 +12,7 @@ import { getRequestId } from '../request-id.js';
 import { MEDIA_TYPE_HUMAN, wantsHumanResponse } from '../content-negotiation.js';
 import { projectToHumanResponse } from './search-human-projection.js';
 import { SearchResponseV2HumanSchema } from '../schemas/search-response-v2.schema.js';
-import { abortSignalFromFastifyRequest } from '../request-abort-signal.js';
+import { abortSignalFromFastifyRequest, raceWithRequestAbort } from '../request-abort-signal.js';
 import { HTTP_STATUS_OK } from '../constants.js';
 import { createStageTimer } from '../../../domain/shared/stage-timer.js';
 
@@ -40,12 +40,17 @@ export function registerSearchRoute(
       const searchRequest = toSearchRequest(parsed);
       const requestId = getRequestId(request);
       const stageTimer = createStageTimer();
+      const abortSignal = abortSignalFromFastifyRequest(request, reply);
 
-      const response = await deps.searchUseCase.execute(searchRequest, requestId, {
-        abortSignal: abortSignalFromFastifyRequest(request),
-        debugRequest: request.debugRequest,
-        stageTimer,
-      });
+      const response = await raceWithRequestAbort(
+        deps.searchUseCase.execute(searchRequest, requestId, {
+          abortSignal,
+          debugRequest: request.debugRequest,
+          stageTimer,
+        }),
+        abortSignal,
+        'Search request aborted',
+      );
 
       // RFC 7234 §4.1: Vary must list headers that influence representation selection.
       void reply.header('Vary', 'Accept');

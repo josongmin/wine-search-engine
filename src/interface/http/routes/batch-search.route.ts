@@ -7,7 +7,7 @@ import {
 import { registerContractRoute } from './register-contract-route.js';
 import { BatchSearchRouteContract } from './route-contracts.js';
 import { getRequestId } from '../request-id.js';
-import { abortSignalFromFastifyRequest } from '../request-abort-signal.js';
+import { abortSignalFromFastifyRequest, raceWithRequestAbort } from '../request-abort-signal.js';
 import { HTTP_STATUS_OK } from '../constants.js';
 import type { BatchSearchResponse } from '../../../application/search/batch-search.dto.js';
 
@@ -100,16 +100,22 @@ export function registerBatchSearchRoute(
     contract: BatchSearchRouteContract,
     handler: async (request, reply) => {
       const body = parseContractBody(request, BatchSearchRouteContract);
+      const abortSignal = abortSignalFromFastifyRequest(request, reply);
 
       // Use the HTTP requestId as the batch_id when the client did not
       // supply one, so per-item subqueries (`${batch_id}-${item.id}`) can
       // be correlated back to the originating HTTP request in logs/traces.
       const effectiveBatchId = body.batch_id ?? getRequestId(request);
-      const response = await deps.batchSearchUseCase.execute(
-        body.requests,
-        body.options,
-        effectiveBatchId,
-        { abortSignal: abortSignalFromFastifyRequest(request) },
+
+      const response = await raceWithRequestAbort(
+        deps.batchSearchUseCase.execute(
+          body.requests,
+          body.options,
+          effectiveBatchId,
+          { abortSignal },
+        ),
+        abortSignal,
+        'Batch search request aborted',
       );
 
       // HTTP transport indicates the batch request itself succeeded.

@@ -36,14 +36,10 @@ function makeSilverRecord(overrides: Partial<SilverWineRecord> = {}): SilverWine
 }
 
 describe('generateAliases', () => {
-  it('generates producer identity alias', () => {
+  it('does not generate producer-only identity aliases for wine entities', () => {
     const result = generateAliases(makeSilverRecord());
-    const producerAlias = result.proposed.find(
-      (a) => a.source === 'rule:producer_identity_v1',
-    );
-    expect(producerAlias).toBeDefined();
-    expect(producerAlias!.value).toBe('Château Margaux');
-    expect(producerAlias!.confidencePrior).toBe(0.95);
+    expect(result.proposed.some((a) => a.source === 'rule:producer_identity_v1')).toBe(false);
+    expect(result.proposed.some((a) => a.source === 'rule:producer_vintage_v1')).toBe(false);
   });
 
   it('generates accent-folded alias when accents present', () => {
@@ -65,9 +61,16 @@ describe('generateAliases', () => {
     expect(shortAlias!.needsReview).toBe(true);
   });
 
+  it('generates no-vintage alias even when it equals producer', () => {
+    const result = generateAliases(makeSilverRecord());
+    const noVintage = result.proposed.find(
+      (a) => a.source === 'rule:no_vintage_v1',
+    );
+    expect(noVintage).toBeDefined();
+    expect(noVintage!.value).toBe('Château Margaux');
+  });
+
   it('generates no-vintage alias when label differs from producer', () => {
-    // "Château Margaux 2015" without vintage = "Château Margaux" = producer → skipped
-    // Use a label that differs from producer after removing vintage
     const result = generateAliases(makeSilverRecord({
       canonicalLabel: 'Château Margaux Grand Vin 2015',
     }));
@@ -91,7 +94,7 @@ describe('generateAliases', () => {
   it('projects high-confidence non-review aliases to identitySafe', () => {
     const result = generateAliases(makeSilverRecord());
     expect(result.identitySafeProjection.length).toBeGreaterThan(0);
-    // Producer identity (0.95, no review) should be in identity-safe
+    // Label-derived no-vintage alias should be in identity-safe.
     expect(result.identitySafeProjection).toContain('Château Margaux');
   });
 
@@ -157,8 +160,8 @@ describe('generateAliases', () => {
         producer: 'Opus One',
       }));
       const noVintage = result.proposed.find((a) => a.source === 'rule:no_vintage_v1');
-      // "2015" embedded in "20150" must NOT be removed
-      expect(noVintage?.value).toContain('20150');
+      // "2015" embedded in "20150" must NOT be removed, so no alias is emitted.
+      expect(noVintage).toBeUndefined();
     });
 
     it('handles Korean label with vintage year adjacent to Hangul', () => {

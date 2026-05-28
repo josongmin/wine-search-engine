@@ -1,12 +1,19 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  DEFAULT_SUITES,
   buildPerfectEntityRetrievalPredictions,
+  parseArgs,
   scoreEntityRetrievalFixtureCases,
 } from '../../../scripts/eval/run-entity-retrieval-fixture-eval.ts';
 import type { FixtureEntityBenchmarkCase } from '../../../scripts/eval/external-fixture-benchmark.ts';
 
 describe('entity retrieval fixture eval', () => {
+  it('includes noisy_attribute_recovery in the default suite set', () => {
+    expect(DEFAULT_SUITES).toContain('noisy_attribute_recovery');
+    expect(parseArgs([]).suites).toEqual(DEFAULT_SUITES);
+  });
+
   it('scores exact, ambiguous, and mixed-script suites with suite-specific semantics', () => {
     const cases: FixtureEntityBenchmarkCase[] = [
       {

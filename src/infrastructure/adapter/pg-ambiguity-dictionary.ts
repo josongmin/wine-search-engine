@@ -38,7 +38,10 @@ export class PgAmbiguityDictionary implements AmbiguityDictionary {
   private activeSnapshotMissingTableUntil = 0;
   private activeSnapshotMissingTableLogged = false;
 
-  constructor(private readonly pool: Pool) {}
+  constructor(
+    private readonly pool: Pool,
+    private readonly snapshotIdOverride?: string,
+  ) {}
 
   async isKnownAmbiguous(surfaceForm: string): Promise<boolean> {
     const snap = await this.resolveActiveSnapshotOrNull();
@@ -110,6 +113,9 @@ export class PgAmbiguityDictionary implements AmbiguityDictionary {
    * loud error upstream.
    */
   private async resolveActiveSnapshotOrNull(): Promise<{ activeSnapshotId: string } | null> {
+    if (this.snapshotIdOverride !== undefined) {
+      return { activeSnapshotId: this.snapshotIdOverride };
+    }
     const now = Date.now();
     if (this.activeSnapshotMissingTableUntil > now) {
       return null;

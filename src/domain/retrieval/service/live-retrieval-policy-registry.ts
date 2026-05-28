@@ -319,7 +319,9 @@ const LEGACY_HEURISTIC_RETRIEVAL_MODE_ALIASES = [
 ] as const;
 
 export function getLiveFusionConfig(queryClass: string): LiveFusionConfig {
-  return LIVE_FUSION_CONFIGS[queryClass as LiveFusionQueryClass] ?? LIVE_FUSION_CONFIGS.fallback;
+  return queryClass in LIVE_FUSION_CONFIGS
+    ? LIVE_FUSION_CONFIGS[queryClass as LiveFusionQueryClass]
+    : LIVE_FUSION_CONFIGS.fallback;
 }
 
 export function mapDomainQueryClassToLiveFusionQueryClass(

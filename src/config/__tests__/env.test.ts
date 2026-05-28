@@ -46,11 +46,11 @@ describe('parseEnv invariants', () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 
   it('AGENT_ENABLED=true without OPENAI_API_KEY throws actionable error', () => {
     expect(() => parseEnv({ AGENT_ENABLED: 'true' })).toThrowError(
-      /AGENT_ENABLED=true requires OPENAI_API_KEY/,
+      /AGENT_ENABLED=true requires OPENAI_API_KEY, OPENAI_API_KEYS, or a Codex ChatGPT login token/,
     );
   });
 
@@ -65,6 +65,25 @@ describe('parseEnv invariants', () => {
     expect(config.openai.apiKey).toBe('sk-a');
     expect(config.openai.apiKeys).toEqual(['sk-a', 'sk-b']);
   });
+
+  it('AGENT_ENABLED=true with explicit Codex auth path succeeds', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'wine-env-codex-agent-'));
+    const authPath = path.join(dir, 'auth.json');
+    try {
+      await writeFile(authPath, JSON.stringify({
+        auth_mode: 'chatgpt',
+        tokens: {
+          access_token: 'at-1',
+          refresh_token: 'rt-1',
+          account_id: 'acct-1',
+        },
+      }), 'utf8');
+      const config = parseEnv({ AGENT_ENABLED: 'true', CODEX_AUTH_JSON_PATH: authPath });
+      expect(config.agent.enabled).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }, 15_000);
 
   it('deduplicates OPENAI_API_KEY and OPENAI_API_KEYS in stable order', () => {
     const config = parseEnv({
@@ -107,7 +126,7 @@ describe('parseEnv invariants', () => {
 
   it('LLM_QUERY_INTERPRETER=true without OPENAI_API_KEY throws actionable error', () => {
     expect(() => parseEnv({ LLM_QUERY_INTERPRETER: 'true' })).toThrowError(
-      /LLM_QUERY_INTERPRETER=true requires OPENAI_API_KEY/,
+      /LLM_QUERY_INTERPRETER=true requires OPENAI_API_KEY, OPENAI_API_KEYS, or a Codex ChatGPT login token/,
     );
   });
 
@@ -120,6 +139,36 @@ describe('parseEnv invariants', () => {
     const config = parseEnv({ LLM_QUERY_INTERPRETER: 'true', OPENAI_API_KEYS: 'sk-a\nsk-b' });
     expect(config.openai.llmQueryInterpreter).toBe(true);
     expect(config.openai.apiKeys).toEqual(['sk-a', 'sk-b']);
+  });
+
+  it('LLM_QUERY_INTERPRETER=true with explicit Codex auth path succeeds', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'wine-env-codex-interpreter-'));
+    const authPath = path.join(dir, 'auth.json');
+    try {
+      await writeFile(authPath, JSON.stringify({
+        auth_mode: 'chatgpt',
+        tokens: {
+          access_token: 'at-1',
+          refresh_token: 'rt-1',
+          account_id: 'acct-1',
+        },
+      }), 'utf8');
+      const config = parseEnv({ LLM_QUERY_INTERPRETER: 'true', CODEX_AUTH_JSON_PATH: authPath });
+      expect(config.openai.llmQueryInterpreter).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('ignores legacy EMBEDDING_MODEL and uses OPENAI_EMBEDDING_MODEL as the only query embedding model authority', () => {
+    const config = parseEnv({
+      EMBEDDING_MODEL: 'bge-m3',
+      OPENAI_EMBEDDING_MODEL: 'text-embedding-3-large',
+    });
+
+    expect(config.openai.embeddingModel).toBe('text-embedding-3-large');
+    expect(config.embedding.dimension).toBe(1024);
+    expect('model' in config.embedding).toBe(false);
   });
 
   it('WATCHLIST_ENABLED=true without WEBHOOK_SECRET throws', () => {

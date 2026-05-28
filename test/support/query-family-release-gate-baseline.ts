@@ -4,7 +4,8 @@ export type ReleaseQueryFamily =
   | 'anchored_similarity'
   | 'pairing'
   | 'browse'
-  | 'situation_based';
+  | 'situation_based'
+  | 'no_match';
 
 export interface EntityExactReleaseBaseline {
   readonly wrongResolveRate: number;
@@ -22,6 +23,10 @@ export interface RankedFamilyReleaseBaseline {
   readonly meanMrrAt10: number;
 }
 
+export interface NoMatchReleaseBaseline {
+  readonly failClosedRate: number;
+}
+
 export interface QueryFamilyReleaseBaselines {
   readonly entity_exact: EntityExactReleaseBaseline;
   readonly pure_constraint: RankedFamilyReleaseBaseline;
@@ -29,9 +34,10 @@ export interface QueryFamilyReleaseBaselines {
   readonly pairing: RankedFamilyReleaseBaseline;
   readonly browse: RankedFamilyReleaseBaseline;
   readonly situation_based: RankedFamilyReleaseBaseline;
+  readonly no_match: NoMatchReleaseBaseline;
 }
 
-export const QUERY_FAMILY_RELEASE_BASELINE_VERSION = '2026-05-26-query-family-release-gate-v1';
+export const QUERY_FAMILY_RELEASE_BASELINE_VERSION = '2026-05-28-query-family-release-gate-v2';
 
 export const QUERY_FAMILY_RELEASE_BASELINES: QueryFamilyReleaseBaselines = {
   entity_exact: {
@@ -65,12 +71,16 @@ export const QUERY_FAMILY_RELEASE_BASELINES: QueryFamilyReleaseBaselines = {
     meanRecallAt20: 1,
     meanMrrAt10: 1,
   },
+  no_match: {
+    failClosedRate: 1,
+  },
 };
 
 export const QUERY_FAMILY_RELEASE_THRESHOLDS = {
   entityExactWrongResolveMaxIncrease: 0,
   entityExactTop3RecallMaxDrop: 0,
   anchoredSimilaritySeedExclusionMaxDrop: 0,
+  noMatchFailClosedMaxDrop: 0,
   rankedFamilyZeroCandidateMaxIncrease: 0,
   rankedFamilyNdcgAt10MaxDrop: 0.02,
   rankedFamilyRecallAt20MaxDrop: 0,

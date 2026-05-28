@@ -77,7 +77,7 @@ describe('assertLiveBenchmarkReadiness', () => {
     }
   });
 
-  it('throws when drinking-window model readiness is down even if /ready is otherwise green', async () => {
+  it('ignores optional readiness probes by default when /ready is otherwise green', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -95,15 +95,13 @@ describe('assertLiveBenchmarkReadiness', () => {
       const { assertLiveBenchmarkReadiness } = await import(
         '../../../scripts/eval/live-benchmark-preflight.js'
       );
-      await expect(assertLiveBenchmarkReadiness('http://localhost:3000')).rejects.toThrow(
-        /drinking_window_model=down/,
-      );
+      await expect(assertLiveBenchmarkReadiness('http://localhost:3000')).resolves.toBeUndefined();
     } finally {
       fetchSpy.mockRestore();
     }
   });
 
-  it('throws when drinking-window model readiness is absent from /ready', async () => {
+  it('throws when a caller explicitly requires an optional readiness probe that is down', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -111,6 +109,7 @@ describe('assertLiveBenchmarkReadiness', () => {
           checks: {
             postgres: { status: 'up', required: true },
             blocking_zero_candidates: { status: 'up', required: false },
+            drinking_window_model: { status: 'down', required: false },
           },
         }),
         { status: 200 },
@@ -120,8 +119,10 @@ describe('assertLiveBenchmarkReadiness', () => {
       const { assertLiveBenchmarkReadiness } = await import(
         '../../../scripts/eval/live-benchmark-preflight.js'
       );
-      await expect(assertLiveBenchmarkReadiness('http://localhost:3000')).rejects.toThrow(
-        /drinking_window_model=missing/,
+      await expect(assertLiveBenchmarkReadiness('http://localhost:3000', {
+        requiredOptionalChecks: ['drinking_window_model'],
+      })).rejects.toThrow(
+        /drinking_window_model=down/,
       );
     } finally {
       fetchSpy.mockRestore();
@@ -144,7 +145,34 @@ describe('assertLiveBenchmarkReadiness', () => {
     }
   });
 
-  it('throws when blocker zero-candidate readiness is down even if /ready is otherwise green', async () => {
+  it('throws when a caller explicitly requires an optional readiness probe that is missing', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          ready: true,
+          checks: {
+            postgres: { status: 'up', required: true },
+            blocking_zero_candidates: { status: 'up', required: false },
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+    try {
+      const { assertLiveBenchmarkReadiness } = await import(
+        '../../../scripts/eval/live-benchmark-preflight.js'
+      );
+      await expect(assertLiveBenchmarkReadiness('http://localhost:3000', {
+        requiredOptionalChecks: ['drinking_window_model'],
+      })).rejects.toThrow(
+        /drinking_window_model=missing/,
+      );
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('throws when a caller explicitly requires blocker zero-candidate readiness', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -162,33 +190,10 @@ describe('assertLiveBenchmarkReadiness', () => {
       const { assertLiveBenchmarkReadiness } = await import(
         '../../../scripts/eval/live-benchmark-preflight.js'
       );
-      await expect(assertLiveBenchmarkReadiness('http://localhost:3000')).rejects.toThrow(
+      await expect(assertLiveBenchmarkReadiness('http://localhost:3000', {
+        requiredOptionalChecks: ['blocking_zero_candidates'],
+      })).rejects.toThrow(
         /blocking_zero_candidates=down/,
-      );
-    } finally {
-      fetchSpy.mockRestore();
-    }
-  });
-
-  it('throws when blocker zero-candidate readiness is absent from /ready', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          ready: true,
-          checks: {
-            postgres: { status: 'up', required: true },
-            drinking_window_model: { status: 'up', required: false },
-          },
-        }),
-        { status: 200 },
-      ),
-    );
-    try {
-      const { assertLiveBenchmarkReadiness } = await import(
-        '../../../scripts/eval/live-benchmark-preflight.js'
-      );
-      await expect(assertLiveBenchmarkReadiness('http://localhost:3000')).rejects.toThrow(
-        /blocking_zero_candidates=missing/,
       );
     } finally {
       fetchSpy.mockRestore();

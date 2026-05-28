@@ -26,6 +26,9 @@ import type {
   EvidenceItem,
   DecisionSnapshot,
 } from '../../shared/types/index.js';
+import type { QueryClass } from '../../shared/types/query-class.js';
+import type { QueryIntent } from '../../query/model/query-intent.js';
+import type { QueryRoute } from '../../query/model/query-route.js';
 import type { LTRScoreComponents } from '../../ranking/service/ltr-feature-extractor.js';
 import type { FunnelMetrics } from '../../ranking/model/ranking-stage.js';
 import type { EvalProvenanceSlice } from '../../retrieval/model/provenance.js';
@@ -34,6 +37,7 @@ import type { EvalResult } from '../model/eval-result.js';
 import type { EvalMetrics, SliceMetrics } from '../model/eval-metrics.js';
 import type { GoldSetStore, GoldSetFilter } from '../port/gold-set-store.port.js';
 import type { EvalResultStore } from '../port/eval-result-store.port.js';
+import type { ExecutionRetrievalMode } from '../../query/model/engine-execution-contract.js';
 import { UtilityScorer } from './utility-scorer.js';
 import { SliceEvaluator, type FlaggedSlice } from './slice-evaluator.js';
 import { SelectivePredictor } from './selective-predictor.js';
@@ -84,6 +88,14 @@ export interface SearchPipelineOutput {
   /** Calibrated decision confidence. */
   readonly decisionConfidence: number;
 
+  /**
+   * Whether {@link decisionConfidence} is trusted as a calibrated probability.
+   *
+   * False means the runtime resolved via a substitute-trust path over an
+   * uncalibrated score; ECE/reliability analysis must exclude it.
+   */
+  readonly decisionConfidenceTrusted?: boolean;
+
   /** Surfaced execution contract for honesty-aware evaluation. */
   readonly executionMode?: 'authoritative' | 'degraded' | 'heuristic' | 'advisory';
 
@@ -120,6 +132,13 @@ export interface SearchPipelineOutput {
    * Used for channel-level offline analysis and quality regression.
    */
   readonly retrievalProvenanceSlices?: readonly EvalProvenanceSlice[];
+
+  /** Runtime planner/execution classification observed during evaluation. */
+  readonly runtimeQueryClass?: QueryClass;
+  readonly runtimeIntent?: QueryIntent;
+  readonly runtimeRoute?: QueryRoute;
+  readonly runtimeRetrievalMode?: ExecutionRetrievalMode;
+  readonly goldRuntimeQueryClassMismatch?: boolean;
 }
 
 /**
@@ -201,6 +220,9 @@ export interface ReleaseGateResult {
 export interface EvalReport {
   /** Aggregate metrics across all cases. */
   readonly overallMetrics: EvalMetrics;
+
+  /** Case-level eval results produced during this run. */
+  readonly results: readonly EvalResult[];
 
   /** Per-slice metrics. */
   readonly sliceMetrics: readonly SliceMetrics[];
@@ -314,6 +336,7 @@ export class EvalRunner {
     // Step 7: Return full report
     return {
       overallMetrics,
+      results,
       sliceMetrics,
       flaggedSlices,
       releaseGateResult,
@@ -331,6 +354,7 @@ export class EvalRunner {
       caseId: evalCase.caseId,
       predictedStatus: 'failed',
       decisionConfidence: 0,
+      decisionConfidenceTrusted: false,
       utilityScore: 0,
       isCorrectResolve: false,
       isWrongResolve: false,
@@ -373,6 +397,9 @@ export class EvalRunner {
         : {}),
       predictedStatus: output.predictedStatus,
       decisionConfidence: output.decisionConfidence,
+      ...(output.decisionConfidenceTrusted !== undefined
+        ? { decisionConfidenceTrusted: output.decisionConfidenceTrusted }
+        : {}),
       ...(output.executionMode !== undefined ? { executionMode: output.executionMode } : {}),
       ...(output.blockingEligible !== undefined ? { blockingEligible: output.blockingEligible } : {}),
       ...(output.degradationReasons !== undefined ? { degradationReasons: output.degradationReasons } : {}),
@@ -393,6 +420,21 @@ export class EvalRunner {
         : {}),
       ...(output.retrievalProvenanceSlices !== undefined && output.retrievalProvenanceSlices.length > 0
         ? { retrievalProvenanceSlices: output.retrievalProvenanceSlices }
+        : {}),
+      ...(output.runtimeQueryClass !== undefined
+        ? { runtimeQueryClass: output.runtimeQueryClass }
+        : {}),
+      ...(output.runtimeIntent !== undefined
+        ? { runtimeIntent: output.runtimeIntent }
+        : {}),
+      ...(output.runtimeRoute !== undefined
+        ? { runtimeRoute: output.runtimeRoute }
+        : {}),
+      ...(output.runtimeRetrievalMode !== undefined
+        ? { runtimeRetrievalMode: output.runtimeRetrievalMode }
+        : {}),
+      ...(output.goldRuntimeQueryClassMismatch === true
+        ? { goldRuntimeQueryClassMismatch: true }
         : {}),
       latencyMs: output.latencyMs,
       decisionSnapshot: output.decisionSnapshot,

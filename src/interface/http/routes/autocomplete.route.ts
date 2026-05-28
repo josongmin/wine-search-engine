@@ -8,7 +8,7 @@ import { registerContractRoute } from './register-contract-route.js';
 import { AutocompleteRouteContract } from './route-contracts.js';
 import { toResolveRequest } from './search-request-mappers.js';
 import { getRequestId } from '../request-id.js';
-import { abortSignalFromFastifyRequest } from '../request-abort-signal.js';
+import { abortSignalFromFastifyRequest, raceWithRequestAbort } from '../request-abort-signal.js';
 import { HTTP_STATUS_OK } from '../constants.js';
 
 /**
@@ -25,11 +25,16 @@ export function registerAutocompleteRoute(
     handler: async (request, reply) => {
       const parsed = parseContractBody(request, AutocompleteRouteContract);
       const resolveRequest = toResolveRequest(parsed, getRequestId(request));
+      const abortSignal = abortSignalFromFastifyRequest(request, reply);
 
-      const result = await deps.autocompleteUseCase.execute(resolveRequest, {
-        abortSignal: abortSignalFromFastifyRequest(request),
-        debugRequest: request.debugRequest,
-      });
+      const result = await raceWithRequestAbort(
+        deps.autocompleteUseCase.execute(resolveRequest, {
+          abortSignal,
+          debugRequest: request.debugRequest,
+        }),
+        abortSignal,
+        'Autocomplete request aborted',
+      );
 
       sendRouteContractResponse(request, reply, AutocompleteRouteContract, HTTP_STATUS_OK, result);
     },

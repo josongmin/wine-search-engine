@@ -5,6 +5,7 @@ import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
 import type { DecisionStatus } from '../../domain/shared/types/index.js';
 import { isQueryClass } from '../../domain/shared/types/query-class.js';
 import { isSourceRecordStylePublicEntityId } from '../../domain/shared/constants/public-entity-id-namespace.js';
+import { pgTableHasColumn } from '../db/pg-schema-capabilities.js';
 import {
   DEFAULT_RUNTIME_STATE_PATH,
   loadSearchSnapshotRuntimeState,
@@ -61,10 +62,21 @@ interface PgGoldSetStoreOptions {
 }
 
 export class PgGoldSetStore implements GoldSetStore {
+  private refreshedAtColumnPresence?: Promise<boolean>;
+
   constructor(
     private readonly pool: Pool,
     private readonly options: PgGoldSetStoreOptions = {},
   ) {}
+
+  private async hasRefreshedAtColumn(): Promise<boolean> {
+    this.refreshedAtColumnPresence ??= pgTableHasColumn(
+      this.pool,
+      'eval_cases',
+      'refreshed_at',
+    );
+    return this.refreshedAtColumnPresence;
+  }
 
   private async resolveSnapshotId(): Promise<string> {
     if (this.options.snapshotId != null && this.options.snapshotId.length > 0) {
@@ -77,12 +89,15 @@ export class PgGoldSetStore implements GoldSetStore {
   }
 
   private async hydrateRows(rows: readonly EvalCaseRow[]): Promise<readonly EvalCase[]> {
-    const legacyRefs: LegacyEvalExpectedEntityIdRef[] = rows
-      .filter((row) => row.expected_entity_id != null && isSourceRecordStylePublicEntityId(row.expected_entity_id))
-      .map((row) => ({
+    const legacyRefs: LegacyEvalExpectedEntityIdRef[] = rows.flatMap((row) => {
+      if (row.expected_entity_id == null || !isSourceRecordStylePublicEntityId(row.expected_entity_id)) {
+        return [];
+      }
+      return [{
         caseId: row.case_id,
-        expectedEntityId: row.expected_entity_id as string,
-      }));
+        expectedEntityId: row.expected_entity_id,
+      }];
+    });
 
     const resolvedLegacyIds = legacyRefs.length > 0
       ? await resolveLegacyEvalExpectedEntityIds(
@@ -106,6 +121,9 @@ export class PgGoldSetStore implements GoldSetStore {
     const conditions: string[] = [];
     const params: unknown[] = [];
     let idx = 1;
+    const freshnessColumn = await this.hasRefreshedAtColumn()
+      ? 'COALESCE(refreshed_at, created_at)'
+      : 'created_at';
 
     if (filter?.queryClass != null) {
       conditions.push(`query_class = $${idx++}`);
@@ -120,25 +138,63 @@ export class PgGoldSetStore implements GoldSetStore {
       params.push(filter.labelTier);
     }
     if (filter?.since != null) {
-      conditions.push(`created_at >= $${idx++}`);
+      conditions.push(`${freshnessColumn} >= $${idx++}`);
       params.push(filter.since);
     }
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     const result = await this.pool.query<EvalCaseRow>(
-      `SELECT * FROM eval_cases ${where} ORDER BY created_at ASC`,
+      `SELECT * FROM eval_cases ${where} ORDER BY ${freshnessColumn} ASC, created_at ASC`,
       params,
     );
     return await this.hydrateRows(result.rows);
   }
 
   async addCase(evalCase: EvalCase): Promise<void> {
+    if (await this.hasRefreshedAtColumn()) {
+      await this.pool.query(
+        `INSERT INTO eval_cases (
+          case_id, query, query_class, expected_entity_id, expected_status,
+          label_tier, annotator_agreement, slice_tags, created_at, refreshed_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
+        ON CONFLICT (case_id) DO UPDATE SET
+          query = EXCLUDED.query,
+          query_class = EXCLUDED.query_class,
+          expected_entity_id = EXCLUDED.expected_entity_id,
+          expected_status = EXCLUDED.expected_status,
+          label_tier = EXCLUDED.label_tier,
+          annotator_agreement = EXCLUDED.annotator_agreement,
+          slice_tags = EXCLUDED.slice_tags,
+          created_at = EXCLUDED.created_at,
+          refreshed_at = CURRENT_TIMESTAMP`,
+        [
+          evalCase.caseId,
+          evalCase.query,
+          evalCase.queryClass,
+          evalCase.expectedEntityId ?? null,
+          evalCase.expectedStatus,
+          evalCase.labelTier,
+          evalCase.annotatorAgreement ?? null,
+          evalCase.sliceTags,
+          evalCase.timestamp,
+        ],
+      );
+      return;
+    }
     await this.pool.query(
       `INSERT INTO eval_cases (
         case_id, query, query_class, expected_entity_id, expected_status,
         label_tier, annotator_agreement, slice_tags, created_at
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      ON CONFLICT (case_id) DO NOTHING`,
+      ON CONFLICT (case_id) DO UPDATE SET
+        query = EXCLUDED.query,
+        query_class = EXCLUDED.query_class,
+        expected_entity_id = EXCLUDED.expected_entity_id,
+        expected_status = EXCLUDED.expected_status,
+        label_tier = EXCLUDED.label_tier,
+        annotator_agreement = EXCLUDED.annotator_agreement,
+        slice_tags = EXCLUDED.slice_tags,
+        created_at = EXCLUDED.created_at`,
       [
         evalCase.caseId,
         evalCase.query,

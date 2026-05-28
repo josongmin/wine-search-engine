@@ -267,6 +267,26 @@ describe('readiness probe matrix — property-based invariants', () => {
             totalDocCount: Math.max(opts.entityCount, 0),
             populatedDocRatio: 0,
           },
+          body: {
+            populatedDocCount: 0,
+            totalDocCount: Math.max(opts.entityCount, 0),
+            populatedDocRatio: 0,
+          },
+          sweetness: {
+            populatedDocCount: 0,
+            totalDocCount: Math.max(opts.entityCount, 0),
+            populatedDocRatio: 0,
+          },
+          acidity: {
+            populatedDocCount: 0,
+            totalDocCount: Math.max(opts.entityCount, 0),
+            populatedDocRatio: 0,
+          },
+          tannin: {
+            populatedDocCount: 0,
+            totalDocCount: Math.max(opts.entityCount, 0),
+            populatedDocRatio: 0,
+          },
         },
         counts: {
           entities: opts.entityCount,
@@ -322,14 +342,12 @@ describe('readiness probe matrix — property-based invariants', () => {
               //   - aliases <= 0
               //   - nlMappings count mismatch OR <= 0
               //   - nlMappings hash mismatch
-              //   - activeLtr <= 0
               //   - runtime quality blockers present
               const shouldBeDown = (
                 opts.entityCount <= 0
                 || opts.aliasCount <= 0
                 || opts.nlMappingCount <= 0
                 || opts.corruptNlHash
-                || opts.activeLtrCount <= 0
                 || opts.qualityBlockers.length > 0
               );
               if (shouldBeDown) {

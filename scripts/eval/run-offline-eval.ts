@@ -36,6 +36,8 @@ import {
   grapeVarietyAtK,
   prestigeMeanAtK,
   scoreSlotF1,
+  isEvalExecutionError,
+  isCalibrationEligibleDecision,
   type RankedHit,
   type DecisionOutcome,
   type GroundTruth,
@@ -69,11 +71,35 @@ import {
   OFFLINE_EVAL_SILVER_CORPUS,
   OFFLINE_EVAL_VAL_CORPUS,
   OFFLINE_EVAL_GATE_CORPUS,
+  OFFLINE_EVAL_RELEASE_SILVER_CORPUS,
+  OFFLINE_EVAL_RELEASE_GOLD_CORPUS,
   requireFixtureCorpusPath,
 } from './fixture-corpus-paths.js';
 import { resolveCliDataPathArg } from './cli-data-path.js';
 import { PgEvalBenchmarkRunStore } from '../../src/infrastructure/adapter/pg-eval-benchmark-run-store.js';
 import { getCurrentFeatureSchemaHash } from '../../src/domain/ranking/service/feature-parity-hash.js';
+import { hashStableJson } from '../../src/domain/shared/utils/stable-json.js';
+import {
+  countStringMix,
+  toReportProvenance,
+  type EvalBenchmarkReportProvenance,
+} from './benchmark-provenance.js';
+import { collectLiveBenchmarkRuntimeMetadata } from './live-benchmark-preflight.js';
+import { validateReleaseCorpusGovernance } from './release-corpus-governance.js';
+import {
+  assertEmbeddingSensitiveGovernance,
+  assertEmbeddingSensitiveRuntime,
+  buildEmbeddingSensitiveRuntimeDescriptor,
+  filterEmbeddingSensitiveGoldenQueries,
+} from './embedding-sensitive-offline-eval.js';
+import { determineRetrievalMode } from '../etl/tag-queries-retrieval-mode.js';
+import { loadConfig } from '../../src/config/env.js';
+import { createPgPool, shouldUsePgPool } from '../../src/infrastructure/db/pg-pool.js';
+import {
+  hasLegacyEvalEntityId,
+  resolveLegacyEvalEntityIds,
+  type LegacyEvalEntityIdRef,
+} from '../../src/infrastructure/adapter/eval-expected-entity-id-resolution.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -109,10 +135,18 @@ const DEFAULT_OUTPUT = resolveDataPath('data/eval-results.json');
  */
 async function loadOfflineEvalGates(args: {
   readonly allowLocalThresholdFallback: boolean;
-}): Promise<typeof RELEASE_GATES_FALLBACK> {
+}): Promise<{
+  readonly gates: typeof RELEASE_GATES_FALLBACK;
+  readonly thresholdSource: 'external_fixture_thresholds' | 'local_fallback_thresholds';
+}> {
   const loader = new FixtureLoader();
   if (!loader.isAvailable()) {
-    if (args.allowLocalThresholdFallback) return RELEASE_GATES_FALLBACK;
+    if (args.allowLocalThresholdFallback) {
+      return {
+        gates: RELEASE_GATES_FALLBACK,
+        thresholdSource: 'local_fallback_thresholds',
+      };
+    }
     throw new Error(
       'run-offline-eval: external fixture thresholds are unavailable. ' +
       'Pass --allow-local-threshold-fallback only for explicit non-gating local runs.',
@@ -121,7 +155,12 @@ async function loadOfflineEvalGates(args: {
   const allThresholds = await loader.loadThresholds();
   const suite = allThresholds['offline_eval'];
   if (typeof suite !== 'object' || suite === null) {
-    if (args.allowLocalThresholdFallback) return RELEASE_GATES_FALLBACK;
+    if (args.allowLocalThresholdFallback) {
+      return {
+        gates: RELEASE_GATES_FALLBACK,
+        thresholdSource: 'local_fallback_thresholds',
+      };
+    }
     throw new Error(
       'run-offline-eval: offline_eval thresholds missing from fixture repo. ' +
       'Pass --allow-local-threshold-fallback only for explicit non-gating local runs.',
@@ -137,15 +176,18 @@ async function loadOfflineEvalGates(args: {
     return fallback;
   }
   return {
-    wrong_top1_rate_max: val('wrong_top1_rate_max', RELEASE_GATES_FALLBACK.wrong_top1_rate_max),
-    decision_utility_min_delta: val('decision_utility_min_delta', RELEASE_GATES_FALLBACK.decision_utility_min_delta),
-    ndcg_at_10_min_delta: val('ndcg_at_10_min_delta', RELEASE_GATES_FALLBACK.ndcg_at_10_min_delta),
-    recall_at_100_min: val('recall_at_100_min', RELEASE_GATES_FALLBACK.recall_at_100_min),
-    aurc_max_delta: val('aurc_max_delta', RELEASE_GATES_FALLBACK.aurc_max_delta),
-    entity_resolve_wrong_top1_max: val('entity_resolve_wrong_top1_max', RELEASE_GATES_FALLBACK.entity_resolve_wrong_top1_max),
-    set_retrieval_recall_at_10_min: val('set_retrieval_recall_at_10_min', RELEASE_GATES_FALLBACK.set_retrieval_recall_at_10_min),
-    no_match_false_resolve_max: val('no_match_false_resolve_max', RELEASE_GATES_FALLBACK.no_match_false_resolve_max),
-  } as const;
+    gates: {
+      wrong_top1_rate_max: val('wrong_top1_rate_max', RELEASE_GATES_FALLBACK.wrong_top1_rate_max),
+      decision_utility_min_delta: val('decision_utility_min_delta', RELEASE_GATES_FALLBACK.decision_utility_min_delta),
+      ndcg_at_10_min_delta: val('ndcg_at_10_min_delta', RELEASE_GATES_FALLBACK.ndcg_at_10_min_delta),
+      recall_at_100_min: val('recall_at_100_min', RELEASE_GATES_FALLBACK.recall_at_100_min),
+      aurc_max_delta: val('aurc_max_delta', RELEASE_GATES_FALLBACK.aurc_max_delta),
+      entity_resolve_wrong_top1_max: val('entity_resolve_wrong_top1_max', RELEASE_GATES_FALLBACK.entity_resolve_wrong_top1_max),
+      set_retrieval_recall_at_10_min: val('set_retrieval_recall_at_10_min', RELEASE_GATES_FALLBACK.set_retrieval_recall_at_10_min),
+      no_match_false_resolve_max: val('no_match_false_resolve_max', RELEASE_GATES_FALLBACK.no_match_false_resolve_max),
+    } as const,
+    thresholdSource: 'external_fixture_thresholds',
+  };
 }
 
 /**
@@ -250,7 +292,7 @@ interface Args {
   input: string;
   output: string;
   tier: 'bronze' | 'silver' | 'gate';
-  fixtureCorpus?: 'silver' | 'val' | 'gate';
+  fixtureCorpus?: 'silver' | 'val' | 'gate' | 'release_silver' | 'release_gold';
   baselineReport?: string;
   /** When true, run `verify-splits` logic before any search (fail-fast on leakage). */
   verifySplits: boolean;
@@ -258,6 +300,8 @@ interface Args {
   includeDiagnostics: boolean;
   /** Explicit opt-in for non-gating local runs when fixture thresholds are unavailable. */
   allowLocalThresholdFallback: boolean;
+  /** Restrict the corpus to query classes where dense semantic retrieval is expected to matter. */
+  embeddingSensitiveOnly: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -271,13 +315,20 @@ function parseArgs(argv: string[]): Args {
     verifySplits: false,
     includeDiagnostics: false,
     allowLocalThresholdFallback: false,
+    embeddingSensitiveOnly: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--input' || a === '-i') out.input = resolveCliDataPathArg(argv[++i] ?? defaultInput);
     else if (a === '--fixture-corpus') {
       const corpus = argv[++i];
-      if (corpus === 'silver' || corpus === 'val' || corpus === 'gate') {
+      if (
+        corpus === 'silver'
+        || corpus === 'val'
+        || corpus === 'gate'
+        || corpus === 'release_silver'
+        || corpus === 'release_gold'
+      ) {
         out.fixtureCorpus = corpus;
       }
     }
@@ -295,6 +346,8 @@ function parseArgs(argv: string[]): Args {
       out.includeDiagnostics = true;
     } else if (a === '--allow-local-threshold-fallback') {
       out.allowLocalThresholdFallback = true;
+    } else if (a === '--embedding-sensitive-only') {
+      out.embeddingSensitiveOnly = true;
     }
   }
   if (out.fixtureCorpus !== undefined) {
@@ -303,11 +356,99 @@ function parseArgs(argv: string[]): Args {
         ? OFFLINE_EVAL_GATE_CORPUS
         : out.fixtureCorpus === 'silver'
           ? OFFLINE_EVAL_SILVER_CORPUS
-          : OFFLINE_EVAL_VAL_CORPUS,
+          : out.fixtureCorpus === 'release_silver'
+            ? OFFLINE_EVAL_RELEASE_SILVER_CORPUS
+            : out.fixtureCorpus === 'release_gold'
+              ? OFFLINE_EVAL_RELEASE_GOLD_CORPUS
+              : OFFLINE_EVAL_VAL_CORPUS,
       `run-offline-eval fixture corpus "${out.fixtureCorpus}" resolution`,
     );
   }
   return out;
+}
+
+async function buildOfflineEvalRunProvenance(args: {
+  readonly cli: Args;
+  readonly evalQueries: readonly GoldenQuery[];
+  readonly thresholdSource: string;
+  readonly suiteGatePassed: boolean;
+}): Promise<OfflineEvalRunProvenanceInput> {
+  const embeddingRuntime = buildEmbeddingSensitiveRuntimeDescriptor();
+  const runtimeTarget = embeddingRuntime.runtimeTarget;
+  const usesLiveApi = embeddingRuntime.usesLiveApi;
+  const benchmarkKind = args.cli.embeddingSensitiveOnly
+    ? 'offline_eval_embedding_sensitive_live_runtime'
+    : usesLiveApi
+      ? 'offline_eval_live_runtime'
+      : 'offline_eval_in_memory_regression';
+  const corpusId = args.cli.fixtureCorpus !== undefined
+    ? `offline_eval:${args.cli.fixtureCorpus}:tier=${args.cli.tier}`
+    : `offline_eval:${args.cli.input}:tier=${args.cli.tier}`;
+  const corpusHash = hashStableJson(
+    args.evalQueries.map((query) => ({
+      qid: query.qid,
+      query: query.query,
+      query_class: query.query_class,
+      scenario: query.scenario,
+      language: query.language,
+      annotation_tier: query.annotation_tier,
+      release_gate_eligible: query.release_gate_eligible,
+      relevant: query.retrieval_labels.relevant,
+      expected_decision_status: query.decision_labels.expected_decision_status,
+      expected_entity_id: query.decision_labels.expected_entity_id ?? null,
+    })),
+  );
+  const labelTierMix = countStringMix(args.evalQueries.map((query) => query.annotation_tier));
+  const sliceMix = countStringMix(args.evalQueries.map((query) => query.scenario));
+  const queryClassMix = countStringMix(args.evalQueries.map((query) => query.query_class));
+  const runtimeMetadata = usesLiveApi
+    ? await collectLiveBenchmarkRuntimeMetadata(process.env['SEARCH_API_URL'] ?? 'http://localhost:3000')
+    : { readinessPassed: undefined, searchSnapshotId: undefined, runtimeActivationStatus: undefined, activeLtrModels: undefined };
+  const gateEligible = !args.cli.embeddingSensitiveOnly
+    && usesLiveApi
+    && runtimeMetadata.readinessPassed === true
+    && args.cli.tier !== 'bronze'
+    && args.thresholdSource === 'external_fixture_thresholds';
+  const featureSchemaHash = getCurrentFeatureSchemaHash();
+  const storeProvenance = {
+    provenanceSchemaVersion: 1 as const,
+    corpusId,
+    corpusHash,
+    runtimeTarget,
+    usesLiveApi,
+    smokeSynthesized: false as const,
+    thresholdSource: args.thresholdSource,
+    gateEligible,
+    suiteGatePassed: args.suiteGatePassed,
+    ...(runtimeMetadata.searchSnapshotId !== undefined
+      ? { searchSnapshotId: runtimeMetadata.searchSnapshotId }
+      : {}),
+    ...(runtimeMetadata.runtimeActivationStatus !== undefined
+      ? { runtimeActivationStatus: runtimeMetadata.runtimeActivationStatus }
+      : {}),
+    ...(runtimeMetadata.readinessPassed !== undefined
+      ? { readinessPassed: runtimeMetadata.readinessPassed }
+      : {}),
+    ...(runtimeMetadata.activeLtrModels !== undefined
+      ? { activeLtrModels: runtimeMetadata.activeLtrModels }
+      : {}),
+    denseRetrievalEnabled: embeddingRuntime.denseRetrievalEnabled,
+    queryEmbeddingModel: embeddingRuntime.queryEmbeddingModel,
+    queryEmbeddingModelVersion: embeddingRuntime.queryEmbeddingModelVersion,
+    embeddingSensitiveEval: args.cli.embeddingSensitiveOnly,
+    ...(labelTierMix !== undefined ? { labelTierMix } : {}),
+    ...(sliceMix !== undefined ? { sliceMix } : {}),
+    ...(queryClassMix !== undefined ? { queryClassMix } : {}),
+  };
+  return {
+    benchmarkKind,
+    storeProvenance,
+    reportProvenance: toReportProvenance({
+      benchmarkKind,
+      provenance: storeProvenance,
+      featureSchemaHash,
+    }),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -426,6 +567,15 @@ export interface OfflineEvalCaseResult {
   readonly extracted_constraints?: readonly ConstraintSlot[];
 }
 
+export function countEvalExecutionErrors(
+  results: readonly OfflineEvalCaseResult[],
+): number {
+  return results.reduce(
+    (count, result) => count + (isEvalExecutionError(result.decision) ? 1 : 0),
+    0,
+  );
+}
+
 export interface OfflinePerQueryMetrics {
   readonly ndcg_at_10: readonly number[];
   readonly mrr_at_10: readonly number[];
@@ -445,8 +595,30 @@ interface EvalSearchRequestBody {
   readonly retrieval_mode?: 'auto' | 'entity' | 'hybrid' | 'mixed' | undefined;
 }
 
+function mapEvalRetrievalModeToRouteFamily(
+  retrievalMode: string,
+): EvalSearchRequestBody['options']['mode'] {
+  if (retrievalMode === 'similar_items') {
+    return 'mixed';
+  }
+  if (retrievalMode === 'entity_lookup' || retrievalMode === 'entity_resolution') {
+    return 'entity';
+  }
+  return 'hybrid';
+}
+
+export function resolveEvalRetrievalMode(query: GoldenQuery): RetrievalMode {
+  return query.retrieval_mode
+    ?? determineRetrievalMode(
+      query.query_class,
+      query.query,
+      query.decision_labels.ambiguity_expected,
+    );
+}
+
 export function buildEvalSearchRequestBody(query: GoldenQuery): EvalSearchRequestBody {
-  const mode = query.retrieval_mode === 'similar_items' ? 'mixed' : 'hybrid';
+  const retrievalMode = resolveEvalRetrievalMode(query);
+  const mode = mapEvalRetrievalModeToRouteFamily(retrievalMode);
 
   return {
     query: query.query,
@@ -458,10 +630,89 @@ export function buildEvalSearchRequestBody(query: GoldenQuery): EvalSearchReques
     // Golden-query retrieval modes are internal evaluation labels, not a
     // 1:1 match for the public API's top-level route override. The public
     // eval harness executes the closest route family the search endpoint can
-    // express: similar-items rows use `mixed`, everything else uses the
-    // ranked-search family (`hybrid`).
+    // express: exact/entity rows use `entity`, similar-items rows use
+    // `mixed`, and exploratory ranked-search rows use `hybrid`.
     retrieval_mode: mode,
   };
+}
+
+export function collectLegacyEvalEntityIdRefs(
+  queries: readonly GoldenQuery[],
+): readonly LegacyEvalEntityIdRef[] {
+  const refs: LegacyEvalEntityIdRef[] = [];
+  for (const query of queries) {
+    for (const relevant of query.retrieval_labels.relevant) {
+      refs.push({
+        caseId: `${query.qid}:relevant`,
+        entityId: relevant.entity_id,
+      });
+    }
+    if (query.decision_labels.expected_entity_id !== undefined) {
+      refs.push({
+        caseId: `${query.qid}:expected`,
+        entityId: query.decision_labels.expected_entity_id,
+      });
+    }
+  }
+  return refs;
+}
+
+export function applyResolvedLegacyEntityIdsToGoldenQueries(
+  queries: readonly GoldenQuery[],
+  resolvedIds: ReadonlyMap<string, string>,
+): readonly GoldenQuery[] {
+  return queries.map((query) => ({
+    ...query,
+    retrieval_labels: {
+      ...query.retrieval_labels,
+      relevant: query.retrieval_labels.relevant.map((relevant) => ({
+        ...relevant,
+        entity_id: resolvedIds.get(relevant.entity_id) ?? relevant.entity_id,
+      })),
+    },
+    decision_labels: query.decision_labels.expected_entity_id === undefined
+      ? query.decision_labels
+      : {
+          ...query.decision_labels,
+          expected_entity_id:
+            resolvedIds.get(query.decision_labels.expected_entity_id)
+            ?? query.decision_labels.expected_entity_id,
+        },
+    leakage_keys: {
+      ...query.leakage_keys,
+      entity_id: resolvedIds.get(query.leakage_keys.entity_id) ?? query.leakage_keys.entity_id,
+    },
+  }));
+}
+
+async function resolveRuntimeEvalEntityIdsIfNeeded(args: {
+  readonly queries: readonly GoldenQuery[];
+  readonly snapshotId?: string | undefined;
+  readonly usesLiveApi: boolean;
+}): Promise<readonly GoldenQuery[]> {
+  if (!args.usesLiveApi || args.snapshotId === undefined) {
+    return args.queries;
+  }
+
+  const refs = collectLegacyEvalEntityIdRefs(args.queries);
+  if (!hasLegacyEvalEntityId(refs)) {
+    return args.queries;
+  }
+
+  const config = loadConfig();
+  if (!shouldUsePgPool(config.pg)) {
+    throw new Error(
+      'offline eval legacy entity-id resolution requires Postgres config when running against a live runtime snapshot.',
+    );
+  }
+
+  const pool = createPgPool(config.pg);
+  try {
+    const resolvedIds = await resolveLegacyEvalEntityIds(pool, args.snapshotId, refs);
+    return applyResolvedLegacyEntityIdsToGoldenQueries(args.queries, resolvedIds);
+  } finally {
+    await pool.end();
+  }
 }
 
 async function executeSearch(goldenQuery: GoldenQuery, timeoutMs: number): Promise<SearchResult> {
@@ -529,6 +780,7 @@ async function executeSearch(goldenQuery: GoldenQuery, timeoutMs: number): Promi
 
     const decisionStatus = (engineDecision['decision_status'] ?? engineDecision['decisionStatus'] ?? 'failed') as string;
     const decisionConfidence = (engineDecision['decision_confidence'] ?? engineDecision['decisionConfidence'] ?? 0) as number;
+    const calibrationTrusted = engineDecision['calibration_trusted'] ?? engineDecision['calibrationTrusted'];
     const executionMode = engineDecision['execution_mode'] ?? engineDecision['executionMode'];
     const blockingEligible = engineDecision['blocking_eligible'] ?? engineDecision['blockingEligible'];
     const degradationReasons = engineDecision['degradation_reasons'] ?? engineDecision['degradationReasons'];
@@ -569,6 +821,9 @@ async function executeSearch(goldenQuery: GoldenQuery, timeoutMs: number): Promi
       decision_status: decisionStatus as 'resolved' | 'ambiguous' | 'failed',
       top_entity_id: ranked[0]?.entity_id ?? null,
       decision_confidence: decisionConfidence,
+      ...(typeof calibrationTrusted === 'boolean'
+        ? { calibration_trusted: calibrationTrusted }
+        : {}),
       ...(typeof executionMode === 'string'
         ? {
             execution_mode: executionMode as
@@ -632,6 +887,7 @@ async function executeSearch(goldenQuery: GoldenQuery, timeoutMs: number): Promi
         decision_status: 'failed',
         top_entity_id: null,
         decision_confidence: 0,
+        evaluation_error: true,
       },
     };
   }
@@ -681,6 +937,7 @@ interface StoredOfflinePerQueryMetrics {
 
 interface StoredOfflineEvalReport {
   readonly query_count?: number;
+  readonly provenance?: EvalBenchmarkReportProvenance;
   readonly ndcg_at_10?: number;
   readonly mrr_at_10?: number;
   readonly recall_at_3?: number;
@@ -697,6 +954,8 @@ interface StoredOfflineEvalReport {
 
 export interface OfflineBaselineComparison {
   readonly baseline_path: string;
+  readonly compatibility_status?: 'compatible' | 'skipped';
+  readonly compatibility_reason?: string;
   readonly deltas: {
     readonly ndcg_at_10: number;
     readonly mrr_at_10: number;
@@ -723,6 +982,36 @@ export interface OfflineBaselineComparison {
     }>;
   };
   readonly significance_skipped_reason?: string;
+}
+
+interface OfflineEvalRunProvenanceInput {
+  readonly benchmarkKind:
+    | 'offline_eval_in_memory_regression'
+    | 'offline_eval_live_runtime'
+    | 'offline_eval_embedding_sensitive_live_runtime';
+  readonly reportProvenance: EvalBenchmarkReportProvenance;
+  readonly storeProvenance: {
+    readonly provenanceSchemaVersion: 1;
+    readonly corpusId: string;
+    readonly corpusHash: string;
+    readonly runtimeTarget: string;
+    readonly usesLiveApi: boolean;
+    readonly smokeSynthesized: false;
+    readonly thresholdSource: string;
+    readonly gateEligible: boolean;
+    readonly suiteGatePassed: boolean;
+    readonly searchSnapshotId?: string | undefined;
+    readonly runtimeActivationStatus?: 'activated' | 'shadow_only' | undefined;
+    readonly readinessPassed?: boolean | undefined;
+    readonly activeLtrModels?: number | undefined;
+    readonly denseRetrievalEnabled?: boolean | undefined;
+    readonly queryEmbeddingModel?: string | undefined;
+    readonly queryEmbeddingModelVersion?: string | undefined;
+    readonly embeddingSensitiveEval?: boolean | undefined;
+    readonly labelTierMix?: Readonly<Record<string, number>> | undefined;
+    readonly sliceMix?: Readonly<Record<string, number>> | undefined;
+    readonly queryClassMix?: Readonly<Record<string, number>> | undefined;
+  };
 }
 
 function toExecutionModeBucket(decision: DecisionOutcome): EvalExecutionModeBucket {
@@ -898,10 +1187,42 @@ export function buildOfflineBaselineComparison(
     | 'by_execution_mode'
     | 'by_blocking_eligible'
     | 'degradation_reason_histogram'
+    | 'provenance'
   >,
   baseline: StoredOfflineEvalReport,
   currentPerQuery: OfflinePerQueryMetrics,
 ): OfflineBaselineComparison {
+  const emptyDeltas = {
+    ndcg_at_10: 0,
+    mrr_at_10: 0,
+    recall_at_3: 0,
+    recall_at_100: 0,
+    decision_utility: 0,
+    wrong_top1_rate: 0,
+  } as const;
+  if (current.provenance === undefined || baseline.provenance === undefined) {
+    return {
+      baseline_path: baselinePath,
+      compatibility_status: 'skipped',
+      compatibility_reason: 'missing provenance block in baseline or current report',
+      deltas: emptyDeltas,
+    };
+  }
+
+  if (
+    current.provenance.comparison_compatibility_key
+    !== baseline.provenance.comparison_compatibility_key
+  ) {
+    return {
+      baseline_path: baselinePath,
+      compatibility_status: 'skipped',
+      compatibility_reason:
+        'baseline provenance is incompatible with current run ' +
+        `(${baseline.provenance.comparison_compatibility_key} != ${current.provenance.comparison_compatibility_key})`,
+      deltas: emptyDeltas,
+    };
+  }
+
   const baselineNdcg = baseline.ndcg_at_10 ?? 0;
   const baselineMrr = baseline.mrr_at_10 ?? 0;
   const baselineRecallAt3 = baseline.recall_at_3 ?? 0;
@@ -925,6 +1246,7 @@ export function buildOfflineBaselineComparison(
 
   const comparison: OfflineBaselineComparison = {
     baseline_path: baselinePath,
+    compatibility_status: 'compatible',
     deltas: {
       ndcg_at_10: current.ndcg_at_10 - baselineNdcg,
       mrr_at_10: current.mrr_at_10 - baselineMrr,
@@ -1749,7 +2071,7 @@ interface GlobalDecisionAccumulator {
   avoidableAbstainCount: number;
   aurcPoints: AurcPoint[];
   eceBuckets: EceBucketAccumulator[];
-  resolvedCount: number;
+  calibrationEligibleResolvedCount: number;
 }
 
 function createGlobalDecisionAccumulator(bins = 10): GlobalDecisionAccumulator {
@@ -1765,7 +2087,7 @@ function createGlobalDecisionAccumulator(bins = 10): GlobalDecisionAccumulator {
       totalCorrect: 0,
       count: 0,
     })),
-    resolvedCount: 0,
+    calibrationEligibleResolvedCount: 0,
   };
 }
 
@@ -1791,8 +2113,8 @@ function addToGlobalDecisionAccumulator(
     wrong: category === 'wrong_resolve',
   });
 
-  if (decision.decision_status === 'resolved') {
-    accumulator.resolvedCount += 1;
+  if (isCalibrationEligibleDecision(decision)) {
+    accumulator.calibrationEligibleResolvedCount += 1;
     const bins = accumulator.eceBuckets.length;
     const binIndex = Math.min(Math.floor(decision.decision_confidence * bins), bins - 1);
     const bucket = accumulator.eceBuckets[binIndex]!;
@@ -1810,6 +2132,7 @@ function finalizeGlobalDecisionAccumulator(accumulator: GlobalDecisionAccumulato
   aurc: number;
   excessAurc: number;
   ece: number;
+  calibrationEligibleResolvedCount: number;
 } {
   const queryCount = accumulator.queryCount;
   if (queryCount === 0) {
@@ -1821,6 +2144,7 @@ function finalizeGlobalDecisionAccumulator(accumulator: GlobalDecisionAccumulato
       aurc: 0,
       excessAurc: 0,
       ece: 0,
+      calibrationEligibleResolvedCount: 0,
     };
   }
 
@@ -1845,14 +2169,14 @@ function finalizeGlobalDecisionAccumulator(accumulator: GlobalDecisionAccumulato
   }
 
   let totalEce = 0;
-  if (accumulator.resolvedCount > 0) {
+  if (accumulator.calibrationEligibleResolvedCount > 0) {
     for (const bucket of accumulator.eceBuckets) {
       if (bucket.count === 0) {
         continue;
       }
       const avgConf = bucket.totalConf / bucket.count;
       const avgAcc = bucket.totalCorrect / bucket.count;
-      totalEce += (bucket.count / accumulator.resolvedCount) * Math.abs(avgConf - avgAcc);
+      totalEce += (bucket.count / accumulator.calibrationEligibleResolvedCount) * Math.abs(avgConf - avgAcc);
     }
   }
 
@@ -1864,6 +2188,7 @@ function finalizeGlobalDecisionAccumulator(accumulator: GlobalDecisionAccumulato
     aurc: aurcArea,
     excessAurc: aurcArea - optimalAurcArea,
     ece: totalEce,
+    calibrationEligibleResolvedCount: accumulator.calibrationEligibleResolvedCount,
   };
 }
 
@@ -1873,11 +2198,28 @@ function finalizeGlobalDecisionAccumulator(accumulator: GlobalDecisionAccumulato
 
 async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  const embeddingRuntime = buildEmbeddingSensitiveRuntimeDescriptor();
 
   // ADR-005 Workstream D: load release gate thresholds from fixture repo.
-  RELEASE_GATES = await loadOfflineEvalGates({
+  const thresholdLoad = await loadOfflineEvalGates({
     allowLocalThresholdFallback: args.allowLocalThresholdFallback,
   });
+  RELEASE_GATES = thresholdLoad.gates;
+
+  if (args.embeddingSensitiveOnly) {
+    if (args.tier === 'gate') {
+      throw new Error(
+        'embedding-sensitive offline eval is a comparative benchmark lane and must not run with --tier gate.',
+      );
+    }
+    assertEmbeddingSensitiveRuntime(embeddingRuntime);
+    console.log(
+      `Embedding-sensitive mode: runtime=${embeddingRuntime.runtimeTarget} `
+      + `dense=${embeddingRuntime.denseRetrievalEnabled} `
+      + `query_model=${embeddingRuntime.queryEmbeddingModel} `
+      + `version=${embeddingRuntime.queryEmbeddingModelVersion}`,
+    );
+  }
 
   if (args.verifySplits) {
     console.log('Running split integrity check (RFC-017 §2.5) …');
@@ -1914,7 +2256,37 @@ async function run(): Promise<void> {
   if (queries.length === 0) {
     console.log('  No queries found for this tier. Using all queries.');
   }
-  const evalQueries = queries.length > 0 ? queries : allQueries;
+  const tierQueries = queries.length > 0 ? queries : allQueries;
+  const filteredEvalQueries = args.embeddingSensitiveOnly
+    ? filterEmbeddingSensitiveGoldenQueries(tierQueries)
+    : tierQueries;
+  if (args.embeddingSensitiveOnly) {
+    const governanceSummary = assertEmbeddingSensitiveGovernance(filteredEvalQueries);
+    console.log(
+      `  Embedding-sensitive corpus governance OK `
+      + `(${governanceSummary.queryCount} queries, classes=${governanceSummary.distinctQueryClasses}, `
+      + `mix=${JSON.stringify(governanceSummary.queryClassMix)})`,
+    );
+  }
+  if (
+    !args.embeddingSensitiveOnly
+    && (args.fixtureCorpus === 'release_silver' || args.fixtureCorpus === 'release_gold')
+  ) {
+    const governanceSummary = validateReleaseCorpusGovernance(filteredEvalQueries);
+    console.log(
+      `  Release corpus governance OK (${governanceSummary.queryCount} queries, top entity share ${(((governanceSummary.entityShareTop[0]?.share) ?? 0) * 100).toFixed(2)}%)`,
+    );
+  }
+
+  const embeddingRuntimeForResolution = buildEmbeddingSensitiveRuntimeDescriptor();
+  const runtimeMetadataForResolution = embeddingRuntimeForResolution.usesLiveApi
+    ? await collectLiveBenchmarkRuntimeMetadata(process.env['SEARCH_API_URL'] ?? 'http://localhost:3000')
+    : { readinessPassed: undefined, searchSnapshotId: undefined, runtimeActivationStatus: undefined, activeLtrModels: undefined };
+  const evalQueries = await resolveRuntimeEvalEntityIdsIfNeeded({
+    queries: filteredEvalQueries,
+    snapshotId: runtimeMetadataForResolution.searchSnapshotId,
+    usesLiveApi: embeddingRuntimeForResolution.usesLiveApi,
+  });
 
   // Validate queries before running to prevent silent metric corruption from
   // empty query strings or duplicate qids.
@@ -2034,6 +2406,7 @@ async function run(): Promise<void> {
             decision_status: 'failed',
             top_entity_id: null,
             decision_confidence: 0,
+            evaluation_error: true,
           };
         }
 
@@ -2061,7 +2434,7 @@ async function run(): Promise<void> {
         globalRecall += recallAt100;
         addToGlobalDecisionAccumulator(globalDecisionAccumulator, decision, truth);
 
-        if (decision.decision_status === 'failed' || (decision.decision_status as string) === 'error') {
+        if (isEvalExecutionError(decision)) {
           failedQueryCount += 1;
         } else {
           succeededNdcgTotal += ndcgAt10;
@@ -2106,7 +2479,7 @@ async function run(): Promise<void> {
         addToSliceAccumulator(languageAccumulator, result);
         languageAccumulators.set(result.query.language, languageAccumulator);
 
-        const mode = result.query.retrieval_mode ?? 'entity_lookup';
+        const mode = resolveEvalRetrievalMode(result.query);
         const modeAccumulator = modeAccumulators.get(mode) ?? createModeAccumulator();
         addToModeAccumulator(modeAccumulator, result, mode);
         modeAccumulators.set(mode, modeAccumulator);
@@ -2188,12 +2561,14 @@ async function run(): Promise<void> {
   globalRecallAt3 /= queryCount;
   globalRecall /= queryCount;
 
-  // Warn when >5% of queries failed (network/timeout errors in eval execution)
+  // Warn when >5% of queries errored at the eval transport/runtime layer.
+  // Semantic fail-closed decisions (for example no_match_detection) are NOT
+  // execution errors and must not poison this warning channel.
   const failedFraction = failedQueryCount / queryCount;
   if (failedFraction > 0.05) {
     console.warn(
-      `[eval] WARNING: ${failedQueryCount}/${evalQueries.length} queries failed (${(failedFraction * 100).toFixed(1)}% > 5% threshold). ` +
-      'Metrics may be unreliable. Check SEARCH_API_URL and network connectivity.',
+      `[eval] WARNING: ${failedQueryCount}/${evalQueries.length} queries errored during evaluation (${(failedFraction * 100).toFixed(1)}% > 5% threshold). ` +
+      'Metrics may be unreliable. Check SEARCH_API_URL, runtime health, and network connectivity.',
       { failedCount: failedQueryCount, totalCount: evalQueries.length, failedFraction },
     );
   }
@@ -2287,10 +2662,18 @@ async function run(): Promise<void> {
       : {}),
   };
   const globalDecisionMetrics = finalizeGlobalDecisionAccumulator(globalDecisionAccumulator);
+  const featureSchemaHash = getCurrentFeatureSchemaHash();
+  let offlineRunProvenance = await buildOfflineEvalRunProvenance({
+    cli: args,
+    evalQueries,
+    thresholdSource: thresholdLoad.thresholdSource,
+    suiteGatePassed: false,
+  });
 
   const evalResult: EvalResult = {
     dataset_tier: args.tier,
     query_count: evalQueries.length,
+    provenance: offlineRunProvenance.reportProvenance,
     ndcg_at_10: globalNdcg,
     ndcg_succeeded_only: ndcgSucceededOnly,
     mrr_at_10: globalMrr,
@@ -2303,6 +2686,8 @@ async function run(): Promise<void> {
     aurc: globalDecisionMetrics.aurc,
     e_aurc: globalDecisionMetrics.excessAurc,
     ece: globalDecisionMetrics.ece,
+    calibration_eligible_resolved_count: globalDecisionMetrics.calibrationEligibleResolvedCount,
+    ece_scope: 'trusted_resolved_only',
     by_scenario: byScenario,
     by_language: byLanguage,
     by_execution_mode: byExecutionMode,
@@ -2374,7 +2759,10 @@ async function run(): Promise<void> {
   console.log(`  Decision Utility: ${evalResult.decision_utility.toFixed(4)}`);
   console.log(`  WrongTop1 rate:   ${evalResult.wrong_top1_rate.toFixed(4)}`);
   console.log(`  AURC:             ${evalResult.aurc.toFixed(4)}`);
-  console.log(`  ECE:              ${evalResult.ece.toFixed(4)}`);
+  console.log(
+    `  ECE (trusted):    ${evalResult.ece.toFixed(4)}` +
+    `  (n=${evalResult.calibration_eligible_resolved_count}, scope=${evalResult.ece_scope})`,
+  );
   if (evalResult.mean_slot_f1_strict !== undefined) {
     console.log(
       `  SlotF1 (strict):  ${evalResult.mean_slot_f1_strict.toFixed(4)}` +
@@ -2384,10 +2772,14 @@ async function run(): Promise<void> {
   }
   if (evalResult.baseline_comparison) {
     console.log('\n  vs baseline:');
-    console.log(`    ndcg@10 Δ:       ${evalResult.baseline_comparison.deltas.ndcg_at_10.toFixed(4)}`);
-    console.log(`    mrr@10 Δ:        ${evalResult.baseline_comparison.deltas.mrr_at_10.toFixed(4)}`);
-    console.log(`    recall@3 Δ:      ${evalResult.baseline_comparison.deltas.recall_at_3.toFixed(4)}`);
-    console.log(`    decision util Δ: ${evalResult.baseline_comparison.deltas.decision_utility.toFixed(4)}`);
+    if (evalResult.baseline_comparison.compatibility_status === 'skipped') {
+      console.log(`    compatibility:   skipped (${evalResult.baseline_comparison.compatibility_reason ?? 'unknown'})`);
+    } else {
+      console.log(`    ndcg@10 Δ:       ${evalResult.baseline_comparison.deltas.ndcg_at_10.toFixed(4)}`);
+      console.log(`    mrr@10 Δ:        ${evalResult.baseline_comparison.deltas.mrr_at_10.toFixed(4)}`);
+      console.log(`    recall@3 Δ:      ${evalResult.baseline_comparison.deltas.recall_at_3.toFixed(4)}`);
+      console.log(`    decision util Δ: ${evalResult.baseline_comparison.deltas.decision_utility.toFixed(4)}`);
+    }
     if (evalResult.baseline_comparison.significance) {
       const metrics = evalResult.baseline_comparison.significance.significant_metrics;
       console.log(`    significant:     ${metrics.length > 0 ? metrics.join(', ') : 'none'}`);
@@ -2682,6 +3074,14 @@ async function run(): Promise<void> {
     evalResult.release_gate_verdict = verdict;
   }
 
+  offlineRunProvenance = await buildOfflineEvalRunProvenance({
+    cli: args,
+    evalQueries,
+    thresholdSource: thresholdLoad.thresholdSource,
+    suiteGatePassed: evalResult.release_gate_verdict?.passed ?? true,
+  });
+  evalResult.provenance = offlineRunProvenance.reportProvenance;
+
   // Write results (after gate verdict is added if applicable)
   await fs.writeFile(args.output, JSON.stringify(evalResult, null, 2) + '\n', 'utf8');
 
@@ -2691,16 +3091,14 @@ async function run(): Promise<void> {
     const pool = getPgPool();
     try {
       const evalBenchmarkRunStore = new PgEvalBenchmarkRunStore(pool);
-      const releaseGatePassed = evalResult.release_gate_verdict?.passed ?? false;
       await evalBenchmarkRunStore.saveRun({
-        benchmarkKind: 'offline_eval',
-        evalDatasetVersion: args.tier,
-        featureSchemaHash: getCurrentFeatureSchemaHash(),
+        benchmarkKind: offlineRunProvenance.benchmarkKind,
+        evalDatasetVersion: offlineRunProvenance.storeProvenance.corpusId,
+        featureSchemaHash,
         queryCount: evalResult.query_count,
         mrr: evalResult.mrr_at_10,
         recallAt3: evalResult.recall_at_3,
-        releaseGatePassed,
-        activationStatus: 'shadow_only',
+        provenance: offlineRunProvenance.storeProvenance,
         report: evalResult as unknown as Readonly<Record<string, unknown>>,
         metrics: {
           ndcg_at_10: evalResult.ndcg_at_10,
@@ -2721,8 +3119,11 @@ async function run(): Promise<void> {
 
   // Epic 6: Run embedding validation if available
   console.log('\n=== EMBEDDING VALIDATION (Epic 6) ===');
-  if (shouldSkipEmbeddingValidation()) {
-    console.log('⏭️  Skipped (EVAL_SKIP_EMBEDDING_VALIDATION=true)');
+  if (args.embeddingSensitiveOnly || shouldSkipEmbeddingValidation()) {
+    const skipReason = args.embeddingSensitiveOnly
+      ? 'embedding-sensitive offline eval owns the embedding-sensitive benchmark already'
+      : 'EVAL_SKIP_EMBEDDING_VALIDATION=true';
+    console.log(`⏭️  Skipped (${skipReason})`);
     return;
   }
   try {
@@ -2765,9 +3166,13 @@ function isMainModule(): boolean {
 }
 
 if (isMainModule()) {
-  void run().catch((err: unknown) => {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`FATAL: ${msg}`);
-    process.exit(1);
-  });
+  void run()
+    .then(() => {
+      process.exit(0);
+    })
+    .catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`FATAL: ${msg}`);
+      process.exit(1);
+    });
 }

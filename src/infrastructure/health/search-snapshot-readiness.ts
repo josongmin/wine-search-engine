@@ -13,7 +13,17 @@ import {
   SOURCE_RECORD_PUBLIC_ENTITY_ID_LIKE_PATTERN,
   SOURCE_RECORD_PUBLIC_ENTITY_ID_PREFIX,
 } from '../../domain/shared/constants/public-entity-id-namespace.js';
-import type { SearchSnapshotFieldAvailability } from '../../domain/shared/types/search-field-availability.js';
+import {
+  SEARCH_SNAPSHOT_SENSORY_FIELD_AVAILABILITY_ATTRIBUTES,
+  ZERO_SEARCH_FIELD_AVAILABILITY_METRIC,
+  type SearchFieldAvailabilityMetric,
+  type SearchSnapshotFieldAvailability,
+} from '../../domain/shared/types/search-field-availability.js';
+import {
+  canonicalizeAliasSnapshotRecords,
+  canonicalizeAmbiguitySnapshotRows,
+  canonicalizeEntitySnapshotRecords,
+} from '../../domain/shared/utils/search-snapshot-canonicalization.js';
 
 const VespaCountResponseSchema = z.object({
   root: z.object({
@@ -258,6 +268,10 @@ export interface LoadedSearchSnapshotRuntimeState {
   };
 }
 
+type RuntimeStateQuality = LoadedSearchSnapshotRuntimeState['quality'];
+type RuntimeStateLtrReleaseProvenance =
+  NonNullable<LoadedSearchSnapshotRuntimeState['ltrReleaseProvenance']>;
+
 interface CanonicalEntitySnapshotRecord {
   readonly entityId: string;
   readonly entityType: 'wine';
@@ -308,6 +322,26 @@ type RuntimeStateShape = {
       readonly totalDocCount?: unknown;
       readonly populatedDocRatio?: unknown;
     };
+    readonly body?: {
+      readonly populatedDocCount?: unknown;
+      readonly totalDocCount?: unknown;
+      readonly populatedDocRatio?: unknown;
+    };
+    readonly sweetness?: {
+      readonly populatedDocCount?: unknown;
+      readonly totalDocCount?: unknown;
+      readonly populatedDocRatio?: unknown;
+    };
+    readonly acidity?: {
+      readonly populatedDocCount?: unknown;
+      readonly totalDocCount?: unknown;
+      readonly populatedDocRatio?: unknown;
+    };
+    readonly tannin?: {
+      readonly populatedDocCount?: unknown;
+      readonly totalDocCount?: unknown;
+      readonly populatedDocRatio?: unknown;
+    };
   };
   readonly counts?: {
     readonly entities?: unknown;
@@ -342,55 +376,142 @@ function isFiniteCount(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
 }
 
+function parseFieldAvailabilityMetric(
+  metric: {
+    readonly populatedDocCount?: unknown;
+    readonly totalDocCount?: unknown;
+    readonly populatedDocRatio?: unknown;
+  } | undefined,
+): SearchFieldAvailabilityMetric | undefined {
+  if (
+    metric === undefined
+    || !isFiniteCount(metric.populatedDocCount)
+    || !isFiniteCount(metric.totalDocCount)
+    || typeof metric.populatedDocRatio !== 'number'
+    || !Number.isFinite(metric.populatedDocRatio)
+    || metric.populatedDocRatio < 0
+    || metric.populatedDocRatio > 1
+  ) {
+    return undefined;
+  }
+  return {
+    populatedDocCount: metric.populatedDocCount,
+    totalDocCount: metric.totalDocCount,
+    populatedDocRatio: metric.populatedDocRatio,
+  };
+}
+
+function parseRuntimeStateQuality(
+  quality: RuntimeStateShape['quality'],
+): RuntimeStateQuality | undefined {
+  const blockers = Array.isArray(quality?.blockers)
+    ? quality.blockers.filter((value): value is string => typeof value === 'string' && value.length > 0)
+    : undefined;
+  const bypasses = Array.isArray(quality?.bypasses)
+    ? quality.bypasses.filter((value): value is string => typeof value === 'string' && value.length > 0)
+    : undefined;
+  if (
+    quality === undefined
+    || (quality.status !== 'canonical' && quality.status !== 'degraded')
+    || !Array.isArray(quality.blockers)
+    || blockers === undefined
+    || blockers.length !== quality.blockers.length
+    || !Array.isArray(quality.bypasses)
+    || bypasses === undefined
+    || bypasses.length !== quality.bypasses.length
+    || !isFiniteCount(quality.carryForwardBenchmarkCount)
+    || typeof quality.experimentalInputsPresent !== 'boolean'
+  ) {
+    return undefined;
+  }
+  return {
+    status: quality.status,
+    blockers,
+    bypasses,
+    carryForwardBenchmarkCount: quality.carryForwardBenchmarkCount,
+    experimentalInputsPresent: quality.experimentalInputsPresent,
+  };
+}
+
+function parseRuntimeStateLtrReleaseProvenance(
+  ltrReleaseProvenance: RuntimeStateShape['ltrReleaseProvenance'],
+): RuntimeStateLtrReleaseProvenance | undefined {
+  if (ltrReleaseProvenance === undefined) {
+    return undefined;
+  }
+  if (
+    typeof ltrReleaseProvenance.updatedAt !== 'string'
+    || ltrReleaseProvenance.updatedAt.length === 0
+    || typeof ltrReleaseProvenance.evalDatasetVersion !== 'string'
+    || ltrReleaseProvenance.evalDatasetVersion.length === 0
+    || typeof ltrReleaseProvenance.featureSchemaHash !== 'string'
+    || ltrReleaseProvenance.featureSchemaHash.length === 0
+    || typeof ltrReleaseProvenance.summaryJsonPath !== 'string'
+    || ltrReleaseProvenance.summaryJsonPath.length === 0
+    || typeof ltrReleaseProvenance.summaryJsonHash !== 'string'
+    || ltrReleaseProvenance.summaryJsonHash.length === 0
+    || typeof ltrReleaseProvenance.summaryMarkdownPath !== 'string'
+    || ltrReleaseProvenance.summaryMarkdownPath.length === 0
+    || typeof ltrReleaseProvenance.summaryMarkdownHash !== 'string'
+    || ltrReleaseProvenance.summaryMarkdownHash.length === 0
+    || typeof ltrReleaseProvenance.noisyEntityOutputPath !== 'string'
+    || ltrReleaseProvenance.noisyEntityOutputPath.length === 0
+    || typeof ltrReleaseProvenance.noisyEntityOutputHash !== 'string'
+    || ltrReleaseProvenance.noisyEntityOutputHash.length === 0
+    || typeof ltrReleaseProvenance.combinedReleaseGatePassed !== 'boolean'
+    || (
+      ltrReleaseProvenance.activationStatus !== 'activated'
+      && ltrReleaseProvenance.activationStatus !== 'shadow_only'
+    )
+  ) {
+    return undefined;
+  }
+  return {
+    updatedAt: ltrReleaseProvenance.updatedAt,
+    evalDatasetVersion: ltrReleaseProvenance.evalDatasetVersion,
+    featureSchemaHash: ltrReleaseProvenance.featureSchemaHash,
+    summaryJsonPath: ltrReleaseProvenance.summaryJsonPath,
+    summaryJsonHash: ltrReleaseProvenance.summaryJsonHash,
+    summaryMarkdownPath: ltrReleaseProvenance.summaryMarkdownPath,
+    summaryMarkdownHash: ltrReleaseProvenance.summaryMarkdownHash,
+    noisyEntityOutputPath: ltrReleaseProvenance.noisyEntityOutputPath,
+    noisyEntityOutputHash: ltrReleaseProvenance.noisyEntityOutputHash,
+    combinedReleaseGatePassed: ltrReleaseProvenance.combinedReleaseGatePassed,
+    activationStatus: ltrReleaseProvenance.activationStatus,
+  };
+}
+
 function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnapshotRuntimeState {
   const counts = parsed.counts;
   const hashes = parsed.hashes;
-  const quality = parsed.quality;
   const fieldAvailability = parsed.fieldAvailability;
-  const ltrReleaseProvenance = parsed.ltrReleaseProvenance;
-  const hasValidQuality = quality !== undefined
-    && (quality.status === 'canonical' || quality.status === 'degraded')
-    && Array.isArray(quality.blockers)
-    && quality.blockers.every((value) => typeof value === 'string' && value.length > 0)
-    && Array.isArray(quality.bypasses)
-    && quality.bypasses.every((value) => typeof value === 'string' && value.length > 0)
-    && typeof quality.carryForwardBenchmarkCount === 'number'
-    && Number.isFinite(quality.carryForwardBenchmarkCount)
-    && quality.carryForwardBenchmarkCount >= 0
-    && typeof quality.experimentalInputsPresent === 'boolean';
-  const hasValidLtrReleaseProvenance = ltrReleaseProvenance === undefined || (
-    typeof ltrReleaseProvenance.updatedAt === 'string'
-    && ltrReleaseProvenance.updatedAt.length > 0
-    && typeof ltrReleaseProvenance.evalDatasetVersion === 'string'
-    && ltrReleaseProvenance.evalDatasetVersion.length > 0
-    && typeof ltrReleaseProvenance.featureSchemaHash === 'string'
-    && ltrReleaseProvenance.featureSchemaHash.length > 0
-    && typeof ltrReleaseProvenance.summaryJsonPath === 'string'
-    && ltrReleaseProvenance.summaryJsonPath.length > 0
-    && typeof ltrReleaseProvenance.summaryJsonHash === 'string'
-    && ltrReleaseProvenance.summaryJsonHash.length > 0
-    && typeof ltrReleaseProvenance.summaryMarkdownPath === 'string'
-    && ltrReleaseProvenance.summaryMarkdownPath.length > 0
-    && typeof ltrReleaseProvenance.summaryMarkdownHash === 'string'
-    && ltrReleaseProvenance.summaryMarkdownHash.length > 0
-    && typeof ltrReleaseProvenance.noisyEntityOutputPath === 'string'
-    && ltrReleaseProvenance.noisyEntityOutputPath.length > 0
-    && typeof ltrReleaseProvenance.noisyEntityOutputHash === 'string'
-    && ltrReleaseProvenance.noisyEntityOutputHash.length > 0
-    && typeof ltrReleaseProvenance.combinedReleaseGatePassed === 'boolean'
-    && (
-      ltrReleaseProvenance.activationStatus === 'activated'
-      || ltrReleaseProvenance.activationStatus === 'shadow_only'
-    )
-  );
-  const hasValidFieldAvailability = fieldAvailability !== undefined
-    && fieldAvailability.appellation !== undefined
-    && isFiniteCount(fieldAvailability.appellation.populatedDocCount)
-    && isFiniteCount(fieldAvailability.appellation.totalDocCount)
-    && typeof fieldAvailability.appellation.populatedDocRatio === 'number'
-    && Number.isFinite(fieldAvailability.appellation.populatedDocRatio)
-    && fieldAvailability.appellation.populatedDocRatio >= 0
-    && fieldAvailability.appellation.populatedDocRatio <= 1;
+  const quality = parseRuntimeStateQuality(parsed.quality);
+  const ltrReleaseProvenance = parseRuntimeStateLtrReleaseProvenance(parsed.ltrReleaseProvenance);
+  const appellationFieldAvailability = parseFieldAvailabilityMetric(fieldAvailability?.appellation);
+  const sensoryFieldAvailabilityMetrics = Object.fromEntries(
+    SEARCH_SNAPSHOT_SENSORY_FIELD_AVAILABILITY_ATTRIBUTES.map((attribute) => [
+      attribute,
+      parseFieldAvailabilityMetric(fieldAvailability?.[attribute]),
+    ]),
+  ) as Record<
+    (typeof SEARCH_SNAPSHOT_SENSORY_FIELD_AVAILABILITY_ATTRIBUTES)[number],
+    SearchFieldAvailabilityMetric | undefined
+  >;
+  const missingSensoryFieldAvailabilityAttributes =
+    SEARCH_SNAPSHOT_SENSORY_FIELD_AVAILABILITY_ATTRIBUTES.filter(
+      (attribute) => sensoryFieldAvailabilityMetrics[attribute] === undefined,
+    );
+  const normalizedFieldAvailability: SearchSnapshotFieldAvailability | undefined =
+    appellationFieldAvailability === undefined
+      ? undefined
+      : {
+          appellation: appellationFieldAvailability,
+          body: sensoryFieldAvailabilityMetrics['body'] ?? ZERO_SEARCH_FIELD_AVAILABILITY_METRIC,
+          sweetness: sensoryFieldAvailabilityMetrics['sweetness'] ?? ZERO_SEARCH_FIELD_AVAILABILITY_METRIC,
+          acidity: sensoryFieldAvailabilityMetrics['acidity'] ?? ZERO_SEARCH_FIELD_AVAILABILITY_METRIC,
+          tannin: sensoryFieldAvailabilityMetrics['tannin'] ?? ZERO_SEARCH_FIELD_AVAILABILITY_METRIC,
+        };
+  const hasValidFieldAvailability = normalizedFieldAvailability !== undefined;
   if (
     parsed.schemaVersion !== SEARCH_SNAPSHOT_STATE_VERSION
     || typeof parsed.snapshotId !== 'string'
@@ -403,7 +524,7 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
     || parsed.manifestPath.length === 0
     || typeof parsed.nlMappingsRuntimePath !== 'string'
     || parsed.nlMappingsRuntimePath.length === 0
-    || !hasValidQuality
+    || quality === undefined
     || !hasValidFieldAvailability
     || counts === undefined
     || !isFiniteCount(counts.entities)
@@ -422,26 +543,21 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
     || hashes.nlMappings.length === 0
     || typeof hashes.activeLtrModels !== 'string'
     || hashes.activeLtrModels.length === 0
-    || !hasValidLtrReleaseProvenance
+    || (parsed.ltrReleaseProvenance !== undefined && ltrReleaseProvenance === undefined)
   ) {
     throw new Error('Malformed runtime search snapshot state');
   }
-
-  const typedLtrReleaseProvenance = ltrReleaseProvenance === undefined
-    ? undefined
-    : {
-        updatedAt: ltrReleaseProvenance.updatedAt as string,
-        evalDatasetVersion: ltrReleaseProvenance.evalDatasetVersion as string,
-        featureSchemaHash: ltrReleaseProvenance.featureSchemaHash as string,
-        summaryJsonPath: ltrReleaseProvenance.summaryJsonPath as string,
-        summaryJsonHash: ltrReleaseProvenance.summaryJsonHash as string,
-        summaryMarkdownPath: ltrReleaseProvenance.summaryMarkdownPath as string,
-        summaryMarkdownHash: ltrReleaseProvenance.summaryMarkdownHash as string,
-        noisyEntityOutputPath: ltrReleaseProvenance.noisyEntityOutputPath as string,
-        noisyEntityOutputHash: ltrReleaseProvenance.noisyEntityOutputHash as string,
-        combinedReleaseGatePassed: ltrReleaseProvenance.combinedReleaseGatePassed as boolean,
-        activationStatus: ltrReleaseProvenance.activationStatus as 'activated' | 'shadow_only',
-      };
+  const normalizedQuality: RuntimeStateQuality =
+    missingSensoryFieldAvailabilityAttributes.length === 0
+      ? quality
+      : {
+          ...quality,
+          status: 'degraded',
+          blockers: [
+            ...quality.blockers,
+            `missing_runtime_sensory_field_availability:${missingSensoryFieldAvailabilityAttributes.join(',')}`,
+          ],
+        };
 
   return {
     schemaVersion: parsed.schemaVersion,
@@ -450,20 +566,8 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
     publishedAt: parsed.publishedAt,
     manifestPath: parsed.manifestPath,
     nlMappingsRuntimePath: parsed.nlMappingsRuntimePath,
-    quality: {
-      status: quality.status as 'canonical' | 'degraded',
-      blockers: [...quality.blockers as string[]],
-      bypasses: [...quality.bypasses as string[]],
-      carryForwardBenchmarkCount: quality.carryForwardBenchmarkCount as number,
-      experimentalInputsPresent: quality.experimentalInputsPresent as boolean,
-    },
-    fieldAvailability: {
-      appellation: {
-        populatedDocCount: fieldAvailability.appellation.populatedDocCount as number,
-        totalDocCount: fieldAvailability.appellation.totalDocCount as number,
-        populatedDocRatio: fieldAvailability.appellation.populatedDocRatio as number,
-      },
-    },
+    quality: normalizedQuality,
+    fieldAvailability: normalizedFieldAvailability,
     counts: {
       entities: counts.entities,
       aliases: counts.aliases,
@@ -478,10 +582,10 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
       nlMappings: hashes.nlMappings,
       activeLtrModels: hashes.activeLtrModels,
     },
-    ...(typedLtrReleaseProvenance === undefined
+    ...(ltrReleaseProvenance === undefined
       ? {}
       : {
-          ltrReleaseProvenance: typedLtrReleaseProvenance,
+          ltrReleaseProvenance,
         }),
   };
 }
@@ -585,7 +689,7 @@ export function canonicalizeEntityRuntimeRows(
   const asRecord = (val: unknown): Record<string, unknown> =>
     typeof val === 'object' && val !== null && !Array.isArray(val) ? val as Record<string, unknown> : {};
 
-  return rows.map((row) => {
+  return canonicalizeEntitySnapshotRecords(rows.map((row) => {
     if (row.entity_type !== 'wine') {
       throw new Error(`canonicalizeEntityRuntimeRows: unexpected entity_type "${row.entity_type}"`);
     }
@@ -598,7 +702,7 @@ export function canonicalizeEntityRuntimeRows(
       attributes: asRecord(row.attributes),
       metadata: asRecord(row.metadata),
     };
-  }).sort((left, right) => left.entityId.localeCompare(right.entityId));
+  }));
 }
 
 export function canonicalizeAliasRuntimeRows(
@@ -614,7 +718,7 @@ export function canonicalizeAliasRuntimeRows(
     readonly confidence: number;
   }[],
 ): readonly CanonicalAliasSnapshotRecord[] {
-  return rows.map((row) => ({
+  return canonicalizeAliasSnapshotRecords(rows.map((row) => ({
     aliasId: row.alias_id,
     entityId: row.entity_id,
     value: row.surface_form,
@@ -624,11 +728,7 @@ export function canonicalizeAliasRuntimeRows(
     source: row.source,
     sourceTrust: row.source_trust,
     confidencePrior: row.confidence,
-  })).sort((left, right) =>
-    left.normalizedValue.localeCompare(right.normalizedValue)
-    || left.entityId.localeCompare(right.entityId)
-    || left.aliasId.localeCompare(right.aliasId),
-  );
+  })));
 }
 
 export function canonicalizeAmbiguityRuntimeRows(
@@ -640,16 +740,13 @@ export function canonicalizeAmbiguityRuntimeRows(
     readonly severity: 'low' | 'medium' | 'high';
   }[],
 ): readonly CanonicalAmbiguitySnapshotRow[] {
-  return rows.map((row) => ({
+  return canonicalizeAmbiguitySnapshotRows(rows.map((row) => ({
     registryId: row.registry_id,
     normalizedForm: row.normalized_form,
     entityIds: row.entity_ids,
     ambiguityTypes: row.ambiguity_types,
     severity: row.severity,
-  })).sort((left, right) =>
-    left.normalizedForm.localeCompare(right.normalizedForm)
-    || left.registryId.localeCompare(right.registryId),
-  );
+  })));
 }
 
 export async function loadSearchSnapshotRuntimeState(
@@ -667,6 +764,7 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
   readonly runtimeStatePath?: string;
   readonly runtimeState?: LoadedSearchSnapshotRuntimeState;
   readonly strictHashes?: boolean | undefined;
+  readonly requireActiveLtr?: boolean | undefined;
   /** T-010/W2: when true, additionally verify active_search_snapshot pointer matches runtime state. */
   readonly requirePointerParity?: boolean | undefined;
 }): Promise<LoadedSearchSnapshotRuntimeState> {
@@ -1046,7 +1144,7 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
   if (activeLtrCountMismatch) {
     throw new Error(`Active LTR runtime count mismatch: runtime=${activeLtrCount}/${activeLtrTotalCount}, state=${runtimeState.counts.activeLtrModels}`);
   }
-  if (activeLtrCount <= 0) {
+  if (args.requireActiveLtr === true && activeLtrCount <= 0) {
     throw new Error('Active LTR runtime count is zero');
   }
   if (runtimeState.quality.blockers.length > 0) {
@@ -1130,6 +1228,9 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
 
 export async function probeSearchSnapshotRuntimeState(
   runtimeStatePath: string = DEFAULT_RUNTIME_STATE_PATH,
+  options?: {
+    readonly requireActiveLtr?: boolean | undefined;
+  },
 ): Promise<ReadinessStatus> {
   try {
     const runtimeState = await loadSearchSnapshotRuntimeState(runtimeStatePath);
@@ -1140,7 +1241,7 @@ export async function probeSearchSnapshotRuntimeState(
       || nlMappingsRuntime.count !== runtimeState.counts.nlMappings
       || nlMappingsRuntime.count <= 0
       || nlMappingsRuntime.hash !== runtimeState.hashes.nlMappings
-      || runtimeState.counts.activeLtrModels <= 0
+      || (options?.requireActiveLtr === true && runtimeState.counts.activeLtrModels <= 0)
       || runtimeState.quality.blockers.length > 0
     ) {
       return 'down';

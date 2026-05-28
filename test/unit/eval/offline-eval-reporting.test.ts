@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { GoldenQuery } from '../../../scripts/etl/types.js';
+import type { EvalBenchmarkReportProvenance } from '../../../scripts/eval/benchmark-provenance.js';
 import {
   buildDegradationAwareReleaseReport,
   buildOfflineBaselineComparison,
   buildOfflinePerQueryMetrics,
+  countEvalExecutionErrors,
   computeBlockingEligibleSlices,
   computeDegradationReasonHistogram,
   computeExecutionModeBlockingEligibleMatrix,
@@ -12,6 +14,7 @@ import {
   computeSlotF1Aggregates,
   type OfflineEvalCaseResult,
 } from '../../../scripts/eval/run-offline-eval.js';
+import { ece, isEvalExecutionError } from '../../../scripts/eval/metrics.js';
 
 function makeGoldenQuery(overrides: Partial<GoldenQuery> = {}): GoldenQuery {
   return {
@@ -64,6 +67,30 @@ function makeCaseResult(overrides: Partial<OfflineEvalCaseResult> = {}): Offline
   };
 }
 
+function makeReportProvenance(
+  comparisonCompatibilityKey = 'compat-key',
+): EvalBenchmarkReportProvenance {
+  return {
+    benchmark_kind: 'offline_eval_live_runtime',
+    provenance_schema_version: 1,
+    corpus_id: 'fixture:offline_eval:gate',
+    corpus_hash: 'corpus-hash',
+    runtime_target: 'search_api_http',
+    uses_live_api: true,
+    smoke_synthesized: false,
+    threshold_source: 'external_fixture_thresholds',
+    gate_eligible: true,
+    suite_gate_passed: true,
+    search_snapshot_id: 'snapshot-1',
+    runtime_activation_status: 'activated',
+    readiness_passed: true,
+    active_ltr_models: 2,
+    feature_schema_hash: 'feature-hash',
+    comparison_compatibility_key: comparisonCompatibilityKey,
+    run_provenance_key: `${comparisonCompatibilityKey}:run`,
+  };
+}
+
 describe('offline eval reporting helpers', () => {
   it('builds per-query metric series including non-wrong-top1 rate', () => {
     const metrics = buildOfflinePerQueryMetrics([
@@ -84,6 +111,54 @@ describe('offline eval reporting helpers', () => {
     expect(metrics.non_wrong_top1_rate).toEqual([1, 0]);
   });
 
+  it('counts only transport/runtime execution errors, not semantic failed decisions', () => {
+    const noMatchFailed = makeCaseResult({
+      decision: {
+        decision_status: 'failed',
+        top_entity_id: null,
+        decision_confidence: 0,
+      },
+      truth: {
+        expected_status: 'failed',
+        ambiguity_expected: false,
+        requires_abstain: true,
+        relevant: { judgments: new Map() },
+      },
+    });
+    const executionError = makeCaseResult({
+      decision: {
+        decision_status: 'failed',
+        top_entity_id: null,
+        decision_confidence: 0,
+        evaluation_error: true,
+      },
+    });
+
+    expect(isEvalExecutionError(noMatchFailed.decision)).toBe(false);
+    expect(isEvalExecutionError(executionError.decision)).toBe(true);
+    expect(countEvalExecutionErrors([noMatchFailed, executionError])).toBe(1);
+  });
+
+  it('excludes untrusted resolved confidence scores from offline ECE', () => {
+    const truth = makeCaseResult().truth;
+    const outcomes = [
+      {
+        decision_status: 'resolved' as const,
+        top_entity_id: 'wine-1',
+        decision_confidence: 1,
+        calibration_trusted: true,
+      },
+      {
+        decision_status: 'resolved' as const,
+        top_entity_id: 'wine-1',
+        decision_confidence: 0.51,
+        calibration_trusted: false,
+      },
+    ];
+
+    expect(ece(outcomes, [truth, truth])).toBe(0);
+  });
+
   it('builds baseline deltas and significance when baseline per-query metrics exist', () => {
     const currentPerQuery = buildOfflinePerQueryMetrics([
       makeCaseResult(),
@@ -93,6 +168,7 @@ describe('offline eval reporting helpers', () => {
     const comparison = buildOfflineBaselineComparison(
       '/tmp/baseline.json',
       {
+        provenance: makeReportProvenance(),
         ndcg_at_10: 1,
         mrr_at_10: 1,
         recall_at_3: 1,
@@ -101,6 +177,7 @@ describe('offline eval reporting helpers', () => {
         wrong_top1_rate: 0,
       },
       {
+        provenance: makeReportProvenance(),
         query_count: 2,
         ndcg_at_10: 0.5,
         mrr_at_10: 0.5,
@@ -129,6 +206,7 @@ describe('offline eval reporting helpers', () => {
     );
 
     expect(comparison.baseline_path).toBe('/tmp/baseline.json');
+    expect(comparison.compatibility_status).toBe('compatible');
     expect(comparison.deltas.ndcg_at_10).toBeCloseTo(0.5);
     expect(comparison.deltas.wrong_top1_rate).toBeCloseTo(-0.5);
     expect(comparison.deltas.execution_mode_mix?.authoritative).toBeCloseTo(-1);
@@ -145,6 +223,7 @@ describe('offline eval reporting helpers', () => {
     const comparison = buildOfflineBaselineComparison(
       '/tmp/baseline.json',
       {
+        provenance: makeReportProvenance(),
         ndcg_at_10: 1,
         mrr_at_10: 1,
         recall_at_3: 1,
@@ -153,6 +232,7 @@ describe('offline eval reporting helpers', () => {
         wrong_top1_rate: 0,
       },
       {
+        provenance: makeReportProvenance(),
         ndcg_at_10: 0.8,
         mrr_at_10: 0.8,
         recall_at_3: 0.8,
@@ -473,6 +553,7 @@ describe('offline eval reporting helpers', () => {
     const comparison = buildOfflineBaselineComparison(
       '/tmp/baseline.json',
       {
+        provenance: makeReportProvenance(),
         ndcg_at_10: 1,
         mrr_at_10: 1,
         recall_at_3: 1,
@@ -491,6 +572,7 @@ describe('offline eval reporting helpers', () => {
         },
       },
       {
+        provenance: makeReportProvenance(),
         query_count: 2,
         ndcg_at_10: 0.995,
         mrr_at_10: 1,
@@ -525,5 +607,35 @@ describe('offline eval reporting helpers', () => {
       percentage_point_delta: 0.5,
     });
     expect(comparison.highlights).toContain('accuracy stable but degraded share up (50.0pp)');
+  });
+
+  it('skips incompatible baseline provenance instead of mixing trend lines', () => {
+    const currentPerQuery = buildOfflinePerQueryMetrics([makeCaseResult()]);
+    const comparison = buildOfflineBaselineComparison(
+      '/tmp/baseline.json',
+      {
+        provenance: makeReportProvenance('current-key'),
+        ndcg_at_10: 1,
+        mrr_at_10: 1,
+        recall_at_3: 1,
+        recall_at_100: 1,
+        decision_utility: 1,
+        wrong_top1_rate: 0,
+      },
+      {
+        provenance: makeReportProvenance('baseline-key'),
+        ndcg_at_10: 0.8,
+        mrr_at_10: 0.8,
+        recall_at_3: 0.8,
+        recall_at_100: 0.8,
+        decision_utility: 0.8,
+        wrong_top1_rate: 0.2,
+      },
+      currentPerQuery,
+    );
+
+    expect(comparison.compatibility_status).toBe('skipped');
+    expect(comparison.compatibility_reason).toContain('incompatible');
+    expect(comparison.significance).toBeUndefined();
   });
 });

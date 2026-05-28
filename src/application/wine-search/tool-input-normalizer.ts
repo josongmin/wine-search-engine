@@ -58,8 +58,9 @@
 import type { NormalizedConstraint } from '@shared/types/index.js';
 import { containsHangul } from '@shared/utils/hangul.js';
 import {
-  convertConstraintUsdToApproxKrw,
+  canonicalizePriceConstraintLike,
   convertKrwToConstraintUsd,
+  splitCanonicalUsdBudgetAcrossSlots,
 } from '@shared/utils/canonical-price.js';
 import {
   MIN_PRODUCED_VINTAGE_YEAR,
@@ -409,6 +410,22 @@ function applyParallelSlotOccasionFilter(
   return kept.length > 0 ? kept : undefined;
 }
 
+function getRawAnalysisConstraints(
+  analysis: WineSearchAnalysis,
+): readonly NormalizedConstraint[] {
+  if (analysis.constraints !== undefined) {
+    const flattened = [
+      ...analysis.constraints.hard,
+      ...analysis.constraints.soft,
+      ...analysis.constraints.inferred,
+    ];
+    if (flattened.length > 0 || analysis.normalizedConstraints.length === 0) {
+      return flattened;
+    }
+  }
+  return analysis.normalizedConstraints;
+}
+
 /** Detect whether the analysis indicates "explicit total budget for parallel
  *  slots". When the analysis decomposition is parallel-slot AND a single
  *  price constraint is present, the agent layer treats it as a *total*
@@ -421,18 +438,39 @@ function findTotalBudgetForParallelSlots(
   if (analysis.decomposition.slots.length < 2) return undefined;
   for (const c of getCanonicalNormalizedConstraints(analysis)) {
     if (!PRICE_CONSTRAINT_ATTRIBUTE_NAMES.has(c.attribute)) continue;
-    if (typeof c.value === 'number' && Number.isFinite(c.value) && c.value > 0) {
-      if (c.attribute === 'price_usd' || c.attribute === 'max_price_usd' || c.attribute === 'min_price_usd') {
-        return convertConstraintUsdToApproxKrw(c.value);
-      }
-      return Math.floor(c.value);
+    const canonical = canonicalizePriceConstraintLike(c);
+    if (typeof canonical.value === 'number' && Number.isFinite(canonical.value) && canonical.value > 0) {
+      return canonical.value;
     }
-    if (typeof c.value === 'object' && !Array.isArray(c.value)) {
-      const maxVal = (c.value as { readonly max?: number }).max;
+    if (typeof canonical.value === 'object' && !Array.isArray(canonical.value)) {
+      const maxVal = (canonical.value as { readonly max?: number }).max;
       if (typeof maxVal === 'number' && Number.isFinite(maxVal) && maxVal > 0) {
-        if (c.attribute === 'price_usd' || c.attribute === 'max_price_usd' || c.attribute === 'min_price_usd') {
-          return convertConstraintUsdToApproxKrw(maxVal);
-        }
+        return maxVal;
+      }
+    }
+  }
+  return undefined;
+}
+
+function findLegacyTotalBudgetKrwForParallelSlots(
+  analysis: WineSearchAnalysis,
+): number | undefined {
+  if (analysis.decomposition?.kind !== 'parallel-slot') return undefined;
+  if (analysis.decomposition.slots.length < 2) return undefined;
+  for (const constraint of getRawAnalysisConstraints(analysis)) {
+    if (
+      constraint.attribute !== 'price_krw'
+      && constraint.attribute !== 'max_price_krw'
+      && constraint.attribute !== 'min_price_krw'
+    ) {
+      continue;
+    }
+    if (typeof constraint.value === 'number' && Number.isFinite(constraint.value) && constraint.value > 0) {
+      return Math.floor(constraint.value);
+    }
+    if (typeof constraint.value === 'object' && !Array.isArray(constraint.value)) {
+      const maxVal = (constraint.value as { readonly max?: number }).max;
+      if (typeof maxVal === 'number' && Number.isFinite(maxVal) && maxVal > 0) {
         return Math.floor(maxVal);
       }
     }
@@ -444,7 +482,7 @@ function findTotalBudgetForParallelSlots(
  *  filter list. Drops any pre-existing price constraints. */
 function applyPerSlotBudget(
   filters: readonly NormalizedConstraint[] | undefined,
-  perSlotBudgetKrw: number,
+  perSlotBudgetUsd: number,
 ): readonly NormalizedConstraint[] {
   const others = (filters ?? []).filter(
     (c) => !PRICE_CONSTRAINT_ATTRIBUTE_NAMES.has(c.attribute),
@@ -452,8 +490,8 @@ function applyPerSlotBudget(
   const slotBudget: NormalizedConstraint = {
     attribute: 'price_usd',
     operator: '<=',
-    value: convertKrwToConstraintUsd(perSlotBudgetKrw),
-    source_phrase: `${perSlotBudgetKrw}원 이하 (per slot)`,
+    value: perSlotBudgetUsd,
+    source_phrase: `price_usd<=${perSlotBudgetUsd} (per slot)`,
     confidence: ROUTER_SYNTHESIZED_CONSTRAINT_CONFIDENCE,
     soft_promotion_authority: 'allow',
   };
@@ -597,12 +635,13 @@ export const DefaultToolInputNormalizer: ToolInputNormalizer = {
 
     // 4. Total-budget split — if the analysis carries a total budget on the
     //    parallel-slot decomposition, divide it equally across slots.
-    const totalBudget = findTotalBudgetForParallelSlots(analysis);
-    if (totalBudget !== undefined) {
-      const perSlotBudgetKrw = Math.floor(totalBudget / slotCount);
-      if (perSlotBudgetKrw > 0) {
-        filtersWithSlot = applyPerSlotBudget(filtersWithSlot, perSlotBudgetKrw);
-      }
+    const legacyTotalBudgetKrw = findLegacyTotalBudgetKrwForParallelSlots(analysis);
+    const perSlotBudgetUsd =
+      legacyTotalBudgetKrw !== undefined
+        ? convertKrwToConstraintUsd(Math.floor(legacyTotalBudgetKrw / slotCount))
+        : splitCanonicalUsdBudgetAcrossSlots(findTotalBudgetForParallelSlots(analysis), slotCount);
+    if (perSlotBudgetUsd !== undefined && perSlotBudgetUsd > 0) {
+      filtersWithSlot = applyPerSlotBudget(filtersWithSlot, perSlotBudgetUsd);
     }
 
     return {

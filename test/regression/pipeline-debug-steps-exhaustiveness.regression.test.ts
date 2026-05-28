@@ -89,15 +89,26 @@ const EXPECTED_SORTED_STEP_VALUES: readonly string[] = [
   'resolver.anchor.done',
   'resolver.anchor.missing',
   'resolver.anchor.start',
+  'retrieval.bundle_selector.budget_violation',
+  'retrieval.bundle_selector.engage',
+  'retrieval.bundle_selector.fail_closed',
+  'retrieval.bundle_selector.subquery_fail_closed',
   'retrieval.candidate_pool.assembled',
   'retrieval.candidate_pool.fallback',
   'retrieval.compare_candidates',
+  'retrieval.critic.budget_exhausted',
+  'retrieval.critic.decision',
+  'retrieval.critic.retries_exhausted',
+  'retrieval.critic.rewriter_declined',
   'retrieval.hybrid_candidates.start',
   'retrieval.producer_browse',
   'retrieval.region_browse',
+  'route.entity.corrective_retry.candidates',
+  'route.entity.corrective_retry.start',
   'route.entity.only.done',
   'route.entity.only.start',
   'search.execute.done',
+  'search.execute.stage_timings',
   'search.execute.start',
   'search.pre_route.early_exit',
   'search.route_resolution',
@@ -122,8 +133,11 @@ function exhaustiveLabel(step: PipelineDebugStepId): string {
     case PipelineDebugStep.SEARCH_PRE_ROUTE_EARLY_EXIT:
     case PipelineDebugStep.SEARCH_ROUTE_RESOLUTION:
     case PipelineDebugStep.SEARCH_EXECUTE_DONE:
+    case PipelineDebugStep.SEARCH_EXECUTE_STAGE_TIMINGS:
     case PipelineDebugStep.ROUTE_ENTITY_ONLY_START:
     case PipelineDebugStep.ROUTE_ENTITY_ONLY_DONE:
+    case PipelineDebugStep.ROUTE_ENTITY_CORRECTIVE_RETRY_START:
+    case PipelineDebugStep.ROUTE_ENTITY_CORRECTIVE_RETRY_CANDIDATES:
     case PipelineDebugStep.RESOLVER_ANCHOR_MISSING:
     case PipelineDebugStep.RESOLVER_ANCHOR_START:
     case PipelineDebugStep.RESOLVER_ANCHOR_DONE:
@@ -141,6 +155,14 @@ function exhaustiveLabel(step: PipelineDebugStepId): string {
     case PipelineDebugStep.RETRIEVAL_COMPARE_CANDIDATES:
     case PipelineDebugStep.RETRIEVAL_CANDIDATE_POOL_FALLBACK:
     case PipelineDebugStep.RETRIEVAL_CANDIDATE_POOL_ASSEMBLED:
+    case PipelineDebugStep.RETRIEVAL_CRITIC_BUDGET_EXHAUSTED:
+    case PipelineDebugStep.RETRIEVAL_CRITIC_DECISION:
+    case PipelineDebugStep.RETRIEVAL_CRITIC_REWRITER_DECLINED:
+    case PipelineDebugStep.RETRIEVAL_CRITIC_RETRIES_EXHAUSTED:
+    case PipelineDebugStep.RETRIEVAL_BUNDLE_SELECTOR_ENGAGE:
+    case PipelineDebugStep.RETRIEVAL_BUNDLE_SELECTOR_SUBQUERY_FAIL_CLOSED:
+    case PipelineDebugStep.RETRIEVAL_BUNDLE_SELECTOR_FAIL_CLOSED:
+    case PipelineDebugStep.RETRIEVAL_BUNDLE_SELECTOR_BUDGET_VIOLATION:
     case PipelineDebugStep.RANKING_HYBRID_COMPLETE:
     case PipelineDebugStep.POST_ROUTE_ENTER:
     case PipelineDebugStep.POST_ROUTE_ENTROPY_ABSTAIN:

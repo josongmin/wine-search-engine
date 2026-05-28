@@ -2,10 +2,19 @@ import { nanoid } from 'nanoid';
 import type { Pool } from 'pg';
 import type { EvalResultStore, EvalResultFilter } from '../../domain/evaluation/port/eval-result-store.port.js';
 import type { EvalResult } from '../../domain/evaluation/model/eval-result.js';
-import { createCanonicalEntityId, isCorruptedSnapshot } from '../../domain/shared/types/index.js';
+import { isCanonicalPublicEntityId, isCorruptedSnapshot } from '../../domain/shared/types/index.js';
 import type { DecisionStatus } from '../../domain/shared/types/index.js';
+import { isQueryClass } from '../../domain/shared/types/query-class.js';
+import { QUERY_INTENTS, type QueryIntent } from '../../domain/query/model/query-intent.js';
+import { QUERY_ROUTES, type QueryRoute } from '../../domain/query/model/query-route.js';
+import { RETRIEVAL_MODES, type RetrievalMode } from '../../domain/query/model/retrieval-mode.js';
 import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
-import { parseDecisionSnapshotJsonb, parseEvidenceItemsJsonb } from './jsonb-schemas.js';
+import { pgTableHasColumn } from '../db/pg-schema-capabilities.js';
+import {
+  parseDecisionSnapshotJsonb,
+  parseEvidenceItemsJsonb,
+  parseLtrScoreComponentsJsonb,
+} from './jsonb-schemas.js';
 function toDecisionStatus(value: string): DecisionStatus {
   if (value === 'resolved' || value === 'ambiguous' || value === 'failed') return value;
   throw new Error(`PgEvalResultStore: unknown predicted_status "${value}" — schema drift or corrupted row`);
@@ -24,12 +33,49 @@ interface EvalResultRow {
   is_safe_abstain: boolean;
   is_avoidable_abstain: boolean;
   evidence_items: unknown;
+  top_result_score_components?: unknown;
+  runtime_query_class?: string | null;
+  runtime_intent?: string | null;
+  runtime_route?: string | null;
+  runtime_retrieval_mode?: string | null;
+  gold_runtime_query_class_mismatch?: boolean | null;
   latency_ms: number;
   decision_snapshot: unknown;
   created_at: Date;
 }
 
-function rowToEvalResult(row: EvalResultRow): EvalResult {
+const QUERY_INTENT_SET = new Set<string>(QUERY_INTENTS);
+const QUERY_ROUTE_SET = new Set<string>(QUERY_ROUTES);
+const RETRIEVAL_MODE_SET = new Set<string>(RETRIEVAL_MODES);
+
+function isRuntimeIntent(value: string): value is QueryIntent {
+  return QUERY_INTENT_SET.has(value);
+}
+
+function isRuntimeRoute(value: string): value is QueryRoute {
+  return QUERY_ROUTE_SET.has(value);
+}
+
+function isRuntimeRetrievalMode(value: string): value is RetrievalMode {
+  return RETRIEVAL_MODE_SET.has(value);
+}
+
+function toRuntimeIntent(value: string | null | undefined): QueryIntent | undefined {
+  return value != null && isRuntimeIntent(value) ? value : undefined;
+}
+
+function toRuntimeRoute(value: string | null | undefined): QueryRoute | undefined {
+  return value != null && isRuntimeRoute(value) ? value : undefined;
+}
+
+function toRuntimeRetrievalMode(value: string | null | undefined): RetrievalMode | undefined {
+  return value != null && isRuntimeRetrievalMode(value) ? value : undefined;
+}
+
+function rowToEvalResult(row: EvalResultRow): {
+  readonly result: EvalResult;
+  readonly droppedLegacyPredictedEntityId: boolean;
+} {
   // top1_raw_score is NULLable (migration 021 added it; legacy rows carry NULL).
   // Guard with Number.isFinite to refuse NaN/Infinity that could be smuggled in
   // by a corrupted ETL backfill (CLAUDE.md schema rule on external numerics).
@@ -38,6 +84,9 @@ function rowToEvalResult(row: EvalResultRow): EvalResult {
     rawScoreFromRow != null && Number.isFinite(rawScoreFromRow)
       ? rawScoreFromRow
       : undefined;
+  const runtimeIntent = toRuntimeIntent(row.runtime_intent);
+  const runtimeRoute = toRuntimeRoute(row.runtime_route);
+  const runtimeRetrievalMode = toRuntimeRetrievalMode(row.runtime_retrieval_mode);
 
   const base = {
     caseId: row.case_id,
@@ -51,16 +100,66 @@ function rowToEvalResult(row: EvalResultRow): EvalResult {
     evidenceItems: parseEvidenceItemsJsonb(row.evidence_items, 'PgEvalResultStore'),
     latencyMs: row.latency_ms,
     decisionSnapshot: parseDecisionSnapshotJsonb(row.decision_snapshot, 'PgEvalResultStore'),
+    ...(row.top_result_score_components != null
+      ? {
+          topResultScoreComponents: parseLtrScoreComponentsJsonb(
+            row.top_result_score_components,
+            'PgEvalResultStore',
+          ),
+        }
+      : {}),
+    ...(row.runtime_query_class != null && isQueryClass(row.runtime_query_class)
+      ? { runtimeQueryClass: row.runtime_query_class }
+      : {}),
+    ...(runtimeIntent !== undefined
+      ? { runtimeIntent }
+      : {}),
+    ...(runtimeRoute !== undefined
+      ? { runtimeRoute }
+      : {}),
+    ...(runtimeRetrievalMode !== undefined
+      ? { runtimeRetrievalMode }
+      : {}),
+    ...(row.gold_runtime_query_class_mismatch === true
+      ? { goldRuntimeQueryClassMismatch: true }
+      : {}),
     ...(top1RawScore !== undefined ? { top1RawScore } : {}),
   };
-  if (row.predicted_entity_id != null) {
-    return { ...base, predictedEntityId: createCanonicalEntityId(row.predicted_entity_id) };
+  if (row.predicted_entity_id != null && isCanonicalPublicEntityId(row.predicted_entity_id)) {
+    return {
+      result: { ...base, predictedEntityId: row.predicted_entity_id },
+      droppedLegacyPredictedEntityId: false,
+    };
   }
-  return base;
+  return {
+    result: base,
+    droppedLegacyPredictedEntityId: row.predicted_entity_id != null,
+  };
 }
 
 export class PgEvalResultStore implements EvalResultStore {
+  private topResultScoreComponentsColumnPresence?: Promise<boolean>;
+  private runtimeClassificationColumnsPresence?: Promise<boolean>;
+
   constructor(private readonly pool: Pool) {}
+
+  private async hasTopResultScoreComponentsColumn(): Promise<boolean> {
+    this.topResultScoreComponentsColumnPresence ??= pgTableHasColumn(
+      this.pool,
+      'eval_results',
+      'top_result_score_components',
+    );
+    return this.topResultScoreComponentsColumnPresence;
+  }
+
+  private async hasRuntimeClassificationColumns(): Promise<boolean> {
+    this.runtimeClassificationColumnsPresence ??= pgTableHasColumn(
+      this.pool,
+      'eval_results',
+      'runtime_query_class',
+    );
+    return this.runtimeClassificationColumnsPresence;
+  }
 
   async saveResult(result: EvalResult): Promise<void> {
     if (isCorruptedSnapshot(result.decisionSnapshot)) {
@@ -75,6 +174,76 @@ export class PgEvalResultStore implements EvalResultStore {
       result.top1RawScore != null && Number.isFinite(result.top1RawScore)
         ? result.top1RawScore
         : null;
+    const topResultScoreComponentsParam =
+      result.topResultScoreComponents !== undefined
+        ? JSON.stringify(result.topResultScoreComponents)
+        : null;
+    const hasTopResultScoreComponentsColumn = await this.hasTopResultScoreComponentsColumn();
+    const hasRuntimeClassificationColumns = await this.hasRuntimeClassificationColumns();
+    if (hasTopResultScoreComponentsColumn && hasRuntimeClassificationColumns) {
+      await this.pool.query(
+        `INSERT INTO eval_results (
+          result_id, case_id, predicted_entity_id, predicted_status,
+          decision_confidence, top1_raw_score, utility_score,
+          is_correct_resolve, is_wrong_resolve, is_safe_abstain, is_avoidable_abstain,
+          evidence_items, top_result_score_components,
+          runtime_query_class, runtime_intent, runtime_route, runtime_retrieval_mode,
+          gold_runtime_query_class_mismatch,
+          latency_ms, decision_snapshot
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
+        [
+          resultId,
+          result.caseId,
+          result.predictedEntityId ?? null,
+          result.predictedStatus,
+          result.decisionConfidence,
+          rawScoreParam,
+          result.utilityScore,
+          result.isCorrectResolve,
+          result.isWrongResolve,
+          result.isSafeAbstain,
+          result.isAvoidableAbstain,
+          JSON.stringify(result.evidenceItems),
+          topResultScoreComponentsParam,
+          result.runtimeQueryClass ?? null,
+          result.runtimeIntent ?? null,
+          result.runtimeRoute ?? null,
+          result.runtimeRetrievalMode ?? null,
+          result.goldRuntimeQueryClassMismatch ?? false,
+          result.latencyMs,
+          JSON.stringify(result.decisionSnapshot),
+        ],
+      );
+      return;
+    }
+    if (hasTopResultScoreComponentsColumn) {
+      await this.pool.query(
+        `INSERT INTO eval_results (
+          result_id, case_id, predicted_entity_id, predicted_status,
+          decision_confidence, top1_raw_score, utility_score,
+          is_correct_resolve, is_wrong_resolve, is_safe_abstain, is_avoidable_abstain,
+          evidence_items, top_result_score_components, latency_ms, decision_snapshot
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+        [
+          resultId,
+          result.caseId,
+          result.predictedEntityId ?? null,
+          result.predictedStatus,
+          result.decisionConfidence,
+          rawScoreParam,
+          result.utilityScore,
+          result.isCorrectResolve,
+          result.isWrongResolve,
+          result.isSafeAbstain,
+          result.isAvoidableAbstain,
+          JSON.stringify(result.evidenceItems),
+          topResultScoreComponentsParam,
+          result.latencyMs,
+          JSON.stringify(result.decisionSnapshot),
+        ],
+      );
+      return;
+    }
     await this.pool.query(
       `INSERT INTO eval_results (
         result_id, case_id, predicted_entity_id, predicted_status,
@@ -111,7 +280,7 @@ export class PgEvalResultStore implements EvalResultStore {
       params.push(filter.since);
     }
     if (filter?.snapshotId != null) {
-      conditions.push(`er.decision_snapshot->>'threshold_profile_id' = $${idx++}`);
+      conditions.push(`er.decision_snapshot->>'snapshot_id' = $${idx++}`);
       params.push(filter.snapshotId);
     }
 
@@ -120,6 +289,19 @@ export class PgEvalResultStore implements EvalResultStore {
       `SELECT er.* FROM eval_results er ${where} ORDER BY er.created_at ASC`,
       params,
     );
-    return result.rows.map(rowToEvalResult);
+    const mapped = result.rows.map(rowToEvalResult);
+    const droppedLegacyPredictedEntityIdCount = mapped.filter(
+      (row) => row.droppedLegacyPredictedEntityId,
+    ).length;
+    if (droppedLegacyPredictedEntityIdCount > 0) {
+      bootstrapLogger.warn(
+        {
+          droppedLegacyPredictedEntityIdCount,
+          ...(filter?.snapshotId !== undefined ? { snapshotId: filter.snapshotId } : {}),
+        },
+        '[PgEvalResultStore] Dropped legacy source-record predicted_entity_id values from eval_results',
+      );
+    }
+    return mapped.map((row) => row.result);
   }
 }

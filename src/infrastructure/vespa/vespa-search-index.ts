@@ -101,6 +101,26 @@ const MAX_BULK_FETCH_IDS = 5000;
  * Override via env if cluster profile differs: `VESPA_BULK_HYDRATION_BATCH_SIZE=N`.
  */
 const FETCH_SUMMARY_BATCH_SIZE = VESPA_BULK_HYDRATION_BATCH_SIZE;
+/**
+ * Correctness-first fan-out cap for bulk hydration summary fetches.
+ *
+ * 2026-05-27 RCA:
+ * - large exact/entity candidate sets (`~1k ids`) were fully retrievable when
+ *   the same `entity_id in (...)` YQL batches were issued sequentially;
+ * - the existing `Promise.allSettled` fan-out over every batch in parallel
+ *   yielded silent partial hydration (`resolved << requested`) with
+ *   `batchFailures=0` and `parseFailures=0`;
+ * - raw Vespa batch queries still returned 50/50 hits when replayed outside
+ *   the parallel fan-out, isolating the failure to remote summary-plane
+ *   saturation under concurrent full-summary requests.
+ *
+ * Until the remote ceiling is characterized with a proof rail, keep the
+ * hydration channel deterministic and fail-closed by executing one full-summary
+ * batch at a time. This applies to `getDocuments*` and the generic summary
+ * projection helper equally; otherwise compare / drinking-window / feature
+ * hydration can drift from document hydration.
+ */
+const BULK_HYDRATION_QUERY_CONCURRENCY = 1;
 const ALIAS_PREFIX_TERMS_FIELD = 'alias_prefix_terms';
 
 /**
@@ -135,6 +155,38 @@ interface VespaSearchIndexSchemaCapabilities {
 const DEFAULT_VESPA_SEARCH_INDEX_SCHEMA_CAPABILITIES: VespaSearchIndexSchemaCapabilities = {
   aliasPrefixTerms: true,
 };
+
+async function runSettledWithConcurrency<T>(
+  tasks: ReadonlyArray<() => Promise<T>>,
+  limit: number,
+): Promise<PromiseSettledResult<T>[]> {
+  const settled: PromiseSettledResult<T>[] = Array.from(
+    { length: tasks.length },
+    (): PromiseSettledResult<T> => ({ status: 'rejected', reason: 'task_not_started' }),
+  );
+  let index = 0;
+
+  async function worker(): Promise<void> {
+    while (index < tasks.length) {
+      const current = index;
+      index += 1;
+      try {
+        settled[current] = {
+          status: 'fulfilled',
+          value: await tasks[current]!(),
+        };
+      } catch (error) {
+        settled[current] = {
+          status: 'rejected',
+          reason: error,
+        };
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker));
+  return settled;
+}
 
 // ---------------------------------------------------------------------------
 // Type guards
@@ -371,7 +423,7 @@ function parseHitSummaryWithContext(
         entityId: rawEntityId,
         rank,
         fieldCount: Object.keys(hit.fields).length,
-        err: err instanceof Error ? err.message : String(err),
+        err,
       },
       `[VespaSearchIndex] ${callerName}: hit summary parse failed`,
     );
@@ -395,7 +447,7 @@ function logDocumentParseFailure(
       ...(rank !== undefined ? { rank } : {}),
       fieldCount: Object.keys(fields).length,
       missingField: err instanceof MalformedVespaDocumentError ? err.missingField : undefined,
-      err: err instanceof Error ? err.message : String(err),
+      err,
     },
     `[VespaSearchIndex] ${callerName}: document parse failed`,
   );
@@ -664,7 +716,7 @@ export class VespaSearchIndex implements SearchIndexPort {
             entityId: getEntityIdForLog(hit),
             rank,
             fieldCount: Object.keys(hit.fields).length,
-            err: err instanceof Error ? err.message : String(err),
+            err,
           },
           '[VespaSearchIndex] sparseSearch: failed to extract entityId',
         );
@@ -762,7 +814,7 @@ export class VespaSearchIndex implements SearchIndexPort {
             entityId: getEntityIdForLog(hit),
             rank,
             fieldCount: Object.keys(hit.fields).length,
-            err: err instanceof Error ? err.message : String(err),
+            err,
           },
           '[VespaSearchIndex] denseSearch: failed to extract entityId',
         );
@@ -850,7 +902,7 @@ export class VespaSearchIndex implements SearchIndexPort {
             entityId: getEntityIdForLog(hit),
             rank,
             fieldCount: Object.keys(hit.fields).length,
-            err: err instanceof Error ? err.message : String(err),
+            err,
           },
           '[VespaSearchIndex] searchLearnedSparse: failed to extract entityId',
         );
@@ -952,7 +1004,7 @@ export class VespaSearchIndex implements SearchIndexPort {
     for (let offset = 0; offset < entityIds.length; offset += FETCH_SUMMARY_BATCH_SIZE) {
       batches.push([...entityIds.slice(offset, offset + FETCH_SUMMARY_BATCH_SIZE)]);
     }
-    const settled = await Promise.allSettled(batches.map(async (batch) => {
+    const settled = await runSettledWithConcurrency(batches.map((batch) => async () => {
       const idList = batch.map((id) => yqlEscapeString(id)).join(', ');
       const yql = `select * from ${SCHEMA} where entity_id in (${idList}) limit ${batch.length}`;
       // Bulk hydration uses the wider timeout channel — full-summary fetches
@@ -984,7 +1036,7 @@ export class VespaSearchIndex implements SearchIndexPort {
         }
       }
       return { docs, parseFailures };
-    }));
+    }), BULK_HYDRATION_QUERY_CONCURRENCY);
     const docs = new Map<CanonicalEntityId, RetrievalDocument>();
     let parseFailures = 0;
     let batchFailures = 0;
@@ -1185,7 +1237,7 @@ export class VespaSearchIndex implements SearchIndexPort {
     for (let offset = 0; offset < entityIds.length; offset += FETCH_SUMMARY_BATCH_SIZE) {
       batches.push([...entityIds.slice(offset, offset + FETCH_SUMMARY_BATCH_SIZE)]);
     }
-    const settled = await Promise.allSettled(batches.map(async (batch) => {
+    const settled = await runSettledWithConcurrency(batches.map((batch) => async () => {
       const idList = batch.map((id) => yqlEscapeString(id)).join(', ');
       const yql =
         `select ${selectFields}` +
@@ -1208,7 +1260,7 @@ export class VespaSearchIndex implements SearchIndexPort {
           return null;
         }
       }).filter((hit): hit is T => hit !== null);
-    }));
+    }), BULK_HYDRATION_QUERY_CONCURRENCY);
 
     // Build Map<entityId, projection> from successful batches.
     // Log failed batches — previously they were silently swallowed, making partial

@@ -10,9 +10,7 @@ import {
 import { probeJsonPostEndpoint } from '../infrastructure/health/readiness-probes.js';
 import {
   loadSearchSnapshotRuntimeState,
-  verifySearchSnapshotRuntimeStateLive,
 } from '../infrastructure/health/search-snapshot-readiness.js';
-import { resolveActiveSnapshot } from '../infrastructure/db/active-snapshot-resolver.js';
 import { createSnapshotHealthReader } from '../infrastructure/health/snapshot-health-reader.js';
 import type { WatchlistRuntimePort } from '../infrastructure/watchlist/watchlist-delivery-runtime.js';
 import type { DrinkingWindowPredictorPort } from '../domain/drinking-window/port/drinking-window-predictor.port.js';
@@ -31,14 +29,17 @@ import { isLtrServingEnabled } from './ltr-serving-mode.js';
 
 const log = bootstrapLogger.child({ component: 'readiness' });
 const PROBE_TIMEOUT_MS = 3_000;
+const ALIAS_SUBSTRATE_PROBE_TIMEOUT_MS = 750;
+const SEARCH_SNAPSHOT_RUNTIME_PROBE_TIMEOUT_MS = 1_500;
 
 async function raceWithProbeTimeout<T>(
   operation: Promise<T>,
   timeoutMessage: string,
   timerRef: { current?: ReturnType<typeof setTimeout> | undefined },
+  timeoutMs: number = PROBE_TIMEOUT_MS,
 ): Promise<T> {
   const timeoutPromise: Promise<never> = new Promise((_, reject) => {
-    timerRef.current = setTimeout(() => { reject(new Error(timeoutMessage)); }, PROBE_TIMEOUT_MS);
+    timerRef.current = setTimeout(() => { reject(new Error(timeoutMessage)); }, timeoutMs);
   });
   return await Promise.race([operation, timeoutPromise]);
 }
@@ -167,9 +168,11 @@ async function probeRuntimeLtrArtifact(path: string): Promise<ReadinessStatus> {
   return runtimeModels.size > 0 ? 'up' : 'down';
 }
 
-async function probeSearchSnapshotRuntimeWithoutPool(): Promise<ReadinessStatus> {
+async function probeSearchSnapshotRuntimeWithoutPool(args?: {
+  readonly requireActiveLtr?: boolean;
+}): Promise<ReadinessStatus> {
   const runtimeState = await loadSearchSnapshotRuntimeState();
-  if (runtimeState.counts.activeLtrModels <= 0) {
+  if (args?.requireActiveLtr === true && runtimeState.counts.activeLtrModels <= 0) {
     throw new Error('Active LTR runtime count is zero');
   }
   if (runtimeState.quality.blockers.length > 0) {
@@ -181,39 +184,130 @@ async function probeSearchSnapshotRuntimeWithoutPool(): Promise<ReadinessStatus>
 async function probeAliasSubstrate(
   pool: NonNullable<RuntimeHandles['pool']>,
 ): Promise<ReadinessStatus> {
+  let client: PoolClient | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const timerRef: { current?: ReturnType<typeof setTimeout> | undefined } = {};
   try {
-    const activeSnapshot = await Promise.race([
-      resolveActiveSnapshot(pool, { bypassCache: true }),
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => { reject(new Error('alias substrate pointer probe timeout')); }, PROBE_TIMEOUT_MS);
-      }),
-    ]);
+    client = await raceWithProbeTimeout(
+      pool.connect(),
+      'alias substrate connect probe timeout',
+      timerRef,
+      ALIAS_SUBSTRATE_PROBE_TIMEOUT_MS,
+    );
+    timer = timerRef.current;
     if (timer !== undefined) {
       clearTimeout(timer);
       timer = undefined;
     }
 
-    const probeResult = await Promise.race([
-      pool.query(
-        `SELECT 1
-           FROM aliases
-          WHERE search_snapshot_id = $1
-            AND is_suppressed = FALSE
-          LIMIT 1`,
-        [activeSnapshot.activeSnapshotId],
-      ),
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => { reject(new Error('alias substrate row probe timeout')); }, PROBE_TIMEOUT_MS);
-      }),
-    ]);
+    await client.query('BEGIN');
+    await client.query(`SET LOCAL statement_timeout = '${ALIAS_SUBSTRATE_PROBE_TIMEOUT_MS}ms'`);
+
+    const { rows: pointerRows } = await client.query<{ active_snapshot_id: string }>(
+      `SELECT active_snapshot_id
+         FROM active_search_snapshot
+        WHERE id = 1`,
+    );
+    const activeSnapshotId = pointerRows[0]?.active_snapshot_id;
+    if (typeof activeSnapshotId !== 'string' || activeSnapshotId.length === 0) {
+      throw new Error('alias substrate active snapshot pointer missing');
+    }
+
+    const probeResult = await client.query(
+      `SELECT 1
+         FROM aliases
+        WHERE search_snapshot_id = $1
+          AND is_suppressed = FALSE
+        LIMIT 1`,
+      [activeSnapshotId],
+    );
+
+    await client.query('COMMIT');
 
     return probeResult.rowCount != null && probeResult.rowCount > 0 ? 'up' : 'down';
   } catch (err) {
+    if (client !== undefined) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackErr) {
+        log.debug({ err: rollbackErr, probe: 'alias_substrate' }, 'alias substrate rollback failed');
+      }
+    }
     log.warn({ err, probe: 'alias_substrate' }, 'readiness probe failed');
     return 'down';
   } finally {
     if (timer !== undefined) clearTimeout(timer);
+    client?.release();
+  }
+}
+
+async function probeSearchSnapshotRuntimeWithPool(args: {
+  readonly pool: NonNullable<RuntimeHandles['pool']>;
+  readonly requireActiveLtr?: boolean;
+}): Promise<ReadinessStatus> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timerRef: { current?: ReturnType<typeof setTimeout> | undefined } = {};
+  try {
+    const runtimeState = await raceWithProbeTimeout(
+      loadSearchSnapshotRuntimeState(),
+      'search snapshot runtime state load timeout',
+      timerRef,
+      SEARCH_SNAPSHOT_RUNTIME_PROBE_TIMEOUT_MS,
+    );
+    timer = timerRef.current;
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      timer = undefined;
+    }
+
+    const pointerRes = await raceWithProbeTimeout(
+      args.pool.query<{ active_snapshot_id: string; content_hash: string }>(
+        `SELECT active_snapshot_id, content_hash
+           FROM active_search_snapshot
+          WHERE id = 1`,
+      ),
+      'search snapshot runtime pointer probe timeout',
+      timerRef,
+      SEARCH_SNAPSHOT_RUNTIME_PROBE_TIMEOUT_MS,
+    );
+    timer = timerRef.current;
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      timer = undefined;
+    }
+
+    const pointerRow = pointerRes.rows[0];
+    if (pointerRow === undefined) {
+      throw new Error('search snapshot runtime pointer row missing');
+    }
+    if (pointerRow.active_snapshot_id !== runtimeState.snapshotId) {
+      throw new Error(
+        `search snapshot runtime pointer mismatch: pointer=${pointerRow.active_snapshot_id}, state=${runtimeState.snapshotId}`,
+      );
+    }
+    if (
+      runtimeState.contentHash.length > 0
+      && pointerRow.content_hash.length > 0
+      && pointerRow.content_hash !== runtimeState.contentHash
+    ) {
+      throw new Error(
+        `search snapshot runtime content hash mismatch: pointer=${pointerRow.content_hash}, state=${runtimeState.contentHash}`,
+      );
+    }
+    if (args.requireActiveLtr === true && runtimeState.counts.activeLtrModels <= 0) {
+      throw new Error('Active LTR runtime count is zero');
+    }
+    if (runtimeState.quality.blockers.length > 0) {
+      throw new Error(`Runtime quality blockers present: ${runtimeState.quality.blockers.join(', ')}`);
+    }
+    return 'up';
+  } catch (err) {
+    log.warn({ err, probe: 'search_snapshot_runtime' }, 'readiness probe failed');
+    return 'down';
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
   }
 }
 
@@ -259,7 +353,11 @@ export function buildHealthRouteOptions(
               },
             },
             alias_substrate: {
-              required: true,
+              // Runtime serves anchors from the in-memory alias overlay and
+              // degrades to SearchIndexAliasMatcher when PostgreSQL alias rows
+              // are unavailable. A live PG alias-row probe is therefore a
+              // quality signal, not a hard traffic gate.
+              required: false,
               check: (): Promise<ReadinessStatus> => {
                 const pool = runtime.pool;
                 if (pool === undefined) {
@@ -317,20 +415,25 @@ export function buildHealthRouteOptions(
             }
             return probeSearchSnapshotRuntimeWithoutPool();
           }
-          try {
-            await verifySearchSnapshotRuntimeStateLive({
-              pool: runtime.pool,
-              vespaUrl: config.vespa.url,
-              strictHashes: true,
-              // T-010/W2: pointer parity is the authoritative "we are serving this snapshot"
-              // signal. A drift between pointer and runtime-state file means ops sees one
-              // id, the read path serves another.
-              requirePointerParity: true,
-            });
-            return 'up';
-          } catch {
-            return 'down';
+          return probeSearchSnapshotRuntimeWithPool({
+            pool: runtime.pool,
+            requireActiveLtr: false,
+          });
+        },
+      },
+      search_snapshot_ltr: {
+        required: false,
+        check: async (): Promise<ReadinessStatus> => {
+          if (runtime.pool === undefined) {
+            if (isProduction) {
+              return 'down';
+            }
+            return probeSearchSnapshotRuntimeWithoutPool({ requireActiveLtr: true });
           }
+          return probeSearchSnapshotRuntimeWithPool({
+            pool: runtime.pool,
+            requireActiveLtr: true,
+          });
         },
       },
       ...(ltrServingEnabled && runtimeLtrModelsPath !== undefined

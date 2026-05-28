@@ -4,7 +4,10 @@ import {
   SEARCH_SNAPSHOT_SCHEMA_VERSION,
   SEARCH_SNAPSHOT_STATE_VERSION,
 } from '../../src/domain/shared/constants/search-snapshot.js';
-import type { SearchSnapshotFieldAvailability } from '../../src/domain/shared/types/search-field-availability.js';
+import {
+  ZERO_SEARCH_FIELD_AVAILABILITY_METRIC,
+  type SearchSnapshotFieldAvailability,
+} from '../../src/domain/shared/types/search-field-availability.js';
 import {
   hashStableJson,
   hashText,
@@ -17,6 +20,7 @@ export interface AliasSnapshotRecord {
   readonly value: string;
   readonly normalizedValue: string;
   readonly type: string;
+  readonly aliasType?: string;
   readonly scope: string;
   readonly source: string;
   readonly sourceTrust: number;
@@ -131,6 +135,26 @@ export interface SearchSnapshotRuntimeState {
   };
 }
 
+const SearchFieldAvailabilityMetricSchema = z.object({
+  populatedDocCount: z.number().int().nonnegative(),
+  totalDocCount: z.number().int().nonnegative(),
+  populatedDocRatio: z.number().min(0).max(1),
+}).strict();
+
+const SearchSnapshotFieldAvailabilitySchema = z.object({
+  appellation: SearchFieldAvailabilityMetricSchema,
+  body: SearchFieldAvailabilityMetricSchema.optional().default(ZERO_SEARCH_FIELD_AVAILABILITY_METRIC),
+  sweetness: SearchFieldAvailabilityMetricSchema.optional().default(ZERO_SEARCH_FIELD_AVAILABILITY_METRIC),
+  acidity: SearchFieldAvailabilityMetricSchema.optional().default(ZERO_SEARCH_FIELD_AVAILABILITY_METRIC),
+  tannin: SearchFieldAvailabilityMetricSchema.optional().default(ZERO_SEARCH_FIELD_AVAILABILITY_METRIC),
+}).strict().transform((value): SearchSnapshotFieldAvailability => ({
+  appellation: value.appellation,
+  body: value.body,
+  sweetness: value.sweetness,
+  acidity: value.acidity,
+  tannin: value.tannin,
+}));
+
 export const SearchSnapshotManifestSchema = z.object({
   schemaVersion: z.literal(SEARCH_SNAPSHOT_SCHEMA_VERSION),
   snapshotId: z.string().min(1),
@@ -162,13 +186,7 @@ export const SearchSnapshotManifestSchema = z.object({
     ambiguityRegistry: z.string().min(1),
     nlMappings: z.string().min(1),
   }).strict(),
-  fieldAvailability: z.object({
-    appellation: z.object({
-      populatedDocCount: z.number().int().nonnegative(),
-      totalDocCount: z.number().int().nonnegative(),
-      populatedDocRatio: z.number().min(0).max(1),
-    }).strict(),
-  }).strict(),
+  fieldAvailability: SearchSnapshotFieldAvailabilitySchema,
   quality: z.object({
     status: z.enum(['canonical', 'degraded']),
     blockers: z.array(z.string().min(1)),
@@ -206,13 +224,7 @@ export const SearchSnapshotRuntimeStateSchema = z.object({
     nlMappings: z.string().min(1),
     activeLtrModels: z.string().min(1),
   }).strict(),
-  fieldAvailability: z.object({
-    appellation: z.object({
-      populatedDocCount: z.number().int().nonnegative(),
-      totalDocCount: z.number().int().nonnegative(),
-      populatedDocRatio: z.number().min(0).max(1),
-    }).strict(),
-  }).strict(),
+  fieldAvailability: SearchSnapshotFieldAvailabilitySchema,
   ltrReleaseProvenance: z.object({
     updatedAt: z.string().min(1),
     evalDatasetVersion: z.string().min(1),

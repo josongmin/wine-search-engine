@@ -18,7 +18,11 @@ dotenv.config({ path: '.env.local', override: true });
 dotenv.config();
 import fs from 'node:fs/promises';
 import { z } from 'zod';
-import type { SearchExecutorPort } from '../../src/application/search/port/search-executor.port.js';
+import type {
+  SearchExecutorEvaluationResult,
+  SearchExecutorPort,
+} from '../../src/application/search/port/search-executor.port.js';
+import { searchResponseToEvalProvenanceSlices } from '../../src/application/search/search-usecase-eval-provenance.js';
 import { parseNdjson } from '../etl/ndjson.js';
 import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 import {
@@ -514,6 +518,27 @@ function extractDecisionStatus(
     : undefined;
 }
 
+function extractEmbeddedEvalProvenanceSlices(
+  responseBody: unknown,
+): readonly {
+  readonly candidateEntityId: string;
+  readonly rank: number;
+}[] {
+  if (typeof responseBody !== 'object' || responseBody === null) {
+    return [];
+  }
+  const body = responseBody as Record<string, unknown>;
+  if (body['queryType'] !== 'search') {
+    return [];
+  }
+
+  try {
+    return searchResponseToEvalProvenanceSlices(body as never);
+  } catch {
+    return [];
+  }
+}
+
 function scoreRows(
   rows: readonly NoisyEntityBenchmarkCase[],
   rankedByBenchmarkId: ReadonlyMap<string, readonly RankedEntityLike[] | RankedPrediction>,
@@ -602,7 +627,10 @@ function scoreRows(
       });
     }
 
-    if (row.expected_provenance_stage !== undefined) {
+    if (
+      row.expected_provenance_stage !== undefined
+      && topEntity?.provenance_stage !== undefined
+    ) {
       provenanceCheckedCount += 1;
       const provenanceMatch =
         topEntity?.provenance_stage === row.expected_provenance_stage &&
@@ -727,6 +755,44 @@ export function extractRankedEntities(responseBody: unknown): readonly RankedEnt
       } satisfies RankedEntity;
     })
     .filter((item): item is RankedEntity => item !== null);
+}
+
+function mergeRankedEntitiesWithEvalProvenance(
+  rankedEntities: readonly RankedEntity[],
+  evalProvenanceSlices: readonly {
+    readonly candidateEntityId: string;
+    readonly rank: number;
+  }[],
+): readonly RankedEntity[] {
+  const merged = new Map<string, RankedEntity>();
+
+  for (const entity of rankedEntities) {
+    merged.set(entity.entity_id, entity);
+  }
+
+  for (const slice of [...evalProvenanceSlices].sort((left, right) => left.rank - right.rank)) {
+    if (merged.has(slice.candidateEntityId)) {
+      continue;
+    }
+    merged.set(slice.candidateEntityId, {
+      entity_id: slice.candidateEntityId,
+    });
+  }
+
+  return [...merged.values()];
+}
+
+function extractRankedEntitiesFromExecution(
+  execution: SearchExecutorEvaluationResult,
+): readonly RankedEntity[] {
+  const fromResults = extractRankedEntities(execution.response);
+  const embeddedSlices = extractEmbeddedEvalProvenanceSlices(execution.response);
+  const directSlices = execution.retrievalProvenanceSlices ?? [];
+
+  return mergeRankedEntitiesWithEvalProvenance(
+    fromResults,
+    [...embeddedSlices, ...directSlices],
+  );
 }
 
 async function mapPool<T, R>(
@@ -930,7 +996,7 @@ export async function evaluateNoisyEntityBenchmarkWithSearchExecutor(
         return [benchmarkCase.benchmark_id, { rankedEntities: [] }] as const;
       }
       return [benchmarkCase.benchmark_id, {
-        rankedEntities: extractRankedEntities(responseBody),
+        rankedEntities: extractRankedEntitiesFromExecution(execution),
         decisionStatus: extractDecisionStatus(responseBody),
       }] as const;
     },

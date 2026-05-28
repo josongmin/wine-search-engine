@@ -58,6 +58,10 @@ interface QueryClassECE {
  * A well-calibrated engine produces confidence scores that match
  * empirical accuracy: when it says "90% confident", it should be
  * correct ~90% of the time.
+ *
+ * Only resolved decisions with trusted calibration are eligible. Ambiguous /
+ * failed outcomes are not positive predictions, and substitute-trust scores
+ * are not probability-calibrated.
  */
 export class CalibrationEvaluator {
   /**
@@ -73,10 +77,11 @@ export class CalibrationEvaluator {
    * @returns The ECE in [0, 1]. Lower is better.
    */
   computeECE(results: readonly EvalResult[], bins: number = 10): number {
-    if (results.length === 0) return 0;
+    const eligibleResults = this.filterCalibrationEligibleResults(results);
+    if (eligibleResults.length === 0) return 0;
 
-    const reliability = this.computeReliabilityDiagram(results, bins);
-    const totalCount = results.length;
+    const reliability = this.computeReliabilityDiagram(eligibleResults, bins);
+    const totalCount = eligibleResults.length;
 
     let ece = 0;
     for (const bin of reliability) {
@@ -101,6 +106,7 @@ export class CalibrationEvaluator {
     results: readonly EvalResult[],
     bins: number = 10,
   ): readonly ReliabilityBin[] {
+    const eligibleResults = this.filterCalibrationEligibleResults(results);
     const binWidth = 1.0 / bins;
     const binData: { confidenceSum: number; correctCount: number; count: number }[] =
       Array.from({ length: bins }, () => ({
@@ -109,7 +115,7 @@ export class CalibrationEvaluator {
         count: 0,
       }));
 
-    for (const result of results) {
+    for (const result of eligibleResults) {
       const binIndex = Math.min(
         Math.floor(result.decisionConfidence / binWidth),
         bins - 1,
@@ -170,5 +176,14 @@ export class CalibrationEvaluator {
     }
 
     return perClass;
+  }
+
+  private filterCalibrationEligibleResults(
+    results: readonly EvalResult[],
+  ): readonly EvalResult[] {
+    return results.filter((result) =>
+      result.predictedStatus === 'resolved'
+      && result.decisionConfidenceTrusted !== false,
+    );
   }
 }

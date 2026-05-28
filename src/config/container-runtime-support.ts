@@ -269,28 +269,33 @@ export async function buildRuntimeSupportServices(
   let ltrRegistryIssue: RuntimeReadinessIssueKind | undefined = pool === undefined
     ? 'pg_pool_missing'
     : undefined;
-  let ltrRequired = ltrServingEnabled;
+  const ltrRequired = ltrServingEnabled;
   let runtimeLtrArtifactModels: ReadonlyMap<string, QueryClassWeights> | undefined;
   let fieldAvailability: SearchSnapshotFieldAvailability = DEFAULT_SEARCH_SNAPSHOT_FIELD_AVAILABILITY;
-  try {
-    const runtimeState = await loadSearchSnapshotRuntimeState();
-    fieldAvailability = runtimeState.fieldAvailability;
-    if (runtimeState.quality.blockers.length > 0) {
+  if (runtime.searchSnapshotFieldAvailability !== undefined) {
+    fieldAvailability = runtime.searchSnapshotFieldAvailability;
+  } else {
+    try {
+      const runtimeState = await loadSearchSnapshotRuntimeState();
+      fieldAvailability = runtimeState.fieldAvailability;
+      if (runtimeState.quality.blockers.length > 0) {
+        bootstrapLogger.warn(
+          { blockers: runtimeState.quality.blockers },
+          '[Container] Search snapshot runtime state reports quality blockers',
+        );
+      }
+    } catch (err) {
       bootstrapLogger.warn(
-        { blockers: runtimeState.quality.blockers },
-        '[Container] Search snapshot runtime state reports quality blockers',
+        { err },
+        '[Container] Search snapshot runtime state unavailable; using fail-safe field availability defaults',
       );
     }
-  } catch (err) {
-    bootstrapLogger.warn(
-      { err },
-      '[Container] Search snapshot runtime state unavailable; using fail-safe field availability defaults',
-    );
   }
   if (ltrServingEnabled && pool) {
     const ltrRegistry = new PgLtrModelRegistry(pool);
     try {
-      ltrRegistrySearchSnapshotId = (await resolveActiveSnapshot(pool, { bypassCache: true })).activeSnapshotId;
+      ltrRegistrySearchSnapshotId = runtime.searchSnapshotId
+        ?? (await resolveActiveSnapshot(pool, { bypassCache: true })).activeSnapshotId;
     } catch (err) {
       ltrRegistryIssue = 'active_snapshot_unavailable';
       bootstrapLogger.warn(

@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
-import { AnchorExtractor, type AliasMatcher, type AliasMatchResult } from '../service/anchor-extractor.js';
+import {
+  AnchorExtractor,
+  type AliasLookupOptions,
+  type AliasMatcher,
+  type AliasMatchResult,
+} from '../service/anchor-extractor.js';
 import type { AnchorConditionedQuery } from '../model/relative-query.js';
 import { QueryNormalizer } from '../service/query-normalizer.js';
 import { createEntityId } from '../../shared/types/index.js';
@@ -41,6 +46,43 @@ class RecordingExactAliasMatcher extends ExactAliasMatcher {
   override async findMatches(normalizedQuery: string): Promise<readonly AliasMatchResult[]> {
     this.queries.push(normalizedQuery);
     return super.findMatches(normalizedQuery);
+  }
+}
+
+class ScopeRecordingAliasMatcher implements AliasMatcher {
+  readonly calls: Array<{ query: string; scope: string }> = [];
+
+  async findMatches(
+    normalizedQuery: string,
+    options?: AliasLookupOptions,
+  ): Promise<readonly AliasMatchResult[]> {
+    this.calls.push({
+      query: normalizedQuery,
+      scope: options?.scope ?? 'default',
+    });
+    if (normalizedQuery === '오푸' && options?.scope === 'span') {
+      return [makeMatchResult('Opus One', ['entity-opus-one'], 0.95)];
+    }
+    return [];
+  }
+
+  async findMatchesBatch(
+    normalizedQueries: readonly string[],
+    options?: AliasLookupOptions,
+  ): Promise<ReadonlyMap<string, readonly AliasMatchResult[]>> {
+    const result = new Map<string, readonly AliasMatchResult[]>();
+    for (const query of normalizedQueries) {
+      this.calls.push({
+        query,
+        scope: options?.scope ?? 'default',
+      });
+      if (query === '오푸' && options?.scope === 'span') {
+        result.set(query, [makeMatchResult('Opus One', ['entity-opus-one'], 0.95)]);
+        continue;
+      }
+      result.set(query, []);
+    }
+    return result;
   }
 }
 
@@ -179,7 +221,7 @@ describe('AnchorExtractor', () => {
     it('does not let span fallbacks inject other entities once base lookup yields a unique exact-like entity', async () => {
       const aliasMatcher = new ExactAliasMatcher(
         new Map([
-          ['샤또 마고', [{
+          ['샤토 마고', [{
             surfaceForm: '샤토 마고',
             normalizedForm: '샤토 마고',
             entityIds: [createEntityId('entity-margaux')],
@@ -197,7 +239,7 @@ describe('AnchorExtractor', () => {
       );
       const extractor = new AnchorExtractor(aliasMatcher);
 
-      const anchors = await extractor.extract('마고 샤또', normalizer.normalize('마고 샤또'));
+      const anchors = await extractor.extract('샤또 마고', normalizer.normalize('샤또 마고'));
 
       expect(anchors.map((anchor) => anchor.surfaceForm)).toContain('샤토 마고');
       expect(anchors.map((anchor) => anchor.candidateEntityIds.map(String))).toEqual(
@@ -407,8 +449,29 @@ describe('AnchorExtractor', () => {
 
       expect(anchors).toHaveLength(1);
       expect(anchors[0]?.surfaceForm).toBe('오푸스원');
-      expect(batchLookup).toHaveBeenCalledTimes(1);
+      expect(batchLookup).toHaveBeenCalledTimes(2);
+      expect(batchLookup.mock.calls[0]?.[1]).toEqual({ scope: 'surface' });
+      expect(batchLookup.mock.calls[1]?.[1]).toEqual({ scope: 'span' });
       expect(singleLookup).not.toHaveBeenCalled();
+    });
+
+    it('uses strict whole-surface batch lookup before broad span fallback', async () => {
+      const aliasMatcher = new ScopeRecordingAliasMatcher();
+      const extractor = new AnchorExtractor(aliasMatcher);
+
+      const anchors = await extractor.extract('오푸', normalizer.normalize('오푸'));
+
+      expect(anchors).toHaveLength(1);
+      expect(anchors[0]?.surfaceForm).toBe('Opus One');
+      const surfaceCalls = aliasMatcher.calls.filter((call) => call.scope === 'surface');
+      const spanCalls = aliasMatcher.calls.filter((call) => call.scope === 'span');
+      expect(surfaceCalls.map((call) => call.query)).toContain('오푸');
+      expect(spanCalls.map((call) => call.query)).toContain('오푸');
+      const firstSpanIndex = aliasMatcher.calls.findIndex((call) => call.scope === 'span');
+      const lastSurfaceIndex = aliasMatcher.calls.reduce((last, call, index) => (
+        call.scope === 'surface' ? index : last
+      ), -1);
+      expect(firstSpanIndex).toBeGreaterThan(lastSurfaceIndex);
     });
 
     it('does not emit phonetic compact acronyms as direct alias lookup queries for lexical latin input', async () => {
@@ -426,8 +489,8 @@ describe('AnchorExtractor', () => {
 
       await extractor.extract('opus', normalizer.normalize('opus'));
 
-      expect(batchLookup).toHaveBeenCalledTimes(1);
-      const queried = batchLookup.mock.calls[0]?.[0] ?? [];
+      expect(batchLookup).toHaveBeenCalledTimes(2);
+      const queried = batchLookup.mock.calls.flatMap((call) => call[0] ?? []);
       expect(queried).toContain('opus');
       expect(queried).not.toContain('ps');
     });

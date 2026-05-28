@@ -19,7 +19,7 @@ import fs from 'node:fs/promises';
 import type { EnrichedSilverRecord, IndexableWineRecord } from './types.js';
 import type { SourceRecordRef } from '../../src/domain/entity/model/source-record-ref.js';
 import { parseSourceRecordRefsFromVespa } from '../../src/domain/entity/model/source-record-ref.js';
-import type { CanonicalEntityId } from '../../src/domain/shared/types/entity-id.js';
+import type { CanonicalEntityId, SourceRecordId } from '../../src/domain/shared/types/entity-id.js';
 import {
   SOURCE_SYSTEM_BENCHMARK_ANCHOR_CATALOG,
   SOURCE_SYSTEM_VIVINO_SILVER,
@@ -34,7 +34,9 @@ import { buildAliasPrefixTerms } from '../../src/domain/query/service/alias-pref
 import type { RetrievalDocument } from '../../src/domain/retrieval/model/retrieval-document.js';
 import {
   loadGoldCanonicalLookupForBuild,
+  loadActiveSourceEntityContinuity,
   resolveWineSnapshotEntity,
+  type SourceEntityContinuityRecord,
 } from './snapshot-entity-identity.js';
 import {
   ETL_ARTIFACT_FILES,
@@ -803,9 +805,10 @@ function priceBandToNumeric(band: string): number {
 export function silverToIndexable(
   rec: EnrichedSilverRecord,
   goldCanonicalLookup: ReadonlyMap<string, string> = new Map(),
+  sourceContinuityLookup: ReadonlyMap<SourceRecordId, SourceEntityContinuityRecord> = new Map(),
 ): IndexableWineRecord {
   const gold = rec as GoldRecord;
-  const resolvedEntity = resolveWineSnapshotEntity(rec, goldCanonicalLookup);
+  const resolvedEntity = resolveWineSnapshotEntity(rec, goldCanonicalLookup, sourceContinuityLookup);
   const benchmarkAnchorEntityId = resolveBenchmarkAnchorEntityId(rec);
 
   // criticScoreNormalized: Track C proxy (÷100) takes priority over raw Vivino rating (÷5)
@@ -1039,9 +1042,10 @@ export function silverToRetrievalDoc(
   embedding: readonly number[],
   searchSnapshotId?: string,
   goldCanonicalLookup?: ReadonlyMap<string, string>,
+  sourceContinuityLookup: ReadonlyMap<SourceRecordId, SourceEntityContinuityRecord> = new Map(),
 ): RetrievalDocument {
   const lookup = goldCanonicalLookup ?? new Map();
-  const indexable = silverToIndexable(rec, lookup);
+  const indexable = silverToIndexable(rec, lookup, sourceContinuityLookup);
 
   const doc: RetrievalDocument = {
     entityId: createCanonicalEntityId(indexable.entityId),
@@ -1137,9 +1141,11 @@ export async function preparePreparedVespaFeedDocuments(args: {
   readonly records: readonly EnrichedSilverRecord[];
   readonly snapshotId?: string;
   readonly goldCanonicalLookup?: ReadonlyMap<string, string>;
+  readonly sourceContinuityLookup?: ReadonlyMap<SourceRecordId, SourceEntityContinuityRecord>;
   readonly reusablePreparedDocs?: readonly PreparedVespaFeedDocument[];
 }): Promise<readonly PreparedVespaFeedDocument[]> {
   const lookup = args.goldCanonicalLookup ?? new Map();
+  const sourceContinuityLookup = args.sourceContinuityLookup ?? new Map();
   const reusableEmbeddingIndex = buildReusableEmbeddingIndex(args.reusablePreparedDocs ?? []);
   const reusableEmbeddingSourceRecordIndex = buildReusableEmbeddingSourceRecordIndex(
     args.reusablePreparedDocs ?? [],
@@ -1155,7 +1161,7 @@ export async function preparePreparedVespaFeedDocuments(args: {
 
   for (let i = 0; i < args.records.length; i += 1) {
     const rec = args.records[i]!;
-    const indexable = silverToIndexable(rec, lookup);
+    const indexable = silverToIndexable(rec, lookup, sourceContinuityLookup);
     const validation = validateIndexableRecord(indexable);
     if (!validation.valid) {
       throw new Error(
@@ -1170,7 +1176,13 @@ export async function preparePreparedVespaFeedDocuments(args: {
       )
       ?? reusableEmbeddingSemanticSummaryIndex.get(indexable.semanticSummary);
     if (reusable !== undefined && reusable.semanticSummary === indexable.semanticSummary) {
-      const retrievalDoc = silverToRetrievalDoc(rec, reusable.embedding, args.snapshotId, lookup);
+      const retrievalDoc = silverToRetrievalDoc(
+        rec,
+        reusable.embedding,
+        args.snapshotId,
+        lookup,
+        sourceContinuityLookup,
+      );
       docs[i] = {
         id: String(retrievalDoc.entityId),
         fields: toVespaFields(retrievalDoc),
@@ -1229,7 +1241,13 @@ export async function preparePreparedVespaFeedDocuments(args: {
                 `Embedding missing for record ${rec.sourceId} at index ${i} — OpenAI returned fewer vectors than inputs`,
               );
             }
-            const retrievalDoc = silverToRetrievalDoc(rec, embedding, args.snapshotId, lookup);
+            const retrievalDoc = silverToRetrievalDoc(
+              rec,
+              embedding,
+              args.snapshotId,
+              lookup,
+              sourceContinuityLookup,
+            );
             docs[targetIndex] = {
               id: String(retrievalDoc.entityId),
               fields: toVespaFields(retrievalDoc),
@@ -1384,6 +1402,7 @@ export async function materializePreparedVespaFeedArtifact(args: {
   readonly hash: string;
 }> {
   const goldLookup = await loadGoldCanonicalLookupForBuild({ fixtureRepoRoot: args.fixtureRepoRoot });
+  const sourceContinuityLookup = await loadActiveSourceEntityContinuity();
   const raw = await fs.readFile(args.inputPath, 'utf8');
   const records = parseNdjson<EnrichedSilverRecord>(raw, args.inputPath).records;
   const reusablePreparedDocs = args.reuseEmbeddingFromPreparedFeedPath !== undefined
@@ -1396,6 +1415,7 @@ export async function materializePreparedVespaFeedArtifact(args: {
     records,
     snapshotId: args.snapshotId,
     goldCanonicalLookup: goldLookup,
+    sourceContinuityLookup,
     ...(reusablePreparedDocs !== undefined ? { reusablePreparedDocs } : {}),
   });
   const serialized = serializePreparedVespaFeedDocuments(docs);
@@ -1439,6 +1459,7 @@ export async function run(): Promise<void> {
   }
 
   const goldLookup = await loadGoldCanonicalLookupForBuild({ fixtureRepoRoot: args.fixtureRepoRoot });
+  const sourceContinuityLookup = await loadActiveSourceEntityContinuity();
   assertCanonicalTrackCArtifactInput(args.input, 'index-to-vespa');
 
   console.log(`Reading enriched Silver from ${args.input} …`);
@@ -1454,7 +1475,7 @@ export async function run(): Promise<void> {
     console.log('  DRY RUN — skipping Vespa feed and embeddings');
     const sample = records[0];
     if (sample) {
-      const indexable = silverToIndexable(sample, goldLookup);
+      const indexable = silverToIndexable(sample, goldLookup, sourceContinuityLookup);
       const validation = validateIndexableRecord(indexable);
       console.log('  Sample IndexableWineRecord:');
       console.log(JSON.stringify(indexable, null, 2).slice(0, 2000));
@@ -1470,6 +1491,7 @@ export async function run(): Promise<void> {
     records,
     ...(args.snapshotId !== undefined ? { snapshotId: args.snapshotId } : {}),
     goldCanonicalLookup: goldLookup,
+    sourceContinuityLookup,
   });
   const vespa = await createVespaClient();
   await feedPreparedVespaDocuments(vespa, docs);

@@ -10,4 +10,4 @@ COPY tsconfig.json tsconfig.base.json tsconfig.build.json ./
 COPY src ./src
 EXPOSE 3000
 USER node
-CMD ["pnpm", "exec", "tsx", "src/main.ts"]
+CMD ["tsx", "src/main.ts"]

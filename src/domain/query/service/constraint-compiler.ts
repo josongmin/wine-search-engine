@@ -29,6 +29,7 @@ import { mergeTopologyIntoTrivial } from './merge-topology-into-trivial.js';
 import { DeterministicTopologyDetector } from './deterministic-topology-detector.js';
 import type { QueryDecompositionHint } from '../model/query-decomposition.js';
 import { extractAllPairingConstraints, type PairingTag } from './pairing-extractor.js';
+import { normalizeConstraintComparableString } from '../../attribute/service/constraint-ontology-normalization.js';
 
 export interface ConstraintCompilerResult {
   readonly bundle: ConstraintBundle;
@@ -157,6 +158,100 @@ function stripIdentityOnlyShadowConstraints(
   );
 }
 
+interface DirectResolvedEntitySpan {
+  readonly span: Span;
+  readonly entity: ResolvedEntity;
+}
+
+function buildExactDirectResolvedEntitySpans(
+  spans: readonly Span[],
+): readonly DirectResolvedEntitySpan[] {
+  return resolveOverlaps(
+    spans.map((span) => {
+      const resolved = resolveEntity(span.text, { preferEntityOverStyle: true });
+      return {
+        span,
+        resolved: isDirectEntityResolution(resolved) ? resolved : null,
+      };
+    }),
+  )
+    .filter((entry): entry is { span: Span; resolved: ResolvedEntity } => entry.resolved !== null)
+    .map((entry) => ({ span: entry.span, entity: entry.resolved }));
+}
+
+function shouldDropMappedConstraintForLongerDirectEntity(
+  constraint: NormalizedConstraint,
+  spans: readonly Span[],
+  directResolvedEntitySpans: readonly DirectResolvedEntitySpan[],
+): boolean {
+  if (typeof constraint.value !== 'string') {
+    return false;
+  }
+  if (constraint.mapping_version?.startsWith('entity-resolver-') === true) {
+    return false;
+  }
+
+  const sourcePhrase = constraint.source_phrase.trim().toLowerCase();
+  if (sourcePhrase.length === 0) {
+    return false;
+  }
+
+  const sourceSpans = spans.filter((span) => span.text === sourcePhrase);
+  if (sourceSpans.length === 0) {
+    return false;
+  }
+
+  const mappedComparable = normalizeConstraintComparableString(
+    constraint.attribute,
+    constraint.value,
+  );
+  const longerResolvedComparables = new Set<string>();
+
+  for (const sourceSpan of sourceSpans) {
+    for (const resolved of directResolvedEntitySpans) {
+      if (resolved.entity.entityType !== constraint.attribute) {
+        continue;
+      }
+      if (spanLength(resolved.span) <= spanLength(sourceSpan)) {
+        continue;
+      }
+      if (!spanContains(resolved.span, sourceSpan)) {
+        continue;
+      }
+      longerResolvedComparables.add(
+        normalizeConstraintComparableString(
+          constraint.attribute,
+          resolved.entity.canonicalValue,
+        ),
+      );
+    }
+  }
+
+  if (longerResolvedComparables.size !== 1) {
+    return false;
+  }
+
+  const [resolvedComparable] = [...longerResolvedComparables];
+  return resolvedComparable !== undefined && resolvedComparable !== mappedComparable;
+}
+
+function stripLongerDirectEntityShadowConstraints(
+  constraints: readonly NormalizedConstraint[],
+  spans: readonly Span[],
+  directResolvedEntitySpans: readonly DirectResolvedEntitySpan[],
+): readonly NormalizedConstraint[] {
+  if (directResolvedEntitySpans.length === 0) {
+    return constraints;
+  }
+  return constraints.filter((constraint) =>
+    !shouldDropMappedConstraintForLongerDirectEntity(
+      constraint,
+      spans,
+      directResolvedEntitySpans,
+    ),
+  );
+}
+
 export class ConstraintCompiler {
   constructor(
     private readonly nlMapper: NLMapper,
@@ -176,11 +271,16 @@ export class ConstraintCompiler {
       candidatePhrases,
       abortSignal !== undefined ? { abortSignal } : undefined,
     );
+    const exactDirectResolvedEntitySpans = buildExactDirectResolvedEntitySpans(spans);
     const identityOnlyShieldSpans = buildIdentityOnlyShieldSpans(spans, this.fuzzyMatcher);
-    const matched = stripIdentityOnlyShadowConstraints(
-      mapped.constraints,
+    const matched = stripLongerDirectEntityShadowConstraints(
+      stripIdentityOnlyShadowConstraints(
+        mapped.constraints,
+        spans,
+        identityOnlyShieldSpans,
+      ),
       spans,
-      identityOnlyShieldSpans,
+      exactDirectResolvedEntitySpans,
     );
     const mapperTrace = mapped.constraintExtraction;
 
@@ -519,6 +619,48 @@ function inferPairingObjectiveConstraints(normalizedQuery: string): readonly Nor
 }
 
 function pairingTagToObjectiveConstraint(tag: PairingTag): NormalizedConstraint | null {
+  if (tag === 'cheese') {
+    return {
+      attribute: 'pairing',
+      operator: 'in',
+      value: [tag],
+      source_phrase: `pairing_objective(${tag})`,
+      confidence: PAIRING_OBJECTIVE_CONFIDENCE,
+      mapping_version: PAIRING_OBJECTIVE_MAPPING_VERSION,
+    };
+  }
+
+  if (
+    tag === 'beef'
+    || tag === 'lamb'
+    || tag === 'pork'
+    || tag === 'chicken'
+    || tag === 'duck'
+    || tag === 'game'
+    || tag === 'salmon'
+    || tag === 'tuna'
+    || tag === 'shellfish'
+    || tag === 'hard_cheese'
+    || tag === 'soft_cheese'
+    || tag === 'mushroom'
+    || tag === 'truffle'
+    || tag === 'pasta'
+    || tag === 'risotto'
+    || tag === 'grilled_vegetables'
+    || tag === 'aperitif'
+    || tag === 'dessert'
+    || tag === 'solo_drinking'
+  ) {
+    return {
+      attribute: 'pairing',
+      operator: 'in',
+      value: [tag],
+      source_phrase: `pairing_objective(${tag})`,
+      confidence: PAIRING_OBJECTIVE_CONFIDENCE,
+      mapping_version: PAIRING_OBJECTIVE_MAPPING_VERSION,
+    };
+  }
+
   if (tag === 'spicy_food') {
     return {
       attribute: 'style',
@@ -530,18 +672,14 @@ function pairingTagToObjectiveConstraint(tag: PairingTag): NormalizedConstraint 
     };
   }
 
-  if (tag === 'white_fish') {
-    return {
-      attribute: 'wine_type',
-      operator: 'in',
-      value: WHITE_FISH_WINE_TYPE_VALUES,
-      source_phrase: `pairing_objective(${tag})`,
-      confidence: PAIRING_OBJECTIVE_CONFIDENCE,
-      mapping_version: PAIRING_OBJECTIVE_MAPPING_VERSION,
-    };
-  }
-
-  return null;
+  return {
+    attribute: 'wine_type',
+    operator: 'in',
+    value: WHITE_FISH_WINE_TYPE_VALUES,
+    source_phrase: `pairing_objective(${tag})`,
+    confidence: PAIRING_OBJECTIVE_CONFIDENCE,
+    mapping_version: PAIRING_OBJECTIVE_MAPPING_VERSION,
+  };
 }
 
 /**

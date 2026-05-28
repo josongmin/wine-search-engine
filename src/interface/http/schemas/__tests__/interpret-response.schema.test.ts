@@ -71,6 +71,28 @@ describe('InterpretResponseSchema', () => {
     expect(parsed.success).toBe(true);
   });
 
+  it('accepts constraints carrying soft_promotion_authority provenance', () => {
+    const parsed = InterpretResponseSchema.safeParse({
+      ...makeValidV1InterpretResponse(),
+      constraints: {
+        hard: [],
+        soft: [
+          {
+            attribute: 'pairing',
+            operator: 'in',
+            value: ['cheese'],
+            source_phrase: 'cheese',
+            confidence: 0.9,
+            soft_promotion_authority: 'allow',
+          },
+        ],
+        inferred: [],
+      },
+    });
+
+    expect(parsed.success).toBe(true);
+  });
+
   it('rejects anchors with an alias_type value outside the ALIAS_TYPES enum', () => {
     const parsed = InterpretResponseSchema.safeParse({
       ...makeValidV1InterpretResponse(),

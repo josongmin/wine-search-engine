@@ -9,6 +9,7 @@ import {
   assertEntityIdentitySignatureConsistency,
   assertSnapshotArtifactLearnedFacetCoverage,
   collectLearnedFacetCoverageFromEntities,
+  ensureSnapshotScopedAmbiguityRegistryIndexes,
   resolveRuntimeSubstrateCutoverPaths,
 } from '../../../scripts/etl/publish-runtime-substrates.js';
 
@@ -172,5 +173,40 @@ describe('resolveRuntimeSubstrateCutoverPaths', () => {
       stagedRuntimeNlMappingsPath: '/tmp/nl-mappings.search-snapshot:v1:test.json',
       activeRuntimeNlMappingsPath: '/tmp/nl-mappings.json',
     });
+  });
+});
+
+describe('ensureSnapshotScopedAmbiguityRegistryIndexes', () => {
+  it('drops the legacy global ambiguity uniqueness index when present', async () => {
+    const query = async (sql: string) => {
+      if (sql.includes('SELECT EXISTS')) {
+        return { rows: [{ exists: true }] };
+      }
+      return { rows: [] };
+    };
+
+    const client = { query };
+
+    await expect(
+      ensureSnapshotScopedAmbiguityRegistryIndexes(client as never),
+    ).resolves.toBeUndefined();
+  });
+
+  it('does not drop the legacy index when it is already absent', async () => {
+    const calls: string[] = [];
+    const client = {
+      query: async (sql: string) => {
+        calls.push(sql);
+        if (sql.includes('SELECT EXISTS')) {
+          return { rows: [{ exists: false }] };
+        }
+        return { rows: [] };
+      },
+    };
+
+    await ensureSnapshotScopedAmbiguityRegistryIndexes(client as never);
+
+    expect(calls.some((sql) => sql.includes('DROP INDEX IF EXISTS idx_ambiguity_normalized'))).toBe(false);
+    expect(calls.some((sql) => sql.includes('idx_ambiguity_snapshot_normalized'))).toBe(true);
   });
 });

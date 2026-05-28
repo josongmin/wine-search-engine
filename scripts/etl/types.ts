@@ -337,7 +337,7 @@ export interface SilverWineRecord {
 // Alias types (RFC-003 compliant)
 // ---------------------------------------------------------------------------
 
-export type AliasType = 'translation' | 'phonetic' | 'catalog_noise_alias';
+export type AliasType = 'translation' | 'phonetic' | 'catalog_noise_alias' | 'abbreviation';
 
 /** A single alias proposal with lineage tracking (RFC-003). */
 export interface ProposedAlias {

@@ -158,9 +158,12 @@ function phrasesForPriceBand(value: unknown): readonly string[] {
   )];
 }
 
+/** Suitability score (gift/beginner) at or above this is treated as high-confidence. */
+const HIGH_CONFIDENCE_SUITABILITY_THRESHOLD = 0.65;
+
 function phrasesForSuitability(attribute: 'gift_suitability' | 'beginner_suitability', value: unknown): readonly string[] {
   const score = firstFiniteNumber(value);
-  const isHighConfidence = score !== undefined && score >= 0.65;
+  const isHighConfidence = score !== undefined && score >= HIGH_CONFIDENCE_SUITABILITY_THRESHOLD;
   if (attribute === 'gift_suitability') {
     return isHighConfidence
       ? ['gift wine', 'giftable wine', 'presentable bottle']

@@ -106,6 +106,52 @@ function makeResolverResult(
   };
 }
 
+function makeResolverResultWithRunnerUp(
+  C: number,
+  gap: number,
+  ambiguityDetected: boolean = false,
+): EntityResolveResult {
+  const topEntityId = createEntityId('entity-top');
+  const runnerUpEntityId = createEntityId('entity-runner-up');
+  return {
+    status: 'resolved',
+    topEntity: {
+      entityId: topEntityId,
+      canonicalLabel: 'Top Candidate',
+      calibratedScore: C,
+    },
+    candidates: [
+      {
+        entityId: topEntityId,
+        canonicalLabel: 'Top Candidate',
+        calibratedScore: C,
+        rank: 1,
+        evidenceRefs: ['rank:1'],
+      },
+      {
+        entityId: runnerUpEntityId,
+        canonicalLabel: 'Runner Up',
+        calibratedScore: C - gap,
+        rank: 2,
+        evidenceRefs: ['rank:2'],
+      },
+    ],
+    decisionTrace: {
+      queryClass: 'semantic_preference',
+      top1CalibratedScore: C,
+      top2CalibratedScore: C - gap,
+      calibratedGap: gap,
+      decisionConfidenceC: C,
+      calibrationTrusted: true,
+      ambiguityDetected,
+      ambiguityTypes: [],
+      appliedThresholds: { resolveThreshold: 0.35, gapThreshold: 0.01 },
+      outcomeReasonCodes: [],
+    },
+    conformalSetSize: computeConformalSetSize(C, DEFAULT_ALPHA, 2),
+  };
+}
+
 function makeQueryPlan(queryClass: QueryPlanV1['queryClass'] = 'short_entity'): QueryPlanV1 {
   return {
     rawQuery: '오푸스원',
@@ -364,6 +410,34 @@ describe('DecisionEngine', () => {
         }),
       );
     });
+
+    it('resolves exploratory constraint-filter lists through the preference-style numeric gate', async () => {
+      const output = await expectDecisionStatus({
+        queryPlan: {
+          ...makeQueryPlan('pure_constraint'),
+          intent: 'facet_search',
+          route: 'hybrid',
+          retrievalMode: 'constraint_filter',
+          constraints: {
+            hard: [{ attribute: 'region', operator: '=', value: 'Barolo', source_phrase: 'barolo', confidence: 0.95 }],
+            soft: [],
+            inferred: [],
+          },
+        },
+        effectiveRoute: 'hybrid',
+        effectiveRetrievalMode: 'constraint_filter',
+        resolveResult: makeResolverResult(0.2, 0.01, false),
+        evidenceSummary: {
+          identityEvidencePresent: false,
+          constraintEvidencePresent: true,
+          anchorEvidencePresent: false,
+        },
+        categoriesCovered: ['region', 'wine_type'],
+      }, 'resolved');
+
+      expect(output.decisionTrace.rulesApplied).toContain('NUMERIC_GATE_EXPLORATORY_LIST_MODE');
+      expect(output.decisionTrace.rulesApplied).toContain('PREFERENCE_MODE_SEMANTIC_UNLOCK');
+    });
   });
 
   describe('ambiguous status', () => {
@@ -387,6 +461,53 @@ describe('DecisionEngine', () => {
         evidenceSummary: makeStrongIdentityEvidence(),
       }, 'ambiguous');
       expect(output.decisionTrace.rulesApplied).toContain('CONFORMAL_SET_AMBIGUOUS');
+    });
+
+    it('semantic_preference tiny-gap exploratory lists still resolve because list queries do not require a unique winner', async () => {
+      const output = await expectDecisionStatus({
+        queryPlan: {
+          ...makeQueryPlan('semantic_preference'),
+          intent: 'semantic_discovery',
+          route: 'hybrid',
+          retrievalMode: 'attribute_search',
+        },
+        effectiveRoute: 'hybrid',
+        effectiveRetrievalMode: 'attribute_search',
+        resolveResult: makeResolverResultWithRunnerUp(0.56, 0.005, false),
+        evidenceSummary: {
+          identityEvidencePresent: false,
+          constraintEvidencePresent: true,
+          anchorEvidencePresent: false,
+        },
+        categoriesCovered: ['acidity', 'wine_type'],
+      }, 'resolved');
+
+      expect(output.nextAction).toBe('return_result');
+      expect(output.decisionTrace.rulesApplied).not.toContain('NUMERIC_GATE_PREFERENCE_MODE_TINY_GAP');
+      expect(output.decisionTrace.rulesApplied).toContain('NUMERIC_GATE_PREFERENCE_MODE');
+    });
+
+    it('non-exploratory preference-mode tiny-gap still clarifies without exact identity evidence', async () => {
+      const output = await expectDecisionStatus({
+        queryPlan: {
+          ...makeQueryPlan('semantic_preference'),
+          intent: 'semantic_discovery',
+          route: 'entity',
+          retrievalMode: 'entity_lookup',
+        },
+        effectiveRoute: 'entity',
+        effectiveRetrievalMode: 'entity_lookup',
+        resolveResult: makeResolverResultWithRunnerUp(0.56, 0.005, false),
+        evidenceSummary: {
+          identityEvidencePresent: false,
+          constraintEvidencePresent: true,
+          anchorEvidencePresent: false,
+        },
+        categoriesCovered: ['acidity', 'wine_type'],
+      }, 'ambiguous');
+
+      expect(output.nextAction).toBe('clarify');
+      expect(output.decisionTrace.rulesApplied).toContain('NUMERIC_GATE_PREFERENCE_MODE_TINY_GAP');
     });
 
     it('clarifies short noisy queries that only resolved via fuzzy lookup strategies', async () => {
@@ -426,6 +547,28 @@ describe('DecisionEngine', () => {
         evidenceSummary: makeStrongIdentityEvidence(),
       }, 'failed');
       expect(output.nextAction).toBe('fail');
+    });
+
+    it('fails closed for no_match_detection without exact or unique fuzzy identity evidence', async () => {
+      const queryPlan: QueryPlanV1 = {
+        ...makeQueryPlan('unknown'),
+        intent: 'semantic_discovery',
+        retrievalMode: 'no_match_detection',
+      };
+      const output = await expectDecisionStatus({
+        queryPlan,
+        effectiveRoute: 'entity',
+        effectiveRetrievalMode: 'no_match_detection',
+        resolveResult: makeResolverResult(0.56, 0.01, false),
+        evidenceSummary: {
+          identityEvidencePresent: false,
+          constraintEvidencePresent: false,
+          anchorEvidencePresent: false,
+        },
+      }, 'failed');
+
+      expect(output.nextAction).toBe('fail');
+      expect(output.decisionTrace.rulesApplied).toContain('NO_MATCH_DETECTION_FAIL_CLOSED');
     });
 
     it.each([
@@ -747,6 +890,31 @@ describe('DecisionEngine', () => {
       expect(output.nextAction).toBe('clarify');
     });
 
+    it('multi-token known ambiguous producer surface stays on the bias path instead of hard clarification', async () => {
+      const output = await engine.decide(
+        makeInput({
+          queryPlan: makeQueryPlan('short_entity'),
+          resolveResult: makeResolverResult(0.95, 0.40, false),
+          uncertainty: {
+            overall: 0.8,
+            ambiguityDetected: true,
+            ambiguityTypes: ['known_ambiguous_surface', 'producer', 'entity'],
+            ambiguitySeverity: 'high',
+            decisionEffect: 'force_clarify',
+            parserConfidence: 0.5,
+            anchorConfidence: 0.9,
+            constraintConfidence: 0.5,
+          },
+          evidenceSummary: makeStrongIdentityEvidence(),
+        }),
+        TEST_SNAPSHOT,
+      );
+
+      expect(output.decisionTrace.rulesApplied).not.toContain('KNOWN_AMBIGUOUS_SURFACE_FORCE_CLARIFY');
+      expect(output.decisionTrace.rulesApplied).toContain('UNCERTAINTY_FORCE_CLARIFY_AS_BIAS');
+      expect(output.decisionStatus).toBe('resolved');
+    });
+
     it('requireExact=true and no exact evidence → downgrade to ambiguous even with a strong score', async () => {
       const input = makeInput({
         resolveResult: makeResolverResult(0.995, 0.20, false),
@@ -900,9 +1068,24 @@ describe('DecisionEngine', () => {
       expect(output.decisionTrace.signals.calibratedGap).toBe(gap);
     });
 
-    it('decisionConfidenceSemantics is always calibrated_decision_confidence', async () => {
+    it('uses calibrated semantics when resolver confidence is trusted', async () => {
       const output = await decideResolvedTrace();
       expect(output.confidenceSemantics).toBe('calibrated_decision_confidence');
+    });
+
+    it('marks untrusted ranked-route style scores as uncalibrated semantics', async () => {
+      const input = makeResolvedDecisionInput({
+        resolveResult: {
+          ...makeResolverResult(0.88, 0.22, false),
+          decisionTrace: {
+            ...makeResolverResult(0.88, 0.22, false).decisionTrace,
+            calibrationTrusted: false,
+          },
+        },
+      });
+      const output = await decideWithEngine(engine, input);
+      expect(output.calibrationTrusted).toBe(false);
+      expect(output.confidenceSemantics).toBe('uncalibrated_decision_score');
     });
 
     it('decisionSnapshot is attached to output', async () => {

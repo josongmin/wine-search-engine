@@ -36,6 +36,8 @@ import type { z, ZodIssue, ZodTypeAny } from 'zod';
 import {
   createCircuitBreaker,
   DEFAULT_BREAKER_FAILURE_THRESHOLD,
+  DEFAULT_RECOVERY_TIMEOUT_MS,
+  DEFAULT_HALF_OPEN_ATTEMPTS,
   type CircuitBreaker,
 } from '../../domain/shared/circuit-breaker/circuit-breaker.js';
 import { CircuitBreakerOpenError } from '../../domain/shared/error/circuit-breaker-open-error.js';
@@ -95,8 +97,8 @@ const LOG_CONTENT_PREVIEW_CHARS = 200;
  *  the legacy chat adapter — 5 consecutive service-health failures trip the
  *  breaker, 60s cool-off, 3 probe successes to re-close. */
 const ANTHROPIC_STRUCTURED_BREAKER_FAILURE_THRESHOLD = DEFAULT_BREAKER_FAILURE_THRESHOLD;
-const ANTHROPIC_STRUCTURED_BREAKER_RECOVERY_TIMEOUT_MS = 60_000;
-const ANTHROPIC_STRUCTURED_BREAKER_HALF_OPEN_MAX_ATTEMPTS = 3;
+const ANTHROPIC_STRUCTURED_BREAKER_RECOVERY_TIMEOUT_MS = DEFAULT_RECOVERY_TIMEOUT_MS;
+const ANTHROPIC_STRUCTURED_BREAKER_HALF_OPEN_MAX_ATTEMPTS = DEFAULT_HALF_OPEN_ATTEMPTS;
 const ANTHROPIC_STRUCTURED_BREAKER_NAME = 'anthropic-structured';
 
 const ANTHROPIC_RETRY_CONFIG: RetryConfig = {

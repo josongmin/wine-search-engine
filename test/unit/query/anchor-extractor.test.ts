@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { AnchorExtractor } from '../../../src/domain/query/service/anchor-extractor.js';
-import type { AliasMatcher, AliasMatchResult } from '../../../src/domain/query/service/anchor-extractor.js';
+import type {
+  AliasLookupOptions,
+  AliasLookupScope,
+  AliasMatcher,
+  AliasMatchResult,
+} from '../../../src/domain/query/service/anchor-extractor.js';
 
 // ── Stub AliasMatcher ──────────────────────────────────────────────────────────
 class StubAliasMatcher implements AliasMatcher {
@@ -21,6 +26,21 @@ class StubAliasMatcher implements AliasMatcher {
     }
 
     return results.sort((a, b) => b.matchConfidence - a.matchConfidence);
+  }
+}
+
+class RecordingAliasMatcher implements AliasMatcher {
+  readonly calls: { query: string; scope: AliasLookupScope }[] = [];
+
+  async findMatches(
+    normalizedQuery: string,
+    options?: AliasLookupOptions,
+  ): Promise<readonly AliasMatchResult[]> {
+    this.calls.push({
+      query: normalizedQuery,
+      scope: options?.scope ?? 'span',
+    });
+    return [];
   }
 }
 
@@ -150,6 +170,25 @@ describe('AnchorExtractor', () => {
       if (candidates.length >= 2) {
         expect(candidates[0]!.confidence).toBeGreaterThanOrEqual(candidates[1]!.confidence);
       }
+    });
+  });
+
+  describe('span fallback query selection', () => {
+    it('keeps compact whole-surface lookup in the base stage but does not reuse it as a span seed', async () => {
+      const matcher = new RecordingAliasMatcher();
+      const extractor = new AnchorExtractor(matcher);
+
+      await extractor.extract('medium body united states / united states red');
+
+      const baseQueries = matcher.calls
+        .filter((call) => call.scope === 'surface')
+        .map((call) => call.query);
+      const spanQueries = matcher.calls
+        .filter((call) => call.scope === 'span')
+        .map((call) => call.query);
+
+      expect(baseQueries).toContain('mediumbodyunitedstatesunitedstatesred');
+      expect(spanQueries).not.toContain('mediumbodyunitedstatesunitedstatesred');
     });
   });
 });

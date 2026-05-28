@@ -4,6 +4,7 @@ import {
   hasExactMatchCandidate,
   hasIdentityEvidence,
 } from '../../../domain/decision/model/decision-input.js';
+import type { ConstraintGraph } from '../../../domain/query/model/constraint-graph.js';
 import type { QueryPlanV1 } from '../../../domain/query/model/query-plan.js';
 import type { RankedResult } from '../../../domain/ranking/model/ranked-result.js';
 import type { EntityResolveResult } from '../../../domain/resolver/model/resolve-result.js';
@@ -144,6 +145,41 @@ function makeRankedTop(entityId: string): RankedResult {
       uncertaintyPenalty: 0,
     },
   } as RankedResult;
+}
+
+function makeDecisionGraphWithInferredCountry(): ConstraintGraph {
+  return {
+    graphSchemaVersion: 'constraint_graph_v1',
+    origin: 'deterministic_from_atoms',
+    rootNodeId: 'root',
+    nodes: [
+      { kind: 'group_and', nodeId: 'root', children: ['slot-region', 'slot-country'] },
+      {
+        kind: 'slot',
+        nodeId: 'slot-region',
+        atomRef: '0',
+        attribute: 'region',
+        operator: '=',
+        value: 'Toscana',
+        sourceTier: 'hard',
+        sourceKind: 'explicit_utterance',
+        confidence: 1,
+      },
+      {
+        kind: 'slot',
+        nodeId: 'slot-country',
+        atomRef: '1',
+        attribute: 'country',
+        operator: '=',
+        value: 'Italy',
+        sourceTier: 'inferred',
+        sourceKind: 'planner_inferred',
+        confidence: 1,
+      },
+    ],
+    edges: [],
+    globalBudgets: {},
+  };
 }
 
 describe('buildSearchDecisionInput', () => {
@@ -365,5 +401,43 @@ describe('buildSearchDecisionInput', () => {
     });
 
     expect(input.ambiguitySummary).toBeUndefined();
+  });
+
+  it('does not upgrade inferred graph slots into unmet hard evidence obligations', () => {
+    const plan = {
+      ...makePlan(),
+      route: 'entity',
+      retrievalMode: 'entity_lookup',
+      constraints: {
+        hard: [
+          { attribute: 'region', operator: '=', value: 'Toscana', source_phrase: 'toscana', confidence: 1 },
+        ],
+        soft: [],
+        inferred: [
+          { attribute: 'country', operator: '=', value: 'Italy', source_phrase: 'italy', confidence: 1 },
+        ],
+      },
+    } as QueryPlanV1;
+    const rankedTop = {
+      ...makeRankedTop('entity-region'),
+      matchedConstraints: ['region'],
+      inferredConstraints: ['country'],
+    } as RankedResult;
+
+    const input = buildSearchDecisionInput({
+      plan,
+      resolveResult: makeResolveResult('entity-region'),
+      rankedResults: [rankedTop],
+      effectiveRoute: 'entity',
+      executionContext: {
+        constraintGraph: makeDecisionGraphWithInferredCountry(),
+      },
+    });
+
+    expect(input.evidenceSummary.constraintEvidencePresent).toBe(true);
+    expect(input.evidenceSummary.constraintEvidence?.matchedRequiredAttributes).toEqual(['region']);
+    expect(input.evidenceSummary.constraintEvidence?.unmetRequiredAttributes).toEqual([]);
+    expect(input.evidenceSummary.constraintEvidence?.inferredAttributes).toEqual(['country']);
+    expect(input.provenanceContract.observed.constraintEvidenceSatisfied).toBe(true);
   });
 });

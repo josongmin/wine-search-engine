@@ -517,6 +517,67 @@ describe('retrieveHybridCandidatesForPlan', () => {
     );
   });
 
+  it('skips multi-query and HyDE fanout for benchmark_trusted executions', async () => {
+    const plan = minimalPlan({
+      rawQuery: '달달한 와인',
+      normalizedQuery: '달달한 와인',
+      queryClass: 'semantic_preference',
+      constraints: {
+        hard: [],
+        soft: [
+          {
+            attribute: 'sweetness',
+            operator: '=',
+            value: 'sweet',
+            source_phrase: '달달한',
+            confidence: 0.86,
+          },
+        ],
+        inferred: [],
+      },
+      expansions: {
+        lexical: ['달달한 와인'],
+        semantic: ['sweet wine'],
+      },
+    });
+    const compiled = buildCompiled(plan, {
+      effectiveRetrievalMode: 'attribute_search',
+    });
+    const candidatePool = {
+      execute: vi.fn(async () => []),
+      getLastDegradationCodes: vi.fn(() => []),
+      getLastDegradationSignals: vi.fn(() => []),
+    };
+    const multiQueryGenerator = {
+      generate: vi.fn(async () => ['달달한 와인', 'sweet dessert wine']),
+    };
+    const hydeGenerator = {
+      generate: vi.fn(async () => 'A rich dessert-style wine with ripe fruit and honey.'),
+    };
+
+    await retrieveHybridCandidatesForPlan(
+      plan,
+      {
+        candidatePool: candidatePool as never,
+        multiQueryGenerator,
+        hydeGenerator,
+      },
+      async () => failedResolveResult(),
+      compiled,
+      { executionPrincipal: 'benchmark_trusted' },
+    );
+
+    expect(multiQueryGenerator.generate).not.toHaveBeenCalled();
+    expect(hydeGenerator.generate).not.toHaveBeenCalled();
+    expect(candidatePool.execute).toHaveBeenCalledOnce();
+    expect(candidatePool.execute.mock.calls[0]?.[0].semanticQueries).toEqual(
+      expect.arrayContaining(['달달한 와인', 'sweet wine']),
+    );
+    expect(candidatePool.execute.mock.calls[0]?.[0].semanticQueries).not.toEqual(
+      expect.arrayContaining(['sweet dessert wine']),
+    );
+  });
+
   it('uses ambiguous short-form family hints for retrieval fanout without promoting direct grape constraints', () => {
     const plan = minimalPlan({
       rawQuery: '피노 추천',

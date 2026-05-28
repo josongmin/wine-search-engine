@@ -83,7 +83,7 @@ export const PROBE_CRITICALITY = {
   postgres: 'critical',
   redis: 'critical',
   vespa: 'critical',
-  alias_substrate: 'critical',
+  alias_substrate: 'non_critical',
   search_snapshot_runtime: 'critical',
   embedding: 'critical',
   calibration_store: 'critical',

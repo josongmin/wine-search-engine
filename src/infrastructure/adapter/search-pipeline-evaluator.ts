@@ -28,6 +28,7 @@ import type {
   SearchPipelinePort,
   SearchPipelineOutput,
 } from '../../domain/evaluation/service/eval-runner.js';
+import { isGoldRuntimeQueryClassMismatch } from '../../domain/evaluation/service/eval-query-class-compatibility.js';
 import type { EvalProvenanceSlice } from '../../domain/retrieval/model/provenance.js';
 import type { DecisionSnapshot } from '../../domain/shared/types/index.js';
 import {
@@ -150,10 +151,15 @@ export class SearchPipelineEvaluator implements SearchPipelinePort {
             preferenceAlignment: topResult.match.scoreComponents.preferenceAlignment,
           }
         : undefined;
+      const runtimeClassification = evalExecution.runtimeClassification;
+      const runtimeQueryClass = runtimeClassification?.queryClass;
 
       const output: SearchPipelineOutput = {
         predictedStatus,
         decisionConfidence: decision.decisionConfidence,
+        ...(decision.calibrationTrusted !== undefined
+          ? { decisionConfidenceTrusted: decision.calibrationTrusted }
+          : {}),
         ...(decision.executionMode !== undefined ? { executionMode: decision.executionMode } : {}),
         ...(decision.blockingEligible !== undefined
           ? { blockingEligible: decision.blockingEligible }
@@ -167,6 +173,22 @@ export class SearchPipelineEvaluator implements SearchPipelinePort {
         ...(retrievalProvenanceSlices.length > 0 ? { retrievalProvenanceSlices } : {}),
         ...(evalExecution.funnelMetrics !== undefined
           ? { funnelMetrics: evalExecution.funnelMetrics }
+          : {}),
+        ...(runtimeQueryClass !== undefined
+          ? { runtimeQueryClass }
+          : {}),
+        ...(runtimeClassification?.intent !== undefined
+          ? { runtimeIntent: runtimeClassification.intent }
+          : {}),
+        ...(runtimeClassification?.route !== undefined
+          ? { runtimeRoute: runtimeClassification.route }
+          : {}),
+        ...(runtimeClassification?.retrievalMode !== undefined
+          ? { runtimeRetrievalMode: runtimeClassification.retrievalMode }
+          : {}),
+        ...(runtimeQueryClass !== undefined
+          && isGoldRuntimeQueryClassMismatch(queryClass, runtimeQueryClass)
+          ? { goldRuntimeQueryClassMismatch: true }
           : {}),
         ...(predictedEntityId !== undefined ? { predictedEntityId } : {}),
         ...(topResultScoreComponents !== undefined

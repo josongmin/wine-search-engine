@@ -11,6 +11,7 @@ interface Args {
   output: string;
   tier: 'bronze' | 'silver' | 'gate';
   baselineReport?: string;
+  embeddingSensitiveOnly: boolean;
 }
 
 function parseArgs(argv: readonly string[]): Args {
@@ -19,6 +20,7 @@ function parseArgs(argv: readonly string[]): Args {
     output: resolveDataPath('data/eval-results-smoke.json'),
     tier: 'bronze',
     baselineReport: undefined,
+    embeddingSensitiveOnly: false,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -37,6 +39,8 @@ function parseArgs(argv: readonly string[]): Args {
       out.baselineReport = baselineReport === undefined
         ? undefined
         : resolveCliDataPathArg(baselineReport);
+    } else if (arg === '--embedding-sensitive-only') {
+      out.embeddingSensitiveOnly = true;
     }
   }
 
@@ -45,6 +49,14 @@ function parseArgs(argv: readonly string[]): Args {
 
 async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  if (args.embeddingSensitiveOnly) {
+    console.error(
+      'Refusing to run embedding-sensitive offline eval smoke against the in-memory test server. ' +
+      'Use a live search runtime lane instead.',
+    );
+    process.exitCode = 1;
+    return;
+  }
   const server = await createTestServer();
   const address = await server.app.listen({ port: 0, host: '127.0.0.1' });
 
@@ -71,6 +83,7 @@ async function run(): Promise<void> {
         env: {
           ...process.env,
           SEARCH_API_URL: url,
+          EVAL_RUNTIME_TARGET: 'in_memory_test_server',
           EVAL_SEARCH_CONCURRENCY: '1',
           EVAL_SEARCH_TIMEOUT_MS: '5000',
           EVAL_SKIP_EMBEDDING_VALIDATION: 'true',

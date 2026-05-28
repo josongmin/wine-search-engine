@@ -159,14 +159,34 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
       }
       : { ...doc };
 
+    const projectedAttributes = toCandidateAttributes(baseDoc);
+    const enrichedDoc = {
+      ...baseDoc,
+      ...(typeof projectedAttributes['country'] === 'string'
+        ? { country: projectedAttributes['country'] }
+        : {}),
+      ...(typeof projectedAttributes['appellation'] === 'string'
+        ? { appellation: projectedAttributes['appellation'] }
+        : {}),
+      ...(typeof projectedAttributes['wineType'] === 'string'
+        ? { wineType: projectedAttributes['wineType'] }
+        : {}),
+      ...(typeof projectedAttributes['grapePrimary'] === 'string'
+        ? { grapePrimary: projectedAttributes['grapePrimary'] }
+        : {}),
+      ...(typeof projectedAttributes['producerType'] === 'string'
+        ? { producerType: projectedAttributes['producerType'] }
+        : {}),
+    };
+
     if (options.drinkingWindowModelVersionOverride === undefined) {
-      return baseDoc;
+      return enrichedDoc;
     }
 
     return {
-      ...baseDoc,
-      drinkingWindowStart: baseDoc.drinkingWindowStart ?? 2024,
-      drinkingWindowEnd: baseDoc.drinkingWindowEnd ?? 2032,
+      ...enrichedDoc,
+      drinkingWindowStart: enrichedDoc.drinkingWindowStart ?? 2024,
+      drinkingWindowEnd: enrichedDoc.drinkingWindowEnd ?? 2032,
       drinkingWindowModelVersion: options.drinkingWindowModelVersionOverride,
     };
   });

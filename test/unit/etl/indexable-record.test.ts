@@ -6,6 +6,7 @@ import {
 } from '../../../scripts/etl/index-to-vespa.js';
 import { silverGoldMatchKey } from '../../../scripts/etl/snapshot-entity-identity.js';
 import { SOURCE_SYSTEM_BENCHMARK_ANCHOR_CATALOG } from '../../../src/domain/shared/constants/source-systems.js';
+import { createCanonicalEntityId } from '../../../src/domain/shared/types/entity-id.js';
 
 function makeEnrichedRecord(
   overrides: Partial<EnrichedSilverRecord> = {},
@@ -76,6 +77,32 @@ describe('silverToIndexable — hit projection fields', () => {
     // the gold slug is stored in benchmarkEntityId on the resolution object,
     // not propagated into silverToIndexable's entityId.
     expect(indexable.entityId.startsWith('wine-ce-')).toBe(true);
+  });
+
+  it('reuses source continuity runtime public id when provided', () => {
+    const rec = makeEnrichedRecord({
+      sourceId: 'vivino-59e3c85e4a4f3928',
+      canonicalLabel: "1979 Col d'Orcia Brunello di Montalcino",
+      producer: "Col d'Orcia",
+      country: '',
+      region: 'Toscana',
+    });
+    const continuityEntityId = createCanonicalEntityId(
+      'wine-ce-6b8577026b0378895eb6e113173cd145643f4c47c62024fa8a4781073d839aff',
+    );
+
+    const indexable = silverToIndexable(
+      rec,
+      new Map(),
+      new Map([
+        [rec.sourceId, {
+          entityId: continuityEntityId,
+          identitySignature: '6b8577026b0378895eb6e113173cd145643f4c47c62024fa8a4781073d839aff',
+        }],
+      ]),
+    );
+
+    expect(indexable.entityId).toBe(continuityEntityId);
   });
 
   it('uses benchmark anchor canonical entity id and source authority in the document plane', () => {

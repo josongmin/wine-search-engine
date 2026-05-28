@@ -34,6 +34,7 @@ export const PAIRING_TAXONOMY = [
   // Vegetarian
   'mushroom',
   'truffle',
+  'cheese',
   'hard_cheese',
   'soft_cheese',
   'pasta',
@@ -47,6 +48,25 @@ export const PAIRING_TAXONOMY = [
 ] as const;
 
 export type PairingTag = (typeof PAIRING_TAXONOMY)[number];
+
+/**
+ * Korean postpositions / suffixes commonly attached directly to an English
+ * food token in mixed-script queries:
+ *   - `Cheese에 어울리는 와인`
+ *   - `Pasta랑 마실 화이트`
+ *
+ * Keep this list narrow and pairing-specific so English food matches can
+ * survive mixed-script input without promoting arbitrary English words.
+ */
+const MIXED_SCRIPT_PAIRING_SUFFIX =
+  '(?:용|에|에는|와|과|랑|이랑|하고|은|는|이|가|을|를)?';
+
+function buildEnglishPairingPattern(terms: readonly string[]): RegExp {
+  return new RegExp(
+    `(?<!\\p{L})(?<!\\p{N})(?:${terms.join('|')})${MIXED_SCRIPT_PAIRING_SUFFIX}(?!\\p{L})(?!\\p{N})`,
+    'iu',
+  );
+}
 
 /**
  * Pattern matching rules for each pairing tag.
@@ -67,7 +87,19 @@ export const PAIRING_PATTERNS: Record<PairingTag, RegExp[]> = {
   // Pork — Korean expansion 2026-05: 한식 - 돼지고기 요리 (삼겹살/목살/보쌈/족발/
   // 수육/부대찌개/돈카츠 등 일식 포함) + 중식 탕수육.
   pork: [
-    /(?<!\p{L})(?<!\p{N})(?:pork|ham|bacon|chop|loin|tonkatsu)(?!\p{L})(?!\p{N})/iu,
+    buildEnglishPairingPattern([
+      'pork',
+      'ham',
+      'bacon',
+      'chop',
+      'loin',
+      'tonkatsu',
+      'charcuterie',
+      'prosciutto',
+      'salami',
+      'cured meat',
+      'cured meats',
+    ]),
     /(?:^|[^\p{L}\p{N}])(?:돼지고기|부대찌개|돼지|햄|베이컨|삼겹살|보쌈|족발|수육|돈카츠|돈까스|탕수육)(?:용|에|에는|와|과|랑|이랑|하고|은|는|이|가|을|를)?(?=$|[^\p{L}\p{N}])/u,
   ],
 
@@ -126,6 +158,12 @@ export const PAIRING_PATTERNS: Record<PairingTag, RegExp[]> = {
   // Truffle
   truffle: [/(?<!\p{L})(?<!\p{N})(?:truffle|truffe)(?!\p{L})(?!\p{N})/iu, /(?:^|[^\p{L}\p{N}])(?:송로|트러플|트뤼프)(?=$|[^\p{L}\p{N}])/u],
 
+  // Cheese — generic cheese intent. Specific cheese tags remain separate.
+  cheese: [
+    buildEnglishPairingPattern(['cheese', 'fromage']),
+    /(?:^|[^\p{L}\p{N}])(?:치즈)(?:용|에|에는|와|과|랑|이랑|하고|은|는|이|가|을|를)?(?=$|[^\p{L}\p{N}])/u,
+  ],
+
   // Hard cheese
   hard_cheese: [
     /(?<!\p{L})(?<!\p{N})(?:parmesan|aged cheese|cheddar|gruyere|manchego)(?!\p{L})(?!\p{N})/iu,
@@ -141,7 +179,7 @@ export const PAIRING_PATTERNS: Record<PairingTag, RegExp[]> = {
   // Pasta — Korean expansion 2026-05: 한식/일식/중식 면류 (라면/칼국수/우동/짜장면/
   // 라멘) + 김밥(밥/면류 카테고리 인접) 포함.
   pasta: [
-    /(?<!\p{L})(?<!\p{N})(?:pasta|noodle|spaghetti|penne|ravioli|lasagna|ramen|udon)(?!\p{L})(?!\p{N})/iu,
+    buildEnglishPairingPattern(['pasta', 'noodle', 'spaghetti', 'penne', 'ravioli', 'lasagna', 'ramen', 'udon']),
     /(?:^|[^\p{L}\p{N}])(?:파스타|국수|스파게티|펜네|라비올리|라자냐|라면|칼국수|우동|짜장면|라멘|김밥)(?:용|에|에는|와|과|랑|이랑|하고|은|는|이|가|을|를)?(?=$|[^\p{L}\p{N}])/u,
   ],
 

@@ -7,13 +7,21 @@ export {
   isCanonicalPublicEntityId,
 } from './entity-id.js';
 export { type DecisionStatus } from './decision-status.js';
+export {
+  DECISION_CONFIDENCE_SEMANTICS,
+  type DecisionConfidenceSemantics,
+  deriveDecisionConfidenceSemantics,
+} from './decision-confidence-semantics.js';
 export { type NextAction } from './next-action.js';
 export { type QueryClass } from './query-class.js';
 export {
   type ConstraintOperator,
   type NormalizedConstraint,
   type ConstraintBundle,
+  type InferredConstraintBinding,
   type SoftPromotionAuthority,
+  filterBindingInferredConstraints,
+  isBindingInferredConstraint,
 } from './constraint-bundle.js';
 export {
   NormalizedConstraintSchema,

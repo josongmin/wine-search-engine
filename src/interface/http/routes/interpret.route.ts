@@ -11,7 +11,7 @@ import { toInterpretRequest } from './search-request-mappers.js';
 import { getRequestId } from '../request-id.js';
 import { MEDIA_TYPE_HUMAN, wantsHumanResponse } from '../content-negotiation.js';
 import { InterpretResponseV2Schema } from '../schemas/search-response-v2.schema.js';
-import { abortSignalFromFastifyRequest } from '../request-abort-signal.js';
+import { abortSignalFromFastifyRequest, raceWithRequestAbort } from '../request-abort-signal.js';
 import { HTTP_STATUS_OK } from '../constants.js';
 
 /**
@@ -33,22 +33,27 @@ export function registerInterpretRoute(
       const parsed = parseContractBody(request, InterpretRouteContract);
       const interpretRequest = toInterpretRequest(parsed);
       const requestId = getRequestId(request);
+      const abortSignal = abortSignalFromFastifyRequest(request, reply);
 
       void reply.header('Vary', 'Accept');
 
       const interpretOptions = {
-        abortSignal: abortSignalFromFastifyRequest(request),
+        abortSignal,
         debugRequest: request.debugRequest,
       };
 
       if (wantsHumanResponse(request.headers.accept)) {
-        const result = await deps.interpretUseCase.execute(
-          {
-            ...interpretRequest,
-            buildV2: true,
-            requestId,
-          },
-          interpretOptions,
+        const result = await raceWithRequestAbort(
+          deps.interpretUseCase.execute(
+            {
+              ...interpretRequest,
+              buildV2: true,
+              requestId,
+            },
+            interpretOptions,
+          ),
+          abortSignal,
+          'Interpret request aborted',
         );
         void reply.header('Content-Type', MEDIA_TYPE_HUMAN);
 
@@ -56,12 +61,16 @@ export function registerInterpretRoute(
         return;
       }
 
-      const plan = await deps.interpretUseCase.execute(
-        {
-          ...interpretRequest,
-          requestId,
-        },
-        interpretOptions,
+      const plan = await raceWithRequestAbort(
+        deps.interpretUseCase.execute(
+          {
+            ...interpretRequest,
+            requestId,
+          },
+          interpretOptions,
+        ),
+        abortSignal,
+        'Interpret request aborted',
       );
       sendRouteContractResponse(request, reply, InterpretRouteContract, HTTP_STATUS_OK, plan);
     },

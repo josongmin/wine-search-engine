@@ -93,12 +93,14 @@ describe('PgLtrModelRegistry.getModel — string[] weights from PG', () => {
     expect(await registry.getModel('red_wine')).toBeNull();
   });
 
-  it('throws when any weight is non-finite (NaN from bad DB data)', async () => {
-    // A row with an unparseable weight string.
+  it('skips the model (returns null) when any weight is non-finite (NaN from bad DB data)', async () => {
+    // A row with an unparseable weight string. Previously this threw; the
+    // current contract is to log a warning and treat the model as unavailable
+    // so a single corrupt row does not crash the entire ranking path.
     const pool = makePool([makeRow({ weights: ['0.5', 'not-a-number', '-0.1'] })]);
     const registry = new PgLtrModelRegistry(pool);
 
-    await expect(registry.getModel('red_wine')).rejects.toThrow(/non-finite weights/);
+    expect(await registry.getModel('red_wine')).toBeNull();
   });
 
   it('parses bias string to finite number', async () => {
@@ -112,11 +114,13 @@ describe('PgLtrModelRegistry.getModel — string[] weights from PG', () => {
     expect(model!.bias).toBeCloseTo(0.01);
   });
 
-  it('throws when bias is non-finite', async () => {
+  it('skips the model (returns null) when bias is non-finite', async () => {
+    // Previously this threw; the current contract is to log + skip so a
+    // single corrupt bias never silently propagates NaN through every score.
     const pool = makePool([makeRow({ bias: 'NaN' })]);
     const registry = new PgLtrModelRegistry(pool);
 
-    await expect(registry.getModel('red_wine')).rejects.toThrow(/non-finite bias/);
+    expect(await registry.getModel('red_wine')).toBeNull();
   });
 
   it('dot-product on returned weights and bias does not produce NaN', async () => {
@@ -156,7 +160,10 @@ describe('PgLtrModelRegistry.getAllModels — string[] weights from PG', () => {
     }
   });
 
-  it('throws when a row has non-finite weights, preventing partial NaN propagation', async () => {
+  it('skips a row with non-finite weights and loads the rest, preventing partial NaN propagation', async () => {
+    // Previously a single bad row crashed every model load; the current
+    // contract is "skip the bad row, keep the healthy ones" — a single
+    // corrupted training output must not deny every query class its model.
     const rows = [
       makeRow({ query_class: 'red_wine', registry_id: 'r1' }),
       makeRow({
@@ -168,7 +175,10 @@ describe('PgLtrModelRegistry.getAllModels — string[] weights from PG', () => {
     const pool = makePool(rows);
     const registry = new PgLtrModelRegistry(pool);
 
-    await expect(registry.getAllModels()).rejects.toThrow(/non-finite weights/);
+    const models = await registry.getAllModels();
+    expect(models.size).toBe(1);
+    expect(models.has('red_wine')).toBe(true);
+    expect(models.has('white_wine')).toBe(false);
   });
 
   it('returns empty map when no active models exist', async () => {

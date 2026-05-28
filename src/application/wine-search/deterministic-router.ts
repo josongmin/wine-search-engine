@@ -36,8 +36,9 @@
 
 import type { NormalizedConstraint } from '@shared/types/index.js';
 import {
-  convertConstraintUsdToApproxKrw,
+  canonicalizePriceConstraintLike,
   convertKrwToConstraintUsd,
+  splitCanonicalUsdBudgetAcrossSlots,
 } from '@shared/utils/canonical-price.js';
 import {
   EXACT_METADATA_SEARCH_LIMIT,
@@ -140,25 +141,20 @@ function isParallelSlotDecomposition(
   return decomposition !== undefined && decomposition.kind === 'parallel-slot';
 }
 
-function extractPriceBudgetKrw(
+function extractPriceBudgetUsd(
   constraints: readonly NormalizedConstraint[],
 ): number | undefined {
   for (const c of constraints) {
     if (!PRICE_CONSTRAINT_ATTRIBUTE_NAMES.has(c.attribute)) continue;
-    const v = c.value;
+    const canonical = canonicalizePriceConstraintLike(c);
+    const v = canonical.value;
     if (typeof v === 'number' && Number.isFinite(v) && v > 0) {
-      if (c.attribute === 'price_usd' || c.attribute === 'max_price_usd' || c.attribute === 'min_price_usd') {
-        return convertConstraintUsdToApproxKrw(v);
-      }
-      return Math.floor(v);
+      return v;
     }
     if (typeof v === 'object' && !Array.isArray(v)) {
       const maxVal = (v as { readonly max?: number }).max;
       if (typeof maxVal === 'number' && Number.isFinite(maxVal) && maxVal > 0) {
-        if (c.attribute === 'price_usd' || c.attribute === 'max_price_usd' || c.attribute === 'min_price_usd') {
-          return convertConstraintUsdToApproxKrw(maxVal);
-        }
-        return Math.floor(maxVal);
+        return maxVal;
       }
     }
   }
@@ -234,19 +230,56 @@ function getAllAnalysisConstraints(
   return getCanonicalNormalizedConstraints(analysis);
 }
 
+function getRawAnalysisConstraints(
+  analysis: WineSearchAnalysis,
+): readonly NormalizedConstraint[] {
+  if (analysis.constraints !== undefined) {
+    const flattened = [
+      ...analysis.constraints.hard,
+      ...analysis.constraints.soft,
+      ...analysis.constraints.inferred,
+    ];
+    if (flattened.length > 0 || analysis.normalizedConstraints.length === 0) {
+      return flattened;
+    }
+  }
+  return analysis.normalizedConstraints;
+}
+
 /**
  * Split a single total-budget cap across N parallel slots. Returns
- * `undefined` when no budget is set. Use Math.floor so summed slot
- * budgets never exceed the user's stated total.
+ * `undefined` when no budget is set. Uses the same 2-decimal canonical USD
+ * precision as the rest of the retrieval stack.
  */
 function splitTotalBudgetAcrossSlots(
-  totalBudgetKrw: number | undefined,
+  totalBudgetUsd: number | undefined,
   slotCount: number,
 ): number | undefined {
-  if (totalBudgetKrw === undefined) return undefined;
-  if (slotCount <= 0 || !Number.isFinite(slotCount)) return undefined;
-  if (!Number.isFinite(totalBudgetKrw) || totalBudgetKrw <= 0) return undefined;
-  return Math.floor(totalBudgetKrw / slotCount);
+  return splitCanonicalUsdBudgetAcrossSlots(totalBudgetUsd, slotCount);
+}
+
+function extractLegacyPriceBudgetKrw(
+  constraints: readonly NormalizedConstraint[],
+): number | undefined {
+  for (const constraint of constraints) {
+    if (
+      constraint.attribute !== 'price_krw'
+      && constraint.attribute !== 'max_price_krw'
+      && constraint.attribute !== 'min_price_krw'
+    ) {
+      continue;
+    }
+    if (typeof constraint.value === 'number' && Number.isFinite(constraint.value) && constraint.value > 0) {
+      return Math.floor(constraint.value);
+    }
+    if (typeof constraint.value === 'object' && !Array.isArray(constraint.value)) {
+      const maxVal = (constraint.value as { readonly max?: number }).max;
+      if (typeof maxVal === 'number' && Number.isFinite(maxVal) && maxVal > 0) {
+        return Math.floor(maxVal);
+      }
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -263,8 +296,10 @@ function expandParallelSlots(
   decomposition: Extract<Decomposition, { kind: 'parallel-slot' }>,
 ): { readonly searches: SearchUseCaseInput[] } {
   const slotCount = decomposition.slots.length;
-  const totalBudgetKrw = extractPriceBudgetKrw(getAllAnalysisConstraints(analysis));
-  const perSlotBudgetKrw = splitTotalBudgetAcrossSlots(totalBudgetKrw, slotCount);
+  const legacyTotalBudgetKrw = extractLegacyPriceBudgetKrw(getRawAnalysisConstraints(analysis));
+  const perSlotBudgetUsd = legacyTotalBudgetKrw !== undefined
+    ? convertKrwToConstraintUsd(Math.floor(legacyTotalBudgetKrw / slotCount))
+    : splitTotalBudgetAcrossSlots(extractPriceBudgetUsd(getAllAnalysisConstraints(analysis)), slotCount);
 
   const baseFilters = getHardAnalysisConstraints(analysis).filter(
     (c) => !PRICE_CONSTRAINT_ATTRIBUTE_NAMES.has(c.attribute),
@@ -282,12 +317,12 @@ function expandParallelSlots(
         confidence: 1.0,
         soft_promotion_authority: 'allow',
       },
-      ...(perSlotBudgetKrw !== undefined
+      ...(perSlotBudgetUsd !== undefined
         ? [{
           attribute: 'price_usd',
           operator: '<=' as const,
-          value: convertKrwToConstraintUsd(perSlotBudgetKrw),
-          source_phrase: `${perSlotBudgetKrw}원 이하 (per slot)`,
+          value: perSlotBudgetUsd,
+          source_phrase: `price_usd<=${perSlotBudgetUsd} (per slot)`,
           confidence: 1.0,
           soft_promotion_authority: 'allow' as const,
         }]

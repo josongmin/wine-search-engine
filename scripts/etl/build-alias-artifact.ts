@@ -25,6 +25,7 @@ function buildAliasRecord(
   source: string,
   confidencePrior: number,
   scope: string,
+  sourceTrust: number = 1.0,
 ): AliasSnapshotRecord {
   const normalizedValue = normalizeForMatch(value);
   return {
@@ -33,9 +34,10 @@ function buildAliasRecord(
     value,
     normalizedValue,
     type,
+    aliasType: type,
     scope,
     source,
-    sourceTrust: 1.0,
+    sourceTrust,
     confidencePrior,
   };
 }
@@ -65,9 +67,19 @@ function buildBaseAliases(
   ];
 }
 
+export interface SnapshotAliasOverlayProposal {
+  readonly value: string;
+  readonly type: string;
+  readonly source: string;
+  readonly confidencePrior: number;
+  readonly scope: string;
+  readonly sourceTrust: number;
+}
+
 export function buildAliasArtifact(
   records: readonly EnrichedSilverRecord[],
   entityIdBySourceId: ReadonlyMap<SourceRecordId, CanonicalEntityId>,
+  overlayProposalsByEntityId: ReadonlyMap<CanonicalEntityId, readonly SnapshotAliasOverlayProposal[]> = new Map(),
 ): readonly AliasSnapshotRecord[] {
   const transliterator = new Transliterator();
   const aliases = new Map<string, AliasSnapshotRecord>();
@@ -78,9 +90,20 @@ export function buildAliasArtifact(
       throw new Error(`Missing canonical entityId mapping for sourceId=${record.sourceId}`);
     }
     const baseAliases = buildBaseAliases(record, entityId);
+    const overlayAliases = (overlayProposalsByEntityId.get(entityId) ?? []).map((proposal) =>
+      buildAliasRecord(
+        entityId,
+        proposal.value,
+        proposal.type,
+        proposal.source,
+        proposal.confidencePrior,
+        proposal.scope,
+        proposal.sourceTrust,
+      ),
+    );
     const lang = inferTransliterationSourceLang(record.country, record.region);
 
-    for (const alias of baseAliases) {
+    for (const alias of [...baseAliases, ...overlayAliases]) {
       aliases.set(alias.aliasId, alias);
       if (alias.scope !== 'global' || hasHangul(alias.value)) {
         continue;
@@ -94,7 +117,8 @@ export function buildAliasArtifact(
           `snapshot:transliterator_v1:${alias.source}`,
           variant.confidence,
           'locale_ko',
-        ));
+        ),
+      );
 
       for (const transliterated of transliterations) {
         aliases.set(transliterated.aliasId, transliterated);

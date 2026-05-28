@@ -3,6 +3,7 @@ import { createSourceRecordId } from '../../../src/domain/shared/types/index.js'
 import type { EnrichedSilverRecord } from '../types.js';
 import {
   detectCollisions,
+  isKoreanHangulAliasCandidate,
   normalizeAliasKey,
   parseAliasMatrix,
 } from '../generate-korean-aliases.js';
@@ -57,6 +58,21 @@ describe('parseAliasMatrix', () => {
 
   it('rejects a flat array contract', () => {
     expect(() => parseAliasMatrix('["a", "b"]', 2)).toThrow(/entry 0 was not an array/);
+  });
+});
+
+describe('isKoreanHangulAliasCandidate', () => {
+  it('accepts Hangul-bearing aliases', () => {
+    expect(isKoreanHangulAliasCandidate('오푸스 원 2018')).toBe(true);
+  });
+
+  it('rejects Latin-only abbreviations', () => {
+    expect(isKoreanHangulAliasCandidate('DRC')).toBe(false);
+    expect(isKoreanHangulAliasCandidate('MRB')).toBe(false);
+  });
+
+  it('rejects mixed-script aliases', () => {
+    expect(isKoreanHangulAliasCandidate('오푸스 원 DRC')).toBe(false);
   });
 });
 

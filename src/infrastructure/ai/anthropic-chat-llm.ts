@@ -12,6 +12,8 @@
 import {
   createCircuitBreaker,
   DEFAULT_BREAKER_FAILURE_THRESHOLD,
+  DEFAULT_RECOVERY_TIMEOUT_MS,
+  DEFAULT_HALF_OPEN_ATTEMPTS,
   type CircuitBreaker,
 } from '../../domain/shared/circuit-breaker/circuit-breaker.js';
 import { globalCircuitBreakerRegistry } from '../../domain/observability/circuit-breaker-registry.js';
@@ -42,8 +44,8 @@ const ANTHROPIC_DEFAULT_MAX_TOKENS = 1024;
  *  Tuned for LLM latency: 5 consecutive service-health failures trip the breaker;
  *  60s cool-off before probing; 3 consecutive probe successes re-close it. */
 const ANTHROPIC_CHAT_BREAKER_FAILURE_THRESHOLD = DEFAULT_BREAKER_FAILURE_THRESHOLD;
-const ANTHROPIC_CHAT_BREAKER_RECOVERY_TIMEOUT_MS = 60_000;
-const ANTHROPIC_CHAT_BREAKER_HALF_OPEN_MAX_ATTEMPTS = 3;
+const ANTHROPIC_CHAT_BREAKER_RECOVERY_TIMEOUT_MS = DEFAULT_RECOVERY_TIMEOUT_MS;
+const ANTHROPIC_CHAT_BREAKER_HALF_OPEN_MAX_ATTEMPTS = DEFAULT_HALF_OPEN_ATTEMPTS;
 const ANTHROPIC_CHAT_BREAKER_NAME = 'anthropic-chat';
 
 const ANTHROPIC_RETRY_CONFIG: RetryConfig = {

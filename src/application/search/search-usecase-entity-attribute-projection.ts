@@ -10,6 +10,7 @@ type HintCandidateField =
   | 'region'
   | 'appellation'
   | 'country'
+  | 'regionHierarchy'
   | 'grapePrimary'
   | 'grapes'
   | 'style'
@@ -134,6 +135,7 @@ const ENTITY_ATTRIBUTE_HINT_PROJECTORS: readonly HintProjector[] = [
   stringHint('region', (doc) => doc.region, 'region'),
   stringHint('appellation', (doc) => doc.appellation, 'appellation'),
   stringHint('country', (doc) => doc.country, 'country'),
+  stringArrayHint('region_hierarchy', (doc) => doc.regionHierarchy, 'regionHierarchy'),
   stringHint('grape_primary', (doc) => doc.grapePrimary, 'grapePrimary'),
   stringArrayHint('grapes', (doc) => doc.grapes, 'grapes'),
   stringHint('style', (doc) => doc.style, 'style'),

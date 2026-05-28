@@ -228,7 +228,12 @@ async function loadEntitiesFromIds(
   }>(
     `SELECT entity_id, canonical_label, attributes
        FROM entities
-      WHERE entity_id = ANY($1::text[])`,
+      WHERE search_snapshot_id = (
+              SELECT active_snapshot_id
+              FROM active_search_snapshot
+              WHERE id = 1
+            )
+        AND entity_id = ANY($1::text[])`,
     [entityIds],
   );
   return result.rows.map((row) => toEntityRow(row));
@@ -245,7 +250,12 @@ async function loadAllEntities(
   }>(
     `SELECT entity_id, canonical_label, attributes
        FROM entities
-      WHERE entity_type IN ('wine','vintage')
+      WHERE search_snapshot_id = (
+              SELECT active_snapshot_id
+              FROM active_search_snapshot
+              WHERE id = 1
+            )
+        AND entity_type IN ('wine','vintage')
       ORDER BY entity_id
       LIMIT $1`,
     [limit],

@@ -703,7 +703,7 @@ export class MiniLoopRunner {
           // adapter MUST NOT surface into the dispatch result. Log once
           // and move on.
           this.logger.warn(
-            { err: err instanceof Error ? err.message : 'unknown', tool: call.tool },
+            { err, tool: call.tool },
             '[MiniLoopRunner] tool cache write threw despite fail-open contract',
           );
         });

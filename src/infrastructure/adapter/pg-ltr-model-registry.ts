@@ -8,7 +8,10 @@
 import { nanoid } from 'nanoid';
 import type { Pool } from 'pg';
 import type { QueryClassWeights } from '../../domain/ranking/index.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import { pgTableHasColumn } from '../db/pg-schema-capabilities.js';
+
+const log = bootstrapLogger.child({ component: 'PgLtrModelRegistry' });
 
 /**
  * Row shape in ltr_model_registry table.
@@ -104,29 +107,54 @@ interface LtrModelCloneMetadata {
 }
 
 /**
+ * Sentinel error raised when a row from `ltr_model_registry` contains
+ * non-finite weights or bias. Distinguished from generic `Error` so the
+ * caller can `catch` and skip the bad row without swallowing real bugs.
+ */
+class LtrModelCorruptError extends Error {
+  constructor(registryId: string, field: 'weights' | 'bias', detail: string) {
+    super(`LTR model ${registryId} has corrupt ${field}: ${detail}`);
+    this.name = 'LtrModelCorruptError';
+  }
+}
+
+/**
  * node-postgres returns float[] columns as string[] at runtime — the type
  * parameter on the query result is a compile-time annotation only.
- * Parse each element with Number() and reject non-finite values immediately
- * so that downstream dot-product scoring never silently produces NaN.
+ *
+ * Parse each element with Number() and explicitly drop non-finite entries
+ * via `.filter(Number.isFinite)`. If the filtered length differs from the
+ * original (i.e., any NaN / +/-Infinity was present) raise
+ * `LtrModelCorruptError`: emitting a shortened weight vector would silently
+ * change the model's feature dimension and corrupt every downstream score.
+ *
+ * The caller (`getModel` / `getAllModels`) catches the error and skips the
+ * model — see those methods for the warn-and-skip flow.
  */
 function parseLtrWeights(raw: number[], registryId: string): number[] {
   // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- pg returns float[] as string[] at runtime
-  const weights = (raw as unknown as string[]).map(Number);
-  if (weights.some((w) => !Number.isFinite(w))) {
-    throw new Error(`LTR model ${registryId} has non-finite weights`);
+  const numeric = (raw as unknown as string[]).map(Number);
+  const finiteOnly = numeric.filter(Number.isFinite);
+  if (finiteOnly.length !== numeric.length) {
+    throw new LtrModelCorruptError(
+      registryId,
+      'weights',
+      `${String(numeric.length - finiteOnly.length)} of ${String(numeric.length)} weights are non-finite (NaN/Infinity)`,
+    );
   }
-  return weights;
+  return finiteOnly;
 }
 
 /**
  * node-postgres also returns scalar float8 columns (bias) as strings.
- * Guard and throw rather than let NaN silently corrupt every LTR score.
+ * Guard with Number.isFinite (rule 28 — finite checks before downstream math)
+ * and raise the same sentinel error so the caller can skip the model.
  */
 function parseLtrBias(raw: number, registryId: string): number {
   // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- pg returns float8 as string at runtime
   const bias = Number(raw as unknown as string);
   if (!Number.isFinite(bias)) {
-    throw new Error(`LTR model ${registryId} has non-finite bias`);
+    throw new LtrModelCorruptError(registryId, 'bias', `parsed value is ${String(bias)}`);
   }
   return bias;
 }
@@ -142,7 +170,7 @@ function assertFeatureSchemaHash(raw: unknown, registryId: string): string {
  * PostgreSQL-backed LTR model registry with versioning.
  *
  * Stores trained LambdaMART models for each query class with:
- * - Feature weights (normalized, length 8)
+ * - Feature weights (normalized, dimension governed by feature_schema_hash)
  * - Bias term
  * - Training metadata (example count, validation NDCG@5)
  * - Version tracking and rollback capability
@@ -264,15 +292,29 @@ export class PgLtrModelRegistry implements LtrModelRegistryPort {
     const row = result.rows[0];
     if (!row) return null;
 
-    return {
-      queryClass: row.query_class,
-      featureSchemaHash: assertFeatureSchemaHash(row.feature_schema_hash, row.registry_id),
-      weights: parseLtrWeights(row.weights, row.registry_id),
-      bias: parseLtrBias(row.bias, row.registry_id),
-      trainingExampleCount: row.training_example_count,
-      ndcg5ValidationScore: row.ndcg5_validation_score,
-      trainedAt: row.trained_at,
-    };
+    try {
+      return {
+        queryClass: row.query_class,
+        featureSchemaHash: assertFeatureSchemaHash(row.feature_schema_hash, row.registry_id),
+        weights: parseLtrWeights(row.weights, row.registry_id),
+        bias: parseLtrBias(row.bias, row.registry_id),
+        trainingExampleCount: row.training_example_count,
+        ndcg5ValidationScore: row.ndcg5_validation_score,
+        trainedAt: row.trained_at,
+      };
+    } catch (err) {
+      if (err instanceof LtrModelCorruptError) {
+        // Skip the model rather than crash LTR scoring for every query.
+        // The caller treats `null` as "no model available" and falls back
+        // to the default ranker.
+        log.warn(
+          { err, queryClass: row.query_class, registryId: row.registry_id },
+          'LTR model row has corrupt numeric column; skipping model load',
+        );
+        return null;
+      }
+      throw err;
+    }
   }
 
   async getAllModels(searchSnapshotId?: string): Promise<ReadonlyMap<string, QueryClassWeights>> {
@@ -286,15 +328,29 @@ export class PgLtrModelRegistry implements LtrModelRegistryPort {
 
     const models = new Map<string, QueryClassWeights>();
     for (const row of result.rows) {
-      models.set(row.query_class, {
-        queryClass: row.query_class,
-        featureSchemaHash: assertFeatureSchemaHash(row.feature_schema_hash, row.registry_id),
-        weights: parseLtrWeights(row.weights, row.registry_id),
-        bias: parseLtrBias(row.bias, row.registry_id),
-        trainingExampleCount: row.training_example_count,
-        ndcg5ValidationScore: row.ndcg5_validation_score,
-        trainedAt: row.trained_at,
-      });
+      try {
+        models.set(row.query_class, {
+          queryClass: row.query_class,
+          featureSchemaHash: assertFeatureSchemaHash(row.feature_schema_hash, row.registry_id),
+          weights: parseLtrWeights(row.weights, row.registry_id),
+          bias: parseLtrBias(row.bias, row.registry_id),
+          trainingExampleCount: row.training_example_count,
+          ndcg5ValidationScore: row.ndcg5_validation_score,
+          trainedAt: row.trained_at,
+        });
+      } catch (err) {
+        if (err instanceof LtrModelCorruptError) {
+          // Skip corrupt rows so a single bad model doesn't poison the
+          // entire registry load — the remaining query classes still get
+          // their healthy models.
+          log.warn(
+            { err, queryClass: row.query_class, registryId: row.registry_id },
+            'LTR model row has corrupt numeric column; skipping model load',
+          );
+          continue;
+        }
+        throw err;
+      }
     }
 
     return models;

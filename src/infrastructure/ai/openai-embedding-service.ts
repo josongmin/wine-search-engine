@@ -28,7 +28,15 @@ const OPENAI_EMBEDDING_DEFAULT_DIMENSIONS = 1024;
 /** Truncate HTTP error bodies in thrown messages. */
 const OPENAI_EMBEDDING_HTTP_ERROR_PREVIEW_CHARS = 200;
 
-/** Circuit breaker thresholds for the OpenAI embedding endpoint. */
+/**
+ * Circuit breaker thresholds for the OpenAI embedding endpoint.
+ *
+ * Deliberately MORE aggressive than the shared LLM defaults
+ * (DEFAULT_BREAKER_FAILURE_THRESHOLD=5, DEFAULT_RECOVERY_TIMEOUT_MS=60_000,
+ * DEFAULT_HALF_OPEN_ATTEMPTS=3): embeddings sit on the synchronous retrieval
+ * hot path, so we trip faster (3 failures) and recover faster (30s) to avoid
+ * stalling query latency on a degraded endpoint. Not a SSoT drift — keep local.
+ */
 const OPENAI_EMBEDDING_BREAKER_NAME = 'openai-embedding';
 const OPENAI_EMBEDDING_FAILURE_THRESHOLD = 3;
 const OPENAI_EMBEDDING_RECOVERY_TIMEOUT_MS = 30_000;

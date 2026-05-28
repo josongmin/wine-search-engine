@@ -153,12 +153,16 @@ describe('SearchResponseV1 Schema Contract', () => {
     expect(snapshot).toHaveProperty('feature_flags');
   });
 
-  it('confidenceSemantics is always calibrated_decision_confidence', async () => {
-    const res = await postJson(server.app, '/v1/search', { query: 'Château Margaux' });
+  it('confidenceSemantics truthfully reflects calibration trust', async () => {
+    const res = await postJson(server.app, '/v1/search', {
+      query: '풀바디 레드 와인',
+      options: { mode: 'hybrid', explain: false, clarification: false },
+    });
 
     expect(res.statusCode).toBe(200);
-    expect(getSearchDecision(parseSearchResponse(res)).confidence_semantics)
-      .toBe('calibrated_decision_confidence');
+    const decision = getSearchDecision(parseSearchResponse(res));
+    expect(decision.calibration_trusted).toBe(false);
+    expect(decision.confidence_semantics).toBe('uncalibrated_decision_score');
   });
 });
 

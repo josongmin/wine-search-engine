@@ -26,6 +26,9 @@ HOST_PORT="4000"
 APP_PORT="3000"
 ENV_FILE="/etc/wine-search-engine.env"
 HEALTH_PATH="/ready"
+DATA_DIR="/opt/wine-search-engine/data"
+HEALTH_TIMEOUT_SECONDS="120"
+HEALTH_POLL_INTERVAL_SECONDS="3"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -38,6 +41,9 @@ while [[ $# -gt 0 ]]; do
     --app-port) APP_PORT="$2"; shift 2 ;;
     --env-file) ENV_FILE="$2"; shift 2 ;;
     --health-path) HEALTH_PATH="$2"; shift 2 ;;
+    --data-dir) DATA_DIR="$2"; shift 2 ;;
+    --health-timeout-seconds) HEALTH_TIMEOUT_SECONDS="$2"; shift 2 ;;
+    --health-poll-interval-seconds) HEALTH_POLL_INTERVAL_SECONDS="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *)
       echo "Unknown argument: $1" >&2
@@ -69,6 +75,9 @@ HOST_PORT="$HOST_PORT" \
 APP_PORT="$APP_PORT" \
 ENV_FILE="$ENV_FILE" \
 HEALTH_PATH="$HEALTH_PATH" \
+DATA_DIR="$DATA_DIR" \
+HEALTH_TIMEOUT_SECONDS="$HEALTH_TIMEOUT_SECONDS" \
+HEALTH_POLL_INTERVAL_SECONDS="$HEALTH_POLL_INTERVAL_SECONDS" \
 python - "$tmpfile" <<'PY'
 import json
 import os
@@ -85,12 +94,22 @@ commands = [
     f"APP_PORT='{os.environ['APP_PORT']}'",
     f"ENV_FILE='{os.environ['ENV_FILE']}'",
     f"HEALTH_PATH='{os.environ['HEALTH_PATH']}'",
+    f"DATA_DIR='{os.environ['DATA_DIR']}'",
+    f"HEALTH_TIMEOUT_SECONDS='{os.environ['HEALTH_TIMEOUT_SECONDS']}'",
+    f"HEALTH_POLL_INTERVAL_SECONDS='{os.environ['HEALTH_POLL_INTERVAL_SECONDS']}'",
     'if [ ! -f "$ENV_FILE" ]; then echo "Missing env file: $ENV_FILE" >&2; exit 1; fi',
+    'if [ ! -d "$DATA_DIR" ]; then echo "Missing data dir: $DATA_DIR" >&2; exit 1; fi',
     'aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$REGISTRY_HOST"',
     'docker pull "$IMAGE_URI"',
     'docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true',
-    'docker run -d --name "$CONTAINER_NAME" --restart unless-stopped --env-file "$ENV_FILE" -e PORT="$APP_PORT" -p 127.0.0.1:"$HOST_PORT":"$APP_PORT" "$IMAGE_URI"',
-    'for i in 1 2 3 4 5 6 7 8 9 10; do if curl -fsS "http://127.0.0.1:$HOST_PORT$HEALTH_PATH" >/dev/null; then exit 0; fi; sleep 3; done',
+    'docker run -d --name "$CONTAINER_NAME" --restart unless-stopped --env-file "$ENV_FILE" -e PORT="$APP_PORT" -v "$DATA_DIR:/app/data:ro" -p 127.0.0.1:"$HOST_PORT":"$APP_PORT" "$IMAGE_URI"',
+    'deadline=$(( $(date +%s) + HEALTH_TIMEOUT_SECONDS ))',
+    'healthy=0',
+    'while [ "$(date +%s)" -lt "$deadline" ]; do',
+    '  if curl -fsS "http://127.0.0.1:$HOST_PORT/health" >/dev/null 2>&1 && curl -fsS "http://127.0.0.1:$HOST_PORT$HEALTH_PATH" >/dev/null 2>&1; then healthy=1; break; fi',
+    '  sleep "$HEALTH_POLL_INTERVAL_SECONDS"',
+    'done',
+    'if [ "$healthy" = "1" ]; then exit 0; fi',
     'echo "Health check failed: http://127.0.0.1:$HOST_PORT$HEALTH_PATH" >&2',
     'docker logs --tail 200 "$CONTAINER_NAME" >&2 || true',
     'exit 1',

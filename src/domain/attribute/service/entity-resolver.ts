@@ -31,6 +31,7 @@ import type { EntityResolutionMode } from './entity-alias-catalog.js';
 import type { AmbiguousEntityHint, AmbiguousEntityHintSpec } from '../model/ambiguous-entity-hint.js';
 import type { FuzzyMatcherPort } from '../../query/port/fuzzy-matcher.port.js';
 import { wineTitleCase } from '../../shared/utils/title-case.js';
+import { inferOntologyRegionEntityType } from './ontology-snapshot.js';
 
 export type EntityType =
   | 'wine_type'
@@ -155,7 +156,7 @@ const RESOLVER_INDEX: ReadonlyMap<string, readonly ResolverEntry[]> = (() => {
     if (discoveredCountries.has(lower)) continue;
     register(lower, {
       canonicalValue: wineTitleCase(regionKey),
-      entityType: 'region',
+      entityType: inferOntologyRegionEntityType(regionKey),
       confidence: CONFIDENCE_REGION,
       resolutionMode: 'direct',
       provenance: 'region_parents',

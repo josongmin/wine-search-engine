@@ -4,9 +4,10 @@ import { z } from 'zod';
 import type {
   AliasMatchResult,
   AliasMatcher,
+  AliasLookupOptions,
 } from '../../domain/query/service/anchor-extractor.js';
 import {
-  buildAliasLookupPlan,
+  buildAliasSurfaceLookupPlan,
   isPhoneticAliasSurfaceCompatible,
 } from '../../domain/query/service/alias-lookup-plan.js';
 import {
@@ -54,6 +55,12 @@ interface SnapshotAliasRecord {
    * shape under `exactOptionalPropertyTypes`.
    */
   readonly aliasType?: AliasType | undefined;
+  /**
+   * Legacy snapshot artifacts stored the RFC-003 discriminator on `type`
+   * instead of `aliasType`. Runtime loaders normalize it at read time so
+   * old artifacts remain identity-safe.
+   */
+  readonly type?: string | undefined;
 }
 
 interface PgAliasRecord {
@@ -86,6 +93,7 @@ const SnapshotAliasRecordSchema = z.object({
   sourceTrust: z.number(),
   confidencePrior: z.number(),
   aliasType: z.enum(ALIAS_TYPES).optional(),
+  type: z.string().min(1).optional(),
 }).passthrough();
 const SnapshotManifestSchema = z.object({
   artifacts: z.object({
@@ -133,7 +141,16 @@ function parseNdjson(raw: string, filePath: string): readonly SnapshotAliasRecor
     try {
       const parsed: unknown = JSON.parse(trimmed);
       const parsedRecord = SnapshotAliasRecordSchema.parse(parsed);
-      rows.push(parsedRecord);
+      const aliasType = parseAliasType(parsedRecord.aliasType ?? parsedRecord.type);
+      rows.push({
+        aliasId: parsedRecord.aliasId,
+        entityId: parsedRecord.entityId,
+        value: parsedRecord.value,
+        normalizedValue: parsedRecord.normalizedValue,
+        sourceTrust: parsedRecord.sourceTrust,
+        confidencePrior: parsedRecord.confidencePrior,
+        ...(aliasType !== undefined ? { aliasType } : {}),
+      });
     } catch (error) {
       throw new Error(
         `Failed to parse NDJSON row ${index + 1} from ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
@@ -175,6 +192,11 @@ interface HangulCompletionAliasRecord {
   readonly syllableBoundaryOffsets: ReadonlySet<number>;
 }
 
+interface PrefixLookupRecord {
+  readonly alias: IndexedAliasRecord;
+  readonly prefixTerms: readonly string[];
+}
+
 interface GroupedAliasMatch {
   readonly surfaceForm: string;
   readonly normalizedForm: string;
@@ -185,9 +207,44 @@ interface GroupedAliasMatch {
 }
 
 export class SearchSnapshotAliasMatcher implements AliasMatcher {
-  static async loadFromPostgres(pool: Pool): Promise<SearchSnapshotAliasMatcher | undefined> {
+  static async loadFromManifest(
+    manifestPath: string,
+  ): Promise<SearchSnapshotAliasMatcher | undefined> {
     try {
-      const { activeSnapshotId } = await resolveActiveSnapshot(pool);
+      const manifestRaw = await fs.readFile(manifestPath, 'utf8');
+      const aliasesPath = parseAliasesManifestPath(manifestRaw, manifestPath);
+      const aliasesRaw = await fs.readFile(aliasesPath, 'utf8');
+      const aliases = parseNdjson(aliasesRaw, aliasesPath);
+      const buildStartedAt = Date.now();
+      const matcher = new SearchSnapshotAliasMatcher(aliases);
+      bootstrapLogger.info(
+        {
+          manifestPath,
+          aliasCount: aliases.length,
+          buildMs: Date.now() - buildStartedAt,
+        },
+        '[Container] Search snapshot alias substrate loaded from manifest into memory',
+      );
+      return matcher;
+    } catch (error) {
+      bootstrapLogger.warn(
+        {
+          manifestPath,
+          err: error,
+        },
+        '[Container] Search snapshot alias manifest unavailable; continuing without in-memory alias preload',
+      );
+      return undefined;
+    }
+  }
+
+  static async loadFromPostgres(
+    pool: Pool,
+    snapshotIdOverride?: string,
+  ): Promise<SearchSnapshotAliasMatcher | undefined> {
+    try {
+      const activeSnapshotId = snapshotIdOverride
+        ?? (await resolveActiveSnapshot(pool)).activeSnapshotId;
       const { rows } = await pool.query<PgAliasRecord>(
         `SELECT alias_id, entity_id, surface_form, normalized_value, source_trust, confidence, alias_type
          FROM aliases
@@ -229,14 +286,17 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
         return undefined;
       }
 
+      const buildStartedAt = Date.now();
+      const matcher = new SearchSnapshotAliasMatcher(aliases);
       bootstrapLogger.info(
         {
           activeSnapshotId,
           aliasCount: aliases.length,
+          buildMs: Date.now() - buildStartedAt,
         },
         '[Container] Search snapshot alias overlay loaded from PostgreSQL into memory',
       );
-      return new SearchSnapshotAliasMatcher(aliases);
+      return matcher;
     } catch (error: unknown) {
       if (!isActiveSnapshotSubstrateBootstrapAllowed()) {
         throw error;
@@ -256,19 +316,7 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
   ): Promise<SearchSnapshotAliasMatcher | undefined> {
     try {
       const runtimeState = await loadSearchSnapshotRuntimeState(runtimeStatePath);
-      const manifestRaw = await fs.readFile(runtimeState.manifestPath, 'utf8');
-      const aliasesPath = parseAliasesManifestPath(manifestRaw, runtimeState.manifestPath);
-      const aliasesRaw = await fs.readFile(aliasesPath, 'utf8');
-      const aliases = parseNdjson(aliasesRaw, aliasesPath);
-      bootstrapLogger.info(
-        {
-          snapshotId: runtimeState.snapshotId,
-          aliasCount: aliases.length,
-          runtimeStatePath,
-        },
-        '[Container] Search snapshot alias substrate loaded into memory',
-      );
-      return new SearchSnapshotAliasMatcher(aliases);
+      return await SearchSnapshotAliasMatcher.loadFromManifest(runtimeState.manifestPath);
     } catch (error) {
       bootstrapLogger.warn(
         {
@@ -281,90 +329,89 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
     }
   }
 
-  private readonly exactIndex = new Map<string, readonly IndexedAliasRecord[]>();
-  private readonly wholeTokenIndex = new Map<string, readonly IndexedAliasRecord[]>();
-  private readonly compactIndex = new Map<string, readonly IndexedAliasRecord[]>();
-  private readonly phoneticIndex = new Map<string, readonly IndexedAliasRecord[]>();
+  private readonly exactIndex = new Map<string, IndexedAliasRecord[]>();
+  private readonly wholeTokenIndex = new Map<string, IndexedAliasRecord[]>();
+  private readonly compactIndex = new Map<string, IndexedAliasRecord[]>();
+  private readonly phoneticIndex = new Map<string, IndexedAliasRecord[]>();
   /**
    * Double Metaphone code → aliases. Each alias contributes its
    * primary key and (if distinct) its alternate key. The matcher uses
    * the union of query DM keys to retrieve candidates from this index.
    */
-  private readonly doubleMetaphoneIndex = new Map<string, readonly IndexedAliasRecord[]>();
+  private readonly doubleMetaphoneIndex = new Map<string, IndexedAliasRecord[]>();
   /**
    * Cached DM keyset per alias to avoid re-encoding during the strategy
    * decision loop. Empty set for non-Latin aliases.
    */
   private readonly doubleMetaphoneKeysByAliasId = new Map<string, ReadonlySet<string>>();
-  private readonly prefixIndex = new Map<string, readonly IndexedAliasRecord[]>();
-  private readonly hangulCompletionPrefixIndex = new Map<string, readonly HangulCompletionAliasRecord[]>();
+  private readonly prefixLookupRecords: PrefixLookupRecord[] = [];
   private readonly prefixTermsByAliasId = new Map<string, readonly string[]>();
+  private readonly hangulCompletionRecords: HangulCompletionAliasRecord[] = [];
+  private readonly aliases: readonly IndexedAliasRecord[];
+  private readonly surfaceForms: readonly string[];
+  private compactIndexBuilt = false;
+  private broadRecallIndexesBuilt = false;
 
   constructor(
     aliases: readonly SnapshotAliasRecord[],
   ) {
+    const normalizedAliases: IndexedAliasRecord[] = [];
+    const surfaceForms: string[] = [];
+    const seenSurfaceForms = new Set<string>();
     for (const rawAlias of aliases) {
       const alias: IndexedAliasRecord = {
         ...rawAlias,
         normalizedValue: normalizeStoredAliasValue(rawAlias.normalizedValue),
       };
+      normalizedAliases.push(alias);
       this.addToIndex(this.exactIndex, alias.normalizedValue, alias);
-      for (const token of tokenizeForLookup(alias.normalizedValue)) {
-        this.addToIndex(this.wholeTokenIndex, token, alias);
-      }
-
       const compactValue = compactForLookup(alias.normalizedValue);
       if (compactValue.length > 0) {
         this.addToIndex(this.compactIndex, compactValue, alias);
       }
-
-      const phoneticValue = phoneticCompactForLookup(alias.normalizedValue);
-      if (phoneticValue.length > 0) {
-        this.addToIndex(this.phoneticIndex, phoneticValue, alias);
-      }
-
-      const dmKeys = doubleMetaphoneKeys(alias.normalizedValue);
-      this.doubleMetaphoneKeysByAliasId.set(alias.aliasId, dmKeys);
-      for (const dmKey of dmKeys) {
-        this.addToIndex(this.doubleMetaphoneIndex, dmKey, alias);
-      }
-
-      const prefixTerms = buildAliasPrefixTerms([alias.value, alias.normalizedValue]);
-      this.prefixTermsByAliasId.set(alias.aliasId, prefixTerms);
-      for (const prefixTerm of prefixTerms) {
-        for (const prefix of this.enumeratePrefixes(prefixTerm)) {
-          this.addToIndex(this.prefixIndex, prefix, alias);
-        }
-      }
-
-      for (const surface of this.buildHangulCompletionSurfaces(alias)) {
-        this.addHangulCompletionSurface(alias, surface);
+      if (!seenSurfaceForms.has(alias.value)) {
+        seenSurfaceForms.add(alias.value);
+        surfaceForms.push(alias.value);
       }
     }
+    this.aliases = normalizedAliases;
+    this.surfaceForms = surfaceForms;
+    this.compactIndexBuilt = true;
+  }
+
+  getSurfaceForms(): readonly string[] {
+    return this.surfaceForms;
   }
 
   async findMatchesBatch(
     normalizedQueries: readonly string[],
+    options?: AliasLookupOptions,
   ): Promise<ReadonlyMap<string, readonly AliasMatchResult[]>> {
     const trimmedQueries = trimDedupedQueries(normalizedQueries);
     const matches = new Map<string, readonly AliasMatchResult[]>();
     for (const query of trimmedQueries) {
-      matches.set(query, this.findMatchesSync(query));
+      matches.set(query, this.findMatchesSync(query, options));
     }
     return Promise.resolve(matches);
   }
 
-  async findMatches(normalizedQuery: string): Promise<readonly AliasMatchResult[]> {
-    return Promise.resolve(this.findMatchesSync(normalizedQuery));
+  async findMatches(
+    normalizedQuery: string,
+    options?: AliasLookupOptions,
+  ): Promise<readonly AliasMatchResult[]> {
+    return Promise.resolve(this.findMatchesSync(normalizedQuery, options));
   }
 
-  private findMatchesSync(normalizedQuery: string): readonly AliasMatchResult[] {
+  private findMatchesSync(
+    normalizedQuery: string,
+    options?: AliasLookupOptions,
+  ): readonly AliasMatchResult[] {
     const trimmed = normalizedQuery.trim();
     if (trimmed.length === 0) {
       return [];
     }
 
-    const lookupPlan = buildAliasLookupPlan(trimmed);
+    const lookupPlan = buildAliasSurfaceLookupPlan(trimmed);
     const {
       tokenList: tokens,
       compactList: compactTokens,
@@ -372,23 +419,19 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
       phoneticList: phoneticTokens,
       views,
     } = lookupPlan;
+    const queryTokens: readonly string[] = tokenizeForLookup(views.vintageStripped);
+    const isAtomicAliasQuery =
+      queryTokens.length === 1
+      && queryTokens[0] !== undefined
+      && !queryTokens[0].includes(' ');
     const exactSet = new Set(tokens);
     const compactSet = new Set(compactTokens);
     const transliteratedSet = new Set(transliteratedTokens);
     const phoneticSet = new Set(phoneticTokens);
-    // Union the Double Metaphone keys across every lookup variant so a
-    // phonetic match can fire regardless of which normalization variant
-    // happened to produce a Latin-script signal.
-    const queryDmKeys = new Set<string>();
-    for (const variant of views.lookupVariants) {
-      for (const dmKey of doubleMetaphoneKeys(variant)) {
-        queryDmKeys.add(dmKey);
-      }
-    }
-    const prefixTokens = buildAliasPrefixTerms([views.strict]).filter((token) => isEligiblePrefixQuery(token));
-    const transliteratedPrefixTokens = views.transliterated !== undefined
-      ? buildAliasPrefixTerms([views.transliterated]).filter((token) => isEligiblePrefixQuery(token))
-      : [];
+    let queryDmKeys: ReadonlySet<string> = EMPTY_DM_KEYSET;
+    let prefixTokens: readonly string[] = [];
+    let transliteratedPrefixTokens: readonly string[] = [];
+    const lookupScope = options?.scope ?? 'span';
     const candidateAliases = new Map<string, IndexedAliasRecord>();
     const grouped = new Map<string, GroupedAliasMatch>();
 
@@ -396,50 +439,81 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
       for (const alias of this.exactIndex.get(token) ?? []) {
         candidateAliases.set(alias.aliasId, alias);
       }
-      if (token.length >= MIN_WHOLE_TOKEN_LOOKUP_LENGTH && !token.includes(' ')) {
-        for (const alias of this.wholeTokenIndex.get(token) ?? []) {
+    }
+
+    let hangulCompletionMatches: readonly HangulCompletionAliasRecord[] = [];
+    if (candidateAliases.size === 0) {
+      this.ensureCompactIndex();
+      for (const token of compactTokens) {
+        for (const alias of this.compactIndex.get(token) ?? []) {
           candidateAliases.set(alias.aliasId, alias);
+        }
+      }
+      if (lookupScope === 'span') {
+        if (isAtomicAliasQuery) {
+          this.ensureBroadRecallIndexes();
+        }
+
+        for (const token of tokens) {
+          if (
+            isAtomicAliasQuery &&
+            token.length >= MIN_WHOLE_TOKEN_LOOKUP_LENGTH &&
+            !token.includes(' ')
+          ) {
+            for (const alias of this.wholeTokenIndex.get(token) ?? []) {
+              candidateAliases.set(alias.aliasId, alias);
+            }
+          }
+        }
+
+        if (isAtomicAliasQuery) {
+          const nextDmKeys = new Set<string>();
+          for (const variant of views.lookupVariants) {
+            for (const dmKey of doubleMetaphoneKeys(variant)) {
+              nextDmKeys.add(dmKey);
+            }
+          }
+          queryDmKeys = nextDmKeys;
+          prefixTokens = buildAliasPrefixTerms([views.strict])
+            .filter((token) => isEligiblePrefixQuery(token));
+          transliteratedPrefixTokens = views.transliterated !== undefined
+            ? buildAliasPrefixTerms([views.transliterated]).filter((token) => isEligiblePrefixQuery(token))
+            : [];
+
+          for (const token of phoneticTokens) {
+            for (const alias of this.phoneticIndex.get(token) ?? []) {
+              candidateAliases.set(alias.aliasId, alias);
+            }
+          }
+
+          for (const dmKey of queryDmKeys) {
+            for (const alias of this.doubleMetaphoneIndex.get(dmKey) ?? []) {
+              candidateAliases.set(alias.aliasId, alias);
+            }
+          }
+
+          for (const token of [...prefixTokens, ...transliteratedPrefixTokens]) {
+            for (const record of this.prefixLookupRecords) {
+              if (!record.prefixTerms.some((term) => matchesAliasPrefixTerm(token, term))) {
+                continue;
+              }
+              candidateAliases.set(record.alias.aliasId, record.alias);
+            }
+          }
+
+          hangulCompletionMatches = this.findHangulCompletionAliases(tokens);
         }
       }
     }
 
-    for (const token of compactTokens) {
-      for (const alias of this.compactIndex.get(token) ?? []) {
-        candidateAliases.set(alias.aliasId, alias);
-      }
-    }
-
-    for (const token of phoneticTokens) {
-      for (const alias of this.phoneticIndex.get(token) ?? []) {
-        candidateAliases.set(alias.aliasId, alias);
-      }
-    }
-
-    // Double Metaphone recall: gather every alias whose primary or
-    // alternate code shares any code with the query. This catches the
-    // foreign-origin proper-noun cases the crude vowel-strip skeleton
-    // misses (Margeaux↔Margaux, Sasicaia↔Sassicaia).
-    for (const dmKey of queryDmKeys) {
-      for (const alias of this.doubleMetaphoneIndex.get(dmKey) ?? []) {
-        candidateAliases.set(alias.aliasId, alias);
-      }
-    }
-
-    for (const token of [...prefixTokens, ...transliteratedPrefixTokens]) {
-      for (const alias of this.prefixIndex.get(token) ?? []) {
-        candidateAliases.set(alias.aliasId, alias);
-      }
-    }
-
-    const hangulCompletionMatches = this.findHangulCompletionAliases(tokens);
-
     for (const alias of candidateAliases.values()) {
       const compactValue = compactForLookup(alias.normalizedValue);
       const phoneticValue = phoneticCompactForLookup(alias.normalizedValue);
-      const aliasDmKeys = this.doubleMetaphoneKeysByAliasId.get(alias.aliasId) ?? EMPTY_DM_KEYSET;
-      const prefixTerms = this.prefixTermsByAliasId.get(alias.aliasId) ?? [];
+      const aliasDmKeys: ReadonlySet<string> =
+        this.doubleMetaphoneKeysByAliasId.get(alias.aliasId) ?? EMPTY_DM_KEYSET;
+      const prefixTerms: readonly string[] = this.prefixTermsByAliasId.get(alias.aliasId) ?? [];
       const hasWholeTokenMatch =
-        tokens.some((token) => (
+        queryTokens.some((token) => (
           token.length >= MIN_WHOLE_TOKEN_LOOKUP_LENGTH
           && !token.includes(' ')
           && tokenizeForLookup(alias.normalizedValue).includes(token)
@@ -506,7 +580,7 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
   }
 
   private addToIndex(
-    index: Map<string, readonly IndexedAliasRecord[]>,
+    index: Map<string, IndexedAliasRecord[]>,
     key: string,
     alias: IndexedAliasRecord,
   ): void {
@@ -515,70 +589,41 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
       index.set(key, [alias]);
       return;
     }
-    index.set(key, [...existing, alias]);
+    existing.push(alias);
   }
 
-  private addUniqueHangulCompletionPrefix(
-    prefix: string,
-    record: HangulCompletionAliasRecord,
-  ): void {
-    const existing = this.hangulCompletionPrefixIndex.get(prefix);
-    if (existing === undefined) {
-      this.hangulCompletionPrefixIndex.set(prefix, [record]);
-      return;
-    }
-    if (existing.some((item) => item.alias.aliasId === record.alias.aliasId && item.jamoKey === record.jamoKey)) {
-      return;
-    }
-    this.hangulCompletionPrefixIndex.set(prefix, [...existing, record]);
-  }
-
-  private enumeratePrefixes(term: string): readonly string[] {
-    const prefixes = new Set<string>();
-    for (let length = 1; length <= term.length; length += 1) {
-      const prefix = term.slice(0, length).trim();
-      if (!isEligiblePrefixQuery(prefix)) {
-        continue;
-      }
-      prefixes.add(prefix);
-    }
-    return [...prefixes];
-  }
-
-  private buildHangulCompletionSurfaces(alias: IndexedAliasRecord): readonly string[] {
-    const surfaces = new Set<string>();
+  private buildHangulCompletionRecords(alias: IndexedAliasRecord): readonly HangulCompletionAliasRecord[] {
+    const records: HangulCompletionAliasRecord[] = [];
+    const seenJamoKeys = new Set<string>();
     for (const value of [alias.value, alias.normalizedValue]) {
       const key = buildHangulJamoKey(value);
-      if (key.containsHangul && key.key.length > 0) {
-        surfaces.add(value);
+      if (key.containsHangul && key.key.length > 0 && !seenJamoKeys.has(key.key)) {
+        seenJamoKeys.add(key.key);
+        records.push({
+          alias,
+          jamoKey: key.key,
+          syllableBoundaryOffsets: key.syllableBoundaryOffsets,
+        });
       }
 
       const exceptionSurface = Transliterator.koreanExceptionSurfaceForLatinTerm(value);
       if (exceptionSurface !== undefined) {
-        surfaces.add(exceptionSurface);
+        const exceptionKey = buildHangulJamoKey(exceptionSurface);
+        if (
+          exceptionKey.containsHangul
+          && exceptionKey.key.length > 0
+          && !seenJamoKeys.has(exceptionKey.key)
+        ) {
+          seenJamoKeys.add(exceptionKey.key);
+          records.push({
+            alias,
+            jamoKey: exceptionKey.key,
+            syllableBoundaryOffsets: exceptionKey.syllableBoundaryOffsets,
+          });
+        }
       }
     }
-    return [...surfaces];
-  }
-
-  private addHangulCompletionSurface(
-    alias: IndexedAliasRecord,
-    surface: string,
-  ): void {
-    const key = buildHangulJamoKey(surface);
-    if (!key.containsHangul || key.key.length === 0) {
-      return;
-    }
-
-    const record: HangulCompletionAliasRecord = {
-      alias,
-      jamoKey: key.key,
-      syllableBoundaryOffsets: key.syllableBoundaryOffsets,
-    };
-
-    for (let prefixLength = 1; prefixLength < key.key.length; prefixLength += 1) {
-      this.addUniqueHangulCompletionPrefix(key.key.slice(0, prefixLength), record);
-    }
+    return records;
   }
 
   private findHangulCompletionAliases(
@@ -595,8 +640,11 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
         continue;
       }
 
-      for (const record of this.hangulCompletionPrefixIndex.get(key.key) ?? []) {
-        if (!record.jamoKey.startsWith(key.key)) {
+      for (const record of this.hangulCompletionRecords) {
+        if (
+          key.key.length >= record.jamoKey.length ||
+          !record.jamoKey.startsWith(key.key)
+        ) {
           continue;
         }
         matches.set(`${record.alias.aliasId}\u0000${record.jamoKey}`, record);
@@ -633,5 +681,52 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
     // Higher-trust alias_type wins so a curated sibling lifts a derived
     // sibling's tag on the same (surfaceForm, normalizedForm) key.
     existing.aliasType = pickHigherTrustAliasType(existing.aliasType, alias.aliasType);
+  }
+
+  private ensureCompactIndex(): void {
+    if (this.compactIndexBuilt) {
+      return;
+    }
+    this.compactIndexBuilt = true;
+  }
+
+  private ensureBroadRecallIndexes(): void {
+    if (this.broadRecallIndexesBuilt) {
+      return;
+    }
+
+    this.ensureCompactIndex();
+
+    for (const alias of this.aliases) {
+      for (const token of tokenizeForLookup(alias.normalizedValue)) {
+        this.addToIndex(this.wholeTokenIndex, token, alias);
+      }
+
+      const phoneticValue = phoneticCompactForLookup(alias.normalizedValue);
+      if (phoneticValue.length > 0) {
+        this.addToIndex(this.phoneticIndex, phoneticValue, alias);
+      }
+
+      const dmKeys = doubleMetaphoneKeys(alias.normalizedValue);
+      this.doubleMetaphoneKeysByAliasId.set(alias.aliasId, dmKeys);
+      for (const dmKey of dmKeys) {
+        this.addToIndex(this.doubleMetaphoneIndex, dmKey, alias);
+      }
+
+      const prefixTerms = buildAliasPrefixTerms([alias.value, alias.normalizedValue]);
+      if (prefixTerms.length > 0) {
+        this.prefixTermsByAliasId.set(alias.aliasId, prefixTerms);
+        this.prefixLookupRecords.push({
+          alias,
+          prefixTerms,
+        });
+      }
+
+      for (const record of this.buildHangulCompletionRecords(alias)) {
+        this.hangulCompletionRecords.push(record);
+      }
+    }
+
+    this.broadRecallIndexesBuilt = true;
   }
 }

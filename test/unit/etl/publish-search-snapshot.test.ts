@@ -63,6 +63,26 @@ const FIELD_AVAILABILITY = {
     totalDocCount: 1,
     populatedDocRatio: 1,
   },
+  body: {
+    populatedDocCount: 1,
+    totalDocCount: 1,
+    populatedDocRatio: 1,
+  },
+  sweetness: {
+    populatedDocCount: 1,
+    totalDocCount: 1,
+    populatedDocRatio: 1,
+  },
+  acidity: {
+    populatedDocCount: 1,
+    totalDocCount: 1,
+    populatedDocRatio: 1,
+  },
+  tannin: {
+    populatedDocCount: 1,
+    totalDocCount: 1,
+    populatedDocRatio: 1,
+  },
 } as const;
 
 function makeManifest(feedPath: string): SearchSnapshotManifest {

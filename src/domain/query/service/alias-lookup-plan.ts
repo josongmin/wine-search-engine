@@ -134,34 +134,56 @@ function addCuratedReverseRomanizations(
   }
 }
 
-export function buildAliasLookupPlan(
-  normalizedQuery: string,
-  queryViews?: NormalizedQueryViews,
-): AliasLookupPlan {
-  const views = queryViews ?? buildNormalizedQueryViews(normalizedQuery);
-  const prefixRomanized = Transliterator.romanizeWineTermPrefix(normalizedQuery);
-  const words = views.punctuationStripped.split(/\s+/).filter(Boolean);
-  const tokenSet = new Set<string>();
-  const compactSet = new Set<string>();
-  const transliteratedSet = new Set<string>();
-  const phoneticSet = new Set<string>();
-  const phoneticCompact = views.phoneticCompact;
+function addCuratedWholeSurfaceRomanizations(
+  surfaces: readonly string[],
+  tokenSet: Set<string>,
+  compactSet: Set<string>,
+): void {
+  for (const surface of surfaces) {
+    const trimmed = surface.trim();
+    if (trimmed.length === 0 || !HANGUL_RE.test(trimmed)) {
+      continue;
+    }
 
-  // ──────────────────────────────────────────────────────────────────────
-  // Pass 1: FULL variants only (no word tokenization yet).
-  //
-  // Lookup priority matters: the alias matcher iterates `tokenList` in
-  // insertion order and short-circuits as soon as an exact-like
-  // single-entity match is found above the
-  // `EXACT_LIKE_SPAN_SHORT_CIRCUIT_CONFIDENCE` bar. Therefore every
-  // multi-word identity surface (full query, transliterated variant,
-  // reordered variant, prefix romanization, curated reverse romanization)
-  // MUST appear BEFORE the per-word tokens. Otherwise an ambiguous
-  // unigram lookup ("chateau", "champagne") can latch onto a wrong entity
-  // before the unambiguous full phrase is even queried.
-  // ──────────────────────────────────────────────────────────────────────
-  for (const value of views.lookupVariants) {
-    if (value.length === 0 || (phoneticCompact !== undefined && value === phoneticCompact)) {
+    const latin = lookupCuratedKoreanToken(trimmed);
+    if (latin === undefined || latin.length === 0) {
+      continue;
+    }
+
+    const accentless = stripAccents(latin);
+    for (const variant of accentless === latin ? [latin] : [latin, accentless]) {
+      tokenSet.add(variant);
+      compactSet.add(compactForLookup(variant));
+    }
+  }
+}
+
+function buildSafeFullSurfaceVariants(views: NormalizedQueryViews): readonly string[] {
+  const reorderedVariants = new Set(views.reordered ?? []);
+  return trimDeduped(
+    views.lookupVariants.filter((value) => !reorderedVariants.has(value)),
+  );
+}
+
+function addFullSurfaceLookupVariants(
+  normalizedQuery: string,
+  views: NormalizedQueryViews,
+  tokenSet: Set<string>,
+  compactSet: Set<string>,
+  transliteratedSet: Set<string>,
+  phoneticSet: Set<string>,
+): void {
+  const prefixRomanized = Transliterator.romanizeWineTermPrefix(normalizedQuery);
+
+  for (const value of buildSafeFullSurfaceVariants(views)) {
+    if (
+      value.length === 0 ||
+      (
+        views.phoneticCompact !== undefined &&
+        value === views.phoneticCompact &&
+        value !== views.strict
+      )
+    ) {
       continue;
     }
     tokenSet.add(value);
@@ -180,8 +202,6 @@ export function buildAliasLookupPlan(
   }
 
   if (prefixRomanized !== undefined && prefixRomanized.length > 0) {
-    tokenSet.add(prefixRomanized);
-    compactSet.add(compactForLookup(prefixRomanized));
     transliteratedSet.add(prefixRomanized);
     transliteratedSet.add(compactForLookup(prefixRomanized));
   }
@@ -189,6 +209,63 @@ export function buildAliasLookupPlan(
   if (views.phoneticCompact !== undefined && views.phoneticCompact.length > 0) {
     phoneticSet.add(views.phoneticCompact);
   }
+}
+
+export function buildAliasSurfaceLookupPlan(
+  normalizedQuery: string,
+  queryViews?: NormalizedQueryViews,
+): AliasLookupPlan {
+  const views = queryViews ?? buildNormalizedQueryViews(normalizedQuery);
+  const tokenSet = new Set<string>();
+  const compactSet = new Set<string>();
+  const transliteratedSet = new Set<string>();
+  const phoneticSet = new Set<string>();
+
+  addFullSurfaceLookupVariants(
+    normalizedQuery,
+    views,
+    tokenSet,
+    compactSet,
+    transliteratedSet,
+    phoneticSet,
+  );
+  addCuratedWholeSurfaceRomanizations(
+    [
+      views.strict,
+      views.punctuationStripped,
+      views.vintageStripped,
+    ],
+    tokenSet,
+    compactSet,
+  );
+
+  return {
+    views,
+    tokenList: trimDeduped(tokenSet),
+    compactList: trimDeduped(compactSet),
+    transliteratedList: trimDeduped(transliteratedSet),
+    phoneticList: trimDeduped(phoneticSet),
+  };
+}
+
+export function buildAliasLookupPlan(
+  normalizedQuery: string,
+  queryViews?: NormalizedQueryViews,
+): AliasLookupPlan {
+  const views = queryViews ?? buildNormalizedQueryViews(normalizedQuery);
+  const words = views.punctuationStripped.split(/\s+/).filter(Boolean);
+  const tokenSet = new Set<string>();
+  const compactSet = new Set<string>();
+  const transliteratedSet = new Set<string>();
+  const phoneticSet = new Set<string>();
+  addFullSurfaceLookupVariants(
+    normalizedQuery,
+    views,
+    tokenSet,
+    compactSet,
+    transliteratedSet,
+    phoneticSet,
+  );
 
   // ──────────────────────────────────────────────────────────────────────
   // Pass 2: per-word + per-bigram tokenization.

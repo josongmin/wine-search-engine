@@ -80,6 +80,35 @@ describe('POST /v1/search — happy paths', () => {
     expect(getSearchMeta(body).route).toBe('hybrid');
   });
 
+  it.each([
+    ['모에 샹동', 'moet-brut'],
+    ['클라우디베이', 'cloudy-bay-2022'],
+  ])('high-confidence Korean exact alias %s resolves the intended entity', async (query, entityId) => {
+    const res = await postSearch({
+      query,
+      options: { mode: 'entity', explain: false, clarification: false },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = parseSearchResponse(res);
+    expect(getSearchDecision(body).decision_status).toBe('resolved');
+    expect(body.results[0]?.entity.entity_id).toBe(entityId);
+    expect(getSearchDecision(body).decision_confidence).toBe(1);
+  });
+
+  it('explicit no-match query fails closed with zero results', async () => {
+    const res = await postSearch({
+      query: '존재하지않는 와인 12345',
+      options: { mode: 'entity', explain: false, clarification: false },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = parseSearchResponse(res);
+    expect(getSearchDecision(body).decision_status).toBe('failed');
+    expect(getSearchDecision(body).next_action).toBe('fail');
+    expect(body.results).toHaveLength(0);
+  });
+
   it('explain=true entity query surfaces post-route execution trace and resolver provenance', async () => {
     const res = await postSearch({
       query: 'Opus One 2018',

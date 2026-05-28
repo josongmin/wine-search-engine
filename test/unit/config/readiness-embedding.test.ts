@@ -48,7 +48,7 @@ function makeMinimalConfig(overrides: Partial<Config['embedding']> = {}): Config
       llmQueryInterpreterTimeoutMs: 60_000,
     },
     cohere: {},
-    embedding: { model: 'test-model', ...overrides },
+    embedding: { ...overrides },
     learnedMatcher: {},
     reranker: {},
     killSwitch: { denseRetrieval: false },

@@ -4,6 +4,8 @@ import type {
   EvalBenchmarkKind,
   EvalBenchmarkRun,
   EvalBenchmarkRunInput,
+  EvalBenchmarkRunProvenance,
+  EvalBenchmarkRuntimeActivationStatus,
 } from '../../domain/evaluation/model/eval-benchmark-run.js';
 import type {
   EvalBenchmarkRunFilter,
@@ -24,7 +26,22 @@ interface EvalBenchmarkRunRow {
   mrr: number | null;
   false_exact_rate: number | null;
   release_gate_passed: boolean;
-  activation_status: string;
+  activation_status: string | null;
+  provenance_schema_version: number | null;
+  corpus_id: string | null;
+  corpus_hash: string | null;
+  runtime_target: string | null;
+  uses_live_api: boolean | null;
+  smoke_synthesized: boolean | null;
+  threshold_source: string | null;
+  gate_eligible: boolean | null;
+  suite_gate_passed: boolean | null;
+  readiness_passed: boolean | null;
+  active_ltr_models: number | null;
+  label_tier_mix: unknown;
+  slice_mix: unknown;
+  query_class_mix: unknown;
+  runtime_activation_status: string | null;
   report_json: unknown;
   metrics: unknown;
   created_at: Date;
@@ -33,8 +50,13 @@ interface EvalBenchmarkRunRow {
 const VALID_BENCHMARK_KINDS: ReadonlySet<string> = new Set([
   'noisy_entity',
   'offline_eval',
+  'offline_eval_in_memory_regression',
+  'offline_eval_live_runtime',
+  'offline_eval_embedding_sensitive_live_runtime',
   'entity_retrieval_fixture',
   'search_feature_behavior_fixture',
+  'search_feature_behavior_structural',
+  'search_feature_behavior_live',
   'agentic_tool_use_fixture',
 ] satisfies EvalBenchmarkKind[]);
 
@@ -49,7 +71,12 @@ function toEvalBenchmarkKind(raw: unknown): EvalBenchmarkKind {
   throw new Error(`Invalid benchmark_kind from DB: ${String(raw)}`);
 }
 
-function toActivationStatus(value: string): EvalBenchmarkRun['activationStatus'] {
+function toRuntimeActivationStatus(
+  value: string | null,
+): EvalBenchmarkRuntimeActivationStatus | undefined {
+  if (value == null) {
+    return undefined;
+  }
   if (value === 'activated' || value === 'shadow_only') {
     return value;
   }
@@ -73,8 +100,64 @@ function parseMetrics(raw: unknown): Readonly<Record<string, number>> | undefine
   return hasKey ? result : undefined;
 }
 
+function parseMix(raw: unknown): Readonly<Record<string, number>> | undefined {
+  if (!isPlainRecord(raw)) return undefined;
+  const result: Record<string, number> = {};
+  let hasKey = false;
+  for (const [key, value] of Object.entries(raw)) {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      result[key] = value;
+      hasKey = true;
+    }
+  }
+  return hasKey ? result : undefined;
+}
+
+function rowToProvenance(row: EvalBenchmarkRunRow): EvalBenchmarkRunProvenance | undefined {
+  if (row.provenance_schema_version == null) {
+    return undefined;
+  }
+  if (row.provenance_schema_version !== 1) {
+    throw new Error(`PgEvalBenchmarkRunStore: unknown provenance_schema_version "${String(row.provenance_schema_version)}"`);
+  }
+  if (
+    row.corpus_id == null
+    || row.corpus_hash == null
+    || row.runtime_target == null
+    || row.uses_live_api == null
+    || row.smoke_synthesized == null
+    || row.threshold_source == null
+    || row.gate_eligible == null
+    || row.suite_gate_passed == null
+  ) {
+    throw new Error('PgEvalBenchmarkRunStore: provenance schema version is present but required provenance columns are null');
+  }
+  return {
+    provenanceSchemaVersion: 1,
+    corpusId: row.corpus_id,
+    corpusHash: row.corpus_hash,
+    runtimeTarget: row.runtime_target,
+    usesLiveApi: row.uses_live_api,
+    smokeSynthesized: row.smoke_synthesized,
+    thresholdSource: row.threshold_source,
+    gateEligible: row.gate_eligible,
+    suiteGatePassed: row.suite_gate_passed,
+    ...(row.search_snapshot_id != null ? { searchSnapshotId: row.search_snapshot_id } : {}),
+    ...(toRuntimeActivationStatus(row.runtime_activation_status) !== undefined
+      ? { runtimeActivationStatus: toRuntimeActivationStatus(row.runtime_activation_status) }
+      : {}),
+    ...(row.readiness_passed == null ? {} : { readinessPassed: row.readiness_passed }),
+    ...(row.active_ltr_models == null ? {} : { activeLtrModels: row.active_ltr_models }),
+    ...(parseMix(row.label_tier_mix) !== undefined ? { labelTierMix: parseMix(row.label_tier_mix) } : {}),
+    ...(parseMix(row.slice_mix) !== undefined ? { sliceMix: parseMix(row.slice_mix) } : {}),
+    ...(parseMix(row.query_class_mix) !== undefined ? { queryClassMix: parseMix(row.query_class_mix) } : {}),
+  };
+}
+
 function rowToEvalBenchmarkRun(row: EvalBenchmarkRunRow): EvalBenchmarkRun {
   const metrics = parseMetrics(row.metrics);
+  const provenance = rowToProvenance(row);
+  const runtimeActivationStatus = toRuntimeActivationStatus(row.runtime_activation_status ?? row.activation_status);
   return {
     runId: row.run_id,
     benchmarkKind: toEvalBenchmarkKind(row.benchmark_kind),
@@ -87,7 +170,8 @@ function rowToEvalBenchmarkRun(row: EvalBenchmarkRunRow): EvalBenchmarkRun {
     ...(row.mrr === null ? {} : { mrr: row.mrr }),
     ...(row.false_exact_rate === null ? {} : { falseExactRate: row.false_exact_rate }),
     releaseGatePassed: row.release_gate_passed,
-    activationStatus: toActivationStatus(row.activation_status),
+    ...(runtimeActivationStatus !== undefined ? { runtimeActivationStatus } : {}),
+    ...(provenance !== undefined ? { provenance } : {}),
     report: isPlainRecord(row.report_json) ? row.report_json : {},
     ...(metrics != null ? { metrics } : {}),
     createdAt: row.created_at,
@@ -113,16 +197,26 @@ export class PgEvalBenchmarkRunStore implements EvalBenchmarkRunStore {
   async saveRun(run: EvalBenchmarkRunInput): Promise<string> {
     return this.withLedgerBootstrapRetry(async () => {
       const runId = nanoid();
+      const releaseGatePassed = run.provenance.gateEligible && run.provenance.suiteGatePassed;
       await this.pool.query(
         `INSERT INTO eval_benchmark_runs (
           run_id, benchmark_kind, search_snapshot_id, eval_dataset_version, feature_schema_hash,
           query_count, recall_at_1, recall_at_3, mrr, false_exact_rate,
-          release_gate_passed, activation_status, report_json, metrics, created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+          release_gate_passed, activation_status, provenance_schema_version,
+          corpus_id, corpus_hash, runtime_target, uses_live_api, smoke_synthesized,
+          threshold_source, gate_eligible, suite_gate_passed, readiness_passed,
+          active_ltr_models, label_tier_mix, slice_mix, query_class_mix,
+          runtime_activation_status, report_json, metrics, created_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+          $11, $12, $13, $14, $15, $16, $17, $18,
+          $19, $20, $21, $22, $23, $24, $25, $26,
+          $27, $28, $29, $30
+        )`,
         [
           runId,
           run.benchmarkKind,
-          run.snapshotId ?? null,
+          run.provenance.searchSnapshotId ?? null,
           run.evalDatasetVersion,
           run.featureSchemaHash,
           run.queryCount,
@@ -130,8 +224,23 @@ export class PgEvalBenchmarkRunStore implements EvalBenchmarkRunStore {
           run.recallAt3 ?? null,
           run.mrr ?? null,
           run.falseExactRate ?? null,
-          run.releaseGatePassed,
-          run.activationStatus,
+          releaseGatePassed,
+          run.provenance.runtimeActivationStatus ?? null,
+          run.provenance.provenanceSchemaVersion,
+          run.provenance.corpusId,
+          run.provenance.corpusHash,
+          run.provenance.runtimeTarget,
+          run.provenance.usesLiveApi,
+          run.provenance.smokeSynthesized,
+          run.provenance.thresholdSource,
+          run.provenance.gateEligible,
+          run.provenance.suiteGatePassed,
+          run.provenance.readinessPassed ?? null,
+          run.provenance.activeLtrModels ?? null,
+          run.provenance.labelTierMix != null ? JSON.stringify(run.provenance.labelTierMix) : null,
+          run.provenance.sliceMix != null ? JSON.stringify(run.provenance.sliceMix) : null,
+          run.provenance.queryClassMix != null ? JSON.stringify(run.provenance.queryClassMix) : null,
+          run.provenance.runtimeActivationStatus ?? null,
           JSON.stringify(run.report),
           run.metrics != null ? JSON.stringify(run.metrics) : null,
           run.createdAt ?? new Date(),
@@ -158,6 +267,9 @@ export class PgEvalBenchmarkRunStore implements EvalBenchmarkRunStore {
       if (filter?.since !== undefined) {
         conditions.push(`created_at >= $${index++}`);
         params.push(filter.since);
+      }
+      if (filter?.includeLegacy !== true) {
+        conditions.push('provenance_schema_version IS NOT NULL');
       }
 
       const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';

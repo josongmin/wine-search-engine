@@ -351,6 +351,566 @@ describe('runSearchPostRoutePhase', () => {
     expect(decide).toHaveBeenCalledTimes(1);
   });
 
+  it('passes ltrAvailable=false to abstainPolicy when reranking metadata is absent', async () => {
+    const evaluate = vi.fn().mockReturnValue(false);
+    const decide = vi.fn().mockResolvedValue({
+      decisionStatus: 'resolved',
+      nextAction: 'return_result',
+      decisionConfidence: 0.74,
+      confidenceSemantics: 'calibrated_decision_confidence',
+      selectedEntity: {
+        entityId: 'wine-1',
+        canonicalLabel: 'Barolo Example',
+        identity_signature: 'sig',
+        snapshot_ref: 'snap',
+      },
+      chosenEntityId: 'wine-1',
+      candidates: [{
+        entityId: 'wine-1',
+        canonicalLabel: 'Barolo Example',
+        calibratedScore: 0.74,
+        rank: 1,
+        evidenceRefs: ['country'],
+      }],
+      signalSet: {
+        entity_integrity_score: 1,
+        hard_constraint_pass: 1,
+        soft_constraint_score: 0.6,
+        semantic_relevance_score: 0.7,
+        preference_alignment_score: 0.4,
+        popularity_score: 0,
+        availability_score: 0,
+        uncertainty_penalty: 0,
+      },
+      evidenceItems: [],
+      decisionTraceRef: 'trace',
+      decisionSnapshot: {
+        model_versions: {},
+        index_versions: {},
+        policy_rule_version: '1.0.0',
+        threshold_profile_id: 'default',
+        planner_version: '1.0.0',
+        feature_flags: {},
+      },
+      decisionTrace: {
+        decisionStatus: 'resolved',
+        nextAction: 'return_result',
+        inputs: {
+          queryClass: 'pure_constraint',
+          effectiveRoute: 'hybrid',
+          policy: {
+            requireExact: false,
+            allowApproximate: true,
+            requireClarification: false,
+            fallbackMode: 'clarify',
+          },
+        },
+        signals: {
+          decisionConfidence: 0.74,
+          calibratedGap: 0.2,
+          ambiguity: false,
+        },
+        thresholds: {
+          resolveThreshold: 0.5,
+          gapThreshold: 0.1,
+        },
+        versions: {
+          plannerVersion: '1.0.0',
+          policyRuleVersion: '1.0.0',
+          thresholdProfileId: 'default',
+        },
+        rulesApplied: [],
+        finalReason: 'ok',
+      },
+    });
+    const response: SearchResponseV1 = {
+      queryType: 'search',
+      engineDecision: {
+        decisionStatus: 'resolved',
+        nextAction: 'return_result',
+        route: 'hybrid',
+        decisionConfidence: 0.74,
+        confidenceSemantics: 'calibrated_decision_confidence',
+        decisionTraceRef: 'trace',
+        decisionSnapshot: {
+          model_versions: {},
+          index_versions: {},
+          policy_rule_version: '1.0.0',
+          threshold_profile_id: 'default',
+          planner_version: '1.0.0',
+          feature_flags: {},
+        },
+      },
+      results: [],
+      meta: {
+        requestId: 'req-ltr-unavailable',
+        queryTimeMs: 1,
+        route: 'hybrid',
+        version: '1.0.0',
+      },
+    };
+
+    await runSearchPostRoutePhase({
+      plan: {
+        rawQuery: 'barolo under 150',
+        normalizedQuery: 'barolo under 150',
+        intent: 'facet_search',
+        queryClass: 'pure_constraint',
+        policy: {
+          requireExact: false,
+          allowApproximate: true,
+          requireClarification: false,
+          fallbackMode: 'clarify',
+          policyReasonCodes: [],
+        },
+        anchors: [],
+        uncertainty: { terms: [], confidence: 0 },
+        route: 'hybrid',
+        retrievalMode: 'constraint_filter',
+        constraints: { hard: [], soft: [], inferred: [] },
+        expansions: { lexical: [], semantic: [] },
+        policyRuleVersion: '1.0.0',
+        thresholdProfileId: 'default',
+        plannerVersion: '1.0.0',
+      } as never,
+      compiled: makeTestCompiled(),
+      request: { query: 'barolo under 150' },
+      requestId: 'req-ltr-unavailable',
+      startTime: Date.now(),
+      resolveResult: {
+        ...minimalResolveResult,
+        status: 'resolved',
+        candidates: [{
+          entityId: 'wine-1',
+          canonicalLabel: 'Barolo Example',
+          calibratedScore: 0.74,
+          rank: 1,
+          evidenceRefs: ['country'],
+        }],
+      },
+      identityResolveResult: null,
+      rankedResults: [{
+        entityId: 'wine-1',
+        canonicalLabel: 'Barolo Example',
+        finalScore: 0.74,
+        rank: 1,
+        componentScores: {
+          entityIntegrity: 1,
+          semantic: 0.74,
+          hardConstraintPass: true,
+          softConstraint: 0.6,
+          attributeAlignment: 0.6,
+          preferenceAlignment: 0.4,
+          popularity: 0,
+          availability: 0,
+          uncertaintyPenalty: 0,
+        },
+        matchedConstraints: [],
+        unmetConstraints: [],
+        inferredConstraints: [],
+        evidenceItems: [],
+      }] as RankedResult[],
+      effectiveRoute: 'hybrid',
+      laneArtifacts: EMPTY_LANE_ARTIFACTS,
+      ...GENERIC_HYBRID_EXECUTION_FACTS,
+      plannerSuggestedMode: 'constraint_filter',
+      retrievalModeSource: 'planner',
+      abstainPolicy: { shouldAbstain: vi.fn(), evaluate } as never,
+      snapshotVersions: {
+        modelVersions: {},
+        indexVersions: {},
+        featureFlags: {},
+      },
+      decisionEngine: { decide } as never,
+      responseBuilder: {
+        build: vi.fn().mockReturnValue(response),
+      } as never,
+    });
+
+    expect(evaluate).toHaveBeenCalledTimes(1);
+    expect(evaluate.mock.calls[0]?.[3]).toEqual({ ltrAvailable: false });
+  });
+
+  it('passes ltrAvailable=false to abstainPolicy for cross-encoder-only rerank metadata', async () => {
+    const evaluate = vi.fn().mockReturnValue(false);
+    const decide = vi.fn().mockResolvedValue({
+      decisionStatus: 'resolved',
+      nextAction: 'return_result',
+      decisionConfidence: 0.74,
+      confidenceSemantics: 'calibrated_decision_confidence',
+      selectedEntity: {
+        entityId: 'wine-1',
+        canonicalLabel: 'Barolo Example',
+        identity_signature: 'sig',
+        snapshot_ref: 'snap',
+      },
+      chosenEntityId: 'wine-1',
+      candidates: [{
+        entityId: 'wine-1',
+        canonicalLabel: 'Barolo Example',
+        calibratedScore: 0.74,
+        rank: 1,
+        evidenceRefs: ['country'],
+      }],
+      signalSet: {
+        entity_integrity_score: 1,
+        hard_constraint_pass: 1,
+        soft_constraint_score: 0.6,
+        semantic_relevance_score: 0.7,
+        preference_alignment_score: 0.4,
+        popularity_score: 0,
+        availability_score: 0,
+        uncertainty_penalty: 0,
+      },
+      evidenceItems: [],
+      decisionTraceRef: 'trace',
+      decisionSnapshot: {
+        model_versions: {},
+        index_versions: {},
+        policy_rule_version: '1.0.0',
+        threshold_profile_id: 'default',
+        planner_version: '1.0.0',
+        feature_flags: {},
+      },
+      decisionTrace: {
+        decisionStatus: 'resolved',
+        nextAction: 'return_result',
+        inputs: {
+          queryClass: 'semantic_preference',
+          effectiveRoute: 'hybrid',
+          policy: {
+            requireExact: false,
+            allowApproximate: true,
+            requireClarification: false,
+            fallbackMode: 'clarify',
+          },
+        },
+        signals: {
+          decisionConfidence: 0.74,
+          calibratedGap: 0.2,
+          ambiguity: false,
+        },
+        thresholds: {
+          resolveThreshold: 0.5,
+          gapThreshold: 0.1,
+        },
+        versions: {
+          plannerVersion: '1.0.0',
+          policyRuleVersion: '1.0.0',
+          thresholdProfileId: 'default',
+        },
+        rulesApplied: [],
+        finalReason: 'ok',
+      },
+    });
+    const response: SearchResponseV1 = {
+      queryType: 'search',
+      engineDecision: {
+        decisionStatus: 'resolved',
+        nextAction: 'return_result',
+        route: 'hybrid',
+        decisionConfidence: 0.74,
+        confidenceSemantics: 'calibrated_decision_confidence',
+        decisionTraceRef: 'trace',
+        decisionSnapshot: {
+          model_versions: {},
+          index_versions: {},
+          policy_rule_version: '1.0.0',
+          threshold_profile_id: 'default',
+          planner_version: '1.0.0',
+          feature_flags: {},
+        },
+      },
+      results: [],
+      meta: {
+        requestId: 'req-cross-encoder-only',
+        queryTimeMs: 1,
+        route: 'hybrid',
+        version: '1.0.0',
+      },
+    };
+
+    await runSearchPostRoutePhase({
+      plan: {
+        rawQuery: 'medium body united states red',
+        normalizedQuery: 'medium body united states red',
+        intent: 'semantic_discovery',
+        queryClass: 'semantic_preference',
+        policy: {
+          requireExact: false,
+          allowApproximate: true,
+          requireClarification: false,
+          fallbackMode: 'clarify',
+          policyReasonCodes: [],
+        },
+        anchors: [],
+        uncertainty: { terms: [], confidence: 0 },
+        route: 'hybrid',
+        retrievalMode: 'attribute_search',
+        constraints: { hard: [], soft: [], inferred: [] },
+        expansions: { lexical: [], semantic: [] },
+        policyRuleVersion: '1.0.0',
+        thresholdProfileId: 'default',
+        plannerVersion: '1.0.0',
+      } as never,
+      compiled: makeTestCompiled(),
+      request: { query: 'medium body united states red' },
+      requestId: 'req-cross-encoder-only',
+      startTime: Date.now(),
+      resolveResult: {
+        ...minimalResolveResult,
+        status: 'resolved',
+        candidates: [{
+          entityId: 'wine-1',
+          canonicalLabel: 'Barolo Example',
+          calibratedScore: 0.74,
+          rank: 1,
+          evidenceRefs: ['country'],
+        }],
+      },
+      identityResolveResult: null,
+      rankedResults: [{
+        entityId: 'wine-1',
+        canonicalLabel: 'Barolo Example',
+        finalScore: 0.74,
+        rank: 1,
+        componentScores: {
+          entityIntegrity: 1,
+          semantic: 0.74,
+          hardConstraintPass: true,
+          softConstraint: 0.6,
+          attributeAlignment: 0.6,
+          preferenceAlignment: 0.4,
+          popularity: 0,
+          availability: 0,
+          uncertaintyPenalty: 0,
+        },
+        matchedConstraints: [],
+        unmetConstraints: [],
+        inferredConstraints: [],
+        evidenceItems: [],
+      }] as RankedResult[],
+      rankingMetadata: {
+        coarsePruneSummary: undefined,
+        rerankExecuted: true,
+        rerankGateReason: undefined,
+        rerankDecision: {
+          applied: true,
+          decision: 'applied',
+          modelId: 'rerank-v4.0-pro',
+          inputCount: 20,
+          outputCount: 20,
+        },
+        runtimeSignal: undefined,
+        preRerankTop5: ['wine-1'],
+      },
+      effectiveRoute: 'hybrid',
+      laneArtifacts: EMPTY_LANE_ARTIFACTS,
+      ...GENERIC_HYBRID_EXECUTION_FACTS,
+      plannerSuggestedMode: 'attribute_search',
+      retrievalModeSource: 'planner',
+      abstainPolicy: { shouldAbstain: vi.fn(), evaluate } as never,
+      snapshotVersions: {
+        model_versions: {},
+        index_versions: {},
+        feature_flags: {},
+      },
+      decisionEngine: { decide } as never,
+      responseBuilder: {
+        build: vi.fn().mockReturnValue(response),
+      } as never,
+    });
+
+    expect(evaluate).toHaveBeenCalledTimes(1);
+    expect(evaluate.mock.calls[0]?.[3]).toEqual({ ltrAvailable: false });
+  });
+
+  it('keeps routeHealthy=true for mixed constraint-guided hybrid fallback degradations', async () => {
+    const evaluate = vi.fn().mockReturnValue(false);
+    const decide = vi.fn().mockResolvedValue({
+      decisionStatus: 'resolved',
+      nextAction: 'return_result',
+      decisionConfidence: 0.74,
+      confidenceSemantics: 'calibrated_decision_confidence',
+      selectedEntity: {
+        entityId: 'wine-1',
+        canonicalLabel: 'Barolo Example',
+        identity_signature: 'sig',
+        snapshot_ref: 'snap',
+      },
+      chosenEntityId: 'wine-1',
+      candidates: [{
+        entityId: 'wine-1',
+        canonicalLabel: 'Barolo Example',
+        calibratedScore: 0.74,
+        rank: 1,
+        evidenceRefs: ['country'],
+      }],
+      signalSet: {
+        entity_integrity_score: 1,
+        hard_constraint_pass: 1,
+        soft_constraint_score: 0.6,
+        semantic_relevance_score: 0.7,
+        preference_alignment_score: 0.4,
+        popularity_score: 0,
+        availability_score: 0,
+        uncertainty_penalty: 0,
+      },
+      evidenceItems: [],
+      decisionTraceRef: 'trace',
+      decisionSnapshot: {
+        model_versions: {},
+        index_versions: {},
+        policy_rule_version: '1.0.0',
+        threshold_profile_id: 'default',
+        planner_version: '1.0.0',
+        feature_flags: {},
+      },
+      decisionTrace: {
+        decisionStatus: 'resolved',
+        nextAction: 'return_result',
+        inputs: {
+          queryClass: 'pure_constraint',
+          effectiveRoute: 'hybrid',
+          policy: {
+            requireExact: false,
+            allowApproximate: true,
+            requireClarification: false,
+            fallbackMode: 'clarify',
+          },
+        },
+        signals: {
+          decisionConfidence: 0.74,
+          calibratedGap: 0.2,
+          ambiguity: false,
+        },
+        thresholds: {
+          resolveThreshold: 0.5,
+          gapThreshold: 0.1,
+        },
+        versions: {
+          plannerVersion: '1.0.0',
+          policyRuleVersion: '1.0.0',
+          thresholdProfileId: 'default',
+        },
+        rulesApplied: [],
+        finalReason: 'ok',
+      },
+    });
+    const response: SearchResponseV1 = {
+      queryType: 'search',
+      engineDecision: {
+        decisionStatus: 'resolved',
+        nextAction: 'return_result',
+        route: 'hybrid',
+        decisionConfidence: 0.74,
+        confidenceSemantics: 'calibrated_decision_confidence',
+        decisionTraceRef: 'trace',
+        decisionSnapshot: {
+          model_versions: {},
+          index_versions: {},
+          policy_rule_version: '1.0.0',
+          threshold_profile_id: 'default',
+          planner_version: '1.0.0',
+          feature_flags: {},
+        },
+      },
+      results: [],
+      meta: {
+        requestId: 'req-mixed-fallback-health',
+        queryTimeMs: 1,
+        route: 'hybrid',
+        version: '1.0.0',
+      },
+    };
+
+    await runSearchPostRoutePhase({
+      plan: {
+        rawQuery: 'barolo under 150',
+        normalizedQuery: 'barolo under 150',
+        intent: 'facet_search',
+        queryClass: 'pure_constraint',
+        policy: {
+          requireExact: false,
+          allowApproximate: true,
+          requireClarification: false,
+          fallbackMode: 'clarify',
+          policyReasonCodes: [],
+        },
+        anchors: [],
+        uncertainty: { terms: [], confidence: 0 },
+        route: 'hybrid',
+        retrievalMode: 'constraint_filter',
+        constraints: { hard: [], soft: [], inferred: [] },
+        expansions: { lexical: [], semantic: [] },
+        policyRuleVersion: '1.0.0',
+        thresholdProfileId: 'default',
+        plannerVersion: '1.0.0',
+      } as never,
+      compiled: makeTestCompiled(),
+      request: { query: 'barolo under 150' },
+      requestId: 'req-mixed-fallback-health',
+      startTime: Date.now(),
+      resolveResult: {
+        ...minimalResolveResult,
+        status: 'resolved',
+        candidates: [{
+          entityId: 'wine-1',
+          canonicalLabel: 'Barolo Example',
+          calibratedScore: 0.74,
+          rank: 1,
+          evidenceRefs: ['country'],
+        }],
+      },
+      identityResolveResult: null,
+      rankedResults: [{
+        entityId: 'wine-1',
+        canonicalLabel: 'Barolo Example',
+        finalScore: 0.74,
+        rank: 1,
+        componentScores: {
+          entityIntegrity: 1,
+          semantic: 0.74,
+          hardConstraintPass: true,
+          softConstraint: 0.6,
+          attributeAlignment: 0.6,
+          preferenceAlignment: 0.4,
+          popularity: 0,
+          availability: 0,
+          uncertaintyPenalty: 0,
+        },
+        matchedConstraints: [],
+        unmetConstraints: [],
+        inferredConstraints: [],
+        evidenceItems: [],
+      }] as RankedResult[],
+      effectiveRoute: 'hybrid',
+      laneArtifacts: EMPTY_LANE_ARTIFACTS,
+      ...GENERIC_HYBRID_EXECUTION_FACTS,
+      plannerSuggestedMode: 'constraint_filter',
+      retrievalModeSource: 'planner',
+      abstainPolicy: { shouldAbstain: vi.fn(), evaluate } as never,
+      snapshotVersions: {
+        modelVersions: {},
+        indexVersions: {},
+        featureFlags: {},
+      },
+      routeDegradation: {
+        executionMode: 'degraded',
+        degradationReasons: ['mixed_constraint_guided_hybrid_fallback'],
+      },
+      decisionEngine: { decide } as never,
+      responseBuilder: {
+        build: vi.fn().mockReturnValue(response),
+      } as never,
+    });
+
+    expect(decide).toHaveBeenCalledTimes(1);
+    expect(decide.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ routeHealthy: true, executionMode: 'degraded' }),
+    );
+  });
+
   it('stores entropy-abstain responses in the cache', async () => {
     const response: SearchResponseV1 = {
       queryType: 'search',

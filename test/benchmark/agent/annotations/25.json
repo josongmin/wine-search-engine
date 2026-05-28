@@ -9,7 +9,7 @@
     ],
     "soft": [
       { "attribute": "tannin", "operator": "<=", "value": 0.5 },
-      { "attribute": "max_price_krw", "operator": "<=", "value": 30000 }
+      { "attribute": "price_usd", "operator": "<=", "value": 22.22 }
     ]
   },
   "expectedClaims": {

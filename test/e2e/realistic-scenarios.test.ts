@@ -128,6 +128,36 @@ describe('Realistic Scenarios — semantic and multilingual smoke', () => {
     expect(body.results.length).toBeGreaterThan(0);
     expect(getSearchMeta(body).route).toMatch(/^(hybrid|mixed)$/);
   });
+
+  it("'호주 쉬라즈 풀바디' resolves Penfolds Grange at top-1", async () => {
+    const body = await search({
+      query: '호주 쉬라즈 풀바디',
+      options: { mode: 'hybrid', explain: false, clarification: false },
+    });
+
+    expect(getSearchDecisionStatus(body)).toBe('resolved');
+    expect(getSearchEntityIds(body)[0]).toBe('penfolds-grange-2017');
+  });
+
+  it("'상큼한 화이트 와인' resolves Cloudy Bay at top-1", async () => {
+    const body = await search({
+      query: '상큼한 화이트 와인',
+      options: { mode: 'hybrid', explain: false, clarification: false },
+    });
+
+    expect(getSearchDecisionStatus(body)).toBe('resolved');
+    expect(getSearchEntityIds(body)[0]).toBe('cloudy-bay-2022');
+  });
+
+  it("'풀바디 레드 와인' resolves as a list-shaped exploratory query", async () => {
+    const body = await search({
+      query: '풀바디 레드 와인',
+      options: { mode: 'hybrid', explain: false, clarification: false },
+    });
+
+    expect(getSearchDecisionStatus(body)).toBe('resolved');
+    expect(getSearchEntityIds(body).slice(0, 5)).toContain('opus-one-2018');
+  });
 });
 
 describe('Benchmark #88 regression', () => {

@@ -21,6 +21,7 @@
 
 import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
+import path from 'node:path';
 import { parseNdjson } from '../etl/ndjson.js';
 import type {
   EnrichedSilverRecord,
@@ -32,8 +33,14 @@ import type {
 import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 import {
   buildEntityIdBySourceId,
+  loadActiveSourceEntityContinuity,
   loadGoldCanonicalLookupForBuild,
+  loadSourceEntityContinuityFromManifestPath,
 } from '../etl/snapshot-entity-identity.js';
+import {
+  inferGoldenQueryLanguage,
+  selectExactEntityGoldenQuerySurface,
+} from './golden-query-corpus-contract.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -41,6 +48,7 @@ import {
 
 const DEFAULT_INPUT = resolveDataPath('data/silver-docquery.ndjson');
 const DEFAULT_OUTPUT = resolveDataPath('data/golden-queries-bronze.snapshot.jsonl');
+const DEFAULT_SEARCH_SNAPSHOT_ROOT_DIR = resolveDataPath('data/search-snapshots');
 const RUN_ID = `run-${new Date().toISOString().slice(0, 10)}-001`;
 
 // Scenario targets (total = 500)
@@ -81,10 +89,17 @@ interface Args {
   output: string;
   /** Optional path to wine-engine-fixture (ADR-007 gold canonical overlay). */
   fixtureRepo?: string | undefined;
+  snapshotId?: string | undefined;
+  snapshotRootDir: string;
+  manifestPath?: string | undefined;
 }
 
 function parseArgs(argv: string[]): Args {
-  const out: Args = { input: DEFAULT_INPUT, output: DEFAULT_OUTPUT };
+  const out: Args = {
+    input: DEFAULT_INPUT,
+    output: DEFAULT_OUTPUT,
+    snapshotRootDir: DEFAULT_SEARCH_SNAPSHOT_ROOT_DIR,
+  };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--input' || a === '-i') out.input = argv[++i] ?? DEFAULT_INPUT;
@@ -92,6 +107,17 @@ function parseArgs(argv: string[]): Args {
     else if (a === '--fixture-repo') {
       const next = argv[++i];
       if (next != null && next.length > 0) out.fixtureRepo = next;
+    }
+    else if (a === '--snapshot-id') {
+      const next = argv[++i];
+      if (next != null && next.length > 0) out.snapshotId = next;
+    }
+    else if (a === '--snapshot-root-dir') {
+      out.snapshotRootDir = argv[++i] ?? DEFAULT_SEARCH_SNAPSHOT_ROOT_DIR;
+    }
+    else if (a === '--manifest-path') {
+      const next = argv[++i];
+      if (next != null && next.length > 0) out.manifestPath = next;
     }
   }
   return out;
@@ -113,6 +139,10 @@ function aliasCluster(record: EnrichedSilverRecord): string {
 
 function removeAccents(text: string): string {
   return text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').normalize('NFC');
+}
+
+function stableCorpusOrderKey(sourceId: string): string {
+  return crypto.createHash('sha256').update(sourceId).digest('hex');
 }
 
 /** Build a same-producer relevance set (ADR-007: `entity_id` is canonical public identity). */
@@ -153,16 +183,14 @@ type QueryGen = (
 
 const scenarioA: QueryGen = (rec, all, idx, cid) => {
   // Exact entity with full name + vintage
-  const lang = assignLanguage(idx);
-  const query = lang === 'ko' && rec.aliases.noisyRecallProjection.length > 0
-    ? rec.aliases.noisyRecallProjection[0]!
-    : rec.canonicalLabel;
+  const query = selectExactEntityGoldenQuerySurface(rec);
+  if (query == null) return null;
   return {
     qid: makeQid('A', idx),
     query,
     query_class: 'exact_entity',
     scenario: 'A',
-    language: lang,
+    language: inferGoldenQueryLanguage(query),
     retrieval_labels: {
       relevant: buildProducerRelevanceSet(rec, all, cid),
     },
@@ -187,7 +215,6 @@ const scenarioA: QueryGen = (rec, all, idx, cid) => {
 
 const scenarioB: QueryGen = (rec, _all, idx, cid) => {
   // Short / ambiguous alias (producer only, no vintage)
-  const lang = assignLanguage(idx);
   const query = rec.producer;
   if (query.length < 3) return null;
   return {
@@ -195,7 +222,7 @@ const scenarioB: QueryGen = (rec, _all, idx, cid) => {
     query,
     query_class: 'ambiguous_short_form',
     scenario: 'B',
-    language: lang,
+    language: inferGoldenQueryLanguage(query),
     retrieval_labels: {
       relevant: [{ entity_id: cid(rec), grade: 2 }],
     },
@@ -244,7 +271,7 @@ const scenarioC: QueryGen = (rec, _all, idx, cid) => {
     query,
     query_class: 'semantic_preference',
     scenario: 'C',
-    language: lang,
+    language: inferGoldenQueryLanguage(query),
     retrieval_labels: {
       relevant: [{ entity_id: cid(rec), grade: 2 }],
     },
@@ -296,7 +323,7 @@ const scenarioD: QueryGen = (rec, _all, idx, cid) => {
     query,
     query_class: 'pure_constraint',
     scenario: 'D',
-    language: lang,
+    language: inferGoldenQueryLanguage(query),
     retrieval_labels: {
       relevant: [{ entity_id: cid(rec), grade: 2 }],
     },
@@ -331,7 +358,7 @@ const scenarioE: QueryGen = (rec, _all, idx, cid) => {
     query,
     query_class: 'exploration',
     scenario: 'E',
-    language: lang,
+    language: inferGoldenQueryLanguage(query),
     retrieval_labels: {
       relevant: [{ entity_id: cid(rec), grade: 1 }],
     },
@@ -390,7 +417,7 @@ const scenarioF: QueryGen = (rec, all, idx, cid) => {
     query,
     query_class: 'similar_compare',
     scenario: 'F',
-    language: lang,
+    language: inferGoldenQueryLanguage(query),
     retrieval_labels: {
       // Seed entity = grade 0 (it's not a "similar wine" to itself).
       // Actual similar wines get grade 2-3.
@@ -438,7 +465,7 @@ const scenarioG: QueryGen = (rec, all, idx, cid) => {
     query,
     query_class: 'catalog_browse',
     scenario: 'G',
-    language: lang,
+    language: inferGoldenQueryLanguage(query),
     retrieval_labels: { relevant: producerWines },
     decision_labels: {
       expected_decision_status: 'resolved',
@@ -460,7 +487,6 @@ const scenarioG: QueryGen = (rec, all, idx, cid) => {
 
 const scenarioH: QueryGen = (rec, _all, idx, cid) => {
   // Noisy / typo query
-  const lang = assignLanguage(idx);
   const folded = removeAccents(rec.canonicalLabel).toLowerCase();
   const vintage = rec.vintageYear
     ? ` ${String(rec.vintageYear).slice(2)}`
@@ -471,7 +497,7 @@ const scenarioH: QueryGen = (rec, _all, idx, cid) => {
     query,
     query_class: 'noisy_recall',
     scenario: 'H',
-    language: lang,
+    language: inferGoldenQueryLanguage(query),
     retrieval_labels: {
       relevant: [{ entity_id: cid(rec), grade: 3 }],
     },
@@ -557,13 +583,13 @@ function generateNoMatchQueries(count: number): GoldenQuery[] {
 
   for (let i = 0; i < Math.min(count, fictitious.length); i++) {
     const name = fictitious[i]!;
-    const lang = name.match(/[가-힣]/) ? 'ko' : 'en';
+    const lang = inferGoldenQueryLanguage(name);
     queries.push({
       qid: makeQid('no_match', i),
       query: name,
       query_class: 'no_match',
       scenario: 'no_match',
-      language: lang as 'en' | 'ko',
+      language: lang,
       retrieval_labels: { relevant: [] },
       decision_labels: {
         expected_decision_status: 'failed',
@@ -599,7 +625,14 @@ async function run(): Promise<void> {
   console.log(`  Loaded ${records.length} records`);
 
   const goldLookup = await loadGoldCanonicalLookupForBuild({ fixtureRepoRoot: args.fixtureRepo });
-  const sourceToCanonical = buildEntityIdBySourceId(records, goldLookup);
+  const sourceContinuityLookup = args.manifestPath != null
+    ? await loadSourceEntityContinuityFromManifestPath(args.manifestPath)
+    : args.snapshotId != null
+      ? await loadSourceEntityContinuityFromManifestPath(
+          path.join(args.snapshotRootDir, args.snapshotId, 'manifest.json'),
+        )
+      : await loadActiveSourceEntityContinuity();
+  const sourceToCanonical = buildEntityIdBySourceId(records, goldLookup, sourceContinuityLookup);
   const canonicalEntityId: CanonicalEntityIdOf = (r) => {
     const id = sourceToCanonical.get(r.sourceId);
     if (id === undefined) {
@@ -608,9 +641,9 @@ async function run(): Promise<void> {
     return id;
   };
 
-  // Shuffle records for random sampling
-  const shuffled = [...records].sort(
-    () => crypto.randomBytes(4).readUInt32LE(0) / 0xffffffff - 0.5,
+  // Deterministic corpus ordering keeps benchmark regeneration replayable.
+  const shuffled = [...records].sort((left, right) =>
+    stableCorpusOrderKey(left.sourceId).localeCompare(stableCorpusOrderKey(right.sourceId)),
   );
 
   const allQueries: GoldenQuery[] = [];

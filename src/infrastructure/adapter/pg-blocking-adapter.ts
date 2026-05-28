@@ -69,7 +69,10 @@ export class PgBlockingAdapter implements BlockingPort {
    */
   private static readonly TRIGRAM_FUZZY_LIMIT = 50;
 
-  constructor(private readonly pool: Pool) {}
+  constructor(
+    private readonly pool: Pool,
+    private readonly snapshotIdOverride?: string,
+  ) {}
 
   async block(
     query: string,
@@ -83,31 +86,33 @@ export class PgBlockingAdapter implements BlockingPort {
     //             and morphological variants the substring matches miss
     //             (e.g. Sasicaia → Sassicaia, 샤또 → 샤토).
     // All four unioned, deduplicated, ordered by priority.
-    let activeSnapshotId: string;
-    try {
-      ({ activeSnapshotId } = await resolveActiveSnapshot(this.pool));
-    } catch (err: unknown) {
-      if (readPgSqlState(err) === '42P01') {
-        if (!isActiveSnapshotSubstrateBootstrapAllowed()) {
-          throw err;
+    let activeSnapshotId = this.snapshotIdOverride;
+    if (activeSnapshotId === undefined) {
+      try {
+        ({ activeSnapshotId } = await resolveActiveSnapshot(this.pool));
+      } catch (err: unknown) {
+        if (readPgSqlState(err) === '42P01') {
+          if (!isActiveSnapshotSubstrateBootstrapAllowed()) {
+            throw err;
+          }
+          // Snapshot pointer table missing = fresh DB, pre-publish. This is
+          // distinct from "aliases table exists but query failed" (counted
+          // below) — operators need the distinction to decide between
+          // "publish a snapshot" vs "investigate PG outage".
+          globalSilentSkipCounter.increment('blocker_disabled_snapshot_pointer_missing', {
+            surface: 'PgBlockingAdapter',
+          });
+          bootstrapLogger.info(
+            '[PgBlockingAdapter] active_search_snapshot table missing — blocker alias lookup disabled for this request',
+          );
+          return [];
         }
-        // Snapshot pointer table missing = fresh DB, pre-publish. This is
-        // distinct from "aliases table exists but query failed" (counted
-        // below) — operators need the distinction to decide between
-        // "publish a snapshot" vs "investigate PG outage".
-        globalSilentSkipCounter.increment('blocker_disabled_snapshot_pointer_missing', {
+        globalSilentSkipCounter.increment('blocker_snapshot_resolve_failure', {
           surface: 'PgBlockingAdapter',
+          errorClass: err instanceof Error ? err.constructor.name : 'unknown',
         });
-        bootstrapLogger.info(
-          '[PgBlockingAdapter] active_search_snapshot table missing — blocker alias lookup disabled for this request',
-        );
-        return [];
+        throw err;
       }
-      globalSilentSkipCounter.increment('blocker_snapshot_resolve_failure', {
-        surface: 'PgBlockingAdapter',
-        errorClass: err instanceof Error ? err.constructor.name : 'unknown',
-      });
-      throw err;
     }
     const lookupVariants = buildBlockingLookupVariants(query, normalizedQuery);
     const prefixPatterns = lookupVariants.map((variant) => `${escapeLikePattern(variant)}%`);

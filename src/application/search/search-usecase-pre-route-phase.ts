@@ -17,6 +17,7 @@ import { buildPlannerContextFromSearchRequest } from './search-usecase-planner-c
 import { createSearchQuerySecurityGate, type SearchSecurityGateDeps } from './search-usecase-security-gate.js';
 import { logSearchEvent } from '../../domain/observability/log-search-event.js';
 import { pipelineDebug } from '../../domain/observability/request-pipeline-debug.js';
+import { PipelineDebugStep } from '../../domain/observability/pipeline-debug-steps.js';
 import { planToObservabilitySlice } from '../../domain/query/model/query-observability-vocab.js';
 import { compileFromLegacyPlan } from './search-usecase-compiled-fallback.js';
 import { buildRetrievalPlan } from '../../domain/retrieval/service/retrieval-plan-builder.js';
@@ -29,8 +30,10 @@ import { isConstraintGraphEmitEnabled } from '../../domain/query/service/constra
 import { liftBundleToAtoms } from '../../domain/shared/types/constraint-atom.js';
 import {
   isAppellationHardFilterAvailable,
+  isSensorySoftPromotionAvailable,
   type SearchSnapshotFieldAvailability,
 } from '../../domain/shared/types/search-field-availability.js';
+import type { NormalizedConstraint } from '../../domain/shared/types/index.js';
 
 /** Hard timeout for decomposed (multi-sub-query) search execution. */
 const DECOMPOSED_SEARCH_TIMEOUT_MS = 15_000;
@@ -57,6 +60,7 @@ const STRUCTURED_SET_RETRIEVAL_FILTER_ATTRIBUTES = new Set([
 const STRUCTURED_RECOMMENDATION_DEFAULT_MAX_CANDIDATES = 20;
 const STRUCTURED_RECOMMENDATION_DEFAULT_RERANK_LIMIT = 20;
 const PRE_ROUTE_ABORTED = Symbol('pre_route_aborted');
+const SENSORY_SOFT_PROMOTION_ATTRIBUTES = ['body', 'sweetness', 'acidity', 'tannin'] as const;
 
 type SearchPreRouteEarlyResponse = SearchResponseV1 | ComparisonSearchResponse;
 
@@ -176,9 +180,8 @@ function applyAppellationDataAvailabilityDemotion(
 
   // Re-tag demoted constraints with a dedicated mapping_version so the
   // soft-promotion path in constraint-to-sparse-filter-tokens.ts does NOT
-  // re-promote them to hard YQL filters (the allow-list there only trusts
-  // rule-based-v1.0 / entity-resolver-v1.0 / v1.0 — our tag is not in
-  // that set, by design).
+  // re-promote them to hard YQL filters. Authority is deny-by-default, and
+  // this seam never reassigns allow on demoted appellation constraints.
   const demotedSoft = appellationHard.map((constraint) => ({
     ...constraint,
     mapping_version: APPELLATION_DEMOTION_MAPPING_VERSION,
@@ -196,6 +199,51 @@ function applyAppellationDataAvailabilityDemotion(
   return rebuildCompiledForConstraintMutation({
     ...plan,
     constraints,
+  }, compiled);
+}
+
+function applySensorySoftPromotionCapabilityPolicy(
+  plan: QueryPlanV1,
+  compiled: CompiledWineQuery,
+  fieldAvailability?: SearchSnapshotFieldAvailability,
+): { readonly plan: QueryPlanV1; readonly compiled: CompiledWineQuery } {
+  const soft: NormalizedConstraint[] = plan.constraints.soft.map((constraint) => {
+    if (!SENSORY_SOFT_PROMOTION_ATTRIBUTES.includes(
+      constraint.attribute as (typeof SENSORY_SOFT_PROMOTION_ATTRIBUTES)[number],
+    )) {
+      return constraint;
+    }
+
+    const attribute = constraint.attribute as (typeof SENSORY_SOFT_PROMOTION_ATTRIBUTES)[number];
+    if (isSensorySoftPromotionAvailable(fieldAvailability, attribute)) {
+      if (constraint.soft_promotion_authority === 'allow') {
+        return constraint;
+      }
+      return {
+        ...constraint,
+        soft_promotion_authority: 'allow' as const,
+      };
+    }
+
+    if (constraint.soft_promotion_authority === undefined) {
+      return constraint;
+    }
+
+    const { soft_promotion_authority: _drop, ...withoutAuthority } = constraint;
+    return withoutAuthority;
+  });
+
+  const changed = soft.some((constraint, index) => constraint !== plan.constraints.soft[index]);
+  if (!changed) {
+    return { plan, compiled };
+  }
+
+  return rebuildCompiledForConstraintMutation({
+    ...plan,
+    constraints: {
+      ...plan.constraints,
+      soft,
+    },
   }, compiled);
 }
 
@@ -387,7 +435,7 @@ export async function runSearchPreRoutePhase(
         if (decomposedSearchTimeoutMs <= 0) {
           pipelineDebug(
             {
-              step: 'pre_route.decomposed_comparison',
+              step: PipelineDebugStep.PRE_ROUTE_DECOMPOSED_COMPARISON,
               decomposition_strategy: decomposition.hint.strategy,
               skipped_due_to_budget: true,
             },
@@ -469,7 +517,7 @@ export async function runSearchPreRoutePhase(
           if (decomposedResponse === timeoutSignal) {
             pipelineDebug(
               {
-                step: 'pre_route.decomposed_comparison',
+                step: PipelineDebugStep.PRE_ROUTE_DECOMPOSED_COMPARISON,
                 decomposition_strategy: decomposition.hint.strategy,
                 timed_out: true,
               },
@@ -483,7 +531,7 @@ export async function runSearchPreRoutePhase(
             });
             pipelineDebug(
               {
-                step: 'pre_route.decomposed_comparison',
+                step: PipelineDebugStep.PRE_ROUTE_DECOMPOSED_COMPARISON,
                 decomposition_strategy: decomposition.hint.strategy,
               },
               'pipeline pre_route comparison branch',
@@ -610,6 +658,12 @@ export async function runSearchPreRoutePhase(
       ctx.fieldAvailability,
     ));
 
+    ({ plan, compiled } = applySensorySoftPromotionCapabilityPolicy(
+      plan,
+      compiled,
+      ctx.fieldAvailability,
+    ));
+
     logSearchEvent({
       runtime_correlation_ref: ctx.requestId,
       query_observability: planToObservabilitySlice(ctx.requestId, plan, compiled),
@@ -622,7 +676,7 @@ export async function runSearchPreRoutePhase(
     if (satResult.contradicted) {
       pipelineDebug(
         {
-          step: 'pre_route.constraint_contradiction',
+          step: PipelineDebugStep.PRE_ROUTE_CONSTRAINT_CONTRADICTION,
           query_class: plan.queryClass,
           conflict_pairs: satResult.conflictPairs.length,
         },
@@ -660,7 +714,7 @@ export async function runSearchPreRoutePhase(
       if (cached !== undefined) {
         pipelineDebug(
           {
-            step: 'pre_route.cache_hit',
+            step: PipelineDebugStep.PRE_ROUTE_CACHE_HIT,
             query_class: plan.queryClass,
           },
           'pipeline pre_route cache hit',
@@ -676,7 +730,7 @@ export async function runSearchPreRoutePhase(
 
     pipelineDebug(
       {
-        step: 'pre_route.continue',
+        step: PipelineDebugStep.PRE_ROUTE_CONTINUE,
         query_class: plan.queryClass,
         plan_route: plan.route,
         compiled_route: compiled.execution.effectiveRoute,

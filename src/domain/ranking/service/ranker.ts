@@ -1,5 +1,5 @@
 import type { CanonicalEntityId, QueryClass } from '../../shared/types/index.js';
-import { liftBundleToAtoms } from '../../shared/types/index.js';
+import { isBindingInferredConstraint, liftBundleToAtoms } from '../../shared/types/index.js';
 import type { ConstraintGraph } from '../../query/model/constraint-graph.js';
 import type { HybridCandidate } from '../../retrieval/model/hybrid-candidate.js';
 import type {
@@ -670,6 +670,9 @@ function buildQueryConstraintContext(input: RankingInput): QueryConstraintContex
   const inferredSeen = new Set<string>();
   const inferredConstraints: string[] = [];
   for (const constraint of input.constraints.inferred) {
+    if (!isBindingInferredConstraint(constraint)) {
+      continue;
+    }
     if (!inferredSeen.has(constraint.attribute)) {
       inferredSeen.add(constraint.attribute);
       inferredConstraints.push(constraint.attribute);
@@ -888,7 +891,11 @@ export class Ranker {
     // After overlay, re-normalise so the non-penalty sum is preserved —
     // otherwise Math.max can inflate the total (e.g. popularity 0.02→0.15
     // adds +0.13).
-    const overlaid: ScoringWeights = applyModeWeightOverlay(baseWeights, modeProfile);
+    const overlaid: ScoringWeights = applyModeWeightOverlay(
+      baseWeights,
+      modeProfile,
+      effectiveRetrievalMode,
+    );
     const baseSum = sumNonPenaltyWeights(baseWeights);
     const overlaidSum = sumNonPenaltyWeights(overlaid);
     // Guard: avoid division by zero when overlaidSum === 0 (all weights zero).

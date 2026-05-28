@@ -76,6 +76,28 @@ describe('Golden Set — semantic quality', () => {
     const body = await searchHybrid('Moet Brut');
     expect(getSearchEntityIds(body).slice(0, 5)).toContain('moet-brut');
   });
+
+  it("'상큼한 화이트 와인' keeps cloudy-bay-2022 in the top-3", async () => {
+    const body = await searchHybrid('상큼한 화이트 와인');
+    expect(getSearchEntityIds(body).slice(0, 3)).toContain('cloudy-bay-2022');
+  });
+
+  it("'호주 쉬라즈 풀바디' keeps penfolds-grange-2017 in the top-3", async () => {
+    const body = await searchHybrid('호주 쉬라즈 풀바디');
+    expect(getSearchEntityIds(body).slice(0, 3)).toContain('penfolds-grange-2017');
+  });
+
+  it("'강한 타닌 네비올로' keeps barolo-giacomo in the top-3", async () => {
+    const body = await searchHybrid('강한 타닌 네비올로');
+    expect(getSearchEntityIds(body).slice(0, 3)).toContain('barolo-giacomo');
+  });
+});
+
+describe('Golden Set — fail-closed safety', () => {
+  it("'존재하지않는 와인 12345' remains failed", async () => {
+    const body = await searchHybrid('존재하지않는 와인 12345');
+    expect(body.engine_decision.decision_status).toBe('failed');
+  });
 });
 
 describe('Golden Set — ranking invariants', () => {

@@ -112,29 +112,7 @@ function extractShortName(producer: string): string | null {
 export function generateAliases(record: SilverWineRecord): AliasBundle {
   const proposed: ProposedAlias[] = [];
 
-  // 1. Producer identity (high confidence)
-  if (record.producer.length > 0) {
-    proposed.push({
-      value: record.producer,
-      type: 'translation',
-      source: 'rule:producer_identity_v1',
-      confidencePrior: 0.95,
-      needsReview: false,
-    });
-  }
-
-  // 2. Producer + vintage
-  if (record.producer.length > 0 && record.vintageYear !== null) {
-    proposed.push({
-      value: `${record.producer} ${record.vintageYear}`,
-      type: 'translation',
-      source: 'rule:producer_vintage_v1',
-      confidencePrior: 0.95,
-      needsReview: false,
-    });
-  }
-
-  // 3. Accent-folded label (e.g. Château → Chateau)
+  // 1. Accent-folded label (e.g. Château → Chateau)
   const folded = removeAccents(record.canonicalLabel);
   if (folded !== record.canonicalLabel) {
     proposed.push({
@@ -146,7 +124,7 @@ export function generateAliases(record: SilverWineRecord): AliasBundle {
     });
   }
 
-  // 4. Accent-folded producer
+  // 2. Accent-folded producer
   const foldedProducer = removeAccents(record.producer);
   if (foldedProducer !== record.producer) {
     proposed.push({
@@ -158,7 +136,7 @@ export function generateAliases(record: SilverWineRecord): AliasBundle {
     });
   }
 
-  // 5. Short producer name ("Château Margaux" → "Margaux")
+  // 3. Short producer name ("Château Margaux" → "Margaux")
   const shortName = extractShortName(record.producer);
   if (shortName) {
     proposed.push({
@@ -170,7 +148,13 @@ export function generateAliases(record: SilverWineRecord): AliasBundle {
     });
   }
 
-  // 6. Label without vintage (for vintage-agnostic search).
+  // 4. Label without vintage (for vintage-agnostic search).
+  //
+  // This MUST be anchored to the canonical wine label, not the producer
+  // field. Producer-only aliases are not identity-safe for wine entities:
+  // they collide across sibling wines from the same producer
+  // ("Opus One" vs "Overture", multiple vintages, etc.). The
+  // vintage-stripped canonical label stays attached to a specific wine label.
   //    Use Unicode-safe boundary assertions (CLAUDE.md Rule 8, Rule 24):
   //    \b is ASCII-only and silently fails on non-ASCII boundaries.
   //    (?<![\\p{L}\\p{N}]) / (?![\\p{L}\\p{N}]) match any Unicode letter-or-digit boundary.
@@ -183,7 +167,7 @@ export function generateAliases(record: SilverWineRecord): AliasBundle {
       .replace(yearPattern, '')
       .replace(/\s{2,}/g, ' ')
       .trim();
-    if (noVintage.length > 0 && noVintage !== record.producer) {
+    if (noVintage.length > 0 && noVintage !== record.canonicalLabel) {
       proposed.push({
         value: noVintage,
         type: 'translation',
@@ -194,7 +178,7 @@ export function generateAliases(record: SilverWineRecord): AliasBundle {
     }
   }
 
-  // 7. Primary grape + region (recall alias)
+  // 5. Primary grape + region (recall alias)
   if (record.grapePrimary && record.region) {
     proposed.push({
       value: `${record.region} ${record.grapePrimary}`,

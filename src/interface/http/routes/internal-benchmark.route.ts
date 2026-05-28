@@ -7,7 +7,7 @@ import { toSearchRequest } from './search-request-mappers.js';
 import { getRequestId } from '../request-id.js';
 import { buildSearchErrorResponse, sendSearchErrorResponse } from '../errors/error-response.js';
 import { HTTP_STATUS_FORBIDDEN, HTTP_STATUS_OK } from '../constants.js';
-import { abortSignalFromFastifyRequest } from '../request-abort-signal.js';
+import { abortSignalFromFastifyRequest, raceWithRequestAbort } from '../request-abort-signal.js';
 import { createStageTimer } from '../../../domain/shared/stage-timer.js';
 
 function denyBenchmarkLane(request: FastifyRequest, reply: FastifyReply): void {
@@ -47,13 +47,18 @@ export function registerInternalBenchmarkRoute(
       const searchRequest = toSearchRequest(parsed);
       const requestId = getRequestId(request);
       const stageTimer = createStageTimer();
+      const abortSignal = abortSignalFromFastifyRequest(request, reply);
 
-      const response = await deps.searchUseCase.execute(searchRequest, requestId, {
-        abortSignal: abortSignalFromFastifyRequest(request),
-        debugRequest: true,
-        executionPrincipal: 'benchmark_trusted',
-        stageTimer,
-      });
+      const response = await raceWithRequestAbort(
+        deps.searchUseCase.execute(searchRequest, requestId, {
+          abortSignal,
+          debugRequest: true,
+          executionPrincipal: 'benchmark_trusted',
+          stageTimer,
+        }),
+        abortSignal,
+        'Benchmark search request aborted',
+      );
 
       sendRouteContractResponse(request, reply, SearchRouteContract, HTTP_STATUS_OK, response);
     },

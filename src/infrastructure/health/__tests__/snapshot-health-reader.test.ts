@@ -8,20 +8,38 @@
  *   5. count query returns non-numeric string → undefined (defensive parse)
  */
 import { describe, expect, it, vi } from 'vitest';
-import { createSnapshotHealthReader } from '../snapshot-health-reader.js';
+import {
+  createSnapshotHealthReader,
+  SNAPSHOT_HEALTH_QUERY_TIMEOUT_MS,
+} from '../snapshot-health-reader.js';
 
 interface MockPool {
-  query: ReturnType<typeof vi.fn>;
+  connect: ReturnType<typeof vi.fn>;
+  client: {
+    query: ReturnType<typeof vi.fn>;
+    release: ReturnType<typeof vi.fn>;
+  };
 }
 
 function makePool(responses: readonly ({ rows: unknown[] } | Error)[]): MockPool {
   let i = 0;
-  return {
-    query: vi.fn(async () => {
+  const client = {
+    query: vi.fn(async (query: string) => {
+      if (query === 'BEGIN' || query === 'ROLLBACK' || query === 'COMMIT') {
+        return { rows: [] };
+      }
+      if (query.startsWith('SET LOCAL statement_timeout')) {
+        return { rows: [] };
+      }
       const r = responses[i++];
       if (r instanceof Error) throw r;
       return r ?? { rows: [] };
     }),
+    release: vi.fn(),
+  };
+  return {
+    connect: vi.fn(async () => client),
+    client,
   };
 }
 
@@ -107,5 +125,24 @@ describe('createSnapshotHealthReader', () => {
     const reader = createSnapshotHealthReader(pool as never);
     const result = await reader();
     expect(result?.pointer_age_seconds).toBe(0);
+  });
+
+  it('applies bounded query timeouts to both snapshot_health PG reads', async () => {
+    const pool = makePool([
+      { rows: [{
+        active_snapshot_id: 'a',
+        previous_snapshot_id: 'b',
+        promoted_at: new Date(),
+      }]},
+      { rows: [{ c: '1' }] },
+    ]);
+
+    const reader = createSnapshotHealthReader(pool as never);
+    await reader();
+
+    expect(pool.client.query).toHaveBeenCalledWith('BEGIN');
+    expect(pool.client.query).toHaveBeenCalledWith(
+      `SET LOCAL statement_timeout = '${SNAPSHOT_HEALTH_QUERY_TIMEOUT_MS}ms'`,
+    );
   });
 });

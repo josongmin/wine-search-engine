@@ -9,7 +9,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { hardConstraintsToSparseFilterTokens } from '../constraint-to-sparse-filter-tokens.js';
+import {
+  hardConstraintsToSparseFilterTokens,
+  softConstraintsToOptionalFilterTokens,
+} from '../constraint-to-sparse-filter-tokens.js';
 import type { NormalizedConstraint } from '../../../shared/types/index.js';
 
 function makeConstraint(
@@ -226,6 +229,13 @@ describe('hardConstraintsToSparseFilterTokens — grape_primary dual-field (grap
     expect(tokens.some((t) => t.startsWith('grape_or:'))).toBe(true);
   });
 
+  it('grape_primary = Syrah expands retrieval surface to Shiraz-compatible token', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('grape_primary', '=', 'Syrah'),
+    ]);
+    expect(tokens).toContain('grape_or_in:Syrah|Shiraz');
+  });
+
   it('grape_primary = value does NOT emit separate grape_primary: token (no AND leakage)', () => {
     const tokens = hardConstraintsToSparseFilterTokens([
       makeConstraint('grape_primary', '=', 'Cabernet Sauvignon'),
@@ -291,6 +301,56 @@ describe('hardConstraintsToSparseFilterTokens — grape_primary dual-field (grap
     ]);
     expect(tokens.some((t) => t.startsWith('grape_primary_not_in:'))).toBe(true);
     expect(tokens.some((t) => t.startsWith('grapes_not_in:'))).toBe(true);
+  });
+
+  it('soft grape_primary with promotion authority emits grape_or token for semantic retrieval tightening', () => {
+    const tokens = softConstraintsToOptionalFilterTokens([
+      {
+        ...makeConstraint('grape_primary', '=', 'Syrah'),
+        soft_promotion_authority: 'allow',
+      },
+    ]);
+    expect(tokens).toContain('grape_or_in:Syrah|Shiraz');
+  });
+
+  it('soft acidity with promotion authority emits acidity_min token', () => {
+    const tokens = softConstraintsToOptionalFilterTokens([
+      {
+        ...makeConstraint('acidity', '>=', 0.6),
+        soft_promotion_authority: 'allow',
+      },
+    ]);
+    expect(tokens).toContain('acidity_min:0.6');
+  });
+
+  it('soft body ceiling with promotion authority emits body_max token', () => {
+    const tokens = softConstraintsToOptionalFilterTokens([
+      {
+        ...makeConstraint('body', '<=', 0.6),
+        soft_promotion_authority: 'allow',
+      },
+    ]);
+    expect(tokens).toContain('body_max:0.6');
+  });
+
+  it('soft tannin ceiling with promotion authority emits tannin_max token', () => {
+    const tokens = softConstraintsToOptionalFilterTokens([
+      {
+        ...makeConstraint('tannin', '<=', 0.4),
+        soft_promotion_authority: 'allow',
+      },
+    ]);
+    expect(tokens).toContain('tannin_max:0.4');
+  });
+
+  it('soft pairing tags with promotion authority emit pairing_in token', () => {
+    const tokens = softConstraintsToOptionalFilterTokens([
+      {
+        ...makeConstraint('pairing', 'in', ['cheese', 'salmon']),
+        soft_promotion_authority: 'allow',
+      },
+    ]);
+    expect(tokens).toContain('pairing_in:cheese|salmon');
   });
 });
 

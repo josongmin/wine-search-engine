@@ -9,6 +9,7 @@ export interface EvalBenchmarkRunFilter {
   readonly snapshotId?: string;
   readonly since?: Date;
   readonly limit?: number;
+  readonly includeLegacy?: boolean;
 }
 
 export interface EvalBenchmarkRunStore {

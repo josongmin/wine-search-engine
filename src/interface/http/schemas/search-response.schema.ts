@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DECISION_CONFIDENCE_SEMANTICS } from '../../../domain/shared/types/decision-confidence-semantics.js';
 import {
   DecisionSnapshotSchema,
 } from './search-shared.schema.js';
@@ -252,7 +253,8 @@ export const EngineDecisionSchema = z.object({
   next_action: z.enum(['return_result', 'clarify', 'hybrid_search', 'fail']),
   route: z.enum(QUERY_ROUTES),
   decision_confidence: z.number().finite().min(0).max(1),
-  confidence_semantics: z.literal('calibrated_decision_confidence'),
+  confidence_semantics: z.enum(DECISION_CONFIDENCE_SEMANTICS),
+  calibration_trusted: z.boolean().optional(),
   decision_trace_ref: z
     .string()
     .regex(CANONICAL_AUTHORITY_TRACE_REF_PATTERN)
@@ -335,6 +337,7 @@ const NormalizedConstraintWireSchema = z.object({
   source_phrase: z.string(),
   confidence: z.number().finite().min(0).max(1),
   mapping_version: z.string().min(1).optional(),
+  soft_promotion_authority: z.enum(['allow', 'deny']).optional(),
 }).strict();
 
 const ConstraintAtomWireSchemaV1 = NormalizedConstraintWireSchema.extend({

@@ -7,7 +7,7 @@
  *  3. Fully resolved hydration remains unaffected.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { buildResolverCandidatesFromGenerator } from '../../src/application/search/search-usecase-resolver-candidates.js';
 import { createEntityId } from '../../src/domain/shared/types/index.js';
 import type { RetrievalDocument } from '../../src/domain/retrieval/model/retrieval-document.js';

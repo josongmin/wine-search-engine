@@ -65,7 +65,7 @@ export function buildOntologySnapshot(
 
   for (const [region, parents] of [...REGION_PARENTS.entries()]
     .sort(([left], [right]) => left.localeCompare(right))) {
-    const entityType = parents.length <= 1 ? 'region' : inferRegionEntityType(region);
+    const entityType = parents.length <= 1 ? 'region' : inferOntologyRegionEntityType(region);
     nodes.push({
       id: `${entityType}:${region}`,
       entityType,
@@ -184,7 +184,7 @@ function dedupeNodes(nodes: readonly OntologySnapshotNode[]): readonly OntologyS
   return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
 }
 
-function inferRegionEntityType(region: string): OntologySnapshotNode['entityType'] {
+export function inferOntologyRegionEntityType(region: string): OntologySnapshotNode['entityType'] {
   switch (region) {
     case 'barolo':
     case 'barbaresco':

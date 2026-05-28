@@ -162,7 +162,7 @@ export class RedisToolResultCache implements ToolResultCachePort {
     } catch (error) {
       warnOnce(
         'get',
-        { err: error instanceof Error ? error.message : 'unknown', key: redisKey },
+        { err: error, key: redisKey },
         'tool-result cache get failed; failing open',
       );
       return null;
@@ -178,7 +178,7 @@ export class RedisToolResultCache implements ToolResultCachePort {
     } catch (err) {
       warnOnce(
         'parse',
-        { key: redisKey, reason: err instanceof Error ? err.message : 'unknown' },
+        { key: redisKey, err },
         'tool-result cache parse failed; treating as miss',
       );
       return null;
@@ -223,7 +223,7 @@ export class RedisToolResultCache implements ToolResultCachePort {
     } catch (err) {
       warnOnce(
         'set',
-        { tool: key.toolName, err: err instanceof Error ? err.message : 'unknown' },
+        { tool: key.toolName, err },
         'tool-result cache serialize failed; skipping write',
       );
       return;
@@ -243,7 +243,7 @@ export class RedisToolResultCache implements ToolResultCachePort {
     } catch (error) {
       warnOnce(
         'set',
-        { err: error instanceof Error ? error.message : 'unknown', key: redisKey },
+        { err: error, key: redisKey },
         'tool-result cache set failed; failing open',
       );
     }

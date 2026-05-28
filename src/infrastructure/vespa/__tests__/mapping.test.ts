@@ -216,6 +216,21 @@ describe('fromVespaFields entity_id validation', () => {
       } as unknown as Record<string, unknown>),
     ).toThrow(/malformed Vespa document/);
   });
+
+  it('accepts numeric-string Vespa fields and coerces them to numbers', () => {
+    const doc = fromVespaFields({
+      ...makeMinimalRequiredFields(),
+      popularity_score: '0.5',
+      critic_score_normalized: '0.82',
+      price_usd: '82.0000',
+      rating_avg: '4.10',
+    });
+
+    expect(doc.popularityScore).toBe(0.5);
+    expect(doc.criticScoreNormalized).toBe(0.82);
+    expect(doc.priceUsd).toBe(82);
+    expect(doc.ratingAvg).toBe(4.1);
+  });
 });
 
 describe('vespa mapping retrieval summary SSOT', () => {
@@ -418,25 +433,40 @@ describe('toRetrievalFeatureProjection — body/sweetness null vs 0 (E1-P3-7)', 
 // mapping.ts switch had case 'region_not' and multi-value 'region_in' but
 // NO case 'region' — single-value positive was silently dropped (default case no-op).
 describe('buildSparseFilters — region filter (BUG-01)', () => {
-  it('single-value positive region filter produces YQL contains clause', () => {
+  it('single-value positive region filter matches region, appellation, and hierarchy', () => {
     const yql = buildSparseFilters(['region:Burgundy']);
     expect(yql).toContain('region contains "Burgundy"');
+    expect(yql).toContain('appellation contains "Burgundy"');
+    expect(yql).toContain('region_hierarchy contains "Burgundy"');
   });
 
-  it('region negation filter still works', () => {
+  it('region negation filter excludes region, appellation, and hierarchy', () => {
     const yql = buildSparseFilters(['region_not:Burgundy']);
-    expect(yql).toContain('!(region contains "Burgundy")');
+    expect(yql).toContain('!(region contains "Burgundy" OR appellation contains "Burgundy" OR region_hierarchy contains "Burgundy")');
   });
 
-  it('region multi-value IN filter works via ALLOWED_SPARSE_IN_FIELDS path', () => {
+  it('region multi-value IN filter applies geography-aware OR semantics per value', () => {
     const yql = buildSparseFilters(['region_in:Burgundy|Barolo']);
     expect(yql).toContain('region contains');
+    expect(yql).toContain('appellation contains "Burgundy"');
+    expect(yql).toContain('region_hierarchy contains "Barolo"');
+  });
+
+  it('region multi-value NOT IN filter excludes geography-aware matches per value', () => {
+    const yql = buildSparseFilters(['region_not_in:Burgundy|Barolo']);
+    expect(yql).toContain('!(region contains "Burgundy" OR appellation contains "Burgundy" OR region_hierarchy contains "Burgundy")');
+    expect(yql).toContain('!(region contains "Barolo" OR appellation contains "Barolo" OR region_hierarchy contains "Barolo")');
   });
 
   it('regression: country, wine_type, appellation positive filters still work', () => {
     expect(buildSparseFilters(['country:France'])).toContain('country contains "France"');
     expect(buildSparseFilters(['wine_type:red'])).toContain('wine_type contains "red"');
     expect(buildSparseFilters(['appellation:Pomerol'])).toContain('appellation contains "Pomerol"');
+  });
+
+  it('supports explicit search_snapshot_id scoping filters', () => {
+    expect(buildSparseFilters(['search_snapshot_id:search-snapshot:v1:target']))
+      .toContain('search_snapshot_id contains "search-snapshot:v1:target"');
   });
 
   it('empty filter array returns empty string', () => {

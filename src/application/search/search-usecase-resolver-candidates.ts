@@ -1,4 +1,3 @@
-import type { AliasType } from '../../domain/alias/model/alias.js';
 import type { AnchorCandidate } from '../../domain/query/model/anchor-candidate.js';
 import type { ResolverCandidate } from '../../domain/resolver/model/resolved-candidate.js';
 import type { MatchSignalSet } from '../../domain/resolver/model/match-signal-set.js';
@@ -238,16 +237,6 @@ function anchorMatchesIdentitySafeProjection(
   }
 
   return false;
-}
-
-function requireAliasType(anchor: AnchorCandidate): AliasType {
-  if (anchor.aliasType === undefined) {
-    throw new DomainError(
-      'INTERNAL_INCONSISTENCY',
-      `anchor aliasType missing for surface=${JSON.stringify(anchor.surfaceForm)}`,
-    );
-  }
-  return anchor.aliasType;
 }
 
 /**
@@ -511,7 +500,7 @@ export async function buildResolverCandidatesFromGenerator(
       const key = String(entityId);
       const incomingAliasMatch = {
         aliasValue: anchor.surfaceForm,
-        aliasType: requireAliasType(anchor),
+        ...(anchor.aliasType !== undefined ? { aliasType: anchor.aliasType } : {}),
         matchScore: anchor.confidence,
       } as const;
       const incomingSignals = buildSignals(input.rawQuery, input.normalizedQuery, anchor, doc);

@@ -143,6 +143,31 @@ describe('buildRuntimeSupportServices', () => {
     expect(services.phraseCache).toBeUndefined();
   });
 
+  it('uses explicit snapshot field-availability overrides without reading the active runtime state', async () => {
+    const config = parseEnv({ NODE_ENV: 'test' });
+    const readinessModule = await import('../../infrastructure/health/search-snapshot-readiness.js');
+    const loadSpy = vi
+      .spyOn(readinessModule, 'loadSearchSnapshotRuntimeState')
+      .mockRejectedValue(new Error('should not read active runtime state'));
+    const override = {
+      appellation: { populatedDocCount: 10, totalDocCount: 20, populatedDocRatio: 0.5 },
+      body: { populatedDocCount: 9, totalDocCount: 20, populatedDocRatio: 0.45 },
+      sweetness: { populatedDocCount: 9, totalDocCount: 20, populatedDocRatio: 0.45 },
+      acidity: { populatedDocCount: 9, totalDocCount: 20, populatedDocRatio: 0.45 },
+      tannin: { populatedDocCount: 9, totalDocCount: 20, populatedDocRatio: 0.45 },
+    } as const;
+
+    try {
+      const services = await buildRuntimeSupportServices(config, {
+        searchSnapshotFieldAvailability: override,
+      });
+      expect(services.fieldAvailability).toEqual(override);
+      expect(loadSpy).not.toHaveBeenCalled();
+    } finally {
+      loadSpy.mockRestore();
+    }
+  });
+
   it('fails startup when an explicit ONNX override directory cannot be loaded', async () => {
     const config = parseEnv({
       NODE_ENV: 'test',
