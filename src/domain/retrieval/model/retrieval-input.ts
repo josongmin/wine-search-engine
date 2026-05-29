@@ -118,4 +118,17 @@ export interface HybridRetrievalInput {
    * Absent when anchor extraction succeeded (no fuzzy fallback needed).
    */
   readonly entityHypothesisTerms?: readonly string[] | undefined;
+
+  /**
+   * T-IR-01: caller-selected retrieval lane from the path-authoritative
+   * primitive search routes. When set to `'semantic_only'` the candidate
+   * pool drops the sparse/learned-sparse channels; `'lexical_only'` drops
+   * dense/anchor. `'hybrid'` (or absent) runs the full channel mix.
+   *
+   * This is orthogonal to `compiledRetrievalMode` (which selects an
+   * intent-derived profile): the lane is a hard cap on which channels may
+   * fire, applied AFTER profile + cascade resolution. RRF fusion already
+   * handles a missing leg gracefully (sparse-only / dense-only ranks).
+   */
+  readonly retrievalLane?: 'hybrid' | 'semantic_only' | 'lexical_only' | undefined;
 }

@@ -40,4 +40,17 @@ export interface RequestExecutionContext {
    * across service boundaries without requiring a full tracing SDK.
    */
   readonly requestId?: string | undefined;
+  /**
+   * Retrieval-lane override set by the path-authoritative primitive search
+   * routes (`/v1/search/{hybrid,semantic,lexical}`). Carries the lane from the
+   * HTTP boundary down to `CandidatePoolService`, which gates active retrieval
+   * channels:
+   *   - `'semantic_only'` → dense (+anchor) channels only; sparse/learned-sparse dropped
+   *   - `'lexical_only'`  → sparse (+learned-sparse) channels only; dense/anchor dropped
+   *   - `'hybrid'` / absent → full channel mix (current default)
+   * Threaded via this side-channel rather than the QueryPlan because the lane
+   * is a caller transport concern, not a planner-derived property
+   * (architecture-decision §2.2 — primitive selector is the URL path).
+   */
+  readonly retrievalLane?: 'hybrid' | 'semantic_only' | 'lexical_only' | undefined;
 }

@@ -57,6 +57,12 @@ export function buildHybridRetrievalInputForPlan(
       : {}),
     ...(anchorEntityId !== undefined ? { anchorEntityId } : {}),
     ...(requestContext !== undefined ? { requestContext } : {}),
+    // T-IR-01: carry the path-selected retrieval lane down to the candidate
+    // pool so `/v1/search/semantic` and `/v1/search/lexical` actually skip
+    // the opposite leg instead of running a full hybrid pass.
+    ...(requestContext?.retrievalLane !== undefined
+      ? { retrievalLane: requestContext.retrievalLane }
+      : {}),
     ...(fuzzyEntityHypotheses != null && fuzzyEntityHypotheses.length > 0
       ? { entityHypothesisTerms: fuzzyEntityHypotheses }
       : {}),

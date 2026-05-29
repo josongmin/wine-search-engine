@@ -57,20 +57,15 @@ export interface SearchRequest {
   readonly retrieval_mode?: 'auto' | 'entity' | 'hybrid' | 'mixed' | undefined;
   /**
    * Internal retrieval-lane discriminator set by the path-authoritative
-   * primitive HTTP routes (`/v1/search/{hybrid,semantic,lexical}`,
-   * `/v1/lookup/wine`). When set, downstream candidate-pool dispatch MUST
-   * honour it — `'semantic_only'` skips the lexical sparse leg and
-   * `'lexical_only'` skips the dense embedding leg. `'hybrid'` is equivalent
-   * to omitting the field (full RRF fusion). NEVER populated from a request
-   * body — this is route-authoritative (architecture-decision §2.2 — primitive
-   * selector is path, not body).
-   *
-   * Today the analyzer/router still receives `'hybrid'` for both `semantic`
-   * and `lexical` endpoints; full lane skipping is plumbed through the
-   * candidate-pool in a follow-up under T-IR-01-bis. The field exists now
-   * so the contract layer is stable and consumers can flip the runtime
-   * behaviour in a localized retrieval-side change rather than rewriting
-   * the HTTP boundary.
+   * primitive HTTP routes (`/v1/search/{hybrid,semantic,lexical}`). When set,
+   * `SearchUseCase` forwards it into `RequestExecutionContext.retrievalLane`,
+   * and `CandidatePoolService.applyRetrievalLaneFilter` honours it as a hard
+   * cap on active channels:
+   *   - `'semantic_only'` → dense (+anchor) channels only; sparse/learned-sparse dropped
+   *   - `'lexical_only'`  → sparse (+learned-sparse) channels only; dense/anchor dropped
+   *   - `'hybrid'` / absent → full RRF channel mix
+   * NEVER populated from a request body — this is route-authoritative
+   * (architecture-decision §2.2 — primitive selector is path, not body).
    */
   readonly retrievalLane?: 'hybrid' | 'semantic_only' | 'lexical_only' | undefined;
   /** Maximum number of result items to return (batch / caller-specified cap). */

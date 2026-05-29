@@ -372,6 +372,11 @@ export class SearchUseCase {
         ? { executionPrincipal: options.executionPrincipal }
         : {}),
       ...(stageTimer !== undefined ? { stageTimer } : {}),
+      // T-IR-01: forward the path-authoritative retrieval lane (set by the
+      // `/v1/search/{hybrid,semantic,lexical}` route mappers) into the
+      // retrieval layer. Absent for the legacy `/v1/search` monolith and the
+      // entity lookup route, which run the full channel mix.
+      ...(request.retrievalLane !== undefined ? { retrievalLane: request.retrievalLane } : {}),
       requestId,
       requestStartTimeMs: startTime,
     };

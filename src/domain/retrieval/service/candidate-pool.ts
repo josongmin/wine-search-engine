@@ -1317,7 +1317,56 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       active.add(RETRIEVAL_CHANNEL_SPARSE_BM25);
     }
 
-    return active;
+    // T-IR-01: hard-cap the resolved channel set to the caller-selected
+    // retrieval lane. Applied LAST so it overrides every profile/cascade
+    // activation above — `/v1/search/semantic` must never run a sparse leg
+    // and `/v1/search/lexical` must never run a dense/anchor leg, regardless
+    // of which intent profile the planner picked.
+    return this.applyRetrievalLaneFilter(active, input.retrievalLane);
+  }
+
+  /**
+   * Restrict an already-resolved active-channel set to the caller-selected
+   * retrieval lane. `'hybrid'` (or absent) is a no-op. The empty-set fallback
+   * is lane-aware: a `'semantic_only'` request that filtered every channel
+   * falls back to dense (NOT sparse) so the lane invariant holds even on the
+   * degenerate path.
+   */
+  private applyRetrievalLaneFilter(
+    channels: ReadonlySet<CandidateChannel>,
+    lane: HybridRetrievalInput['retrievalLane'],
+  ): ReadonlySet<CandidateChannel> {
+    if (lane === undefined || lane === 'hybrid') {
+      return channels;
+    }
+    const filtered = new Set<CandidateChannel>();
+    for (const channel of channels) {
+      if (lane === 'semantic_only') {
+        if (
+          channel === RETRIEVAL_CHANNEL_DENSE_SEMANTIC
+          || channel === RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY
+          || channel === RETRIEVAL_CHANNEL_RELATIVE_FILTER
+        ) {
+          filtered.add(channel);
+        }
+        continue;
+      }
+      // lane === 'lexical_only'
+      if (
+        channel === RETRIEVAL_CHANNEL_SPARSE_BM25
+        || channel === RETRIEVAL_CHANNEL_LEARNED_SPARSE
+      ) {
+        filtered.add(channel);
+      }
+    }
+    if (filtered.size === 0) {
+      filtered.add(
+        lane === 'semantic_only'
+          ? RETRIEVAL_CHANNEL_DENSE_SEMANTIC
+          : RETRIEVAL_CHANNEL_SPARSE_BM25,
+      );
+    }
+    return filtered;
   }
 
   private shouldExecutePhase(
