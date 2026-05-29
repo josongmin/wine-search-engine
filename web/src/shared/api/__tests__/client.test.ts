@@ -106,7 +106,7 @@ describe('api client', () => {
   });
 
   describe('wineSearch', () => {
-    it('execute sends POST to /v1/wine-search with body', async () => {
+    it('execute sends POST to /v1/agent with body', async () => {
       mockFetch(
         { ok: true, status: 200 },
         {
@@ -140,7 +140,7 @@ describe('api client', () => {
       expect(res.meta.policy_blocked).toBe(false);
 
       const [url, options] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
-      expect(String(url)).toContain('/v1/wine-search');
+      expect(String(url)).toContain('/v1/agent');
       expect(options.method).toBe('POST');
       expect(JSON.parse(options.body)).toEqual({ query: '레드 와인 추천해줘' });
     });

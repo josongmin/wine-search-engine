@@ -1,5 +1,5 @@
 /**
- * HELL-DIFFICULTY e2e: POST /v1/wine-search concurrency + state isolation.
+ * HELL-DIFFICULTY e2e: POST /v1/agent concurrency + state isolation.
  *
  * Companion to wine-search-api-hell-{http,pipeline,adversarial}.test.ts. This
  * file attacks the SHARED-MUTABLE-STATE SEAMS introduced by the new
@@ -41,7 +41,7 @@
  *    the LLM mock does NOT grow without bound (we track distinct identities).
  *  - Process memory after 1000 fast requests stays within a generous bound
  *    (statistical — the per-request closure footprint is bounded by GC).
- *  - `/v1/search` and `/v1/wine-search` interleaved: both surfaces retain
+ *  - `/v1/search` and `/v1/agent` interleaved: both surfaces retain
  *    their own state (no cross-surface corruption).
  *
  * SCOPE — ADDITIVE ONLY:
@@ -162,7 +162,7 @@ interface InjectOptions {
 
 function inject(harness: WineSearchTestHarness, opts: InjectOptions = {}) {
   const headers = opts.headers ?? { 'content-type': 'application/json' };
-  const url = opts.url ?? '/v1/wine-search';
+  const url = opts.url ?? '/v1/agent';
   const method = opts.method ?? 'POST';
   const payload = typeof opts.payload === 'string' || opts.payload === undefined
     ? opts.payload
@@ -206,7 +206,7 @@ function makeBudgetConfig(maxSteps: number) {
 // Category 1 — Parallel request isolation
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/wine-search — Hell C1: Parallel request isolation', () => {
+describe('POST /v1/agent — Hell C1: Parallel request isolation', () => {
   let harness: WineSearchTestHarness;
   afterEach(async () => { if (harness !== undefined) await harness.cleanup(); });
 
@@ -351,7 +351,7 @@ describe('POST /v1/wine-search — Hell C1: Parallel request isolation', () => {
 // Category 2 — Abort race conditions
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/wine-search — Hell C2: Abort race conditions', () => {
+describe('POST /v1/agent — Hell C2: Abort race conditions', () => {
   let harness: WineSearchTestHarness;
   afterEach(async () => { if (harness !== undefined) await harness.cleanup(); });
 
@@ -626,7 +626,7 @@ describe('TerminationStateMachine — Hell C4: pure function under concurrency',
 // Category 5 — Resource cleanup
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/wine-search — Hell C5: Resource cleanup', () => {
+describe('POST /v1/agent — Hell C5: Resource cleanup', () => {
   let harness: WineSearchTestHarness;
   afterEach(async () => { if (harness !== undefined) await harness.cleanup(); });
 
@@ -812,11 +812,11 @@ describe('WineSearchResponseSchema — Hell C6: no schema-level state leak', () 
 // Category 7 — Server-level isolation
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/wine-search — Hell C7: Server-level isolation', () => {
+describe('POST /v1/agent — Hell C7: Server-level isolation', () => {
   let harness: WineSearchTestHarness;
   afterEach(async () => { if (harness !== undefined) await harness.cleanup(); });
 
-  it('C7-1: interleaved /v1/wine-search calls have independent orchestrator state across requests', async () => {
+  it('C7-1: interleaved /v1/agent calls have independent orchestrator state across requests', async () => {
     // The orchestrator class is a SHARED instance (one per server build) —
     // its mutable state lives in `execute()`-local closures. Verify by
     // interleaving 20 requests and asserting each produces a clean response.
@@ -933,7 +933,7 @@ describe('Synthetic state-machine + StepBudget — Hell C8: simulated race', () 
 // Category 9 — End-to-end cross-talk + abort interaction
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/wine-search — Hell C9: End-to-end cross-talk + abort interaction', () => {
+describe('POST /v1/agent — Hell C9: End-to-end cross-talk + abort interaction', () => {
   let harness: WineSearchTestHarness;
   afterEach(async () => { if (harness !== undefined) await harness.cleanup(); });
 

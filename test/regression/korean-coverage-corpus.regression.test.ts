@@ -222,7 +222,7 @@ interface PipelineResult {
 async function runQuery(query: string): Promise<PipelineResult> {
   const res = await harness.app.inject({
     method: 'POST',
-    url: '/v1/wine-search',
+    url: '/v1/agent',
     headers: { 'content-type': 'application/json' },
     payload: JSON.stringify({ query }),
   });

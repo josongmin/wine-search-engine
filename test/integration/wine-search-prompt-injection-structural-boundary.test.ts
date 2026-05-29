@@ -324,7 +324,7 @@ describe('Wine-search structural prompt-injection boundary', () => {
       const start = Date.now();
       const res = await h.app.inject({
         method: 'POST',
-        url: '/v1/wine-search',
+        url: '/v1/agent',
         headers: { 'content-type': 'application/json' },
         payload: JSON.stringify({ query: variant.query }),
       });

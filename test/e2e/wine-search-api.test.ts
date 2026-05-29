@@ -1,5 +1,5 @@
 /**
- * E2E tests for POST /v1/wine-search — Plan-then-Execute wine search.
+ * E2E tests for POST /v1/agent — Plan-then-Execute wine search.
  *
  * Builds a REAL Fastify server with the REAL `WineSearchOrchestrator` and
  * the REAL Plan-then-Execute components (analyzer, deterministic router,
@@ -48,7 +48,7 @@ function postWineSearch(
 ) {
   return harness.app.inject({
     method: 'POST',
-    url: '/v1/wine-search',
+    url: '/v1/agent',
     headers: { 'content-type': 'application/json', ...headers },
     payload: JSON.stringify(body),
   });
@@ -58,7 +58,7 @@ function postWineSearch(
 // Tier 1: Happy paths (Korean + English single-search)
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/wine-search — Tier 1: Happy paths', () => {
+describe('POST /v1/agent — Tier 1: Happy paths', () => {
   let harness: WineSearchTestHarness;
 
   afterEach(async () => {
@@ -163,7 +163,7 @@ describe('POST /v1/wine-search — Tier 1: Happy paths', () => {
 // Tier 2: Validation (Zod 400 path)
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/wine-search — Tier 2: Validation', () => {
+describe('POST /v1/agent — Tier 2: Validation', () => {
   let harness: WineSearchTestHarness;
 
   beforeEach(async () => {
@@ -230,13 +230,13 @@ describe('POST /v1/wine-search — Tier 2: Validation', () => {
 // Tier 3: Feature flag (route not registered when wineSearch slice absent)
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/wine-search — Tier 3: Feature flag off', () => {
+describe('POST /v1/agent — Tier 3: Feature flag off', () => {
   it('returns 404 when the wineSearch slice is not wired (route not registered)', async () => {
     const { app, cleanup } = await buildAppWithoutWineSearch();
     try {
       const res = await app.inject({
         method: 'POST',
-        url: '/v1/wine-search',
+        url: '/v1/agent',
         headers: { 'content-type': 'application/json' },
         payload: JSON.stringify({ query: 'wine' }),
       });
@@ -251,7 +251,7 @@ describe('POST /v1/wine-search — Tier 3: Feature flag off', () => {
 // Tier 4: AbortSignal propagation through the stack
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/wine-search — Tier 4: AbortSignal lifecycle', () => {
+describe('POST /v1/agent — Tier 4: AbortSignal lifecycle', () => {
   let harness: WineSearchTestHarness;
 
   afterEach(async () => {
@@ -295,7 +295,7 @@ describe('POST /v1/wine-search — Tier 4: AbortSignal lifecycle', () => {
 // Tier 5: Response contract invariants (regression-grade)
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/wine-search — Tier 5: Response contract', () => {
+describe('POST /v1/agent — Tier 5: Response contract', () => {
   let harness: WineSearchTestHarness;
 
   afterEach(async () => {

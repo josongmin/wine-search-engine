@@ -74,7 +74,7 @@ describe('search.run local↔remote parity', () => {
 });
 
 describe('wine-search.run local↔remote parity', () => {
-  it('emits identical wire JSON from local container + remote HTTP for /v1/wine-search', async () => {
+  it('emits identical wire JSON from local container + remote HTTP for /v1/agent', async () => {
     const orchestratorResult = {
       answer: 'A representative wine answer.',
       layer: 'primary',
@@ -131,6 +131,6 @@ describe('wine-search.run local↔remote parity', () => {
     expect(remoteOut).toEqual(expectedWire);
     expect(localOut).toEqual(remoteOut);
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.input).toBe('https://api.example.com/v1/wine-search');
+    expect(calls[0]?.input).toBe('https://api.example.com/v1/agent');
   });
 });

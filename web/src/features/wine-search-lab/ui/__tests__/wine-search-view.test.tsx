@@ -222,7 +222,7 @@ describe('WineSearchView', () => {
     expect(screen.getByTestId('meta-tool-call-count')).toHaveTextContent('tools: 1');
   });
 
-  it('POSTs to /v1/wine-search with options.max_steps forwarded when changed', async () => {
+  it('POSTs to /v1/agent with options.max_steps forwarded when changed', async () => {
     mockFetchOk(baseResponse());
     renderWithProviders(<WineSearchView />);
     const maxStepsInput = screen.getByLabelText('max_steps') as HTMLInputElement;
@@ -236,7 +236,7 @@ describe('WineSearchView', () => {
       expect(globalThis.fetch).toHaveBeenCalled();
     });
     const [url, init] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(String(url)).toContain('/v1/wine-search');
+    expect(String(url)).toContain('/v1/agent');
     const body = JSON.parse((init as { body: string }).body) as {
       query: string;
       options?: { max_steps?: number };

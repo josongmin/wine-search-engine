@@ -46,7 +46,7 @@ export class RemoteWineSearchFacade implements WineSearchFacadePort {
     return await this.http.requestJson<WineSearchRunResult>(
       {
         method: 'POST',
-        path: '/v1/wine-search',
+        path: '/v1/agent',
         body: toBody(input),
       },
       options,

@@ -430,7 +430,7 @@ export interface WatchlistListResponse {
   total: number;
 }
 
-// ── Wine Search (POST /v1/wine-search) ──
+// ── Wine Search (POST /v1/agent) ──
 //
 // Canonical agentic surface.
 // Wire shape is snake_case across the boundary to match the rest of the API.

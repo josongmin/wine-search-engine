@@ -34,7 +34,7 @@ export interface HttpServerDeps
   /**
    * Plan-then-Execute wine-search slice — present when
    * `WINE_SEARCH_ENABLED=true` and an Anthropic credential is configured.
-   * When `undefined`, the `/v1/wine-search` route is not registered.
+   * When `undefined`, the `/v1/agent` route is not registered.
    */
   readonly wineSearch?: WineSearchContainerServices | undefined;
 }

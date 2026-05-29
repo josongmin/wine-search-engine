@@ -38,7 +38,7 @@ describe('RemoteWineSearchFacade', () => {
     await facade.run({ query: 'q' }, { requestId: 'req-1' });
 
     expect(captured).toHaveLength(1);
-    expect(captured[0]?.input.endsWith('/v1/wine-search')).toBe(true);
+    expect(captured[0]?.input.endsWith('/v1/agent')).toBe(true);
     expect(captured[0]?.init?.method).toBe('POST');
     const body = JSON.parse((captured[0]?.init?.body as string) ?? '{}');
     expect(body).toEqual({ query: 'q' });

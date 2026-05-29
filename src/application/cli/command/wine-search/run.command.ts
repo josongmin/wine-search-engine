@@ -43,7 +43,7 @@ function buildInput(args: WineSearchArgs, overlay: Partial<WineSearchRunInput>):
 export class WineSearchRunCommand implements CliCommand<WineSearchArgs> {
   readonly group = 'wine-search';
   readonly name = 'run';
-  readonly summary = 'Execute plan-then-execute wine search locally or via remote /v1/wine-search.';
+  readonly summary = 'Execute plan-then-execute wine search locally or via remote /v1/agent.';
 
   parseArgs(rawArgs: readonly string[]): WineSearchArgs {
     let body: string | undefined;

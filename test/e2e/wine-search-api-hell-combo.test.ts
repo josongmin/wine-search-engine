@@ -1,5 +1,5 @@
 /**
- * Hell-COMBO e2e tests for POST /v1/wine-search.
+ * Hell-COMBO e2e tests for POST /v1/agent.
  *
  * Companion to the three existing hell suites:
  *   - `wine-search-api-hell-http.test.ts`          — HTTP boundary
@@ -151,7 +151,7 @@ function postWineSearch(
 ): ReturnType<WineSearchTestHarness['app']['inject']> {
   return harness.app.inject({
     method: 'POST',
-    url: '/v1/wine-search',
+    url: '/v1/agent',
     headers: { 'content-type': 'application/json', ...headers },
     payload: JSON.stringify(body),
   });
@@ -548,7 +548,7 @@ describe('Hell-Combo C4: Schema bypass attempts', () => {
     const rawPayload = '{"query":"wine","options":{"__proto__":{"max_steps":999}}}';
     const res = await harness.app.inject({
       method: 'POST',
-      url: '/v1/wine-search',
+      url: '/v1/agent',
       headers: { 'content-type': 'application/json' },
       payload: rawPayload,
     });
@@ -738,9 +738,9 @@ describe('Hell-Combo C6: Cross-surface paths', () => {
   let harness: WineSearchTestHarness;
   afterEach(async () => { if (harness !== undefined) await harness.cleanup(); });
 
-  it('C6-01: Interleaved POST /v1/wine-search + POST /v1/search → no shared mutable state', async () => {
+  it('C6-01: Interleaved POST /v1/agent + POST /v1/search → no shared mutable state', async () => {
     harness = await buildBenignHarness();
-    // Interleave 5 requests against /v1/wine-search and 5 against /v1/search.
+    // Interleave 5 requests against /v1/agent and 5 against /v1/search.
     const wineSearch = Array.from({ length: 5 }, () =>
       postWineSearch(harness, { query: '와인 추천' }),
     );
@@ -756,7 +756,7 @@ describe('Hell-Combo C6: Cross-surface paths', () => {
     for (const res of all) {
       expect(res.statusCode).toBeLessThan(500);
     }
-    // Verify /v1/wine-search responses are still well-formed.
+    // Verify /v1/agent responses are still well-formed.
     const wineResponses = all.slice(0, 5);
     for (const res of wineResponses) {
       expect(res.statusCode).toBe(200);
@@ -765,19 +765,19 @@ describe('Hell-Combo C6: Cross-surface paths', () => {
     }
   });
 
-  it('C6-02: Feature flag off (enableWineSearch=false) → POST /v1/wine-search returns 404', async () => {
+  it('C6-02: Feature flag off (enableWineSearch=false) → POST /v1/agent returns 404', async () => {
     harness = await buildWineSearchTestContainer({ enableWineSearch: false });
     const res = await postWineSearch(harness, { query: '와인' });
     expect(res.statusCode).toBe(404);
   });
 
-  it('C6-03: GET /v1/wine-search interleaved with POST → GET stays 404, POST stays 200', async () => {
+  it('C6-03: GET /v1/agent interleaved with POST → GET stays 404, POST stays 200', async () => {
     harness = await buildBenignHarness();
     const all = await Promise.all([
       postWineSearch(harness, { query: '와인 추천' }),
-      harness.app.inject({ method: 'GET', url: '/v1/wine-search' }),
+      harness.app.inject({ method: 'GET', url: '/v1/agent' }),
       postWineSearch(harness, { query: '오퍼스 원' }),
-      harness.app.inject({ method: 'GET', url: '/v1/wine-search' }),
+      harness.app.inject({ method: 'GET', url: '/v1/agent' }),
     ]);
     expect(all[0]?.statusCode).toBe(200);
     expect(all[1]?.statusCode).toBe(404);

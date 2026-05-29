@@ -20,7 +20,7 @@ import { createStageTimer } from '../../../domain/shared/stage-timer.js';
  * POST /v1/search — main public search endpoint.
  *
  * This surface is the general hybrid search API. Agent-only intent analysis
- * stays behind `/v1/wine-search` and tool-entry surfaces.
+ * stays behind `/v1/agent` and tool-entry surfaces.
  *
  * Content negotiation (RFC 7231 §5.3.2):
  *   Accept: application/json                 → engine response (default)

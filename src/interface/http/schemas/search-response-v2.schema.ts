@@ -7,7 +7,7 @@
  * ─────────────────────────────────────────────────────────────────────────────
  * POST /v1/search              SearchResponseSchema (V1)    Human + adapter
  * POST /v1/search/lookup       SearchResponseSchema (V1)    Human + adapter
- * POST /v1/wine-search         WineSearchResponseSchema     Agent runtime
+ * POST /v1/agent         WineSearchResponseSchema     Agent runtime
  *
  * POST /v2/search              SearchResponseV2Human        Human
  * POST /v2/search/hybrid       SearchResponseV2Human        Human

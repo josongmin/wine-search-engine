@@ -1,5 +1,5 @@
 /**
- * POST /v1/wine-search — Plan-then-Execute wine search endpoint.
+ * POST /v1/agent — Plan-then-Execute wine search endpoint.
  *
  * Public HTTP surface for the canonical orchestrator
  * (`WineSearchOrchestrator`). This is a deliberate
@@ -62,7 +62,7 @@ export function registerWineSearchRoute(
 ): void {
   registerContractRoute(app, {
     method: 'POST',
-    url: '/v1/wine-search',
+    url: '/v1/agent',
     contract: WineSearchRouteContract,
     handler: async (request, reply) => {
       const parsed = parseContractBody(request, WineSearchRouteContract);

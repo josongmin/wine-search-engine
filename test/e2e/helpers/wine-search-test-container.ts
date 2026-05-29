@@ -1,5 +1,5 @@
 /**
- * Test container builder for the POST /v1/wine-search e2e tests.
+ * Test container builder for the POST /v1/agent e2e tests.
  *
  * Wires the FULL Plan-then-Execute pipeline against the existing in-memory
  * adapter stack (`createTestContainer`), substituting ONE seam: the
@@ -69,7 +69,7 @@ interface WineSearchTestContainerOptions {
   readonly searchUseCase?: SearchUseCasePort;
   /**
    * When `false`, the helper builds the server WITHOUT registering the
-   * /v1/wine-search route — used to test the feature-flag-off behavior
+   * /v1/agent route — used to test the feature-flag-off behavior
    * (route returns 404). Default: `true`.
    */
   readonly enableWineSearch?: boolean;
@@ -119,7 +119,7 @@ export async function buildWineSearchTestContainer(
 
   if (!enableWineSearch) {
     // Feature-flag-off path: build the standard test server WITHOUT the
-    // wine-search slice. The /v1/wine-search route MUST NOT be registered.
+    // wine-search slice. The /v1/agent route MUST NOT be registered.
     const server = await createTestServer();
     return {
       app: server.app,
@@ -180,7 +180,7 @@ export async function buildWineSearchTestContainer(
   // ── Build a Fastify app — minimal middleware to keep e2e fast, but with
   //    the request-context / error-handler middleware the route depends on.
   //    We could go through `createServer` for fuller parity, but the
-  //    `/v1/wine-search` route has its own self-contained surface. We do
+  //    `/v1/agent` route has its own self-contained surface. We do
   //    use `createServer` so any drift in CORS/helmet/etc. layering is
   //    caught (the route registration path is what we care about).
   const fullServer = await createServer(

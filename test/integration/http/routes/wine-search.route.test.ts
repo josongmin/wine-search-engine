@@ -62,7 +62,7 @@ async function buildHarness(): Promise<TestHarness> {
   return { app, orchestrator: orchestrator as TestHarness['orchestrator'] };
 }
 
-describe('POST /v1/wine-search', () => {
+describe('POST /v1/agent', () => {
   let harness: TestHarness;
 
   beforeEach(async () => {
@@ -84,7 +84,7 @@ describe('POST /v1/wine-search', () => {
 
     const response = await harness.app.inject({
       method: 'POST',
-      url: '/v1/wine-search',
+      url: '/v1/agent',
       headers: { 'content-type': 'application/json' },
       payload: { query: '부르고뉴 피노누아 추천' },
     });
@@ -121,7 +121,7 @@ describe('POST /v1/wine-search', () => {
 
     const response = await harness.app.inject({
       method: 'POST',
-      url: '/v1/wine-search',
+      url: '/v1/agent',
       headers: { 'content-type': 'application/json' },
       payload: { query: 'Opus One 2018' },
     });
@@ -139,7 +139,7 @@ describe('POST /v1/wine-search', () => {
   it('rejects an empty query with 400 (Zod validation)', async () => {
     const response = await harness.app.inject({
       method: 'POST',
-      url: '/v1/wine-search',
+      url: '/v1/agent',
       headers: { 'content-type': 'application/json' },
       payload: { query: '' },
     });
@@ -152,7 +152,7 @@ describe('POST /v1/wine-search', () => {
     const tooLong = 'a'.repeat(MAX_AGENT_HTTP_QUERY_CHARS + 1);
     const response = await harness.app.inject({
       method: 'POST',
-      url: '/v1/wine-search',
+      url: '/v1/agent',
       headers: { 'content-type': 'application/json' },
       payload: { query: tooLong },
     });
@@ -165,7 +165,7 @@ describe('POST /v1/wine-search', () => {
     async (badSteps) => {
       const response = await harness.app.inject({
         method: 'POST',
-        url: '/v1/wine-search',
+        url: '/v1/agent',
         headers: { 'content-type': 'application/json' },
         payload: { query: 'test', options: { max_steps: badSteps } },
       });
@@ -177,7 +177,7 @@ describe('POST /v1/wine-search', () => {
   it('rejects non-numeric max_steps with 400', async () => {
     const response = await harness.app.inject({
       method: 'POST',
-      url: '/v1/wine-search',
+      url: '/v1/agent',
       headers: { 'content-type': 'application/json' },
       payload: { query: 'test', options: { max_steps: 'abc' } },
     });
@@ -190,7 +190,7 @@ describe('POST /v1/wine-search', () => {
 
     const response = await harness.app.inject({
       method: 'POST',
-      url: '/v1/wine-search',
+      url: '/v1/agent',
       headers: { 'content-type': 'application/json' },
       payload: { query: 'test', options: { max_steps: 10 } },
     });
@@ -207,7 +207,7 @@ describe('POST /v1/wine-search', () => {
 
     const response = await harness.app.inject({
       method: 'POST',
-      url: '/v1/wine-search',
+      url: '/v1/agent',
       headers: { 'content-type': 'application/json' },
       payload: {
         query: 'test',
@@ -234,7 +234,7 @@ describe('POST /v1/wine-search', () => {
 
     const response = await harness.app.inject({
       method: 'POST',
-      url: '/v1/wine-search',
+      url: '/v1/agent',
       headers: { 'content-type': 'application/json' },
       payload: { query: 'test' },
     });
@@ -256,7 +256,7 @@ describe('POST /v1/wine-search', () => {
 
     const response = await harness.app.inject({
       method: 'POST',
-      url: '/v1/wine-search',
+      url: '/v1/agent',
       headers: { 'content-type': 'application/json' },
       payload: { query: 'signal lifecycle' },
     });
@@ -271,7 +271,7 @@ describe('POST /v1/wine-search', () => {
 
     const response = await harness.app.inject({
       method: 'POST',
-      url: '/v1/wine-search',
+      url: '/v1/agent',
       headers: { 'content-type': 'application/json', 'x-request-id': 'req-boom' },
       payload: { query: 'wine please' },
     });
@@ -326,7 +326,7 @@ describe('POST /v1/wine-search', () => {
 
     const response = await harness.app.inject({
       method: 'POST',
-      url: '/v1/wine-search',
+      url: '/v1/agent',
       headers: { 'content-type': 'application/json' },
       payload: { query: '보르도 vs 부르고뉴 2018' },
     });
@@ -361,7 +361,7 @@ describe('POST /v1/wine-search', () => {
 
     const response = await harness.app.inject({
       method: 'POST',
-      url: '/v1/wine-search',
+      url: '/v1/agent',
       headers: { 'content-type': 'application/json' },
       payload: { query: 'pinot noir' },
     });
@@ -390,7 +390,7 @@ describe('POST /v1/wine-search', () => {
 
     const response = await harness.app.inject({
       method: 'POST',
-      url: '/v1/wine-search',
+      url: '/v1/agent',
       headers: { 'content-type': 'application/json' },
       payload: { query: 'malicious payload' },
     });

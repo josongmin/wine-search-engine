@@ -170,13 +170,13 @@ export const api = {
   },
 
   /**
-   * Plan-then-Execute wine search (POST /v1/wine-search).
+   * Plan-then-Execute wine search (POST /v1/agent).
    * This is the canonical agentic API surface.
    */
   wineSearch: {
     execute(body: WineSearchRequest, opts: ApiCallOptions = {}) {
       return request<WineSearchResponse>(
-        '/v1/wine-search',
+        '/v1/agent',
         {
           method: 'POST',
           body: JSON.stringify(body),

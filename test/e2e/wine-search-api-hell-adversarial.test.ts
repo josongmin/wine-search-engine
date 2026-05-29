@@ -1,5 +1,5 @@
 /**
- * Hell-difficulty adversarial e2e tests for POST /v1/wine-search.
+ * Hell-difficulty adversarial e2e tests for POST /v1/agent.
  *
  * Targets ADVERSARIAL QUERY CONTENT (not framing concerns):
  *  1. Prompt injection (direct, markdown, JSON, Korean)
@@ -104,7 +104,7 @@ function postWineSearch(
 ): ReturnType<WineSearchTestHarness['app']['inject']> {
   return harness.app.inject({
     method: 'POST',
-    url: '/v1/wine-search',
+    url: '/v1/agent',
     headers: { 'content-type': 'application/json', ...headers },
     payload: JSON.stringify(body),
   });
@@ -186,7 +186,7 @@ function assertNoLeakMarkers(answer: string): void {
 // Category 1 — Prompt injection attempts
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/wine-search — Hell adversarial: Category 1 — Prompt injection', () => {
+describe('POST /v1/agent — Hell adversarial: Category 1 — Prompt injection', () => {
   let harness: WineSearchTestHarness;
 
   beforeEach(async () => {
@@ -340,7 +340,7 @@ describe('POST /v1/wine-search — Hell adversarial: Category 1 — Prompt injec
 // Category 2 — Unicode normalization attacks
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/wine-search — Hell adversarial: Category 2 — Unicode normalization', () => {
+describe('POST /v1/agent — Hell adversarial: Category 2 — Unicode normalization', () => {
   let harness: WineSearchTestHarness;
 
   beforeEach(async () => {
@@ -451,7 +451,7 @@ describe('POST /v1/wine-search — Hell adversarial: Category 2 — Unicode norm
 // Category 3 — Homoglyph / script-mixing attacks
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/wine-search — Hell adversarial: Category 3 — Homoglyph & script mixing', () => {
+describe('POST /v1/agent — Hell adversarial: Category 3 — Homoglyph & script mixing', () => {
   let harness: WineSearchTestHarness;
 
   beforeEach(async () => {
@@ -533,7 +533,7 @@ describe('POST /v1/wine-search — Hell adversarial: Category 3 — Homoglyph & 
 // Category 4 — Length-tail attacks (DoS / boundary)
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/wine-search — Hell adversarial: Category 4 — Length tail', () => {
+describe('POST /v1/agent — Hell adversarial: Category 4 — Length tail', () => {
   let harness: WineSearchTestHarness;
 
   beforeEach(async () => {
@@ -592,7 +592,7 @@ describe('POST /v1/wine-search — Hell adversarial: Category 4 — Length tail'
 // Category 5 — Korean wine domain edge cases
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/wine-search — Hell adversarial: Category 5 — Korean wine domain', () => {
+describe('POST /v1/agent — Hell adversarial: Category 5 — Korean wine domain', () => {
   let harness: WineSearchTestHarness;
 
   beforeEach(async () => {
@@ -695,7 +695,7 @@ describe('POST /v1/wine-search — Hell adversarial: Category 5 — Korean wine 
 // Category 6 — Semantic security boundary
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/wine-search — Hell adversarial: Category 6 — Semantic security boundary', () => {
+describe('POST /v1/agent — Hell adversarial: Category 6 — Semantic security boundary', () => {
   let harness: WineSearchTestHarness;
 
   beforeEach(async () => {
@@ -778,7 +778,7 @@ describe('POST /v1/wine-search — Hell adversarial: Category 6 — Semantic sec
 // Category 7 — Reserved-word / SQL / XSS shapes
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/wine-search — Hell adversarial: Category 7 — Reserved-word & injection shapes', () => {
+describe('POST /v1/agent — Hell adversarial: Category 7 — Reserved-word & injection shapes', () => {
   let harness: WineSearchTestHarness;
 
   beforeEach(async () => {

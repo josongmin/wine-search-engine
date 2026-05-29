@@ -1,6 +1,6 @@
 /**
  * Minimal bench runner targeting the NEW canonical agent —
- * `WineSearchOrchestrator` (Plan-then-Execute, `/v1/wine-search`).
+ * `WineSearchOrchestrator` (Plan-then-Execute, `/v1/agent`).
  *
  * Replaces the deleted legacy `test/benchmark/agent/runner.ts` (which drove
  * the ReAct-style `AgentOrchestrator`). The cutover blueprint

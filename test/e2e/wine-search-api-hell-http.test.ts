@@ -1,5 +1,5 @@
 /**
- * Hell-difficulty e2e tests for POST /v1/wine-search.
+ * Hell-difficulty e2e tests for POST /v1/agent.
  *
  * Companion to `test/e2e/wine-search-api.test.ts`. That file proves the happy
  * path + basic validation; this file attacks the HTTP boundary itself:
@@ -95,7 +95,7 @@ interface InjectOptions {
 
 function inject(harness: WineSearchTestHarness, opts: InjectOptions = {}) {
   const method = opts.method ?? 'POST';
-  const url = opts.url ?? '/v1/wine-search';
+  const url = opts.url ?? '/v1/agent';
   const headers = opts.headers ?? { 'content-type': 'application/json' };
   const payload = typeof opts.payload === 'string' || opts.payload === undefined
     ? opts.payload
@@ -131,7 +131,7 @@ async function buildHappyHarness(answer = '추천 결과를 정리했습니다.'
 // Tier H1: Request-body adversarial
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/wine-search — Hell H1: Request body adversarial', () => {
+describe('POST /v1/agent — Hell H1: Request body adversarial', () => {
   let harness: WineSearchTestHarness;
   afterEach(async () => { if (harness !== undefined) await harness.cleanup(); });
 
@@ -356,7 +356,7 @@ describe('POST /v1/wine-search — Hell H1: Request body adversarial', () => {
 // Tier H2: Content-Type tricks
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/wine-search — Hell H2: Content-Type tricks', () => {
+describe('POST /v1/agent — Hell H2: Content-Type tricks', () => {
   let harness: WineSearchTestHarness;
   afterEach(async () => { if (harness !== undefined) await harness.cleanup(); });
 
@@ -364,7 +364,7 @@ describe('POST /v1/wine-search — Hell H2: Content-Type tricks', () => {
     harness = await buildHappyHarness();
     const res = await harness.app.inject({
       method: 'POST',
-      url: '/v1/wine-search',
+      url: '/v1/agent',
       headers: {}, // explicitly empty
       payload: JSON.stringify({ query: 'wine' }),
     });
@@ -376,7 +376,7 @@ describe('POST /v1/wine-search — Hell H2: Content-Type tricks', () => {
     harness = await buildHappyHarness();
     const res = await harness.app.inject({
       method: 'POST',
-      url: '/v1/wine-search',
+      url: '/v1/agent',
       headers: { 'content-type': 'text/plain' },
       payload: JSON.stringify({ query: 'wine' }),
     });
@@ -418,21 +418,21 @@ describe('POST /v1/wine-search — Hell H2: Content-Type tricks', () => {
 // Tier H3: Method + path tricks
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/wine-search — Hell H3: Method + path tricks', () => {
+describe('POST /v1/agent — Hell H3: Method + path tricks', () => {
   let harness: WineSearchTestHarness;
   afterEach(async () => { if (harness !== undefined) await harness.cleanup(); });
 
-  it('GET /v1/wine-search → 404 (only POST is registered)', async () => {
+  it('GET /v1/agent → 404 (only POST is registered)', async () => {
     harness = await buildHappyHarness();
-    const res = await harness.app.inject({ method: 'GET', url: '/v1/wine-search' });
+    const res = await harness.app.inject({ method: 'GET', url: '/v1/agent' });
     expect(res.statusCode).toBe(404);
   });
 
-  it('PUT /v1/wine-search → 4xx (rejects unrelated method)', async () => {
+  it('PUT /v1/agent → 4xx (rejects unrelated method)', async () => {
     harness = await buildHappyHarness();
     const res = await harness.app.inject({
       method: 'PUT',
-      url: '/v1/wine-search',
+      url: '/v1/agent',
       headers: { 'content-type': 'application/json' },
       payload: JSON.stringify({ query: 'wine' }),
     });
@@ -442,24 +442,24 @@ describe('POST /v1/wine-search — Hell H3: Method + path tricks', () => {
     expect(res.statusCode).toBeLessThan(500);
   });
 
-  it('OPTIONS /v1/wine-search → never 500 (CORS preflight or 404)', async () => {
+  it('OPTIONS /v1/agent → never 500 (CORS preflight or 404)', async () => {
     harness = await buildHappyHarness();
-    const res = await harness.app.inject({ method: 'OPTIONS', url: '/v1/wine-search' });
+    const res = await harness.app.inject({ method: 'OPTIONS', url: '/v1/agent' });
     expect(res.statusCode).toBeLessThan(500);
   });
 
-  it('POST /v1/wine-search/ (trailing slash) → handled deterministically (200 or 404, never 500)', async () => {
+  it('POST /v1/agent/ (trailing slash) → handled deterministically (200 or 404, never 500)', async () => {
     harness = await buildHappyHarness('ok');
-    const res = await inject(harness, { url: '/v1/wine-search/', payload: { query: 'wine' } });
+    const res = await inject(harness, { url: '/v1/agent/', payload: { query: 'wine' } });
     // Fastify's default is `ignoreTrailingSlash: false` → 404. We accept
     // either behavior; the invariant is "no 500".
     expect([200, 404]).toContain(res.statusCode);
   });
 
-  it('POST /v1/wine-search?inject=1 (query params) → 200, query params ignored', async () => {
+  it('POST /v1/agent?inject=1 (query params) → 200, query params ignored', async () => {
     harness = await buildHappyHarness('ok');
     const res = await inject(harness, {
-      url: '/v1/wine-search?inject=1&attack=true',
+      url: '/v1/agent?inject=1&attack=true',
       payload: { query: 'wine' },
     });
     expect(res.statusCode).toBe(200);
@@ -479,7 +479,7 @@ describe('POST /v1/wine-search — Hell H3: Method + path tricks', () => {
 // Tier H4: AbortSignal lifecycle (race conditions)
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/wine-search — Hell H4: AbortSignal lifecycle', () => {
+describe('POST /v1/agent — Hell H4: AbortSignal lifecycle', () => {
   let harness: WineSearchTestHarness;
   afterEach(async () => { if (harness !== undefined) await harness.cleanup(); });
 
@@ -578,7 +578,7 @@ describe('POST /v1/wine-search — Hell H4: AbortSignal lifecycle', () => {
 // Tier H5: Header manipulation
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/wine-search — Hell H5: Header manipulation', () => {
+describe('POST /v1/agent — Hell H5: Header manipulation', () => {
   let harness: WineSearchTestHarness;
   afterEach(async () => { if (harness !== undefined) await harness.cleanup(); });
 
@@ -637,7 +637,7 @@ describe('POST /v1/wine-search — Hell H5: Header manipulation', () => {
 // Tier H6: Concurrency stress + no cross-talk
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/wine-search — Hell H6: Concurrency', () => {
+describe('POST /v1/agent — Hell H6: Concurrency', () => {
   let harness: WineSearchTestHarness;
   afterEach(async () => { if (harness !== undefined) await harness.cleanup(); });
 
@@ -726,7 +726,7 @@ describe('POST /v1/wine-search — Hell H6: Concurrency', () => {
 // Tier H7: Response envelope discipline (RFC-014 + invariants)
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/wine-search — Hell H7: Response envelope discipline', () => {
+describe('POST /v1/agent — Hell H7: Response envelope discipline', () => {
   let harness: WineSearchTestHarness;
   afterEach(async () => { if (harness !== undefined) await harness.cleanup(); });
 

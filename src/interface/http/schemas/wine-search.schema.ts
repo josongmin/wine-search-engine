@@ -1,5 +1,5 @@
 /**
- * Zod schemas for the new POST /v1/wine-search endpoint.
+ * Zod schemas for the new POST /v1/agent endpoint.
  *
  * This is the public HTTP surface for the Plan-then-Execute wine-search
  * orchestrator. The response shape is intentionally leaner and

@@ -1,5 +1,5 @@
 /**
- * Route contract for POST /v1/wine-search — Plan-then-Execute wine search.
+ * Route contract for POST /v1/agent — Plan-then-Execute wine search.
  *
  * This contract is the static authority for the route's request/response
  * shape and its enumerated error statuses. It is consumed by:
@@ -28,7 +28,7 @@ import {
 } from '../schemas/wine-search.schema.js';
 
 export const WineSearchRouteContract = {
-  operationId: 'wineSearch.execute',
+  operationId: 'agent.execute',
   body: WineSearchRequestSchema,
   responses: {
     [HTTP_STATUS_OK]: WineSearchResponseSchema,

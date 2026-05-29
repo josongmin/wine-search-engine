@@ -93,7 +93,7 @@ export interface Container extends LearningContainerServices {
   /**
    * Plan-then-Execute wine-search orchestrator — present when
    * `WINE_SEARCH_ENABLED=true` and an Anthropic API key is configured.
-   * When undefined, the `/v1/wine-search` route is not registered.
+   * When undefined, the `/v1/agent` route is not registered.
    */
   readonly wineSearch?: WineSearchContainerServices | undefined;
 }
@@ -288,7 +288,7 @@ export async function createContainer(
     !config.killSwitch.learning && learning.feedbackStore !== null;
 
   // Plan-then-Execute wine-search slice. Returns `undefined` when the
-  // `WINE_SEARCH_ENABLED` flag is off — the `/v1/wine-search` route is
+  // `WINE_SEARCH_ENABLED` flag is off — the `/v1/agent` route is
   // simply not registered in that case (zero runtime cost).
   const wineSearch = buildWineSearchContainerServices(
     config,

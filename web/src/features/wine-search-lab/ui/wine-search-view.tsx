@@ -2,7 +2,7 @@
 
 /**
  * WineSearchView — UI for the Plan-then-Execute orchestrator
- * (`POST /v1/wine-search`).
+ * (`POST /v1/agent`).
  *
  *   - `meta.intent` + `meta.plan_kind`
  *   - `meta.termination.{reason, layer, kind?, degraded_reason?}`
@@ -81,7 +81,7 @@ export function WineSearchView() {
           </h1>
           <p className="mt-2 text-sm text-muted-foreground max-w-2xl">
             POST{' '}
-            <code className="rounded bg-muted px-1 py-0.5 text-xs">/v1/wine-search</code>{' '}
+            <code className="rounded bg-muted px-1 py-0.5 text-xs">/v1/agent</code>{' '}
             새 오케스트레이터를 호출합니다. 백엔드에{' '}
             <code className="rounded bg-muted px-1 py-0.5 text-xs">WINE_SEARCH_ENABLED=true</code>{' '}
             와 LLM 키가 필요합니다.
