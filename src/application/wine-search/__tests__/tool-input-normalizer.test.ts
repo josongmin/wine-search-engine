@@ -648,7 +648,10 @@ describe('normalizeSearchInput — end-to-end composition', () => {
         requiresDrinkabilityCheck: false,
         requiresGroundedWineSearch: false,
         hasEntityMetadataSignal: false,
-        requiredTool: 'get_food_pairings',
+        // T-IR-05: pairing capability is composed from the primitive
+        // grounded-discovery tool (`search_hybrid`) rather than a dedicated
+        // `get_food_pairings` tool. Analyzer intent stays 'pair'.
+        requiredTool: 'search_hybrid',
       },
     });
     const out = DefaultToolInputNormalizer.normalizeSearchInput(input, analysis);

@@ -80,6 +80,298 @@
               },
               "maxItems": 8
             },
+            "constraints": {
+              "type": "object",
+              "properties": {
+                "hard": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "attribute": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2000
+                      },
+                      "operator": {
+                        "type": "string",
+                        "enum": [
+                          "=",
+                          "<=",
+                          ">=",
+                          "range",
+                          "in",
+                          "exclude",
+                          "not_in"
+                        ]
+                      },
+                      "value": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "maxLength": 2000
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "min": {
+                                "type": "number"
+                              },
+                              "max": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "min",
+                              "max"
+                            ]
+                          },
+                          {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "maxLength": 2000
+                            },
+                            "maxItems": 32
+                          }
+                        ]
+                      },
+                      "source_phrase": {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      "confidence": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "soft_promotion_authority": {
+                        "type": "string",
+                        "enum": [
+                          "allow",
+                          "deny"
+                        ]
+                      },
+                      "mapping_version": {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      "inferred_binding": {
+                        "type": "string",
+                        "enum": [
+                          "binding",
+                          "descriptive"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "attribute",
+                      "operator",
+                      "value",
+                      "source_phrase",
+                      "confidence"
+                    ]
+                  },
+                  "maxItems": 32
+                },
+                "soft": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "attribute": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2000
+                      },
+                      "operator": {
+                        "type": "string",
+                        "enum": [
+                          "=",
+                          "<=",
+                          ">=",
+                          "range",
+                          "in",
+                          "exclude",
+                          "not_in"
+                        ]
+                      },
+                      "value": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "maxLength": 2000
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "min": {
+                                "type": "number"
+                              },
+                              "max": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "min",
+                              "max"
+                            ]
+                          },
+                          {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "maxLength": 2000
+                            },
+                            "maxItems": 32
+                          }
+                        ]
+                      },
+                      "source_phrase": {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      "confidence": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "soft_promotion_authority": {
+                        "type": "string",
+                        "enum": [
+                          "allow",
+                          "deny"
+                        ]
+                      },
+                      "mapping_version": {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      "inferred_binding": {
+                        "type": "string",
+                        "enum": [
+                          "binding",
+                          "descriptive"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "attribute",
+                      "operator",
+                      "value",
+                      "source_phrase",
+                      "confidence"
+                    ]
+                  },
+                  "maxItems": 32
+                },
+                "inferred": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "attribute": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2000
+                      },
+                      "operator": {
+                        "type": "string",
+                        "enum": [
+                          "=",
+                          "<=",
+                          ">=",
+                          "range",
+                          "in",
+                          "exclude",
+                          "not_in"
+                        ]
+                      },
+                      "value": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "maxLength": 2000
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "min": {
+                                "type": "number"
+                              },
+                              "max": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "min",
+                              "max"
+                            ]
+                          },
+                          {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "maxLength": 2000
+                            },
+                            "maxItems": 32
+                          }
+                        ]
+                      },
+                      "source_phrase": {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      "confidence": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "soft_promotion_authority": {
+                        "type": "string",
+                        "enum": [
+                          "allow",
+                          "deny"
+                        ]
+                      },
+                      "mapping_version": {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      "inferred_binding": {
+                        "type": "string",
+                        "enum": [
+                          "binding",
+                          "descriptive"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "attribute",
+                      "operator",
+                      "value",
+                      "source_phrase",
+                      "confidence"
+                    ]
+                  },
+                  "maxItems": 32
+                }
+              },
+              "required": [
+                "hard",
+                "soft",
+                "inferred"
+              ]
+            },
             "normalizedConstraints": {
               "type": "array",
               "items": {
@@ -145,9 +437,23 @@
                     "minimum": 0,
                     "maximum": 1
                   },
+                  "soft_promotion_authority": {
+                    "type": "string",
+                    "enum": [
+                      "allow",
+                      "deny"
+                    ]
+                  },
                   "mapping_version": {
                     "type": "string",
                     "maxLength": 2000
+                  },
+                  "inferred_binding": {
+                    "type": "string",
+                    "enum": [
+                      "binding",
+                      "descriptive"
+                    ]
                   }
                 },
                 "required": [
@@ -159,6 +465,11 @@
                 ]
               },
               "maxItems": 32
+            },
+            "requestedResultLimit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
             },
             "decomposition": {
               "oneOf": [
@@ -243,9 +554,23 @@
                                   "minimum": 0,
                                   "maximum": 1
                                 },
+                                "soft_promotion_authority": {
+                                  "type": "string",
+                                  "enum": [
+                                    "allow",
+                                    "deny"
+                                  ]
+                                },
                                 "mapping_version": {
                                   "type": "string",
                                   "maxLength": 2000
+                                },
+                                "inferred_binding": {
+                                  "type": "string",
+                                  "enum": [
+                                    "binding",
+                                    "descriptive"
+                                  ]
                                 }
                               },
                               "required": [
@@ -320,10 +645,10 @@
                 "requiredTool": {
                   "type": "string",
                   "enum": [
-                    "search_wines",
-                    "compare_wines",
-                    "check_drinking_window",
-                    "get_food_pairings"
+                    "search_hybrid",
+                    "search_semantic",
+                    "search_lexical",
+                    "lookup_wine"
                   ]
                 },
                 "requiresGroundedWineSearch": {
@@ -359,6 +684,11 @@
                   "type": "integer",
                   "minimum": 2,
                   "maximum": 6
+                },
+                "retrievalK": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 500
                 }
               },
               "required": [
@@ -372,6 +702,95 @@
             "preservedSurface": {
               "type": "string",
               "maxLength": 2000
+            },
+            "callerInterpretation": {
+              "type": "object",
+              "properties": {
+                "authority": {
+                  "const": "caller"
+                },
+                "intent": {
+                  "type": "string",
+                  "enum": [
+                    "entity_exact",
+                    "entity_fuzzy",
+                    "facet_search",
+                    "semantic_discovery",
+                    "pairing_search",
+                    "budget_search",
+                    "comparison_search",
+                    "mixed_query"
+                  ]
+                },
+                "queryClass": {
+                  "type": "string",
+                  "enum": [
+                    "exact_entity",
+                    "short_entity",
+                    "ambiguous_short_form",
+                    "anchored_similarity",
+                    "pure_constraint",
+                    "semantic_preference",
+                    "comparison_query",
+                    "unknown"
+                  ]
+                }
+              },
+              "required": [
+                "authority",
+                "intent",
+                "queryClass"
+              ]
+            },
+            "llmFallbackOutcome": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "const": "not_attempted"
+                    }
+                  },
+                  "required": [
+                    "kind"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "const": "success"
+                    }
+                  },
+                  "required": [
+                    "kind"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "const": "failed_softened_to_search"
+                    },
+                    "failureReason": {
+                      "type": "string",
+                      "enum": [
+                        "timeout",
+                        "refusal",
+                        "validation",
+                        "partial_output",
+                        "circuit_open",
+                        "unknown"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "failureReason"
+                  ]
+                }
+              ],
+              "x-discriminator": "kind"
             }
           },
           "required": [

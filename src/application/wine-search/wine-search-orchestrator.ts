@@ -1313,9 +1313,9 @@ function projectExecutionOutcomeAsToolOutcomes(
   const now = clock.now();
   switch (outcome.kind) {
     case 'search-result':
-      return [makeToolOutcome('search_wines', outcome.result, now)];
+      return [makeToolOutcome('search_hybrid', outcome.result, now)];
     case 'parallel-results':
-      return outcome.results.map((r) => makeToolOutcome('search_wines', r, now));
+      return outcome.results.map((r) => makeToolOutcome('search_hybrid', r, now));
   }
 }
 
@@ -1356,7 +1356,7 @@ function planSearchToolCallSummary(
 ): ExecutionStepShape {
   if (plan.kind === 'single-search') {
     const sample = sampleSearchInput(plan.searchInput);
-    return { toolCalls: [{ name: 'search_wines', arguments: sample }] };
+    return { toolCalls: [{ name: 'search_hybrid', arguments: sample }] };
   }
   return {};
 }
@@ -1367,7 +1367,7 @@ function planParallelToolCallSummary(
   if (plan.kind !== 'parallel-search') return {};
   return {
     toolCalls: plan.searches.map((s) => ({
-      name: 'search_wines',
+      name: 'search_hybrid',
       arguments: sampleSearchInput(s),
     })),
   };

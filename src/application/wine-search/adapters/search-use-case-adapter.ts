@@ -115,5 +115,9 @@ export function mapSearchUseCaseInputToSearchRequest(
       ? { representativeConcept: input.representativeConcept }
       : {}),
     ...(callerInterpretation !== undefined ? { callerInterpretation } : {}),
+    // T-IR-05: forward the primitive agent tool's retrieval lane onto the
+    // SearchRequest so `search_semantic` / `search_lexical` gate channels at
+    // the candidate pool exactly like the HTTP `/v1/search/{...}` routes.
+    ...(input.retrievalLane !== undefined ? { retrievalLane: input.retrievalLane } : {}),
   };
 }

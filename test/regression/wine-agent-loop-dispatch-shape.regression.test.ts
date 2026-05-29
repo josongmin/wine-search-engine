@@ -1,13 +1,18 @@
 /**
  * Regression: wine-agent-loop tool dispatch shape (SOLID H1/H2 follow-up).
  *
- * Three invariants:
+ * Invariants (T-IR-05 taxonomy: the active loop exposes exactly the four
+ * retrieval primitives `search_hybrid`/`search_semantic`/`search_lexical`/
+ * `lookup_wine`; the convenience tools `get_food_pairings`,
+ * `check_drinking_window`, `compare_wines` were removed):
  *   1. `lookup_wine` routes through the shared schema — empty / placeholder
  *      query produces an INVALID_INPUT-style observation, no port call.
- *   2. `get_food_pairings` returns the WHOLE FoodPairingResult as
- *      `rawResult` (sibling shape), not the unwrapped results array. The
- *      observation continues to be derived from `.results` so the LLM only
- *      sees per-wine fields.
+ *   2. A REMOVED convenience tool (e.g. `get_food_pairings`) is now
+ *      UNSUPPORTED: when the LLM emits it, the dispatcher hits its default
+ *      branch and returns the "not supported in the wine-agent-loop"
+ *      observation WITHOUT calling the search port. (Repurposed from the old
+ *      food-pairing rawResult-shape invariant, which no longer applies since
+ *      the tool was removed — regression tests are append-only per CLAUDE.md.)
  *   3. The default "unknown tool" observation reads the tool-name display
  *      string from the SSoT (KNOWN_AGENT_TOOL_NAMES_DISPLAY), so adding a
  *      new tool to the SSoT propagates here without an edit.
@@ -162,8 +167,13 @@ function makeInput(overrides: Partial<WineAgentLoopInput>): WineAgentLoopInput {
     analysis: makeAnalysis(),
     requestId: 'req-mldsr-1',
     tools: overrides.tools ?? [
-      makePassthroughToolDef('search_wines'),
+      // T-IR-05 active taxonomy: the four retrieval primitives.
+      makePassthroughToolDef('search_hybrid'),
+      makePassthroughToolDef('search_semantic'),
+      makePassthroughToolDef('search_lexical'),
       makePassthroughToolDef('lookup_wine'),
+      // A REMOVED convenience tool — exposed as a passthrough def so the LLM
+      // can emit it; the dispatcher must reject it via the default branch.
       makePassthroughToolDef('get_food_pairings'),
       // Intentionally include a name that is NOT in KNOWN_AGENT_TOOL_NAMES so
       // the unknown-tool default branch fires when the LLM emits it.
@@ -251,4 +261,44 @@ describe('wine-agent-loop dispatch — unknown tool branch uses SSoT display str
     expect(obs).toContain('mystery_tool');
     expect(obs).toContain(KNOWN_AGENT_TOOL_NAMES_DISPLAY);
   });
+});
+
+describe('wine-agent-loop dispatch — removed convenience tools are UNSUPPORTED (T-IR-05)', () => {
+  // Repurposed from the legacy food-pairing rawResult-shape invariant. The
+  // convenience tools (`get_food_pairings`, `check_drinking_window`,
+  // `compare_wines`) were removed from the active loop; the agent now composes
+  // those capabilities from the primitive search/lookup tools. When the LLM
+  // still emits one of the removed names, the dispatcher MUST hit its default
+  // branch (unsupported) and MUST NOT dispatch to the search use case.
+  for (const removedTool of ['get_food_pairings', 'check_drinking_window', 'compare_wines']) {
+    it(`rejects "${removedTool}" via the default branch and never calls the search port`, async () => {
+      const searchPort = makeSearchPort();
+      const llm = makeStubLlm([
+        async () => asToolUseResult([toolUse(removedTool, { food: 'steak', query: 'x' })]),
+        async () => asTextResult('Sorry.'),
+      ]);
+      const runner = new WineAgentLoopRunner({ structuredLlm: llm });
+      const out = await runner.run(makeInput({
+        toolPorts: makeToolPorts({ searchUseCase: searchPort }),
+        tools: [
+          makePassthroughToolDef('search_hybrid'),
+          makePassthroughToolDef('search_semantic'),
+          makePassthroughToolDef('search_lexical'),
+          makePassthroughToolDef('lookup_wine'),
+          // Exposed as a callable def so the stub LLM can emit it; the
+          // dispatcher must still refuse it.
+          makePassthroughToolDef(removedTool),
+        ],
+      }));
+
+      const obs = out.steps[0]?.observations[0] ?? '';
+      // The dispatcher's default-branch observation contract.
+      expect(obs).toMatch(
+        new RegExp(`^Tool "${removedTool}" is not supported in the wine-agent-loop\\. Use one of:`),
+      );
+      expect(obs).toContain(KNOWN_AGENT_TOOL_NAMES_DISPLAY);
+      // The removed convenience tool MUST NOT reach the search use case.
+      expect(searchPort.executeMock).not.toHaveBeenCalled();
+    });
+  }
 });

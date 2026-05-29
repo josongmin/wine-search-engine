@@ -1,14 +1,37 @@
 import { z } from 'zod';
 
+/**
+ * T-IR-05: the active agent tool taxonomy is exactly the four retrieval
+ * primitives that mirror the external `/v1/search/{hybrid,semantic,lexical}`
+ * and `/v1/lookup/wine` HTTP surface. The convenience tools
+ * (`get_food_pairings`, `check_drinking_window`, `compare_wines`) were removed
+ * from the active loop — the agent composes those capabilities from primitive
+ * retrieval + synthesis (architecture-decision §5). `search_wines(mode=...)`
+ * is gone; the lane is selected by the tool NAME, not a body field.
+ */
 export const KNOWN_AGENT_TOOL_NAMES = [
-  'search_wines',
+  'search_hybrid',
+  'search_semantic',
+  'search_lexical',
   'lookup_wine',
-  'get_food_pairings',
-  'check_drinking_window',
-  'compare_wines',
 ] as const;
 
 export type KnownAgentToolName = (typeof KNOWN_AGENT_TOOL_NAMES)[number];
+
+/** Maps each search-family primitive tool to the retrieval lane it drives in
+ *  the candidate pool. `lookup_wine` is entity resolution (no lane — runs the
+ *  entity route). SSoT for the tool→lane projection used by the dispatcher. */
+export const SEARCH_PRIMITIVE_TOOL_LANES = {
+  search_hybrid: 'hybrid',
+  search_semantic: 'semantic_only',
+  search_lexical: 'lexical_only',
+} as const satisfies Record<string, 'hybrid' | 'semantic_only' | 'lexical_only'>;
+
+export type SearchPrimitiveToolName = keyof typeof SEARCH_PRIMITIVE_TOOL_LANES;
+
+export function isSearchPrimitiveToolName(tool: string): tool is SearchPrimitiveToolName {
+  return Object.prototype.hasOwnProperty.call(SEARCH_PRIMITIVE_TOOL_LANES, tool);
+}
 
 /** Formatted "Available: ..." string derived from SSOT tool name list. */
 export const KNOWN_AGENT_TOOL_NAMES_DISPLAY = KNOWN_AGENT_TOOL_NAMES.join(', ');

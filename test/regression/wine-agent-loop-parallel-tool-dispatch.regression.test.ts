@@ -3,8 +3,8 @@
  *
  * The legacy implementation (wine-agent-loop.ts:340-354) used a `for...await` loop
  * to call `dispatchTool` once per tool call emitted by the LLM. When a
- * single LLM turn emits 2-3 tool calls (common: compare + two
- * drinking-window checks), serial dispatch tripled per-step latency.
+ * single LLM turn emits 2-3 tool calls (common: a fan-out of several
+ * search_hybrid discovery probes), serial dispatch tripled per-step latency.
  *
  * This regression pins the parallel contract: when an LLM turn emits N
  * tool calls, all N dispatches start before any of them resolves.
@@ -86,9 +86,9 @@ describe('wine-agent-loop parallel tool dispatch (F1 regression)', () => {
     });
 
     const llm = makeLlm([
-      { tool: 'search_wines', input: { query: 'a' } },
-      { tool: 'search_wines', input: { query: 'b' } },
-      { tool: 'search_wines', input: { query: 'c' } },
+      { tool: 'search_hybrid', input: { query: 'a' } },
+      { tool: 'search_hybrid', input: { query: 'b' } },
+      { tool: 'search_hybrid', input: { query: 'c' } },
     ]);
 
     const runner = new WineAgentLoopRunner({
@@ -97,7 +97,7 @@ describe('wine-agent-loop parallel tool dispatch (F1 regression)', () => {
     });
 
     const minimalTool = {
-      name: 'search_wines',
+      name: 'search_hybrid',
       description: 'search',
       inputSchema: z.object({ query: z.string() }),
     } as const;

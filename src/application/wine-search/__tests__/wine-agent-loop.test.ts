@@ -290,17 +290,20 @@ function asTextResult(text: string, usage = makeTokenUsage(100, 50)): ExecuteRes
 }
 
 // Minimal tool definition list — the runner only forwards these to the LLM.
+// T-IR-05: the active taxonomy is exactly the four retrieval primitives
+// (search_hybrid / search_semantic / search_lexical / lookup_wine). The
+// removed convenience tools (search_wines / get_food_pairings /
+// check_drinking_window / compare_wines) are no longer forwarded.
 function makeToolDefs(): readonly ToolDefinition[] {
   const passthrough: ToolDefinition['inputSchema'] = {
     parse: (x: unknown) => x,
     safeParse: (x: unknown) => ({ success: true as const, data: x }),
   } as unknown as ToolDefinition['inputSchema'];
   return [
-    { name: 'search_wines', description: 'search', inputSchema: passthrough },
+    { name: 'search_hybrid', description: 'hybrid search', inputSchema: passthrough },
+    { name: 'search_semantic', description: 'semantic search', inputSchema: passthrough },
+    { name: 'search_lexical', description: 'lexical search', inputSchema: passthrough },
     { name: 'lookup_wine', description: 'lookup', inputSchema: passthrough },
-    { name: 'get_food_pairings', description: 'food pairing', inputSchema: passthrough },
-    { name: 'check_drinking_window', description: 'drinking window', inputSchema: passthrough },
-    { name: 'compare_wines', description: 'compare', inputSchema: passthrough },
   ];
 }
 
@@ -329,7 +332,7 @@ function makeInput(overrides: Partial<WineAgentLoopInput> & { readonly analysis?
 describe('WineAgentLoopRunner — happy path', () => {
   it('single search → answer → terminates with reason=answer in 2 steps', async () => {
     const llm = makeStubLlm([
-      async () => asToolUseResult([toolUse('search_wines', { query: 'Burgundy Pinot Noir' })]),
+      async () => asToolUseResult([toolUse('search_hybrid', { query: 'Burgundy Pinot Noir' })]),
       async () => asTextResult('I recommend Burgundy Pinot Noir based on the results.'),
     ]);
     const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
@@ -341,7 +344,7 @@ describe('WineAgentLoopRunner — happy path', () => {
     expect(out.steps[1]?.kind).toBe('answer');
     expect(out.answer).toBe('I recommend Burgundy Pinot Noir based on the results.');
     expect(out.toolOutcomes).toHaveLength(1);
-    expect(out.toolOutcomes[0]?.tool).toBe('search_wines');
+    expect(out.toolOutcomes[0]?.tool).toBe('search_hybrid');
     expect(out.toolOutcomes[0]?.kind).toBe('success');
   });
 });
@@ -354,8 +357,8 @@ describe('WineAgentLoopRunner — relax constraints retry', () => {
       return Promise.resolve(makeSearchResponse(['wine-relaxed']));
     });
     const llm = makeStubLlm([
-      async () => asToolUseResult([toolUse('search_wines', { query: 'rare 1947 Mouton under 5만원' })]),
-      async () => asToolUseResult([toolUse('search_wines', { query: 'rare 1947 Mouton (relaxed)' })]),
+      async () => asToolUseResult([toolUse('search_hybrid', { query: 'rare 1947 Mouton under 5만원' })]),
+      async () => asToolUseResult([toolUse('search_hybrid', { query: 'rare 1947 Mouton (relaxed)' })]),
       async () => asTextResult('After relaxing price, found wine-relaxed.'),
     ]);
     const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
@@ -379,40 +382,38 @@ describe('WineAgentLoopRunner — required tool directive', () => {
   it('model emits answer first → required_tool directive injected → tool called → answer accepted', async () => {
     const llm = makeStubLlm([
       // Model tries to answer prematurely — must be rejected because
-      // requiredTool=get_food_pairings hasn't been called.
+      // requiredTool=search_hybrid hasn't been called.
       async () => asTextResult('Try a Riesling.'),
-      // After directive injection, the model calls get_food_pairings.
-      async () => asToolUseResult([toolUse('get_food_pairings', { food: 'spicy Korean BBQ' })]),
+      // After directive injection, the model calls the required discovery
+      // primitive (T-IR-05: pairing capability is composed from search_hybrid).
+      async () => asToolUseResult([toolUse('search_hybrid', { query: 'wine pairing for spicy Korean BBQ' })]),
       // Final answer accepted.
       async () => asTextResult('Riesling pairs well with spicy Korean BBQ.'),
     ]);
     const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
     const out = await runner.run(makeInput({
-      analysis: makeAnalysis({ requiredTool: 'get_food_pairings' }),
+      analysis: makeAnalysis({ requiredTool: 'search_hybrid' }),
       maxSteps: 5,
     }));
 
     expect(out.terminationReason).toBe('answer');
-    expect(out.toolOutcomes.some((o) => o.tool === 'get_food_pairings')).toBe(true);
+    expect(out.toolOutcomes.some((o) => o.tool === 'search_hybrid')).toBe(true);
     expect(out.answer).toContain('Riesling pairs well');
   });
 
-  it('dispatches get_food_pairings through searchUseCase with shared pairing assembly', async () => {
+  it('dispatches search_hybrid through searchUseCase for a pairing query', async () => {
     const searchPort = makeSearchPort(() => Promise.resolve(makeSearchResponse(['pair-1'])));
     const llm = makeStubLlm([
       async () => asToolUseResult([
-        toolUse('get_food_pairings', {
-          food: 'spicy Korean BBQ',
-          color: 'white',
-          styles: ['aromatic'],
-          pairing_tags: ['spicy'],
+        toolUse('search_hybrid', {
+          query: 'wine pairing for spicy Korean BBQ',
         }),
       ]),
       async () => asTextResult('Riesling works here.'),
     ]);
     const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
     const out = await runner.run(makeInput({
-      analysis: makeAnalysis({ requiredTool: 'get_food_pairings' }),
+      analysis: makeAnalysis({ requiredTool: 'search_hybrid' }),
       toolPorts: makeToolPorts({ searchUseCase: searchPort }),
       maxSteps: 4,
     }));
@@ -421,19 +422,20 @@ describe('WineAgentLoopRunner — required tool directive', () => {
     expect(searchPort.executeMock).toHaveBeenCalledTimes(1);
     expect(searchPort.executeMock.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
       query: expect.stringContaining('wine pairing for spicy Korean BBQ'),
-      mode: 'hybrid',
     }));
-    expect(searchPort.executeMock.mock.calls[0]?.[0]?.filters).toEqual(
-      expect.arrayContaining([expect.objectContaining({ attribute: 'wine_type', value: 'white' })]),
-    );
-    expect(searchPort.executeMock.mock.calls[0]?.[0]?.preferences).toEqual(
-      expect.arrayContaining([expect.objectContaining({ attribute: 'pairing', value: ['spicy'] })]),
-    );
   });
 });
 
-describe('WineAgentLoopRunner — extended tool dispatch', () => {
-  it('dispatches compare_wines through decomposedSearchUseCase', async () => {
+describe('WineAgentLoopRunner — removed convenience tools are unsupported (T-IR-05 guard)', () => {
+  // T-IR-05 removed compare_wines / check_drinking_window / get_food_pairings
+  // from the active loop. These tests are repurposed (NOT deleted — regression
+  // tests are append-only) into guards that the dispatcher hits its default
+  // branch for a removed tool name: it returns the "not supported" observation
+  // and never invokes the corresponding use-case spy.
+  const UNSUPPORTED_PREFIX = (name: string) =>
+    `Tool "${name}" is not supported in the wine-agent-loop. Use one of:`;
+
+  it('compare_wines hits the unsupported default branch and never calls decomposedSearchUseCase', async () => {
     const comparisonPort = makeDecomposedSearchPort();
     const llm = makeStubLlm([
       async () => asToolUseResult([
@@ -448,12 +450,17 @@ describe('WineAgentLoopRunner — extended tool dispatch', () => {
     }));
 
     expect(out.terminationReason).toBe('answer');
-    expect(comparisonPort.executeMock).toHaveBeenCalledTimes(1);
-    expect(comparisonPort.executeMock.mock.calls[0]?.[0]).toEqual(['Opus One 2018', 'Almaviva 2019']);
-    expect(out.toolOutcomes.some((o) => o.tool === 'compare_wines')).toBe(true);
+    // Removed tool: the convenience use case MUST NOT be dispatched.
+    expect(comparisonPort.executeMock).not.toHaveBeenCalled();
+    const compareStep = out.steps.find((s) =>
+      s.toolCalls.some((c) => c.tool === 'compare_wines'),
+    );
+    expect(compareStep?.observations[0]).toMatch(
+      new RegExp(`^${UNSUPPORTED_PREFIX('compare_wines').replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}`),
+    );
   });
 
-  it('dispatches check_drinking_window through entity lookup hydration and use case', async () => {
+  it('check_drinking_window hits the unsupported default branch and never calls the drinking-window use case', async () => {
     const drinkingWindowPort = makeDrinkingWindowPort();
     const entityLookup = makeEntityLookupPort();
     const llm = makeStubLlm([
@@ -472,9 +479,40 @@ describe('WineAgentLoopRunner — extended tool dispatch', () => {
     }));
 
     expect(out.terminationReason).toBe('answer');
-    expect(entityLookup.getDrinkingWindowDocumentsMock).toHaveBeenCalledTimes(1);
-    expect(drinkingWindowPort.checkMock).toHaveBeenCalledTimes(1);
-    expect(out.toolOutcomes.some((o) => o.tool === 'check_drinking_window')).toBe(true);
+    // Removed tool: neither hydration nor the drinking-window use case fire.
+    expect(entityLookup.getDrinkingWindowDocumentsMock).not.toHaveBeenCalled();
+    expect(drinkingWindowPort.checkMock).not.toHaveBeenCalled();
+    const dwStep = out.steps.find((s) =>
+      s.toolCalls.some((c) => c.tool === 'check_drinking_window'),
+    );
+    expect(dwStep?.observations[0]).toMatch(
+      new RegExp(`^${UNSUPPORTED_PREFIX('check_drinking_window').replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}`),
+    );
+  });
+
+  it('get_food_pairings hits the unsupported default branch and never calls the search use case', async () => {
+    const searchPort = makeSearchPort(() => Promise.resolve(makeSearchResponse(['pair-1'])));
+    const llm = makeStubLlm([
+      async () => asToolUseResult([
+        toolUse('get_food_pairings', { food: 'spicy Korean BBQ', color: 'white' }),
+      ]),
+      async () => asTextResult('Riesling works here.'),
+    ]);
+    const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
+    const out = await runner.run(makeInput({
+      toolPorts: makeToolPorts({ searchUseCase: searchPort }),
+      maxSteps: 4,
+    }));
+
+    expect(out.terminationReason).toBe('answer');
+    // Removed tool: the search use case MUST NOT be dispatched by the default branch.
+    expect(searchPort.executeMock).not.toHaveBeenCalled();
+    const pairStep = out.steps.find((s) =>
+      s.toolCalls.some((c) => c.tool === 'get_food_pairings'),
+    );
+    expect(pairStep?.observations[0]).toMatch(
+      new RegExp(`^${UNSUPPORTED_PREFIX('get_food_pairings').replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}`),
+    );
   });
 });
 
@@ -482,7 +520,7 @@ describe('WineAgentLoopRunner — grounded search required', () => {
   it('model emits answer first → grounded_search_required → search → answer', async () => {
     const llm = makeStubLlm([
       async () => asTextResult('Try a Bordeaux.'),
-      async () => asToolUseResult([toolUse('search_wines', { query: 'Bordeaux' })]),
+      async () => asToolUseResult([toolUse('search_hybrid', { query: 'Bordeaux' })]),
       async () => asTextResult('Recommend Wine wine-1 from Bordeaux.'),
     ]);
     const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
@@ -492,7 +530,7 @@ describe('WineAgentLoopRunner — grounded search required', () => {
     }));
 
     expect(out.terminationReason).toBe('answer');
-    expect(out.toolOutcomes.some((o) => o.tool === 'search_wines')).toBe(true);
+    expect(out.toolOutcomes.some((o) => o.tool === 'search_hybrid')).toBe(true);
   });
 });
 
@@ -501,7 +539,7 @@ describe('WineAgentLoopRunner — loop detection', () => {
     // Same input each time — StepBudget will reject as exact-key loop on
     // the 2nd call. The runner gets one retry budget; we exhaust it by
     // having the model keep emitting the same call.
-    const sameCall = toolUse('search_wines', { query: 'identical' });
+    const sameCall = toolUse('search_hybrid', { query: 'identical' });
     const llm = makeStubLlm([
       async () => asToolUseResult([sameCall]),
       async () => asToolUseResult([sameCall]),
@@ -517,10 +555,10 @@ describe('WineAgentLoopRunner — loop detection', () => {
 describe('WineAgentLoopRunner — max steps', () => {
   it('model keeps calling tools → step budget exhausts → max_steps termination', async () => {
     const llm = makeStubLlm([
-      async () => asToolUseResult([toolUse('search_wines', { query: 'q1' }, 'tu-1')]),
-      async () => asToolUseResult([toolUse('search_wines', { query: 'q2 distinct' }, 'tu-2')]),
-      async () => asToolUseResult([toolUse('search_wines', { query: 'q3 also distinct' }, 'tu-3')]),
-      async () => asToolUseResult([toolUse('search_wines', { query: 'q4' }, 'tu-4')]),
+      async () => asToolUseResult([toolUse('search_hybrid', { query: 'q1' }, 'tu-1')]),
+      async () => asToolUseResult([toolUse('search_hybrid', { query: 'q2 distinct' }, 'tu-2')]),
+      async () => asToolUseResult([toolUse('search_hybrid', { query: 'q3 also distinct' }, 'tu-3')]),
+      async () => asToolUseResult([toolUse('search_hybrid', { query: 'q4' }, 'tu-4')]),
     ]);
     const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
     const out = await runner.run(makeInput({ maxSteps: 2 }));
@@ -534,7 +572,7 @@ describe('WineAgentLoopRunner — token budget', () => {
   it('large LLM responses accumulate to maxTotalTokens → terminate with budget', async () => {
     const heavyUsage = makeTokenUsage(20_000, 5_000);
     const llm = makeStubLlm([
-      async () => asToolUseResult([toolUse('search_wines', { query: 'big' })], heavyUsage),
+      async () => asToolUseResult([toolUse('search_hybrid', { query: 'big' })], heavyUsage),
       // Should not reach here because token budget terminates first.
       async () => asTextResult('answer', heavyUsage),
     ]);
@@ -566,7 +604,7 @@ describe('WineAgentLoopRunner — abort', () => {
     const controller = new AbortController();
     controller.abort();
     const llm = makeStubLlm([
-      async () => asToolUseResult([toolUse('search_wines', { query: 'x' })]),
+      async () => asToolUseResult([toolUse('search_hybrid', { query: 'x' })]),
     ]);
     const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
     const out = await runner.run(makeInput({ abortSignal: controller.signal }));
@@ -578,7 +616,7 @@ describe('WineAgentLoopRunner — abort', () => {
 
 describe('WineAgentLoopRunner — zombie loop fix', () => {
   it('model keeps emitting answers despite directives → loop terminates gracefully', async () => {
-    // Contract requires get_food_pairings, but the model just keeps
+    // Contract requires search_hybrid, but the model just keeps
     // answering. Without functional directive recomputation this would
     // loop forever; with it, the budget burns down and we terminate.
     const llm = makeStubLlm([
@@ -590,7 +628,7 @@ describe('WineAgentLoopRunner — zombie loop fix', () => {
     ]);
     const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
     const out = await runner.run(makeInput({
-      analysis: makeAnalysis({ requiredTool: 'get_food_pairings' }),
+      analysis: makeAnalysis({ requiredTool: 'search_hybrid' }),
       maxSteps: WINE_AGENT_LOOP_DEFAULT_MAX_STEPS,
     }));
 
@@ -616,7 +654,7 @@ describe('WineAgentLoopRunner — Korean directive copy', () => {
             break;
           }
         }
-        return asToolUseResult([toolUse('search_wines', { query: '와인' })]);
+        return asToolUseResult([toolUse('search_hybrid', { query: '와인' })]);
       },
       async () => asTextResult('wine-1 추천합니다.'),
     ]);
@@ -628,7 +666,7 @@ describe('WineAgentLoopRunner — Korean directive copy', () => {
     }));
 
     expect(out.terminationReason).toBe('answer');
-    expect(observedDirectiveMessage).toContain('search_wines');
+    expect(observedDirectiveMessage).toContain('search_hybrid');
     expect(observedDirectiveMessage).toMatch(/[가-힣]/u);  // contains Hangul
     expect(observedDirectiveMessage).toBe(`[directive] ${WINE_AGENT_LOOP_DIRECTIVE_COPY_KOREAN.groundedSearch}`);
   });
@@ -645,7 +683,7 @@ describe('WineAgentLoopRunner — Korean directive copy', () => {
             break;
           }
         }
-        return asToolUseResult([toolUse('search_wines', { query: 'wine' })]);
+        return asToolUseResult([toolUse('search_hybrid', { query: 'wine' })]);
       },
       async () => asTextResult('Recommend wine-1.'),
     ]);
@@ -672,7 +710,7 @@ describe('WineAgentLoopRunner — token accumulation', () => {
       cacheReadTokens: 250, cacheCreationTokens: 0,
     };
     const llm = makeStubLlm([
-      async () => asToolUseResult([toolUse('search_wines', { query: 'q' })], usage1),
+      async () => asToolUseResult([toolUse('search_hybrid', { query: 'q' })], usage1),
       async () => asTextResult('answer', usage2),
     ]);
     const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
@@ -717,14 +755,14 @@ describe('computeNextDirective (pure function)', () => {
     }
   });
 
-  it('returns required_tool when contract requires get_food_pairings (Korean copy)', () => {
+  it('returns required_tool when contract requires search_hybrid (Korean copy)', () => {
     const input = makeInput({
-      analysis: makeAnalysis({ requiredTool: 'get_food_pairings', hangulDominant: true }),
+      analysis: makeAnalysis({ requiredTool: 'search_hybrid', hangulDominant: true }),
     });
     const out = computeNextDirective(input, makeStateView([]), selectDirectiveCopy(true));
     expect(out?.kind).toBe('required_tool');
     if (out?.kind === 'required_tool') {
-      expect(out.tool).toBe('get_food_pairings');
+      expect(out.tool).toBe('search_hybrid');
       expect(out.instruction).toMatch(/[가-힣]/u);
     }
   });
@@ -737,7 +775,7 @@ describe('computeNextDirective (pure function)', () => {
     const out = computeNextDirective(
       input,
       makeStateView([
-        { tool: 'search_wines', kind: 'success', result: makeSearchResponse(['wine-1']) },
+        { tool: 'search_hybrid', kind: 'success', result: makeSearchResponse(['wine-1']) },
       ]),
       selectDirectiveCopy(false),
     );
@@ -756,7 +794,7 @@ describe('computeNextDirective (pure function)', () => {
     // First empty search → relax directive surfaces.
     const first = computeNextDirective(
       input,
-      makeStateView([{ tool: 'search_wines', kind: 'empty_result' }]),
+      makeStateView([{ tool: 'search_hybrid', kind: 'empty_result' }]),
       selectDirectiveCopy(false),
     );
     expect(first?.kind).toBe('relax_constraints_retry');
@@ -765,8 +803,8 @@ describe('computeNextDirective (pure function)', () => {
     const second = computeNextDirective(
       input,
       makeStateView([
-        { tool: 'search_wines', kind: 'empty_result' },
-        { tool: 'search_wines', kind: 'empty_result' },
+        { tool: 'search_hybrid', kind: 'empty_result' },
+        { tool: 'search_hybrid', kind: 'empty_result' },
       ]),
       selectDirectiveCopy(false),
     );
@@ -783,7 +821,7 @@ describe('computeNextDirective (pure function)', () => {
     });
     const out = computeNextDirective(
       input,
-      makeStateView([{ tool: 'search_wines', kind: 'empty_result' }]),
+      makeStateView([{ tool: 'search_hybrid', kind: 'empty_result' }]),
       selectDirectiveCopy(false),
     );
     expect(out).toBeUndefined();

@@ -50,8 +50,6 @@ import { HybridUseCase } from '../../../../src/application/search/hybrid.usecase
 import { WatchlistService } from '../../../../src/application/watchlist/watchlist.service.js';
 import type { Container } from '../../../../src/config/container.js';
 import type { SnapshotVersions } from '../../../../src/application/search/search.usecase.js';
-import { WineToolExecutor } from '../../../../src/interface/claude-tools/tool-executor.js';
-import { AdaptiveToolExecutor } from '../../../../src/interface/claude-tools/adaptive-tool-executor.js';
 import { VespaClient } from '../../../../src/infrastructure/vespa/vespa-client.js';
 import { VespaSearchIndex } from '../../../../src/infrastructure/vespa/vespa-search-index.js';
 import { HttpLearnedMatcherAdapter } from '../../../../src/infrastructure/adapter/http-learned-matcher.js';
@@ -357,13 +355,6 @@ export async function createVespaTestContainer(
     decomposedSearch: decomposedSearchUseCase,
   });
   const batchSearchUseCase = new BatchSearchUseCase(searchUseCase);
-  const adaptiveToolExecutor = new AdaptiveToolExecutor(
-    new WineToolExecutor({
-      searchUseCase,
-      decomposedSearchUseCase,
-      drinkingWindowUseCase,
-    }),
-  );
   const watchlistService = new WatchlistService({
     storage: new InMemoryWatchlistStore(),
   });
@@ -392,7 +383,6 @@ export async function createVespaTestContainer(
     drinkingWindowUseCase,
     drinkingWindowPredictor,
     batchSearchUseCase,
-    adaptiveToolExecutor,
     watchlistService,
     watchlistRuntime: null,
     evalRunner: null,

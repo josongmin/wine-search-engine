@@ -681,8 +681,8 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
   //    auto + prompt cache markers, then synthesize.
   it('5. Multi-step — WineAgentLoop execute() payloads carry all tools, auto choice, cache markers', async () => {
     const capture = buildAnthropicFetchCapture((req, i) => {
-      // Call 0: wine-agent-loop execute → emit a search_wines tool_use.
-      if (i === 0) return namedToolUse('search_wines', { query: 'Burgundy pinot' });
+      // Call 0: wine-agent-loop execute → emit a search_hybrid tool_use.
+      if (i === 0) return namedToolUse('search_hybrid', { query: 'Burgundy pinot' });
       // Call 1: wine-agent-loop execute → final text answer (ends the loop).
       if (i === 1) return endTurnText('Found a Burgundy Pinot Noir for you.');
       // Call 2+: synthesize.
@@ -713,11 +713,14 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
     // At least one execute() turn + one synthesize().
     expect(capture.requests.length).toBeGreaterThanOrEqual(2);
     const execBody = assertWireInvariants(capture.requests[0]!);
-    // WineAgentLoop uses tool_choice auto and exposes the four production tools.
+    // WineAgentLoop uses tool_choice auto and exposes the four active tools.
     expect(execBody.tool_choice).toEqual({ type: 'auto' });
+    // T-IR-05: the agent bundle now carries the four active primitives, in
+    // WINE_AGENT_LOOP_TOOL_NAMES order. We assert membership (sorted) so the
+    // check is order-independent of how the adapter serializes the array.
     const execToolNames = execBody.tools.map((t) => t.name).sort();
     expect(execToolNames).toEqual(
-      ['check_drinking_window', 'compare_wines', 'get_food_pairings', 'search_wines'],
+      ['lookup_wine', 'search_hybrid', 'search_lexical', 'search_semantic'],
     );
     // WineAgentLoop passes enablePromptCache:true (wine-agent-loop.ts L484).
     assertPromptCacheMarkers(execBody, true);
@@ -839,7 +842,7 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
   //    a `properties` map (asserted via ToolInputSchema inside the invariant).
   it('9. input_schema validity — all tool schemas are object+properties across phases', async () => {
     const capture = buildAnthropicFetchCapture((req, i) => {
-      if (i === 0) return namedToolUse('search_wines', { query: 'x' });
+      if (i === 0) return namedToolUse('search_hybrid', { query: 'x' });
       if (i === 1) return endTurnText('done');
       return respondToolUse(synthAnswer('answer'));
     });
@@ -864,22 +867,22 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
     // Validate EVERY tool input_schema on EVERY captured request. The
     // ToolInputSchema in AnthropicRequestBodySchema already enforces
     // type:'object' + properties; the loop here adds an explicit per-tool
-    // assertion for clarity and to confirm the search_wines schema has the
+    // assertion for clarity and to confirm the search_hybrid schema has the
     // expected `query` property.
-    let sawSearchWines = false;
+    let sawSearchHybrid = false;
     for (const req of capture.requests) {
       const body = assertWireInvariants(req);
       for (const tool of body.tools) {
         expect(tool.input_schema.type).toBe('object');
         const props = tool.input_schema.properties;
         expect(Object.keys(props).length).toBeGreaterThan(0);
-        if (tool.name === 'search_wines') {
-          sawSearchWines = true;
+        if (tool.name === 'search_hybrid') {
+          sawSearchHybrid = true;
           expect(props['query']).toBeDefined();
         }
       }
     }
-    expect(sawSearchWines).toBe(true);
+    expect(sawSearchHybrid).toBe(true);
   });
 
   // ── Scenario 10: PRODUCTION model-id regression guard.

@@ -57,23 +57,15 @@ import { normalizeLookupWineInput } from '../search/lookup-wine-execution.js';
 import {
   sanitizeOptionalToolNulls,
 } from '../search/search-tool-contract.js';
-import { applySearchToolBudgetResultPolicy } from '../search/search-tool-result-policy.js';
 import {
-  buildFoodPairingToolUseCaseInput,
   buildSearchWinesToolUseCaseInput,
-  CALLER_CONTROLLED_FOOD_PAIRING_INTENT,
 } from '../search/agent-tool-request-adapter.js';
 import {
-  buildCompareWinesExecutionRequest,
-  buildDrinkingWindowRequest,
-  resolveFoodPairingBudgetKrw,
-} from '../search/tool-execution-support.js';
-import { KNOWN_AGENT_TOOL_NAMES_DISPLAY } from '@domain/agent/model/agent-tool-attempt-schema.js';
-import { KRW_PER_USD_APPROXIMATE } from '@domain/shared/constants.js';
+  KNOWN_AGENT_TOOL_NAMES_DISPLAY,
+  SEARCH_PRIMITIVE_TOOL_LANES,
+  isSearchPrimitiveToolName,
+} from '@domain/agent/model/agent-tool-attempt-schema.js';
 import { toolResultCacheTtlSeconds } from '@domain/shared/constants/tool-cache-ttl.js';
-import {
-  createCanonicalEntityId,
-} from '@shared/types/index.js';
 import type { ToolResultCachePort } from './port/tool-result-cache.port.js';
 import {
   addTokenUsage,
@@ -96,10 +88,7 @@ import {
 import { getCanonicalNormalizedConstraints } from './wine-search-schemas.js';
 import { stableStringify } from '@shared/utils/stable-stringify.js';
 import {
-  CHECK_DRINKING_WINDOW_INPUT_SCHEMA,
-  COMPARE_WINES_INPUT_SCHEMA,
-  GET_FOOD_PAIRINGS_INPUT_SCHEMA,
-  SEARCH_WINES_INPUT_SCHEMA,
+  SEARCH_PRIMITIVE_INPUT_SCHEMA,
 } from './wine-agent-loop-tool-bundle.js';
 import type {
   SearchUseCaseInput,
@@ -146,11 +135,12 @@ const WINE_AGENT_LOOP_SYSTEM_PROMPT = [
   'You are a wine search agent driving a small, focused ReAct loop.',
   '',
   'Available tools:',
-  '  - search_wines: retrieve wines matching the query and constraints.',
-  '  - lookup_wine: resolve ONE specific wine by name/identity (1-3 exact matches); use instead of search_wines when the user names a particular wine.',
-  '  - get_food_pairings: retrieve wines that fit a dish or ingredient pairing goal.',
-  '  - check_drinking_window: verify whether a specific wine is drinkable in a target year.',
-  '  - compare_wines: compare two wines or wine concepts side-by-side.',
+  '  - search_hybrid: discovery search using BOTH lexical (BM25) and semantic (embedding) retrieval fused with RRF. The DEFAULT for finding wines by constraints, region, style, price, or description.',
+  '  - search_semantic: discovery search using ONLY semantic similarity (no lexical leg). Use for vibe/profile/preference queries ("light summer red").',
+  '  - search_lexical: discovery search using ONLY lexical/BM25 token matching (no embedding leg). Use when exact words/names/codes matter and semantic drift is undesirable.',
+  '  - lookup_wine: resolve ONE specific wine by name/identity (1-3 exact matches); use when the user names a particular wine.',
+  '',
+  'Composition note: there are no dedicated pairing / drinkability / comparison tools. Achieve those by running one or more search_* / lookup_wine calls and synthesizing the answer from the results.',
   '',
   'Hard rules:',
   '  - Call AT MOST ONE tool per turn. If the user clearly asked for parallel work, prefer a single search with combined constraints.',
@@ -849,8 +839,14 @@ async function invokeToolPort(
     };
   }
   switch (call.tool) {
-    case 'search_wines': {
-      const validation = SEARCH_WINES_INPUT_SCHEMA.safeParse(sanitizeOptionalToolNulls(call.input));
+    case 'search_hybrid':
+    case 'search_semantic':
+    case 'search_lexical': {
+      // T-IR-05: the three discovery primitives share one input schema and
+      // differ only in the retrieval lane, projected from the tool NAME via
+      // the SSoT map. `semantic`/`lexical` skip the opposite candidate-pool
+      // leg (see CandidatePoolService.applyRetrievalLaneFilter).
+      const validation = SEARCH_PRIMITIVE_INPUT_SCHEMA.safeParse(sanitizeOptionalToolNulls(call.input));
       if (!validation.success) {
         return invalidToolInputObservation(
           call.tool,
@@ -860,6 +856,7 @@ async function invokeToolPort(
       const searchInput = adaptSearchInput(
         validation.data as Record<string, unknown>,
         adaptiveRetrievalKDefault,
+        SEARCH_PRIMITIVE_TOOL_LANES[call.tool],
       );
       const result = await ports.searchUseCase.execute(searchInput, requestId, { abortSignal: signal });
       return { rawResult: result, observation: formatSearchObservation(result) };
@@ -893,107 +890,6 @@ async function invokeToolPort(
       );
       return { rawResult: result, observation: formatSearchObservation(result) };
     }
-    case 'get_food_pairings': {
-      const validation = GET_FOOD_PAIRINGS_INPUT_SCHEMA.safeParse(sanitizeOptionalToolNulls(call.input));
-      if (!validation.success) {
-        return invalidToolInputObservation(
-          call.tool,
-          validation.error.issues.map((issue) => issue.message),
-        );
-      }
-      const searchInput = buildFoodPairingToolUseCaseInput(validation.data as Record<string, unknown>, {
-        mappingVersion: WINE_AGENT_LOOP_TOOL_FILTER_MAPPING_VERSION,
-        includeCallerInterpretation: true,
-        callerIntent: CALLER_CONTROLLED_FOOD_PAIRING_INTENT,
-      });
-      const result = await ports.searchUseCase.execute(
-        {
-          ...searchInput,
-        },
-        requestId,
-        { abortSignal: signal },
-      );
-      const filteredResult = applySearchToolBudgetResultPolicy(
-        result,
-        { maxKrw: resolveFoodPairingBudgetKrw(validation.data) },
-        { krwPerUsd: KRW_PER_USD_APPROXIMATE },
-      ).response;
-      return { rawResult: filteredResult, observation: formatSearchObservation(filteredResult) };
-    }
-    case 'check_drinking_window': {
-      const validation = CHECK_DRINKING_WINDOW_INPUT_SCHEMA.safeParse(sanitizeOptionalToolNulls(call.input));
-      if (!validation.success) {
-        return invalidToolInputObservation(
-          call.tool,
-          validation.error.issues.map((issue) => issue.message),
-        );
-      }
-      if (ports.drinkingWindowUseCase === undefined) {
-        return {
-          rawResult: null,
-          observation: 'Tool "check_drinking_window" failed: Drinking-window predictor not available.',
-        };
-      }
-      const entityLookup = ports.entityLookup;
-      if (entityLookup?.getDrinkingWindowDocuments === undefined) {
-        return {
-          rawResult: null,
-          observation: 'Tool "check_drinking_window" failed: Entity lookup not yet implemented or available for check_drinking_window.',
-        };
-      }
-      const entityId = createCanonicalEntityId(validation.data.entity_id);
-      const docs = await entityLookup.getDrinkingWindowDocuments([entityId]);
-      const projection = docs.get(entityId);
-      if (projection === undefined) {
-        return {
-          rawResult: null,
-          observation: `Tool "check_drinking_window" failed: Entity lookup not available for entity_id=${validation.data.entity_id}`,
-        };
-      }
-      const targetYear = validation.data.target_year ?? new Date().getFullYear();
-      const request = buildDrinkingWindowRequest(
-        projection as unknown as Record<string, unknown>,
-        targetYear,
-      );
-      if (request === null) {
-        return {
-          rawResult: null,
-          observation: `Tool "check_drinking_window" failed: Entity ${validation.data.entity_id} is missing required drinking-window features.`,
-        };
-      }
-      const result = await ports.drinkingWindowUseCase.check(request);
-      return { rawResult: result, observation: formatGenericObservation(call.tool, result) };
-    }
-    case 'compare_wines': {
-      const validation = COMPARE_WINES_INPUT_SCHEMA.safeParse(sanitizeOptionalToolNulls(call.input));
-      if (!validation.success) {
-        return invalidToolInputObservation(
-          call.tool,
-          validation.error.issues.map((issue) => issue.message),
-        );
-      }
-      if (ports.decomposedSearchUseCase === undefined) {
-        return {
-          rawResult: null,
-          observation: 'Tool "compare_wines" failed: Decomposed comparison use case not available.',
-        };
-      }
-      const executionRequest = buildCompareWinesExecutionRequest(
-        validation.data,
-        WINE_AGENT_LOOP_TOOL_FILTER_MAPPING_VERSION,
-      );
-      const result = await ports.decomposedSearchUseCase.execute(
-        executionRequest.subQueries,
-        executionRequest.comparisonLegs,
-        executionRequest.comparisonIntent,
-        executionRequest.originalQuery,
-        requestId,
-        Date.now(),
-        executionRequest.parentContext,
-        { abortSignal: signal },
-      );
-      return { rawResult: result, observation: formatGenericObservation(call.tool, result) };
-    }
     default: {
       return {
         rawResult: null,
@@ -1014,6 +910,7 @@ async function invokeToolPort(
 export function adaptSearchInput(
   raw: Record<string, unknown>,
   adaptiveRetrievalKDefault: number | undefined,
+  retrievalLane?: 'hybrid' | 'semantic_only' | 'lexical_only',
 ): SearchUseCaseInput {
   const built = buildSearchWinesToolUseCaseInput(raw, {
     mappingVersion: WINE_AGENT_LOOP_TOOL_FILTER_MAPPING_VERSION,
@@ -1024,6 +921,10 @@ export function adaptSearchInput(
     ...built,
     ...(built.filters !== undefined ? { filters: [...built.filters] } : {}),
     ...(built.preferences !== undefined ? { preferences: [...built.preferences] } : {}),
+    // T-IR-05: the discovery primitive (search_hybrid/semantic/lexical) sets
+    // the lane; the candidate pool gates channels accordingly. Omitted for
+    // legacy/test callers that pass no lane (full hybrid mix).
+    ...(retrievalLane !== undefined ? { retrievalLane } : {}),
   };
 }
 
@@ -1152,9 +1053,10 @@ function computeToolInputHash(input: unknown): string {
  */
 function formatObservationForTool(toolName: string, result: unknown): string {
   switch (toolName) {
-    case 'search_wines':
+    case 'search_hybrid':
+    case 'search_semantic':
+    case 'search_lexical':
     case 'lookup_wine':
-    case 'get_food_pairings':
       return formatSearchObservation(result);
     default:
       return formatGenericObservation(toolName, result);
@@ -1210,15 +1112,17 @@ export function computeNextDirective(
 
   // Helpers — small inline because they're only used here.
   const hasOutcome = (tool: string): boolean => outcomes.some((o) => o.tool === tool);
+  const hasAnySearchOutcome = (): boolean => outcomes.some((o) => isSearchPrimitiveToolName(o.tool));
   const lastSearchOutcome = (): ToolOutcome | undefined => {
     for (let i = outcomes.length - 1; i >= 0; i--) {
       const o = outcomes[i];
-      if (o !== undefined && o.tool === 'search_wines') return o;
+      if (o !== undefined && isSearchPrimitiveToolName(o.tool)) return o;
     }
     return undefined;
   };
-  // 1. Grounded search required + no search yet.
-  if (contract.requiresGroundedWineSearch && !hasOutcome('search_wines')) {
+  // 1. Grounded search required + no search yet. Any discovery primitive
+  //    (search_hybrid/semantic/lexical) satisfies the grounded-search gate.
+  if (contract.requiresGroundedWineSearch && !hasAnySearchOutcome()) {
     return { kind: 'grounded_search_required', instruction: copy.groundedSearch };
   }
 
@@ -1286,7 +1190,7 @@ function alreadyRetriedRelax(state: RunnerStateView): boolean {
   // means we've already done at least one relax pass.
   let searchCount = 0;
   for (const o of state.toolOutcomes) {
-    if (o.tool === 'search_wines') searchCount += 1;
+    if (isSearchPrimitiveToolName(o.tool)) searchCount += 1;
   }
   return searchCount >= 2;
 }

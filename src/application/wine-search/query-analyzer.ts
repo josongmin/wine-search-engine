@@ -307,16 +307,20 @@ export class QueryAnalyzerService {
     const decomposition = buildDecomposition(decompositionOutcome);
     const requestedResultLimit = extractRequestedResultLimit(normalizedViews.collapsedWhitespace);
 
-    const requiredTool: AnalysisRequiredTool | undefined =
+    // T-IR-05: convenience intents (pairing / comparison / drinkability) no
+    // longer have dedicated tools — all grounded work funnels through the
+    // `search_hybrid` discovery primitive, and the agent composes the
+    // convenience answer from the results. We still force a grounded search
+    // whenever the query carries anchors, constraints, pairing tags, a
+    // decomposition, or an anchor-bound drinkability check.
+    const requiresGroundedTool =
       pairingTags.length > 0
-        ? 'get_food_pairings'
-        : decompositionOutcome.decomposed
-          ? 'compare_wines'
-          : hasDrinkability && anchors.length > 0
-            ? 'check_drinking_window'
-            : anchors.length > 0 || constraints.length > 0
-              ? 'search_wines'
-              : undefined;
+      || decompositionOutcome.decomposed
+      || (hasDrinkability && anchors.length > 0)
+      || anchors.length > 0
+      || constraints.length > 0;
+    const requiredTool: AnalysisRequiredTool | undefined =
+      requiresGroundedTool ? 'search_hybrid' : undefined;
 
     const contract: AnalysisContract = {
       requiresDrinkabilityCheck: hasDrinkability,
@@ -330,7 +334,7 @@ export class QueryAnalyzerService {
 
     const expectedMultiStep =
       decomposition !== undefined
-      || requiredTool === 'get_food_pairings'
+      || pairingTags.length > 0
       || (contract.requiresDrinkabilityCheck && anchors.length > 0);
 
     // The query-analyzer reconciles the adaptive-budget classification with

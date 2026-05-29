@@ -424,6 +424,17 @@ function zodToJsonSchemaUncached(schema: ZodTypeAny, depth: number): JsonSchema 
       const ro = (schema as unknown as { _def: { innerType: ZodTypeAny } })._def;
       return zodToJsonSchema(ro.innerType, depth + 1);
     }
+    case 'ZodPipeline': {
+      // `a.pipe(b)` (e.g. `z.unknown().superRefine(...).pipe(objectSchema)` —
+      // the `rejectUnsupportedSearchFamilyFields` guard used by the agent
+      // search tools). The OUTPUT schema describes the validated shape the LLM
+      // must emit, so the meaningful JSON Schema is `out`'s. Without this case
+      // the pipeline fell through to `default: {}`, producing an empty
+      // input_schema that the Anthropic Messages API rejects (input_schema
+      // MUST be `{type:'object', properties:{...}}`).
+      const pipe = (schema as unknown as { _def: { out: ZodTypeAny } })._def;
+      return zodToJsonSchema(pipe.out, depth + 1);
+    }
     case 'ZodAny':
     case 'ZodUnknown':
       return {};

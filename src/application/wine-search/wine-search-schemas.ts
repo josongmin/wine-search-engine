@@ -165,11 +165,19 @@ export const DecompositionSchema = z.discriminatedUnion('kind', [
 ]);
 export type Decomposition = z.infer<typeof DecompositionSchema>;
 
+/**
+ * T-IR-05: the analyzer's "the agent MUST call this tool" hint now references
+ * the primitive tool taxonomy (mirrors `KNOWN_AGENT_TOOL_NAMES`). The
+ * convenience intents (pairing / comparison / drinkability) no longer map to
+ * dedicated tools — the analyzer steers the agent to `search_hybrid` (grounded
+ * discovery) and the agent composes the convenience answer from primitive
+ * results + synthesis (architecture-decision §5).
+ */
 export const AnalysisRequiredToolSchema = z.enum([
-  'search_wines',
-  'compare_wines',
-  'check_drinking_window',
-  'get_food_pairings',
+  'search_hybrid',
+  'search_semantic',
+  'search_lexical',
+  'lookup_wine',
 ]);
 export type AnalysisRequiredTool = z.infer<typeof AnalysisRequiredToolSchema>;
 

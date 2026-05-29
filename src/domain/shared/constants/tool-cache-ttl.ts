@@ -34,26 +34,13 @@ const SECONDS_PER_DAY = SECONDS_PER_HOUR * HOURS_PER_DAY;
  *  reruns, user retries). */
 const LOOKUP_WINE_TTL_DAYS = 1;
 
-/** search_wines — constraint-driven retrieval.
- *  Results depend on Vespa snapshot + LTR weights + recent ingest. Vespa
- *  publish cadence is hourly at the slowest; 1 hour is the freshest TTL
- *  that still lets repeat queries within a session benefit from cache. */
-const SEARCH_WINES_TTL_HOURS = 1;
-
-/** compare_wines — entity-pair → comparison projection.
- *  Volatility tracks lookup_wine (the pair resolves to two identities,
- *  then comparison is a deterministic projection). 1 day matches. */
-const COMPARE_WINES_TTL_DAYS = 1;
-
-/** check_drinking_window — deterministic from (entity vintage, style,
- *  predictor model version). Predictor model version changes ≪ daily;
- *  vintage is immutable. 1 day TTL is well within the safe envelope. */
-const CHECK_DRINKING_WINDOW_TTL_DAYS = 1;
-
-/** get_food_pairings — deterministic from (food, style preferences).
- *  Pairing taxonomy + style affinity tables refresh on a multi-day cadence.
- *  1 day TTL captures the common pattern: a user asks twice in a session. */
-const GET_FOOD_PAIRINGS_TTL_DAYS = 1;
+/** search_hybrid / search_semantic / search_lexical — constraint-driven
+ *  discovery retrieval. Results depend on Vespa snapshot + LTR weights +
+ *  recent ingest. Vespa publish cadence is hourly at the slowest; 1 hour is
+ *  the freshest TTL that still lets repeat queries within a session benefit
+ *  from cache. All three discovery primitives share the same volatility
+ *  envelope (same corpus, same snapshot) so they share one TTL. */
+const SEARCH_PRIMITIVE_TTL_HOURS = 1;
 
 // ---------------------------------------------------------------------------
 // Public SSoT: per-tool TTL map
@@ -71,10 +58,9 @@ const GET_FOOD_PAIRINGS_TTL_DAYS = 1;
  */
 export const TOOL_RESULT_CACHE_TTL_SECONDS: ReadonlyMap<string, number> = new Map<string, number>([
   ['lookup_wine', LOOKUP_WINE_TTL_DAYS * SECONDS_PER_DAY],
-  ['search_wines', SEARCH_WINES_TTL_HOURS * SECONDS_PER_HOUR],
-  ['compare_wines', COMPARE_WINES_TTL_DAYS * SECONDS_PER_DAY],
-  ['check_drinking_window', CHECK_DRINKING_WINDOW_TTL_DAYS * SECONDS_PER_DAY],
-  ['get_food_pairings', GET_FOOD_PAIRINGS_TTL_DAYS * SECONDS_PER_DAY],
+  ['search_hybrid', SEARCH_PRIMITIVE_TTL_HOURS * SECONDS_PER_HOUR],
+  ['search_semantic', SEARCH_PRIMITIVE_TTL_HOURS * SECONDS_PER_HOUR],
+  ['search_lexical', SEARCH_PRIMITIVE_TTL_HOURS * SECONDS_PER_HOUR],
 ]);
 
 /**

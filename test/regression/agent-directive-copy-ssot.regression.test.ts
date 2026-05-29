@@ -38,13 +38,13 @@ describe('SSoT: AGENT_DIRECTIVE_COPY shape', () => {
 
   it('English groundedSearch matches the agent-contract-policy fixed string', () => {
     expect(AGENT_DIRECTIVE_COPY.english.groundedSearch).toBe(
-      'This request still requires a grounded wine search before answering. Call search_wines first and answer only from the returned evidence.',
+      'This request still requires a grounded wine search before answering. Call search_hybrid first and answer only from the returned evidence.',
     );
   });
 
-  it('English requiredTool template instantiates correctly for get_food_pairings', () => {
-    expect(AGENT_DIRECTIVE_COPY.english.requiredTool('get_food_pairings')).toBe(
-      'This request requires get_food_pairings before answering. Call get_food_pairings first and answer only from the returned evidence.',
+  it('English requiredTool template instantiates correctly for lookup_wine', () => {
+    expect(AGENT_DIRECTIVE_COPY.english.requiredTool('lookup_wine')).toBe(
+      'This request requires lookup_wine before answering. Call lookup_wine first and answer only from the returned evidence.',
     );
   });
 
@@ -86,14 +86,14 @@ describe('SSoT: wine-agent-loop directive copy is byte-identical to SSoT', () =>
   });
 
   it('English requiredTool produces the same output as the SSoT for a sample tool name', () => {
-    expect(WINE_AGENT_LOOP_DIRECTIVE_COPY_ENGLISH.requiredTool('search_wines')).toBe(
-      AGENT_DIRECTIVE_COPY.english.requiredTool('search_wines'),
+    expect(WINE_AGENT_LOOP_DIRECTIVE_COPY_ENGLISH.requiredTool('search_hybrid')).toBe(
+      AGENT_DIRECTIVE_COPY.english.requiredTool('search_hybrid'),
     );
   });
 
   it('Korean requiredTool produces the same output as the SSoT for a sample tool name', () => {
-    expect(WINE_AGENT_LOOP_DIRECTIVE_COPY_KOREAN.requiredTool('search_wines')).toBe(
-      AGENT_DIRECTIVE_COPY.korean.requiredTool('search_wines'),
+    expect(WINE_AGENT_LOOP_DIRECTIVE_COPY_KOREAN.requiredTool('search_hybrid')).toBe(
+      AGENT_DIRECTIVE_COPY.korean.requiredTool('search_hybrid'),
     );
   });
 

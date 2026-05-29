@@ -46,9 +46,6 @@ import {
 import type { ToolDefinition } from '@domain/ai/port/structured-llm.port.js';
 import { LookupWineInputSchema } from '../search/lookup-wine-execution.js';
 import {
-  buildCompareToolFieldShape,
-  buildEntityIdToolField,
-  buildFoodPairingFieldShape,
   SEARCH_FAMILY_UNSUPPORTED_TOOL_FIELDS,
   buildSearchToolFieldShape,
   buildSearchToolQueryField,
@@ -82,20 +79,10 @@ const TOOL_INPUT_STRING_MAX_LEN = 500;
  *  legacy agent tool's bound. */
 const TOOL_INPUT_MAX_ARRAY_ITEMS = 16;
 
-/** Allowed wine colors for the food-pairing tool. Mirrors
- *  `PairingColorSchema` in `execution-plan-schemas.ts`. */
-
-/** Allowed search retrieval modes. Mirrors `ExecutionSearchModeSchema` in
- *  `execution-plan-schemas.ts`. */
-const SEARCH_MODE_VALUES = ['auto', 'entity', 'hybrid', 'mixed'] as const;
-
 /** Hard upper bound on `limit` in a search tool input. Aligns with the
  *  legacy agent-tool cap (`SEARCH_LIMIT_MAX = 20`). */
 const TOOL_INPUT_SEARCH_LIMIT_MAX = 20;
 const TOOL_INPUT_MAX_PRICE_KRW = Number.MAX_SAFE_INTEGER;
-const TOOL_INPUT_ENTITY_ID_MAX_LEN = 500;
-const TOOL_INPUT_VINTAGE_MIN = 1600;
-const TOOL_INPUT_VINTAGE_MAX = 2100;
 
 // ---------------------------------------------------------------------------
 // Shared Zod field builders — all permissive (rule 10), Korean-safe.
@@ -127,14 +114,20 @@ function rejectUnsupportedSearchFamilyFields<T extends z.ZodTypeAny>(schema: T) 
         ctx.addIssue({
           code: 'custom',
           path: [field],
-          message: `${field} is not supported for this tool. Use check_drinking_window instead.`,
+          message: `${field} is not supported for this tool. The discovery primitives (search_hybrid/semantic/lexical) accept query + structured filters only.`,
         });
       }
     }
   }).pipe(schema);
 }
 
-const SEARCH_WINES_INPUT_SCHEMA_BASE = z.object({
+// T-IR-05: ONE shared input schema for the three search primitives. They
+// differ only in the retrieval lane (selected by tool NAME, dispatched in
+// `wine-agent-loop.ts`), so the body is intentionally lane-free — there is
+// no `mode` field. Keeping a single schema means `search_hybrid`,
+// `search_semantic`, and `search_lexical` can never drift in their accepted
+// fields (CLAUDE.md rule 30).
+const SEARCH_PRIMITIVE_INPUT_SCHEMA_BASE = z.object({
   query: buildSearchToolQueryField({
     maxLen: TOOL_INPUT_STRING_MAX_LEN,
     requiredMessage: 'Query must not be empty',
@@ -145,65 +138,10 @@ const SEARCH_WINES_INPUT_SCHEMA_BASE = z.object({
   }),
   filters: z.array(z.unknown()).max(TOOL_INPUT_MAX_ARRAY_ITEMS).optional(),
   preferences: z.array(z.unknown()).max(TOOL_INPUT_MAX_ARRAY_ITEMS).optional(),
-  mode: z.enum(SEARCH_MODE_VALUES).optional(),
 }).superRefine((data, ctx) => {
   validateSearchToolVintageRange(data, ctx);
 });
-export const SEARCH_WINES_INPUT_SCHEMA = rejectUnsupportedSearchFamilyFields(SEARCH_WINES_INPUT_SCHEMA_BASE);
-
-export const GET_FOOD_PAIRINGS_INPUT_SCHEMA = z.object(
-  buildFoodPairingFieldShape({
-    foodRequiredMessage: 'Food must not be empty',
-    maxPriceKrwMax: TOOL_INPUT_MAX_PRICE_KRW,
-  }),
-);
-
-export const CHECK_DRINKING_WINDOW_INPUT_SCHEMA = z.object({
-  entity_id: buildEntityIdToolField({
-    maxLen: TOOL_INPUT_ENTITY_ID_MAX_LEN,
-    requiredMessage: 'Entity ID must not be empty',
-  }),
-  target_year: z.number().int().min(TOOL_INPUT_VINTAGE_MIN).max(TOOL_INPUT_VINTAGE_MAX).optional(),
-});
-
-const COMPARE_WINES_INPUT_SCHEMA_BASE = z.object({
-  query_a: buildSearchToolQueryField({
-    maxLen: TOOL_INPUT_STRING_MAX_LEN,
-    requiredMessage: 'Query A must not be empty',
-  }),
-  query_b: buildSearchToolQueryField({
-    maxLen: TOOL_INPUT_STRING_MAX_LEN,
-    requiredMessage: 'Query B must not be empty',
-  }),
-  ...buildCompareToolFieldShape({
-    maxPriceKrwMax: TOOL_INPUT_MAX_PRICE_KRW,
-  }),
-  country_a: z.string().trim().min(1).max(TOOL_INPUT_STRING_MAX_LEN).optional(),
-  country_b: z.string().trim().min(1).max(TOOL_INPUT_STRING_MAX_LEN).optional(),
-  region_a: z.string().trim().min(1).max(TOOL_INPUT_STRING_MAX_LEN).optional(),
-  region_b: z.string().trim().min(1).max(TOOL_INPUT_STRING_MAX_LEN).optional(),
-  appellation_a: z.string().trim().min(1).max(TOOL_INPUT_STRING_MAX_LEN).optional(),
-  appellation_b: z.string().trim().min(1).max(TOOL_INPUT_STRING_MAX_LEN).optional(),
-  grape_primary_a: z.string().trim().min(1).max(TOOL_INPUT_STRING_MAX_LEN).optional(),
-  grape_primary_b: z.string().trim().min(1).max(TOOL_INPUT_STRING_MAX_LEN).optional(),
-  wine_type_a: z.enum(['red', 'white', 'rosé', 'sparkling', 'fortified', 'dessert', 'orange', 'natural']).optional(),
-  wine_type_b: z.enum(['red', 'white', 'rosé', 'sparkling', 'fortified', 'dessert', 'orange', 'natural']).optional(),
-  vintage_min_a: z.number().int().min(TOOL_INPUT_VINTAGE_MIN).max(TOOL_INPUT_VINTAGE_MAX).optional(),
-  vintage_min_b: z.number().int().min(TOOL_INPUT_VINTAGE_MIN).max(TOOL_INPUT_VINTAGE_MAX).optional(),
-  vintage_max_a: z.number().int().min(TOOL_INPUT_VINTAGE_MIN).max(TOOL_INPUT_VINTAGE_MAX).optional(),
-  vintage_max_b: z.number().int().min(TOOL_INPUT_VINTAGE_MIN).max(TOOL_INPUT_VINTAGE_MAX).optional(),
-}).superRefine((data, ctx) => {
-  validateSearchToolVintageRange(data, ctx);
-  validateSearchToolVintageRange({
-    vintage_min: data.vintage_min_a,
-    vintage_max: data.vintage_max_a,
-  }, ctx);
-  validateSearchToolVintageRange({
-    vintage_min: data.vintage_min_b,
-    vintage_max: data.vintage_max_b,
-  }, ctx);
-});
-export const COMPARE_WINES_INPUT_SCHEMA = rejectUnsupportedSearchFamilyFields(COMPARE_WINES_INPUT_SCHEMA_BASE);
+export const SEARCH_PRIMITIVE_INPUT_SCHEMA = rejectUnsupportedSearchFamilyFields(SEARCH_PRIMITIVE_INPUT_SCHEMA_BASE);
 
 // Identity lookup: schema is the SSoT canonical `LookupWineInputSchema` from
 // `lookup-wine-execution.ts`. Before extraction (SOLID H2) this file declared
@@ -223,27 +161,40 @@ void ToolOptionalStringField;
 // friendly. SSoT for tool semantics lives in `wine-agent-loop.ts`'s dispatcher.
 // ---------------------------------------------------------------------------
 
-const SEARCH_WINES_DESCRIPTION =
-  'Search the wine catalog. Use for finding wines by name, region, style, vintage, price, food pairing intent, or any combination. Accepts structured filters.';
-
+const SEARCH_HYBRID_DESCRIPTION =
+  'Discovery search over the wine catalog using BOTH lexical (BM25) and semantic (embedding) retrieval fused with RRF. The default for finding wines by name, region, style, vintage, price, or any combination. Accepts structured filters.';
+const SEARCH_SEMANTIC_DESCRIPTION =
+  'Discovery search using ONLY semantic (embedding) similarity — no lexical/BM25 leg. Use when the query describes a vibe, profile, or preference ("light summer red", "elegant cool-climate pinot") rather than exact tokens.';
+const SEARCH_LEXICAL_DESCRIPTION =
+  'Discovery search using ONLY lexical (BM25) token matching — no embedding leg. Use when exact words/names/codes matter and semantic drift is undesirable (rare producer names, appellation codes, precise varietal spellings).';
 const LOOKUP_WINE_DESCRIPTION =
-  'Look up a SPECIFIC wine by name/identity (e.g. "Opus One 2018"). Returns the 1-3 most exact matches via high-precision entity resolution. No filters — use search_wines for constraint-based discovery.';
-const GET_FOOD_PAIRINGS_DESCRIPTION =
-  'Find wines that pair with a dish or ingredient. Supports typed pairing objectives and optional color or budget hints.';
-const CHECK_DRINKING_WINDOW_DESCRIPTION =
-  'Check whether a specific wine is drinkable in a target year using hydrated source-backed priors when available.';
-const COMPARE_WINES_DESCRIPTION =
-  'Compare two wines or wine concepts side-by-side. Supports shared constraints plus side-specific geography, varietal, and vintage hints.';
+  'Look up a SPECIFIC wine by name/identity (e.g. "Opus One 2018"). Returns the 1-3 most exact matches via high-precision entity resolution. No filters — use a search_* primitive for constraint-based discovery.';
 
 // ---------------------------------------------------------------------------
 // Per-tool definitions — exported as module-scope `const`s so they have
 // stable referential identity across calls (rule 16 + prompt-cache hygiene).
+//
+// T-IR-05: the three discovery primitives share ONE input schema and differ
+// only in the retrieval lane the dispatcher selects from the tool NAME
+// (SEARCH_PRIMITIVE_TOOL_LANES). `lookup_wine` is identity resolution.
 // ---------------------------------------------------------------------------
 
-export const SEARCH_WINES_TOOL_DEF: ToolDefinition = {
-  name: 'search_wines' satisfies KnownAgentToolName,
-  description: SEARCH_WINES_DESCRIPTION,
-  inputSchema: SEARCH_WINES_INPUT_SCHEMA,
+export const SEARCH_HYBRID_TOOL_DEF: ToolDefinition = {
+  name: 'search_hybrid' satisfies KnownAgentToolName,
+  description: SEARCH_HYBRID_DESCRIPTION,
+  inputSchema: SEARCH_PRIMITIVE_INPUT_SCHEMA,
+};
+
+export const SEARCH_SEMANTIC_TOOL_DEF: ToolDefinition = {
+  name: 'search_semantic' satisfies KnownAgentToolName,
+  description: SEARCH_SEMANTIC_DESCRIPTION,
+  inputSchema: SEARCH_PRIMITIVE_INPUT_SCHEMA,
+};
+
+export const SEARCH_LEXICAL_TOOL_DEF: ToolDefinition = {
+  name: 'search_lexical' satisfies KnownAgentToolName,
+  description: SEARCH_LEXICAL_DESCRIPTION,
+  inputSchema: SEARCH_PRIMITIVE_INPUT_SCHEMA,
 };
 
 export const LOOKUP_WINE_TOOL_DEF: ToolDefinition = {
@@ -252,34 +203,15 @@ export const LOOKUP_WINE_TOOL_DEF: ToolDefinition = {
   inputSchema: LookupWineInputSchema,
 };
 
-export const GET_FOOD_PAIRINGS_TOOL_DEF: ToolDefinition = {
-  name: 'get_food_pairings' satisfies KnownAgentToolName,
-  description: GET_FOOD_PAIRINGS_DESCRIPTION,
-  inputSchema: GET_FOOD_PAIRINGS_INPUT_SCHEMA,
-};
-
-export const CHECK_DRINKING_WINDOW_TOOL_DEF: ToolDefinition = {
-  name: 'check_drinking_window' satisfies KnownAgentToolName,
-  description: CHECK_DRINKING_WINDOW_DESCRIPTION,
-  inputSchema: CHECK_DRINKING_WINDOW_INPUT_SCHEMA,
-};
-
-export const COMPARE_WINES_TOOL_DEF: ToolDefinition = {
-  name: 'compare_wines' satisfies KnownAgentToolName,
-  description: COMPARE_WINES_DESCRIPTION,
-  inputSchema: COMPARE_WINES_INPUT_SCHEMA,
-};
-
 /** Frozen production tool list. Module-scope const so every
  *  `buildWineAgentLoopToolBundle` call returns the exact same array identity —
  *  prompt cache benefit on the Anthropic side and a simple equality check
  *  in tests. */
 const WINE_AGENT_LOOP_TOOL_DEFS: readonly ToolDefinition[] = Object.freeze([
-  SEARCH_WINES_TOOL_DEF,
+  SEARCH_HYBRID_TOOL_DEF,
+  SEARCH_SEMANTIC_TOOL_DEF,
+  SEARCH_LEXICAL_TOOL_DEF,
   LOOKUP_WINE_TOOL_DEF,
-  GET_FOOD_PAIRINGS_TOOL_DEF,
-  CHECK_DRINKING_WINDOW_TOOL_DEF,
-  COMPARE_WINES_TOOL_DEF,
 ]);
 
 // ---------------------------------------------------------------------------
@@ -319,11 +251,10 @@ export function buildWineAgentLoopToolBundle(
 /** The set of tool names this bundle exposes — for assertion-style imports
  *  in tests. Always equals `KNOWN_AGENT_TOOL_NAMES` by construction. */
 export const WINE_AGENT_LOOP_TOOL_NAMES: readonly KnownAgentToolName[] = [
-  'search_wines',
+  'search_hybrid',
+  'search_semantic',
+  'search_lexical',
   'lookup_wine',
-  'get_food_pairings',
-  'check_drinking_window',
-  'compare_wines',
 ];
 
 // Compile-time guarantee: every name in WINE_AGENT_LOOP_TOOL_NAMES exists in the

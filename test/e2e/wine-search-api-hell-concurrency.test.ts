@@ -477,18 +477,18 @@ describe('StepBudget — Hell C3: per-request isolation', () => {
     const a = new StepBudget(makeBudgetConfig(5));
     const b = new StepBudget(makeBudgetConfig(5));
 
-    const check1 = a.recordStep('search_wines', { query: 'Opus One' });
+    const check1 = a.recordStep('search_hybrid', { query: 'Opus One' });
     expect(check1.allowed).toBe(true);
     expect(a.getStepCount()).toBe(1);
     expect(b.getStepCount()).toBe(0);
 
     // Same input on `b` MUST be allowed (no shared `seenActions`).
-    const check2 = b.recordStep('search_wines', { query: 'Opus One' });
+    const check2 = b.recordStep('search_hybrid', { query: 'Opus One' });
     expect(check2.allowed).toBe(true);
     expect(b.getStepCount()).toBe(1);
 
     // Same input on `a` again MUST be loop_detected.
-    const check3 = a.recordStep('search_wines', { query: 'Opus One' });
+    const check3 = a.recordStep('search_hybrid', { query: 'Opus One' });
     expect(check3.allowed).toBe(false);
     expect(check3.reason).toBe('loop_detected');
   });
@@ -503,9 +503,9 @@ describe('StepBudget — Hell C3: per-request isolation', () => {
     const runs = await Promise.all(
       Array.from({ length: RUNS }, async (_, i) => {
         const budget = new StepBudget(makeBudgetConfig(8));
-        const r1 = budget.recordStep('search_wines', { query: `instance${String(i)}_alpha` });
-        const r2 = budget.recordStep('get_food_pairings', { food: `instance${String(i)}_steak` });
-        const r3 = budget.recordStep('compare_wines', { query_a: `instance${String(i)}_a`, query_b: `instance${String(i)}_b` });
+        const r1 = budget.recordStep('search_hybrid', { query: `instance${String(i)}_alpha` });
+        const r2 = budget.recordStep('search_semantic', { query: `instance${String(i)}_steak` });
+        const r3 = budget.recordStep('search_lexical', { query: `instance${String(i)}_charlie` });
         return [r1, r2, r3, budget.getStepCount()] as const;
       }),
     );
@@ -523,15 +523,15 @@ describe('StepBudget — Hell C3: per-request isolation', () => {
     // counters for entries 0..N-1.
     const budget = new StepBudget(makeBudgetConfig(8));
     // Prime with one call so the next batch can collide with it.
-    const seed = budget.recordStep('search_wines', { query: 'Bordeaux' });
+    const seed = budget.recordStep('search_hybrid', { query: 'Bordeaux' });
     expect(seed.allowed).toBe(true);
     expect(budget.getStepCount()).toBe(1);
 
     // Submit a parallel batch where the SECOND entry collides with the
     // primed call. The batch must reject atomically.
     const batch = budget.recordParallelBatch([
-      { tool: 'search_wines', input: { query: 'Burgundy' } },
-      { tool: 'search_wines', input: { query: 'Bordeaux' } }, // collision
+      { tool: 'search_hybrid', input: { query: 'Burgundy' } },
+      { tool: 'search_hybrid', input: { query: 'Bordeaux' } }, // collision
     ]);
     expect(batch.allowed).toBe(false);
     expect(batch.reason).toBe('loop_detected');
@@ -540,7 +540,7 @@ describe('StepBudget — Hell C3: per-request isolation', () => {
     expect(budget.getStepCount()).toBe(1);
 
     // The first entry of the batch must still be admissible afterwards.
-    const retry = budget.recordStep('search_wines', { query: 'Burgundy' });
+    const retry = budget.recordStep('search_hybrid', { query: 'Burgundy' });
     expect(retry.allowed).toBe(true);
     expect(budget.getStepCount()).toBe(2);
   });
@@ -551,15 +551,15 @@ describe('StepBudget — Hell C3: per-request isolation', () => {
     // so near-duplicate Jaccard does not interfere (we are testing instance
     // independence here, not the loop-detection algorithm).
     const budget = new StepBudget(makeBudgetConfig(5));
-    expect(budget.recordStep('search_wines', { query: 'Cabernet Sauvignon Bordeaux' }).allowed).toBe(true);
-    expect(budget.recordStep('get_food_pairings', { food: 'grilled lamb chops' }).allowed).toBe(true);
-    expect(budget.recordStep('compare_wines', { query_a: 'Brunello', query_b: 'Barolo' }).allowed).toBe(true);
+    expect(budget.recordStep('search_hybrid', { query: 'Cabernet Sauvignon Bordeaux' }).allowed).toBe(true);
+    expect(budget.recordStep('search_semantic', { query: 'grilled lamb chops pairing' }).allowed).toBe(true);
+    expect(budget.recordStep('search_lexical', { query: 'Brunello versus Barolo' }).allowed).toBe(true);
     expect(budget.getStepCount()).toBe(3);
 
     // A separate budget instance MUST be independent — the same first call
     // is admissible without crosstalk.
     const otherBudget = new StepBudget(makeBudgetConfig(5));
-    const independent = otherBudget.recordStep('search_wines', { query: 'Cabernet Sauvignon Bordeaux' });
+    const independent = otherBudget.recordStep('search_hybrid', { query: 'Cabernet Sauvignon Bordeaux' });
     expect(independent.allowed).toBe(true);
     expect(otherBudget.getStepCount()).toBe(1);
   });
@@ -913,16 +913,16 @@ describe('Synthetic state-machine + StepBudget — Hell C8: simulated race', () 
     // construction. We document the invariant with an explicit test.
     const budget = new StepBudget(makeBudgetConfig(8));
     const r1 = budget.recordParallelBatch([
-      { tool: 'search_wines', input: { query: 'A' } },
-      { tool: 'search_wines', input: { query: 'B' } },
+      { tool: 'search_hybrid', input: { query: 'A' } },
+      { tool: 'search_hybrid', input: { query: 'B' } },
     ], { skipNearDuplicate: true });
     expect(r1.allowed).toBe(true);
     expect(budget.getStepCount()).toBe(1);
 
     // A subsequent batch that collides on one entry must reject atomically.
     const r2 = budget.recordParallelBatch([
-      { tool: 'search_wines', input: { query: 'C' } },
-      { tool: 'search_wines', input: { query: 'A' } }, // collision
+      { tool: 'search_hybrid', input: { query: 'C' } },
+      { tool: 'search_hybrid', input: { query: 'A' } }, // collision
     ], { skipNearDuplicate: true });
     expect(r2.allowed).toBe(false);
     expect(budget.getStepCount()).toBe(1);

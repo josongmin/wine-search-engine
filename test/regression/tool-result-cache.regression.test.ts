@@ -167,9 +167,10 @@ function makeToolDefs(): readonly ToolDefinition[] {
     safeParse: (x: unknown) => ({ success: true as const, data: x }),
   } as unknown as ToolDefinition['inputSchema'];
   return [
-    { name: 'search_wines', description: 'search', inputSchema: passthrough },
-    { name: 'get_food_pairings', description: 'food pairing', inputSchema: passthrough },
-    { name: 'compare_wines', description: 'compare', inputSchema: passthrough },
+    { name: 'search_hybrid', description: 'search (hybrid)', inputSchema: passthrough },
+    { name: 'search_semantic', description: 'search (semantic)', inputSchema: passthrough },
+    { name: 'search_lexical', description: 'search (lexical)', inputSchema: passthrough },
+    { name: 'lookup_wine', description: 'lookup', inputSchema: passthrough },
   ];
 }
 
@@ -300,10 +301,9 @@ describe('Tool Result Cache — TTL map', () => {
 
   it('toolResultCacheTtlSeconds returns documented values', () => {
     expect(toolResultCacheTtlSeconds('lookup_wine')).toBe(86_400); // 1 day
-    expect(toolResultCacheTtlSeconds('search_wines')).toBe(3_600); // 1 hour
-    expect(toolResultCacheTtlSeconds('compare_wines')).toBe(86_400);
-    expect(toolResultCacheTtlSeconds('check_drinking_window')).toBe(86_400);
-    expect(toolResultCacheTtlSeconds('get_food_pairings')).toBe(86_400);
+    expect(toolResultCacheTtlSeconds('search_hybrid')).toBe(3_600); // 1 hour
+    expect(toolResultCacheTtlSeconds('search_semantic')).toBe(3_600); // 1 hour
+    expect(toolResultCacheTtlSeconds('search_lexical')).toBe(3_600); // 1 hour
   });
 
   it('returns undefined for unknown tool names (fail-safe: do-not-cache)', () => {
@@ -327,7 +327,7 @@ describe('Tool Result Cache — WineAgentLoopRunner integration', () => {
 
       // First run: tool executes, cache fills.
       const llm1 = makeStubLlm([
-        async () => asToolUseResult([toolUse('search_wines', { query: 'cache-test' })]),
+        async () => asToolUseResult([toolUse('search_hybrid', { query: 'cache-test' })]),
         async () => asTextResult('answer1'),
       ]);
       const runner1 = new WineAgentLoopRunner({ structuredLlm: llm1, logger: makeLogger(), toolResultCache: cache });
@@ -338,7 +338,7 @@ describe('Tool Result Cache — WineAgentLoopRunner integration', () => {
 
       // Second run: same query, second dispatch should be a CACHE HIT.
       const llm2 = makeStubLlm([
-        async () => asToolUseResult([toolUse('search_wines', { query: 'cache-test' })]),
+        async () => asToolUseResult([toolUse('search_hybrid', { query: 'cache-test' })]),
         async () => asTextResult('answer2'),
       ]);
       const runner2 = new WineAgentLoopRunner({ structuredLlm: llm2, logger: makeLogger(), toolResultCache: cache });
@@ -358,14 +358,14 @@ describe('Tool Result Cache — WineAgentLoopRunner integration', () => {
       const searchPort = makeSearchPort();
 
       const llm1 = makeStubLlm([
-        async () => asToolUseResult([toolUse('search_wines', { query: 'first' })]),
+        async () => asToolUseResult([toolUse('search_hybrid', { query: 'first' })]),
         async () => asTextResult('a'),
       ]);
       await new WineAgentLoopRunner({ structuredLlm: llm1, logger: makeLogger(), toolResultCache: cache })
         .run(makeInput({ toolPorts: makeToolPorts({ searchUseCase: searchPort }) }));
 
       const llm2 = makeStubLlm([
-        async () => asToolUseResult([toolUse('search_wines', { query: 'second' })]),
+        async () => asToolUseResult([toolUse('search_hybrid', { query: 'second' })]),
         async () => asTextResult('b'),
       ]);
       await new WineAgentLoopRunner({ structuredLlm: llm2, logger: makeLogger(), toolResultCache: cache })
@@ -381,7 +381,7 @@ describe('Tool Result Cache — WineAgentLoopRunner integration', () => {
       const cache = makeMockCache();
       const searchPort = makeSearchPort();
       const llm = makeStubLlm([
-        async () => asToolUseResult([toolUse('search_wines', { query: 'ttl-test' })]),
+        async () => asToolUseResult([toolUse('search_hybrid', { query: 'ttl-test' })]),
         async () => asTextResult('done'),
       ]);
       await new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger(), toolResultCache: cache })
@@ -392,7 +392,7 @@ describe('Tool Result Cache — WineAgentLoopRunner integration', () => {
       expect(setCall).toBeDefined();
       // setMock signature: (key, value, ttlSeconds)
       const ttlArg = setCall?.[2] as number | undefined;
-      expect(ttlArg).toBe(toolResultCacheTtlSeconds('search_wines'));
+      expect(ttlArg).toBe(toolResultCacheTtlSeconds('search_hybrid'));
     });
   });
 
@@ -409,7 +409,7 @@ describe('Tool Result Cache — WineAgentLoopRunner integration', () => {
       };
       const searchPort = makeSearchPort();
       const llm = makeStubLlm([
-        async () => asToolUseResult([toolUse('search_wines', { query: 'fail-open' })]),
+        async () => asToolUseResult([toolUse('search_hybrid', { query: 'fail-open' })]),
         async () => asTextResult('ok'),
       ]);
       const out = await new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger(), toolResultCache: failOpenCache })
@@ -424,7 +424,7 @@ describe('Tool Result Cache — WineAgentLoopRunner integration', () => {
       const cache = makeMockCache();
       const searchPort = makeSearchPort();
       const llm = makeStubLlm([
-        async () => asToolUseResult([toolUse('search_wines', { query: 'disabled' })]),
+        async () => asToolUseResult([toolUse('search_hybrid', { query: 'disabled' })]),
         async () => asTextResult('ok'),
       ]);
       await new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger(), toolResultCache: cache })
@@ -451,7 +451,7 @@ describe('Tool Result Cache — WineAgentLoopRunner integration', () => {
       // search port to throw via the dispatcher's mapped failure.
       const searchPort = makeSearchPort(() => Promise.reject(new Error('tool not available')));
       const llm = makeStubLlm([
-        async () => asToolUseResult([toolUse('search_wines', { query: 'fail-tool' })]),
+        async () => asToolUseResult([toolUse('search_hybrid', { query: 'fail-tool' })]),
         async () => asTextResult('ok'),
       ]);
       await new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger(), toolResultCache: cache })
@@ -469,7 +469,7 @@ describe('Tool Result Cache — WineAgentLoopRunner integration', () => {
 
       // First run with input A,B
       const llm1 = makeStubLlm([
-        async () => asToolUseResult([toolUse('search_wines', { query: 'reorder', limit: 5 })]),
+        async () => asToolUseResult([toolUse('search_hybrid', { query: 'reorder', limit: 5 })]),
         async () => asTextResult('a'),
       ]);
       await new WineAgentLoopRunner({ structuredLlm: llm1, logger: makeLogger(), toolResultCache: cache })
@@ -477,7 +477,7 @@ describe('Tool Result Cache — WineAgentLoopRunner integration', () => {
 
       // Second run with input B,A (same fields, different insertion order) — should HIT cache
       const llm2 = makeStubLlm([
-        async () => asToolUseResult([toolUse('search_wines', { limit: 5, query: 'reorder' })]),
+        async () => asToolUseResult([toolUse('search_hybrid', { limit: 5, query: 'reorder' })]),
         async () => asTextResult('b'),
       ]);
       await new WineAgentLoopRunner({ structuredLlm: llm2, logger: makeLogger(), toolResultCache: cache })
@@ -514,7 +514,7 @@ describe('Tool Result Cache — RedisToolResultCache adapter (in-memory Redis mo
     const adapter = new RedisToolResultCache({
       resolveClient: async () => ({ get: mock.get, set: mock.set }),
     });
-    const key = { toolName: 'search_wines', normalizedInputHash: computeInputHash({ q: 'a' }) };
+    const key = { toolName: 'search_hybrid', normalizedInputHash: computeInputHash({ q: 'a' }) };
     expect(await adapter.get(key)).toBeNull();
     await adapter.set(key, { result: { hello: 'world' }, createdAt: 1_700_000_000_000 }, 60);
     const back = await adapter.get(key);
@@ -542,7 +542,7 @@ describe('Tool Result Cache — RedisToolResultCache adapter (in-memory Redis mo
         set: async () => 'OK',
       }),
     });
-    const key = { toolName: 'search_wines', normalizedInputHash: 'deadbeef00000000' };
+    const key = { toolName: 'search_hybrid', normalizedInputHash: 'deadbeef00000000' };
     await expect(adapter.get(key)).resolves.toBeNull();
   });
 
@@ -553,7 +553,7 @@ describe('Tool Result Cache — RedisToolResultCache adapter (in-memory Redis mo
         set: () => { throw new Error('redis down'); },
       }),
     });
-    const key = { toolName: 'search_wines', normalizedInputHash: 'deadbeef11111111' };
+    const key = { toolName: 'search_hybrid', normalizedInputHash: 'deadbeef11111111' };
     await expect(
       adapter.set(key, { result: 'x', createdAt: 1 }, 60),
     ).resolves.toBeUndefined();
@@ -561,21 +561,21 @@ describe('Tool Result Cache — RedisToolResultCache adapter (in-memory Redis mo
 
   it('treats corrupt JSON in the store as a miss (returns null)', async () => {
     const mock = makeRedisMockClient();
-    mock.store.set('tool-result:search_wines:badjsonbadjsonba', '{not valid json');
+    mock.store.set('tool-result:search_hybrid:badjsonbadjsonba', '{not valid json');
     const adapter = new RedisToolResultCache({
       resolveClient: async () => ({ get: mock.get, set: mock.set }),
     });
-    const key = { toolName: 'search_wines', normalizedInputHash: 'badjsonbadjsonba' };
+    const key = { toolName: 'search_hybrid', normalizedInputHash: 'badjsonbadjsonba' };
     expect(await adapter.get(key)).toBeNull();
   });
 
   it('rejects shape-mismatched entries (returns null)', async () => {
     const mock = makeRedisMockClient();
-    mock.store.set('tool-result:search_wines:shape00mismatch', JSON.stringify({ no_result_field: true }));
+    mock.store.set('tool-result:search_hybrid:shape00mismatch', JSON.stringify({ no_result_field: true }));
     const adapter = new RedisToolResultCache({
       resolveClient: async () => ({ get: mock.get, set: mock.set }),
     });
-    const key = { toolName: 'search_wines', normalizedInputHash: 'shape00mismatch' };
+    const key = { toolName: 'search_hybrid', normalizedInputHash: 'shape00mismatch' };
     expect(await adapter.get(key)).toBeNull();
   });
 
@@ -584,7 +584,7 @@ describe('Tool Result Cache — RedisToolResultCache adapter (in-memory Redis mo
     const adapter = new RedisToolResultCache({
       resolveClient: async () => ({ get: mock.get, set: mock.set }),
     });
-    const key = { toolName: 'search_wines', normalizedInputHash: 'badttl0000000000' };
+    const key = { toolName: 'search_hybrid', normalizedInputHash: 'badttl0000000000' };
     await adapter.set(key, { result: 'x', createdAt: 1 }, 0);
     await adapter.set(key, { result: 'x', createdAt: 1 }, -1);
     await adapter.set(key, { result: 'x', createdAt: 1 }, Number.NaN);

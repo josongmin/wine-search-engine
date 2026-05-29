@@ -11,7 +11,7 @@
     "system": [
       {
         "type": "text",
-        "text": "You are a wine search agent driving a small, focused ReAct loop.\n\nAvailable tools:\n  - search_wines: retrieve wines matching the query and constraints.\n  - get_food_pairings: retrieve wines that pair with a food description.\n  - check_drinking_window: evaluate drinkability of a specific wine entity at a target year.\n  - compare_wines: compare two wine descriptors.\n\nHard rules:\n  - Call AT MOST ONE tool per turn. If the user clearly asked for parallel work, prefer a single search with combined constraints.\n  - Ground every factual claim in a tool result. NEVER fabricate.\n  - When you emit a final answer, do NOT make additional tool calls.\n  - Honor any \"directive\" message the controller injects between turns. Directives are authoritative — they reflect contract requirements derived from the user query.\n  - If the controller injects a \"Loop detected\" notice, switch to a different tool or substantially different input on the next turn.",
+        "text": "You are a wine search agent driving a small, focused ReAct loop.\n\nAvailable tools:\n  - search_hybrid: discovery search using BOTH lexical (BM25) and semantic (embedding) retrieval fused with RRF. The DEFAULT for finding wines by constraints, region, style, price, or description.\n  - search_semantic: discovery search using ONLY semantic similarity (no lexical leg). Use for vibe/profile/preference queries (\"light summer red\").\n  - search_lexical: discovery search using ONLY lexical/BM25 token matching (no embedding leg). Use when exact words/names/codes matter and semantic drift is undesirable.\n  - lookup_wine: resolve ONE specific wine by name/identity (1-3 exact matches); use when the user names a particular wine.\n\nComposition note: there are no dedicated pairing / drinkability / comparison tools. Achieve those by running one or more search_* / lookup_wine calls and synthesizing the answer from the results.\n\nHard rules:\n  - Call AT MOST ONE tool per turn. If the user clearly asked for parallel work, prefer a single search with combined constraints.\n  - Ground every factual claim in a tool result. NEVER fabricate.\n  - When you emit a final answer, do NOT make additional tool calls.\n  - Honor any \"directive\" message the controller injects between turns. Directives are authoritative — they reflect contract requirements derived from the user query.\n  - If the controller injects a \"Loop detected\" notice, switch to a different tool or substantially different input on the next turn.",
         "cache_control": {
           "type": "ephemeral"
         }
@@ -26,8 +26,8 @@
     "max_tokens": 1024,
     "tools": [
       {
-        "name": "search_wines",
-        "description": "Search the wine catalog. Use for finding wines by name, region, style, vintage, price, food pairing intent, or any combination. Accepts structured filters.",
+        "name": "search_hybrid",
+        "description": "Discovery search over the wine catalog using BOTH lexical (BM25) and semantic (embedding) retrieval fused with RRF. The default for finding wines by name, region, style, vintage, price, or any combination. Accepts structured filters.",
         "input_schema": {
           "type": "object",
           "properties": {
@@ -35,6 +35,212 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 500
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20
+            },
+            "retrieval_mode": {
+              "type": "string",
+              "enum": [
+                "auto",
+                "entity",
+                "hybrid",
+                "mixed"
+              ]
+            },
+            "exclude_grapes": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "maxItems": 10
+            },
+            "exclude_regions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "maxItems": 10
+            },
+            "exclude_wine_types": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "red",
+                  "white",
+                  "rosé",
+                  "sparkling",
+                  "fortified",
+                  "dessert",
+                  "orange",
+                  "natural"
+                ]
+              },
+              "maxItems": 10
+            },
+            "min_price_krw": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "max_price_krw": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "max_alcohol_pct": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 100
+            },
+            "grape_primary": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "wine_type": {
+              "type": "string",
+              "enum": [
+                "red",
+                "white",
+                "rosé",
+                "sparkling",
+                "fortified",
+                "dessert",
+                "orange",
+                "natural"
+              ]
+            },
+            "country": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "region": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "vintage_min": {
+              "type": "integer",
+              "minimum": 1600,
+              "maximum": 2100
+            },
+            "vintage_max": {
+              "type": "integer",
+              "minimum": 1600,
+              "maximum": 2100
+            },
+            "appellation": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "style": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 50
+            },
+            "styles": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 50
+              },
+              "maxItems": 5
+            },
+            "certification": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 50
+            },
+            "occasion": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "gift",
+                  "celebration",
+                  "anniversary",
+                  "birthday",
+                  "date_night",
+                  "housewarming",
+                  "party",
+                  "wedding",
+                  "special_occasion",
+                  "solo",
+                  "healing",
+                  "comforting",
+                  "camping",
+                  "cellaring",
+                  "romantic"
+                ]
+              },
+              "maxItems": 5
+            },
+            "gift_suitability_min": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "beginner_suitability_min": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "producer_prestige_min": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "popularity_min": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "recipient_profile": {
+              "type": "string",
+              "enum": [
+                "parents_first_time",
+                "senior_colleague_gift",
+                "unknown_preference_recipient"
+              ]
+            },
+            "sweetness_min": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "sweetness_max": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "acidity_min": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "acidity_max": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "tannin_max": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "want_diversity": {
+              "type": "boolean"
             },
             "filters": {
               "type": "array",
@@ -45,20 +251,6 @@
               "type": "array",
               "items": {},
               "maxItems": 16
-            },
-            "mode": {
-              "type": "string",
-              "enum": [
-                "auto",
-                "entity",
-                "hybrid",
-                "mixed"
-              ]
-            },
-            "limit": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 20
             }
           },
           "required": [
@@ -67,97 +259,489 @@
         }
       },
       {
-        "name": "compare_wines",
-        "description": "Compare two wines side-by-side. Use ONLY for explicit head-to-head comparisons. Cannot batch with other tools — must run alone.",
+        "name": "search_semantic",
+        "description": "Discovery search using ONLY semantic (embedding) similarity — no lexical/BM25 leg. Use when the query describes a vibe, profile, or preference (\"light summer red\", \"elegant cool-climate pinot\") rather than exact tokens.",
         "input_schema": {
           "type": "object",
           "properties": {
-            "query_a": {
+            "query": {
               "type": "string",
               "minLength": 1,
               "maxLength": 500
             },
-            "query_b": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 500
-            }
-          },
-          "required": [
-            "query_a",
-            "query_b"
-          ]
-        }
-      },
-      {
-        "name": "check_drinking_window",
-        "description": "Check current/future drinkability for a specific wine. Provide an entity_id from a prior search_wines result; never invent ids.",
-        "input_schema": {
-          "type": "object",
-          "properties": {
-            "entity_id": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 500
-            },
-            "target_year": {
+            "limit": {
               "type": "integer",
-              "minimum": 1900,
-              "maximum": 2100
-            }
-          },
-          "required": [
-            "entity_id"
-          ]
-        }
-      },
-      {
-        "name": "get_food_pairings",
-        "description": "Suggest wine pairings for a food description. Returns ranked wines. Accepts color, styles, budget.",
-        "input_schema": {
-          "type": "object",
-          "properties": {
-            "food": {
+              "minimum": 1,
+              "maximum": 20
+            },
+            "retrieval_mode": {
+              "type": "string",
+              "enum": [
+                "auto",
+                "entity",
+                "hybrid",
+                "mixed"
+              ]
+            },
+            "exclude_grapes": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "maxItems": 10
+            },
+            "exclude_regions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "maxItems": 10
+            },
+            "exclude_wine_types": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "red",
+                  "white",
+                  "rosé",
+                  "sparkling",
+                  "fortified",
+                  "dessert",
+                  "orange",
+                  "natural"
+                ]
+              },
+              "maxItems": 10
+            },
+            "min_price_krw": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "max_price_krw": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "max_alcohol_pct": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 100
+            },
+            "grape_primary": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 500
+              "maxLength": 100
             },
-            "color": {
+            "wine_type": {
               "type": "string",
               "enum": [
                 "red",
                 "white",
                 "rosé",
                 "sparkling",
-                "both"
+                "fortified",
+                "dessert",
+                "orange",
+                "natural"
               ]
+            },
+            "country": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "region": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "vintage_min": {
+              "type": "integer",
+              "minimum": 1600,
+              "maximum": 2100
+            },
+            "vintage_max": {
+              "type": "integer",
+              "minimum": 1600,
+              "maximum": 2100
+            },
+            "appellation": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "style": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 50
             },
             "styles": {
               "type": "array",
               "items": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 500
+                "maxLength": 50
               },
+              "maxItems": 5
+            },
+            "certification": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 50
+            },
+            "occasion": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "gift",
+                  "celebration",
+                  "anniversary",
+                  "birthday",
+                  "date_night",
+                  "housewarming",
+                  "party",
+                  "wedding",
+                  "special_occasion",
+                  "solo",
+                  "healing",
+                  "comforting",
+                  "camping",
+                  "cellaring",
+                  "romantic"
+                ]
+              },
+              "maxItems": 5
+            },
+            "gift_suitability_min": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "beginner_suitability_min": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "producer_prestige_min": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "popularity_min": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "recipient_profile": {
+              "type": "string",
+              "enum": [
+                "parents_first_time",
+                "senior_colleague_gift",
+                "unknown_preference_recipient"
+              ]
+            },
+            "sweetness_min": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "sweetness_max": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "acidity_min": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "acidity_max": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "tannin_max": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "want_diversity": {
+              "type": "boolean"
+            },
+            "filters": {
+              "type": "array",
+              "items": {},
               "maxItems": 16
             },
-            "pairing_tags": {
+            "preferences": {
+              "type": "array",
+              "items": {},
+              "maxItems": 16
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      },
+      {
+        "name": "search_lexical",
+        "description": "Discovery search using ONLY lexical (BM25) token matching — no embedding leg. Use when exact words/names/codes matter and semantic drift is undesirable (rare producer names, appellation codes, precise varietal spellings).",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20
+            },
+            "retrieval_mode": {
+              "type": "string",
+              "enum": [
+                "auto",
+                "entity",
+                "hybrid",
+                "mixed"
+              ]
+            },
+            "exclude_grapes": {
               "type": "array",
               "items": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 500
+                "maxLength": 100
               },
-              "maxItems": 16
+              "maxItems": 10
+            },
+            "exclude_regions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "maxItems": 10
+            },
+            "exclude_wine_types": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "red",
+                  "white",
+                  "rosé",
+                  "sparkling",
+                  "fortified",
+                  "dessert",
+                  "orange",
+                  "natural"
+                ]
+              },
+              "maxItems": 10
+            },
+            "min_price_krw": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
             },
             "max_price_krw": {
               "type": "integer",
               "minimum": 1,
-              "maximum": 100000000
+              "maximum": 9007199254740991
+            },
+            "max_alcohol_pct": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 100
+            },
+            "grape_primary": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "wine_type": {
+              "type": "string",
+              "enum": [
+                "red",
+                "white",
+                "rosé",
+                "sparkling",
+                "fortified",
+                "dessert",
+                "orange",
+                "natural"
+              ]
+            },
+            "country": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "region": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "vintage_min": {
+              "type": "integer",
+              "minimum": 1600,
+              "maximum": 2100
+            },
+            "vintage_max": {
+              "type": "integer",
+              "minimum": 1600,
+              "maximum": 2100
+            },
+            "appellation": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "style": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 50
+            },
+            "styles": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 50
+              },
+              "maxItems": 5
+            },
+            "certification": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 50
+            },
+            "occasion": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "gift",
+                  "celebration",
+                  "anniversary",
+                  "birthday",
+                  "date_night",
+                  "housewarming",
+                  "party",
+                  "wedding",
+                  "special_occasion",
+                  "solo",
+                  "healing",
+                  "comforting",
+                  "camping",
+                  "cellaring",
+                  "romantic"
+                ]
+              },
+              "maxItems": 5
+            },
+            "gift_suitability_min": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "beginner_suitability_min": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "producer_prestige_min": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "popularity_min": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "recipient_profile": {
+              "type": "string",
+              "enum": [
+                "parents_first_time",
+                "senior_colleague_gift",
+                "unknown_preference_recipient"
+              ]
+            },
+            "sweetness_min": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "sweetness_max": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "acidity_min": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "acidity_max": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "tannin_max": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "want_diversity": {
+              "type": "boolean"
+            },
+            "filters": {
+              "type": "array",
+              "items": {},
+              "maxItems": 16
+            },
+            "preferences": {
+              "type": "array",
+              "items": {},
+              "maxItems": 16
             }
           },
           "required": [
-            "food"
+            "query"
+          ]
+        }
+      },
+      {
+        "name": "lookup_wine",
+        "description": "Look up a SPECIFIC wine by name/identity (e.g. \"Opus One 2018\"). Returns the 1-3 most exact matches via high-precision entity resolution. No filters — use a search_* primitive for constraint-based discovery.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "required": [
+            "query"
           ]
         },
         "cache_control": {

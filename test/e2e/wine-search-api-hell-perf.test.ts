@@ -378,7 +378,7 @@ describe('Hell perf — Category 5: Trigram / Jaccard stress', () => {
     let i = 0;
     const summary = timeMedianMs(() => {
       i += 1;
-      budget.recordStep('search_wines', { query: `${longQuery} ${i}` });
+      budget.recordStep('search_hybrid', { query: `${longQuery} ${i}` });
     });
     expect(summary.maxMs, `2000-char Hangul recordStep median=${summary.medianMs.toFixed(2)}`).toBeLessThan(PERF_TRIGRAM_MAX_MS);
   });
@@ -389,7 +389,7 @@ describe('Hell perf — Category 5: Trigram / Jaccard stress', () => {
     let i = 0;
     const summary = timeMedianMs(() => {
       i += 1;
-      budget.recordStep('search_wines', { query: `${longQuery}${i}` });
+      budget.recordStep('search_hybrid', { query: `${longQuery}${i}` });
     });
     expect(summary.maxMs).toBeLessThan(PERF_TRIGRAM_MAX_MS);
   });
@@ -402,7 +402,7 @@ describe('Hell perf — Category 5: Trigram / Jaccard stress', () => {
     const start = performance.now();
     for (let i = 0; i < NEAR_DUPLICATE_ITERATIONS; i += 1) {
       // Each query is slightly different so we don't bounce on exact dedup.
-      budget.recordStep('search_wines', { query: `Bordeaux ${i} wine` });
+      budget.recordStep('search_hybrid', { query: `Bordeaux ${i} wine` });
     }
     const elapsed = performance.now() - start;
     expect(elapsed, `50 near-dup iters=${elapsed.toFixed(2)}ms`).toBeLessThan(PERF_LOOP_AGGREGATE_MS);

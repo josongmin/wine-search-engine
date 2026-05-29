@@ -55,7 +55,30 @@ describe('HTTP contract OpenAPI bridge', () => {
         },
       ],
     }));
-    expect(document.paths['/v1/search/hybrid']).toBeUndefined();
+    // T-IR-01/02: path-authoritative primitive surface is now declared in the
+    // catalog alongside the legacy mode-monolith routes. These must be present
+    // as `post` operations (additive — legacy `/v1/search`, `/v1/search/lookup`,
+    // `/v1/agent` stay until T-IR-07 removes them).
+    expect(document.paths['/v1/search/hybrid']?.post).toEqual(expect.objectContaining({
+      operationId: 'search.hybrid',
+      tags: ['search'],
+    }));
+    expect(document.paths['/v1/search/semantic']?.post).toEqual(expect.objectContaining({
+      operationId: 'search.semantic',
+      tags: ['search'],
+    }));
+    expect(document.paths['/v1/search/lexical']?.post).toEqual(expect.objectContaining({
+      operationId: 'search.lexical',
+      tags: ['search'],
+    }));
+    expect(document.paths['/v1/lookup/wine']?.post).toEqual(expect.objectContaining({
+      operationId: 'lookup.wine',
+      tags: ['lookup'],
+    }));
+    expect(document.paths['/v1/agent/run']?.post).toEqual(expect.objectContaining({
+      operationId: expect.any(String),
+      tags: ['agent'],
+    }));
     expect(document.paths['/v1/search/interpret']).toBeUndefined();
     expect(document.paths['/v1/entity/resolve']).toBeUndefined();
     expect(document.paths['/v1/entity/autocomplete']).toBeUndefined();

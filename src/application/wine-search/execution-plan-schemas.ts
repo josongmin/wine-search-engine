@@ -96,6 +96,15 @@ export const SearchUseCaseInputSchema = z.object({
   limit: z.number().int().finite().min(1).max(EXECUTION_PLAN_MAX_LIMIT).optional(),
   representativeConcept: RepresentativeConceptSchema.optional(),
   callerInterpretation: WineSearchCallerInterpretationSchema.optional(),
+  /**
+   * T-IR-05: retrieval-lane discriminator set by the primitive agent tools
+   * (`search_hybrid` / `search_semantic` / `search_lexical`). Mirrors the
+   * HTTP-side `SearchRequest.retrievalLane` so the agent tool path and the
+   * `/v1/search/{...}` HTTP path drive the SAME candidate-pool channel
+   * gating. The `SearchUseCaseAdapter` forwards it onto the `SearchRequest`.
+   * Absent → full hybrid channel mix.
+   */
+  retrievalLane: z.enum(['hybrid', 'semantic_only', 'lexical_only']).optional(),
 }).strict();
 export type SearchUseCaseInput = z.infer<typeof SearchUseCaseInputSchema>;
 

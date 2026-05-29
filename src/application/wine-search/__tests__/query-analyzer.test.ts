@@ -138,12 +138,15 @@ describe('QueryAnalyzerService — deterministic pipeline', () => {
     });
   });
 
-  it('Food pairing query — intent=pair, requiredTool=get_food_pairings', async () => {
+  it('Food pairing query — intent=pair, requiredTool=search_hybrid', async () => {
     const result = await analyze('스테이크에 어울리는 와인');
     expect(result.kind).toBe('ok');
     if (result.kind !== 'ok') return;
     expect(result.analysis.intent).toBe('pair');
-    expect(result.analysis.contract.requiredTool).toBe('get_food_pairings');
+    // T-IR-05: pairing has no dedicated tool — the analyzer steers the agent to
+    // the grounded `search_hybrid` discovery primitive and the pairing answer
+    // is composed from primitive search results.
+    expect(result.analysis.contract.requiredTool).toBe('search_hybrid');
     expect(result.analysis.expectedMultiStep).toBe(true);
     expect(result.analysis.callerInterpretation).toEqual({
       authority: 'caller',
@@ -165,7 +168,7 @@ describe('QueryAnalyzerService — deterministic pipeline', () => {
     if (result.kind !== 'ok') return;
 
     expect(result.analysis.intent).toBe('search');
-    expect(result.analysis.contract.requiredTool).toBe('search_wines');
+    expect(result.analysis.contract.requiredTool).toBe('search_hybrid');
     expect(result.analysis.callerInterpretation).toEqual({
       authority: 'caller',
       intent: 'semantic_discovery',

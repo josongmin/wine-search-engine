@@ -44,8 +44,6 @@ import { HybridUseCase } from '../../../src/application/search/hybrid.usecase.js
 import { WatchlistService } from '../../../src/application/watchlist/watchlist.service.js';
 import type { Container } from '../../../src/config/container.js';
 import type { SnapshotVersions } from '../../../src/application/search/search.usecase.js';
-import { AdaptiveToolExecutor } from '../../../src/interface/claude-tools/adaptive-tool-executor.js';
-import { WineToolExecutor } from '../../../src/interface/claude-tools/tool-executor.js';
 import { InMemoryWatchlistStore } from '../../../src/infrastructure/watchlist/in-memory-watchlist-store.js';
 import {
   InMemoryAmbiguityDictionary,
@@ -362,12 +360,6 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
     decomposedSearch: decomposedSearchUseCase,
   });
 
-  const wineToolExecutor = new WineToolExecutor({
-    searchUseCase,
-    decomposedSearchUseCase,
-    drinkingWindowUseCase,
-  });
-  const adaptiveToolExecutor = new AdaptiveToolExecutor(wineToolExecutor);
   const watchlistService = new WatchlistService({
     storage: watchlistStore,
   });
@@ -395,7 +387,6 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
     drinkingWindowUseCase,
     drinkingWindowPredictor,
     batchSearchUseCase,
-    adaptiveToolExecutor,
     watchlistService,
     watchlistRuntime: null,
     evalRunner: null,
