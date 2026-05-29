@@ -30,6 +30,7 @@ import {
 import { registerWatchlistRoute } from './routes/watchlist.route.js';
 import { registerFeedbackRoute } from './routes/feedback.route.js';
 import { registerWineSearchRoute } from './routes/wine-search.route.js';
+import { registerAgentRunRoute } from './routes/agent.route.js';
 import { registerOpenApiRoute } from './routes/openapi.route.js';
 import type { HttpServerDeps } from './routes/route-deps.js';
 import { getRequestId, resolveIncomingRequestId } from './request-id.js';
@@ -403,6 +404,12 @@ export async function createServer(
     // Plan-then-Execute `/v1/agent` — the canonical agentic entry point.
     // Registration requires an Anthropic credential at startup.
     registerWineSearchRoute(app, {
+      wineSearchOrchestrator: deps.wineSearch.wineSearchOrchestrator,
+    });
+    // T-IR-02 single-shot agent surface — `POST /v1/agent/run`. Accepts the
+    // canonical `messages[]` body; session-managed `/v1/agent/sessions*`
+    // endpoints land with T-IR-03 alongside the persistent session store.
+    registerAgentRunRoute(app, {
       wineSearchOrchestrator: deps.wineSearch.wineSearchOrchestrator,
     });
   }

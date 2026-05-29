@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { HttpRouteContract } from './route-contracts.js';
 import { WineSearchRouteContract } from './wine-search.contract.js';
+import { AgentRunRouteContract } from './agent.contract.js';
 import {
   AgentMetricsRouteContract,
   HealthRouteContract,
@@ -67,8 +68,13 @@ interface DeclaredHttpRouteContract {
  *           Legacy `/v1/search` and `/v1/search/lookup` are kept until
  *           T-IR-07 removes them, at which point this bumps to 5.0.0.
  *           Remaining: 17.
+ *   4.2.0 — T-IR-02 step 1: add `POST /v1/agent/run` with `messages[]`
+ *           canonical body (2026-05-29). MINOR bump — additive only.
+ *           Session-managed `/v1/agent/sessions*` endpoints land with
+ *           T-IR-03; legacy `/v1/agent` stays until T-IR-07 removes it.
+ *           Remaining: 18.
  */
-export const HTTP_CONTRACT_CATALOG_VERSION = '4.1.0';
+export const HTTP_CONTRACT_CATALOG_VERSION = '4.2.0';
 
 export const DeclaredHttpRouteContractCatalog: readonly DeclaredHttpRouteContract[] = [
   { method: 'GET', url: '/health', contract: HealthRouteContract },
@@ -88,6 +94,7 @@ export const DeclaredHttpRouteContractCatalog: readonly DeclaredHttpRouteContrac
   { method: 'GET', url: '/v1/watchlist/:id/deliveries', contract: WatchlistDeliveriesRouteContract },
   { method: 'POST', url: '/v1/feedback', contract: FeedbackSubmitRouteContract },
   { method: 'POST', url: '/v1/agent', contract: WineSearchRouteContract },
+  { method: 'POST', url: '/v1/agent/run', contract: AgentRunRouteContract },
 ] as const;
 
 function compareContracts(
@@ -193,7 +200,7 @@ export function computeHttpContractCatalogFingerprint(
  * failing test.
  */
 export const HTTP_CONTRACT_CATALOG_FINGERPRINT =
-  'd9609188d1a5fec7d65f7b3c8a40965435afb93becf541ad96823f89688f84b4';
+  '8818a6e1f257d33cb342cf38e019dccc6784f4cc83a27da37208b4357bdb20d5';
 
 export function buildDeclaredHttpRouteContractManifest(): HttpRouteContractManifest {
   const routes: RegisteredHttpRouteContract[] = DeclaredHttpRouteContractCatalog.map((entry) => {
