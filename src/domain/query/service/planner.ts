@@ -52,7 +52,7 @@ import {
 } from './exact-entity-metadata-signals.js';
 import {
   isGenericWineNounToken,
-  isShortEntityLikeSurface as isSharedShortEntityLikeSurface,
+  isShortEntityLikeSurface,
 } from './short-entity-surface.js';
 import type { PolicyDecisionRecord, PlannerStage } from '../model/policy-decision-record.js';
 import { buildBundleFromAtoms } from './constraint-reasoner.js';
@@ -1301,11 +1301,7 @@ export class Planner {
       return true;
     }
 
-    return this.isShortEntityLikeSurface(normalizedQuery);
-  }
-
-  private isShortEntityLikeSurface(normalizedQuery: string): boolean {
-    return isSharedShortEntityLikeSurface(normalizedQuery);
+    return isShortEntityLikeSurface(normalizedQuery);
   }
 
   private async buildFuzzyFallbackAnchors(

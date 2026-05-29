@@ -203,22 +203,14 @@ function expandParallelSlots(
 // Public surface
 // ---------------------------------------------------------------------------
 
-interface DeterministicRouterDeps {
-  /** Optional wall-clock — unused since step 4-3 removed the drinkability
-   *  plan kind (the only time-dependent rule). Retained on the deps shape
-   *  for caller backward compatibility; future rules may consume it. */
-  readonly now?: () => Date;
-}
-
+/**
+ * Deterministic plan router — a pure-function service wrapped in a class so
+ * DI callers can swap implementations without leaking the function shape
+ * across boundaries. Currently stateless; if future rules require wall-clock
+ * or other ports, add a typed deps interface (do NOT reach for `Date.now()`
+ * directly — it breaks test determinism).
+ */
 export class DeterministicRouter {
-  // eslint-disable-next-line @typescript-eslint/no-useless-constructor
-  constructor(_deps?: DeterministicRouterDeps) {
-    // No instance state — the router is currently a pure function dressed
-    // up as a class so DI callers can swap implementations. The optional
-    // deps shape (currently empty after step 4-3) is retained so existing
-    // call sites do not need to be touched.
-  }
-
   route(analysis: WineSearchAnalysis): ExecutionPlan {
     // Rule 1 — analysis-rejected guard. We don't reject "intent=unknown
     // with anchors" because the deterministic anchor extractor may still
@@ -248,7 +240,7 @@ export class DeterministicRouter {
       }
     }
 
-    // Rule 3 — multi-step (defer to MiniLoop).
+    // Rule 3 — multi-step (defer to WineAgentLoop).
     if (analysis.expectedMultiStep) {
       return {
         kind: PLAN_KIND_MULTI_STEP,

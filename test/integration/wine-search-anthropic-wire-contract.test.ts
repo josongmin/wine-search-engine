@@ -1,7 +1,7 @@
 /**
  * Anthropic Messages-API wire-contract integration test.
  *
- * Drives the FULL Plan-then-Execute pipeline (Analyzer → Router → MiniLoop →
+ * Drives the FULL Plan-then-Execute pipeline (Analyzer → Router → WineAgentLoop →
  * Synthesizer) through the REAL {@link ClaudeStructuredLlmAdapter} with a
  * mocked global `fetch`. Every outgoing request to `api.anthropic.com` is
  * captured and asserted byte-perfect against the Anthropic Messages API spec.
@@ -13,7 +13,7 @@
  *
  * Why drive through the orchestrator (not just the adapter)?
  *   The orchestrator is the only component that composes the analyzer's
- *   `analyze`, the mini-loop's `execute`, and the synthesizer's `synthesize`
+ *   `analyze`, the wine-agent-loop's `execute`, and the synthesizer's `synthesize`
  *   into a single request lifecycle. By wiring the real adapter at the
  *   orchestrator's `StructuredLlmPort` seam (instead of the port-level mock in
  *   `anthropic-sdk-mock.ts`), we exercise the exact request bodies each phase
@@ -34,7 +34,7 @@
  *   - src/application/wine-search/wine-search-orchestrator.ts (pipeline)
  *   - src/application/wine-search/synthesis-runner.ts
  *       SYNTHESIS_SYSTEM_PROMPT L285-303, enablePromptCache:true L554.
- *   - src/application/wine-search/mini-loop.ts runOneTurn() L453-499.
+ *   - src/application/wine-search/wine-agent-loop.ts runOneTurn() L453-499.
  *   - src/application/wine-search/query-analyzer.ts runLlmFallback() L288-317.
  */
 
@@ -51,13 +51,13 @@ import { globalCircuitBreakerRegistry } from '../../src/domain/observability/cir
 import { QueryAnalyzerService } from '../../src/application/wine-search/query-analyzer.js';
 import { DeterministicRouter } from '../../src/application/wine-search/deterministic-router.js';
 import { ExecutionRunner } from '../../src/application/wine-search/execution-runner.js';
-import { MiniLoopRunner } from '../../src/application/wine-search/mini-loop.js';
+import { WineAgentLoopRunner } from '../../src/application/wine-search/wine-agent-loop.js';
 import { SynthesisRunner } from '../../src/application/wine-search/synthesis-runner.js';
 import { WineSearchOrchestrator } from '../../src/application/wine-search/wine-search-orchestrator.js';
 import type {
-  OrchestratorMiniLoopToolBundle,
+  OrchestratorWineAgentLoopToolBundle,
 } from '../../src/application/wine-search/wine-search-orchestrator.js';
-import { buildMiniLoopToolBundle } from '../../src/application/wine-search/mini-loop-tool-bundle.js';
+import { buildWineAgentLoopToolBundle } from '../../src/application/wine-search/wine-agent-loop-tool-bundle.js';
 import type { WineSearchAnalysis } from '../../src/application/wine-search/wine-search-schemas.js';
 import type { SearchUseCasePort } from '../../src/application/wine-search/execution-runner.js';
 import type { SearchResponseV1 } from '../../src/domain/response/model/search-response.js';
@@ -102,7 +102,7 @@ const EXPECTED_ANTHROPIC_VERSION = '2023-06-01';
  *  invariant holds. */
 const ANALYZE_MODEL = 'claude-sonnet-4-5-20250929';
 const SYNTH_MODEL = 'claude-sonnet-4-5-20250929';
-const MINILOOP_MODEL = 'claude-haiku-4-5-20251001';
+const WINE_AGENT_LOOP_MODEL = 'claude-haiku-4-5-20251001';
 
 // ---------------------------------------------------------------------------
 // Anthropic Messages-API request Zod schema.
@@ -387,7 +387,7 @@ function respondToolUse(input: unknown): ScriptedAnthropicResponse {
   };
 }
 
-/** A mini-loop tool_use response invoking a named tool. */
+/** A wine-agent-loop tool_use response invoking a named tool. */
 function namedToolUse(name: string, input: unknown): ScriptedAnthropicResponse {
   return {
     status: 200,
@@ -395,7 +395,7 @@ function namedToolUse(name: string, input: unknown): ScriptedAnthropicResponse {
       id: 'msg_wire_miniloop',
       type: 'message',
       role: 'assistant',
-      model: MINILOOP_MODEL,
+      model: WINE_AGENT_LOOP_MODEL,
       stop_reason: 'tool_use',
       stop_sequence: null,
       content: [
@@ -406,7 +406,7 @@ function namedToolUse(name: string, input: unknown): ScriptedAnthropicResponse {
   };
 }
 
-/** A plain end_turn text response (mini-loop final answer turn). */
+/** A plain end_turn text response (wine-agent-loop final answer turn). */
 function endTurnText(text: string): ScriptedAnthropicResponse {
   return {
     status: 200,
@@ -414,7 +414,7 @@ function endTurnText(text: string): ScriptedAnthropicResponse {
       id: 'msg_wire_text',
       type: 'message',
       role: 'assistant',
-      model: MINILOOP_MODEL,
+      model: WINE_AGENT_LOOP_MODEL,
       stop_reason: 'end_turn',
       stop_sequence: null,
       content: [{ type: 'text', text }],
@@ -470,7 +470,7 @@ function makeStubSearch(): SearchUseCasePort {
 
 interface HarnessOptions {
   readonly queryAnalyzer?: Pick<QueryAnalyzerService, 'analyze'>;
-  readonly miniLoopToolBundle?: OrchestratorMiniLoopToolBundle;
+  readonly wineAgentLoopToolBundle?: OrchestratorWineAgentLoopToolBundle;
   readonly synthModel?: string;
 }
 
@@ -494,11 +494,11 @@ function buildHarness(options: HarnessOptions = {}): WineSearchOrchestrator {
 
   const queryAnalyzer = (options.queryAnalyzer
     ?? new QueryAnalyzerService({ structuredLlm: adapter, logger: silentLogger })) as QueryAnalyzerService;
-  const router = new DeterministicRouter({ now: () => new Date('2026-05-21T00:00:00.000Z') });
+  const router = new DeterministicRouter();
   const executionRunner = new ExecutionRunner({
     searchUseCase: makeStubSearch(),
   });
-  const miniLoopRunner = new MiniLoopRunner({ structuredLlm: adapter, logger: silentLogger, model: MINILOOP_MODEL });
+  const wineAgentLoopRunner = new WineAgentLoopRunner({ structuredLlm: adapter, logger: silentLogger, model: WINE_AGENT_LOOP_MODEL });
   const synthesisRunner = new SynthesisRunner({
     structuredLlm: adapter,
     logger: silentLogger,
@@ -509,12 +509,12 @@ function buildHarness(options: HarnessOptions = {}): WineSearchOrchestrator {
     queryAnalyzer,
     router,
     executionRunner,
-    miniLoopRunner,
+    wineAgentLoopRunner,
     synthesisRunner,
     logger: silentLogger,
     clock: fixedClock,
-    ...(options.miniLoopToolBundle !== undefined
-      ? { miniLoopToolBundle: options.miniLoopToolBundle }
+    ...(options.wineAgentLoopToolBundle !== undefined
+      ? { wineAgentLoopToolBundle: options.wineAgentLoopToolBundle }
       : {}),
   });
 }
@@ -677,20 +677,20 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
   });
 
   // ── Scenario 5: Multi-step. Forced expectedMultiStep=true routes to the
-  //    MiniLoop, whose `execute` payloads carry all four tools + tool_choice
+  //    WineAgentLoop, whose `execute` payloads carry all four tools + tool_choice
   //    auto + prompt cache markers, then synthesize.
-  it('5. Multi-step — MiniLoop execute() payloads carry all tools, auto choice, cache markers', async () => {
+  it('5. Multi-step — WineAgentLoop execute() payloads carry all tools, auto choice, cache markers', async () => {
     const capture = buildAnthropicFetchCapture((req, i) => {
-      // Call 0: mini-loop execute → emit a search_wines tool_use.
+      // Call 0: wine-agent-loop execute → emit a search_wines tool_use.
       if (i === 0) return namedToolUse('search_wines', { query: 'Burgundy pinot' });
-      // Call 1: mini-loop execute → final text answer (ends the loop).
+      // Call 1: wine-agent-loop execute → final text answer (ends the loop).
       if (i === 1) return endTurnText('Found a Burgundy Pinot Noir for you.');
       // Call 2+: synthesize.
       return respondToolUse(synthAnswer('Recommended a Burgundy Pinot Noir.'));
     });
     vi.stubGlobal('fetch', capture.fetchMock);
 
-    const bundle = buildMiniLoopToolBundle({
+    const bundle = buildWineAgentLoopToolBundle({
       searchUseCase: makeStubSearch(),
           });
     const analysis = makeAnalysis({
@@ -706,20 +706,20 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
     });
     const orchestrator = buildHarness({
       queryAnalyzer: { analyze: async () => ({ kind: 'ok', analysis }) },
-      miniLoopToolBundle: bundle,
+      wineAgentLoopToolBundle: bundle,
     });
     await orchestrator.execute({ query: 'find and assess a Burgundy pinot', requestId: 'req-multistep' });
 
     // At least one execute() turn + one synthesize().
     expect(capture.requests.length).toBeGreaterThanOrEqual(2);
     const execBody = assertWireInvariants(capture.requests[0]!);
-    // MiniLoop uses tool_choice auto and exposes the four production tools.
+    // WineAgentLoop uses tool_choice auto and exposes the four production tools.
     expect(execBody.tool_choice).toEqual({ type: 'auto' });
     const execToolNames = execBody.tools.map((t) => t.name).sort();
     expect(execToolNames).toEqual(
       ['check_drinking_window', 'compare_wines', 'get_food_pairings', 'search_wines'],
     );
-    // MiniLoop passes enablePromptCache:true (mini-loop.ts L484).
+    // WineAgentLoop passes enablePromptCache:true (wine-agent-loop.ts L484).
     assertPromptCacheMarkers(execBody, true);
     matchWireSnapshot('multistep-execute-turn0', capture.requests[0]!);
 
@@ -845,7 +845,7 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
     });
     vi.stubGlobal('fetch', capture.fetchMock);
 
-    const bundle = buildMiniLoopToolBundle({
+    const bundle = buildWineAgentLoopToolBundle({
       searchUseCase: makeStubSearch(),
           });
     const analysis = makeAnalysis({
@@ -856,7 +856,7 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
     });
     const orchestrator = buildHarness({
       queryAnalyzer: { analyze: async () => ({ kind: 'ok', analysis }) },
-      miniLoopToolBundle: bundle,
+      wineAgentLoopToolBundle: bundle,
     });
     await orchestrator.execute({ query: 'multi tool schema check', requestId: 'req-schema' });
 
@@ -890,7 +890,7 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
   //    spec-compliant form so the fix cannot regress.
   //      - query-analyzer.ts:        LLM_FALLBACK_MODEL    (analyzer LLM fallback)
   //      - synthesis-runner.ts:      DEFAULT_SYNTHESIS_MODEL
-  //      - mini-loop-schemas.ts:     MINI_LOOP_DEFAULT_MODEL
+  //      - wine-agent-loop-schemas.ts:     WINE_AGENT_LOOP_DEFAULT_MODEL
   it('10. model-id regression guard — pipeline defaults conform to API naming convention', async () => {
     // Synthesizer with its PRODUCTION default model (no override).
     const capture = buildAnthropicFetchCapture(() => respondToolUse(synthAnswer('answer')));
@@ -904,11 +904,11 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
     });
     const orchestrator = new WineSearchOrchestrator({
       queryAnalyzer: { analyze: async () => ({ kind: 'ok', analysis }) } as QueryAnalyzerService,
-      router: new DeterministicRouter({ now: () => new Date('2026-05-21T00:00:00.000Z') }),
+      router: new DeterministicRouter(),
       executionRunner: new ExecutionRunner({
         searchUseCase: makeStubSearch(),
                   }),
-      miniLoopRunner: new MiniLoopRunner({ structuredLlm: adapter, logger: silentLogger }),
+      wineAgentLoopRunner: new WineAgentLoopRunner({ structuredLlm: adapter, logger: silentLogger }),
       // SynthesisRunner with NO model override → uses DEFAULT_SYNTHESIS_MODEL.
       synthesisRunner: new SynthesisRunner({ structuredLlm: adapter, logger: silentLogger }),
       logger: silentLogger,

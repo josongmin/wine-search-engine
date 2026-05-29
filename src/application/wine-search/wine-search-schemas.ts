@@ -72,9 +72,13 @@ export const WINE_SEARCH_MAX_PER_TOOL_CAP = 6;
  *  still must request at least one candidate). Maximum 500 matches the
  *  widest `exploratory` value in `RETRIEVAL_K_BY_INTENT` (SSoT —
  *  `src/domain/agent/service/adaptive-budget.ts`). The cap is intentionally
- *  generous so the analyzer can emit the full SOTA range without clamping. */
-const WINE_SEARCH_MIN_RETRIEVAL_K = 1;
-const WINE_SEARCH_MAX_RETRIEVAL_K = 500;
+ *  generous so the analyzer can emit the full SOTA range without clamping.
+ *
+ *  Exported so {@link execution-plan-schemas.ts}'s `SearchUseCaseInputSchema`
+ *  can reuse the same `limit` ceiling (CLAUDE.md rule 30 — single source for
+ *  cross-module bounds). */
+export const WINE_SEARCH_MIN_RETRIEVAL_K = 1;
+export const WINE_SEARCH_MAX_RETRIEVAL_K = 500;
 export const WINE_SEARCH_MIN_RESULT_LIMIT = 1;
 export const WINE_SEARCH_MAX_RESULT_LIMIT = 50;
 
@@ -88,21 +92,33 @@ const WINE_SEARCH_DECOMPOSITION_MAX_LEGS = 4;
 const WINE_SEARCH_PARALLEL_SLOT_MIN_LIMIT = 1;
 const WINE_SEARCH_PARALLEL_SLOT_MAX_LIMIT = 10;
 
-/** Vintage-year bounds — re-exported from the shared SSoT in
- *  `@shared/constants` (MIN/MAX_PRODUCED_VINTAGE_YEAR). Re-exposed under the
- *  WINE_SEARCH_* prefix so consumers do not need a second import to wire up
- *  the contract. */
-export const WINE_SEARCH_MIN_VINTAGE_YEAR = MIN_PRODUCED_VINTAGE_YEAR;
-export const WINE_SEARCH_MAX_VINTAGE_YEAR = MAX_PRODUCED_VINTAGE_YEAR;
+/** Vintage-year bounds — internal aliases that pin
+ *  `AnalysisContractSchema.exactMetadataTargetVintage` to the same window as
+ *  `@shared/constants` (`MIN/MAX_PRODUCED_VINTAGE_YEAR`). Not exported —
+ *  external callers should import the shared constant directly to keep the
+ *  domain SSoT visible. */
+const WINE_SEARCH_MIN_VINTAGE_YEAR = MIN_PRODUCED_VINTAGE_YEAR;
+const WINE_SEARCH_MAX_VINTAGE_YEAR = MAX_PRODUCED_VINTAGE_YEAR;
 
-export const QueryIntentSchema = z.enum([
+/**
+ * Analyzer-emitted query intent — the 5-way deterministic classification used
+ * by {@link WineSearchAnalysisSchema}. Distinct from the 8-way **domain**
+ * `QueryIntent` enum in `@domain/query/model/query-intent` (entity_exact,
+ * facet_search, pairing_search, …), which is the authority for downstream
+ * router/runner/caller-interpretation logic. These two enums were silently
+ * colliding under the same name (CLAUDE.md rule 30) — the analyzer-side is now
+ * renamed to make the layering explicit. The caller-interpretation field on
+ * the analyzer output still references the domain enum via
+ * {@link WineSearchCallerInterpretationSchema}.
+ */
+export const AnalyzerIntentSchema = z.enum([
   'search',
   'compare',
   'pair',
   'drinkability',
   'unknown',
 ]);
-export type QueryIntent = z.infer<typeof QueryIntentSchema>;
+export type AnalyzerIntent = z.infer<typeof AnalyzerIntentSchema>;
 
 export const AnchorEntityTypeSchema = z.enum([
   'producer',
@@ -123,7 +139,7 @@ export const AnchorResolutionSchema = z.object({
 }).strict();
 export type AnchorResolution = z.infer<typeof AnchorResolutionSchema>;
 
-export const ComparisonLegSchema = z.object({
+const ComparisonLegSchema = z.object({
   surface: z.string().min(1).max(WINE_SEARCH_MAX_QUERY_CHARS),
   constraints: z.array(NormalizedConstraintSchema).max(WINE_SEARCH_MAX_CONSTRAINTS),
 }).strict();
@@ -248,7 +264,7 @@ export const LlmFallbackOutcomeSchema = z.discriminatedUnion('kind', [
 export type LlmFallbackOutcome = z.infer<typeof LlmFallbackOutcomeSchema>;
 
 export const WineSearchAnalysisSchema = z.object({
-  intent: QueryIntentSchema,
+  intent: AnalyzerIntentSchema,
   anchors: z.array(AnchorResolutionSchema).max(WINE_SEARCH_MAX_ANCHORS),
   constraints: ConstraintTierBundleSchema.optional(),
   normalizedConstraints: z.array(NormalizedConstraintSchema).max(WINE_SEARCH_MAX_CONSTRAINTS),
@@ -292,7 +308,7 @@ function canonicalizeConstraintTierBundle(
   };
 }
 
-export function flattenConstraintTierBundle(
+function flattenConstraintTierBundle(
   bundle: ConstraintTierBundle,
 ): readonly z.infer<typeof NormalizedConstraintSchema>[] {
   return [
@@ -302,7 +318,7 @@ export function flattenConstraintTierBundle(
   ];
 }
 
-export function classifyLegacyNormalizedConstraints(
+function classifyLegacyNormalizedConstraints(
   constraints: readonly z.infer<typeof NormalizedConstraintSchema>[],
 ): ConstraintTierBundle {
   const hard: z.infer<typeof NormalizedConstraintSchema>[] = [];

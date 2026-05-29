@@ -21,10 +21,8 @@ import type { WineSearchAnalysis } from '../wine-search-schemas.js';
 // shared with query-analyzer.test.ts) so router tests stay independent.
 // ---------------------------------------------------------------------------
 
-const FIXED_NOW = new Date('2026-05-21T12:00:00Z');
-
 function makeRouter() {
-  return new DeterministicRouter({ now: () => FIXED_NOW });
+  return new DeterministicRouter();
 }
 
 function baseAnalysis(overrides: Partial<WineSearchAnalysis> = {}): WineSearchAnalysis {

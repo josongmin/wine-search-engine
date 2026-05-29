@@ -9,7 +9,7 @@
  *                              ┌───────┴───────┐
  *                       multi-step           other plans
  *                              │                   │
- *                        MiniLoopRunner     ExecutionRunner
+ *                        WineAgentLoopRunner     ExecutionRunner
  *                              │                   │
  *                              └────────┬──────────┘
  *                                       ▼
@@ -35,7 +35,7 @@
  * The orchestrator does **not** know about:
  *  - HTTP wire formats (Track B owns the route handler),
  *  - DI container wiring (Track C owns container.ts registration),
- *  - tool-port construction (callers supply `miniLoopToolBundle` when a
+ *  - tool-port construction (callers supply `wineAgentLoopToolBundle` when a
  *    `multi-step` plan is possible; absent that, the orchestrator falls back
  *    to the synthesizer with empty tool outcomes).
  *
@@ -62,10 +62,10 @@ import type {
   ExecutionOutcome,
 } from './execution-runner.js';
 import {
-  MINI_LOOP_DEFAULT_MAX_OUTPUT_TOKENS,
-  type MiniLoopToolPorts,
-} from './mini-loop-schemas.js';
-import type { MiniLoopRunner } from './mini-loop.js';
+  WINE_AGENT_LOOP_DEFAULT_MAX_OUTPUT_TOKENS,
+  type WineAgentLoopToolPorts,
+} from './wine-agent-loop-schemas.js';
+import type { WineAgentLoopRunner } from './wine-agent-loop.js';
 import type { QueryAnalyzerService, AnalysisOutcome } from './query-analyzer.js';
 import {
   SynthesisAbortedError,
@@ -76,7 +76,7 @@ import {
 import type { SynthesisRunner } from './synthesis-runner.js';
 import {
   getCanonicalNormalizedConstraints,
-  type QueryIntent,
+  type AnalyzerIntent,
   type WineSearchAnalysis,
 } from './wine-search-schemas.js';
 import {
@@ -128,8 +128,8 @@ const ORCHESTRATOR_DEFAULT_MAX_STEPS = DEFAULT_AGENT_CONFIG.maxSteps;
  *  budgets. Matches the agent contract executor default. */
 const ORCHESTRATOR_DEFAULT_SYNTHESIS_MAX_OUTPUT_TOKENS = 1_024;
 
-/** Per-tool cap forwarded into the mini-loop when callers do not provide
- *  their own bundle. Mirrors `MINI_LOOP_DEFAULT_PER_TOOL_CAP` (2). The mini
+/** Per-tool cap forwarded into the wine-agent-loop when callers do not provide
+ *  their own bundle. Mirrors `WINE_AGENT_LOOP_DEFAULT_PER_TOOL_CAP` (2). The mini
  *  loop will adjust internally if the adaptive budget recommends a different
  *  value. */
 const ORCHESTRATOR_DEFAULT_PER_TOOL_CAP = 2;
@@ -179,26 +179,26 @@ interface OrchestratorLogger {
 }
 
 /**
- * Optional tool bundle required to drive the mini-loop. When omitted, the
+ * Optional tool bundle required to drive the wine-agent-loop. When omitted, the
  * orchestrator handles a `multi-step` plan by short-circuiting to the
  * synthesizer (Layer 4 — degraded path). Track C wires this bundle from the
  * container; until then, multi-step queries are best-effort.
  */
-export interface OrchestratorMiniLoopToolBundle {
+export interface OrchestratorWineAgentLoopToolBundle {
   readonly tools: readonly ToolDefinition[];
-  readonly toolPorts: MiniLoopToolPorts;
+  readonly toolPorts: WineAgentLoopToolPorts;
 }
 
 interface WineSearchOrchestratorDeps {
   readonly queryAnalyzer: QueryAnalyzerService;
   readonly router: DeterministicRouter;
   readonly executionRunner: ExecutionRunner;
-  readonly miniLoopRunner: MiniLoopRunner;
+  readonly wineAgentLoopRunner: WineAgentLoopRunner;
   readonly synthesisRunner: SynthesisRunner;
   readonly logger?: OrchestratorLogger | undefined;
   readonly clock?: OrchestratorClock | undefined;
   readonly defaultConfig?: Partial<AgentConfig> | undefined;
-  readonly miniLoopToolBundle?: OrchestratorMiniLoopToolBundle | undefined;
+  readonly wineAgentLoopToolBundle?: OrchestratorWineAgentLoopToolBundle | undefined;
 }
 
 export interface WineSearchInput {
@@ -729,7 +729,7 @@ export class WineSearchOrchestrator {
   }
 
   // -------------------------------------------------------------------------
-  // Multi-step (MiniLoop) branch
+  // Multi-step (WineAgentLoop) branch
   // -------------------------------------------------------------------------
 
   private async dispatchMultiStep(
@@ -739,14 +739,14 @@ export class WineSearchOrchestrator {
     state: OrchestratorState,
     baseConfig: AgentConfig,
   ): Promise<DispatchOutcome> {
-    const bundle = this.deps.miniLoopToolBundle;
+    const bundle = this.deps.wineAgentLoopToolBundle;
     if (bundle === undefined) {
       this.logger.warn(
         { requestId: input.requestId, planKind: plan.kind },
-        '[wine-search-orchestrator] multi-step plan requested but miniLoopToolBundle not wired — emitting degraded result',
+        '[wine-search-orchestrator] multi-step plan requested but wineAgentLoopToolBundle not wired — emitting degraded result',
       );
       this.appendStep(state, {
-        source: 'mini_loop',
+        source: 'wine_agent_loop',
         summary: 'skipped: tool bundle not wired',
         durationMs: 0,
       });
@@ -754,9 +754,9 @@ export class WineSearchOrchestrator {
       return { kind: 'ok', terminationReason: 'fallback', policyBlocked: false };
     }
 
-    const miniLoopStart = this.clock.now();
+    const wineAgentLoopStart = this.clock.now();
     try {
-      const outcome = await this.deps.miniLoopRunner.run({
+      const outcome = await this.deps.wineAgentLoopRunner.run({
         query: input.query,
         analysis,
         requestId: input.requestId,
@@ -766,7 +766,7 @@ export class WineSearchOrchestrator {
         agentTimeoutMs: baseConfig.agentTimeoutMs,
         maxSteps: baseConfig.maxSteps,
         maxTotalTokens: baseConfig.maxTotalTokens,
-        maxOutputTokens: MINI_LOOP_DEFAULT_MAX_OUTPUT_TOKENS,
+        maxOutputTokens: WINE_AGENT_LOOP_DEFAULT_MAX_OUTPUT_TOKENS,
         perToolCap: analysis.recommendedBudget.perToolCap > 0
           ? analysis.recommendedBudget.perToolCap
           : ORCHESTRATOR_DEFAULT_PER_TOOL_CAP,
@@ -776,8 +776,8 @@ export class WineSearchOrchestrator {
       state.tokenUsage = addTokenUsage(state.tokenUsage, outcome.tokenUsage);
       for (const o of outcome.toolOutcomes) state.toolOutcomes.push(o);
 
-      // Emit one ExecutionStep per mini-loop step so the trace is dense.
-      const miniLoopBaseDuration = Math.max(0, this.clock.now() - miniLoopStart);
+      // Emit one ExecutionStep per wine-agent-loop step so the trace is dense.
+      const wineAgentLoopBaseDuration = Math.max(0, this.clock.now() - wineAgentLoopStart);
       let recordedDuration = 0;
       for (const step of outcome.steps) {
         recordedDuration += Math.max(0, step.durationMs);
@@ -791,7 +791,7 @@ export class WineSearchOrchestrator {
           ? step.observations.map((o) => clipString(o, ORCHESTRATOR_TOOL_INPUT_MAX_CHARS))
           : undefined;
         this.appendStep(state, {
-          source: 'mini_loop',
+          source: 'wine_agent_loop',
           summary: clipString(
             `step=${String(step.index)} kind=${step.kind}${step.errorReason !== undefined ? ` reason=${step.errorReason}` : ''}`,
             ORCHESTRATOR_STEP_SUMMARY_MAX_CHARS,
@@ -806,9 +806,9 @@ export class WineSearchOrchestrator {
       // single synthetic step so the trace is not empty.
       if (outcome.steps.length === 0) {
         this.appendStep(state, {
-          source: 'mini_loop',
+          source: 'wine_agent_loop',
           summary: `terminated: ${outcome.terminationReason}`,
-          durationMs: miniLoopBaseDuration,
+          durationMs: wineAgentLoopBaseDuration,
         });
       }
       void recordedDuration;
@@ -824,9 +824,9 @@ export class WineSearchOrchestrator {
         return { kind: 'aborted' };
       }
       this.appendStep(state, {
-        source: 'mini_loop',
-        summary: `mini-loop threw: ${errorMessage(err).slice(0, ORCHESTRATOR_ERROR_SUMMARY_MAX_CHARS)}`,
-        durationMs: Math.max(0, this.clock.now() - miniLoopStart),
+        source: 'wine_agent_loop',
+        summary: `wine-agent-loop threw: ${errorMessage(err).slice(0, ORCHESTRATOR_ERROR_SUMMARY_MAX_CHARS)}`,
+        durationMs: Math.max(0, this.clock.now() - wineAgentLoopStart),
       });
       state.terminationReason = transitionTerminationReason(state.terminationReason, 'error');
       return { kind: 'ok', terminationReason: 'error', policyBlocked: false };
@@ -841,7 +841,7 @@ export class WineSearchOrchestrator {
     // case explicitly hands off. We don't have analysis here; we surface a
     // fallback step and let the synthesizer handle the rest.
     this.appendStep(state, {
-      source: 'mini_loop',
+      source: 'wine_agent_loop',
       summary: `handoff: ${syntheticPlan.handoff.initialAction}`,
       durationMs: 0,
     });
@@ -1088,7 +1088,7 @@ export class WineSearchOrchestrator {
     state: OrchestratorState,
     startMs: number,
     queryHasHangul: boolean,
-    intent: QueryIntent | 'rejected',
+    intent: AnalyzerIntent | 'rejected',
     planKind: ExecutionPlan['kind'],
     degradedReason: NonNullable<AnswerResult['degradedReason']>,
     terminationKind?: TerminationKind,
@@ -1129,7 +1129,7 @@ export class WineSearchOrchestrator {
     readonly answer: AnswerResult;
     readonly state: OrchestratorState;
     readonly startMs: number;
-    readonly intent: QueryIntent | 'rejected';
+    readonly intent: AnalyzerIntent | 'rejected';
     readonly planKind: ExecutionPlan['kind'];
     readonly policyBlocked: boolean;
     readonly terminationKind?: TerminationKind | undefined;
@@ -1243,7 +1243,7 @@ function clipString(value: string, max: number): string {
 
 /**
  * Sum the `toolCalls?.length` across every `ExecutionStep` whose source emits
- * real tool invocations (`runner` and `mini_loop` — the analyzer / router /
+ * real tool invocations (`runner` and `wine_agent_loop` — the analyzer / router /
  * synthesizer never emit `toolCalls`). Surfaces as `toolCallCount` at the top
  * of {@link WineSearchResult} so the HTTP wire's `execution.tool_call_count`
  * is a pure case-rename at the route boundary — no recomputation downstream.
@@ -1253,7 +1253,7 @@ function clipString(value: string, max: number): string {
 function computeToolCallCount(steps: readonly ExecutionStep[]): number {
   let n = 0;
   for (const step of steps) {
-    if (step.source !== 'runner' && step.source !== 'mini_loop') continue;
+    if (step.source !== 'runner' && step.source !== 'wine_agent_loop') continue;
     if (step.toolCalls === undefined) continue;
     n += step.toolCalls.length;
   }

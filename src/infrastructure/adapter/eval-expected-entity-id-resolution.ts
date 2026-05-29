@@ -19,6 +19,74 @@ interface EvalEntityIdRow {
 
 const LEGACY_EVAL_ID_ERROR_SAMPLE_LIMIT = 5;
 
+/**
+ * Phase of the eval entity-id resolution pipeline that emitted an error.
+ * The wrappers (`resolveLegacyEvalEntityIds`, `resolveLegacyEvalExpectedEntityIds`)
+ * re-throw with a wider phase while preserving the original `cause`, so callers
+ * can `instanceof EvalEntityIdResolutionError` and inspect `.init.phase` /
+ * `.init.missingIds` rather than scraping the human-readable message.
+ */
+export type EvalEntityIdResolutionPhase = 'offline' | 'legacy' | 'legacy_expected';
+
+export type EvalEntityIdResolutionErrorKind = 'unmapped' | 'conflict';
+
+interface EvalEntityIdResolutionErrorInit {
+  readonly phase: EvalEntityIdResolutionPhase;
+  readonly kind: EvalEntityIdResolutionErrorKind;
+  readonly snapshotId: string;
+  // 'unmapped' payload
+  readonly missingIds?: readonly string[];
+  readonly sampleCases?: readonly string[];
+  // 'conflict' payload
+  readonly requestedId?: string;
+  readonly previousEntityId?: CanonicalEntityId;
+  readonly nextEntityId?: CanonicalEntityId;
+}
+
+export class EvalEntityIdResolutionError extends Error {
+  readonly init: EvalEntityIdResolutionErrorInit;
+
+  constructor(init: EvalEntityIdResolutionErrorInit, options?: { cause?: unknown }) {
+    super(formatMessage(init), options);
+    this.name = 'EvalEntityIdResolutionError';
+    this.init = init;
+  }
+}
+
+function subjectFor(phase: EvalEntityIdResolutionPhase): string {
+  if (phase === 'offline') return 'Offline eval entity_id';
+  if (phase === 'legacy') return 'Legacy eval entity_id';
+  return 'Legacy eval expected_entity_id';
+}
+
+function unmappedIdLabelFor(phase: EvalEntityIdResolutionPhase): string {
+  // The legacy paths describe missing rows as "source record id(s)" because the
+  // requested ids are source-record-style identifiers (vivino-* etc) that the
+  // pipeline expects to back-resolve via metadata.sourceRecordRefs. The offline
+  // (canonical) path uses the generic "id(s)" wording.
+  return phase === 'offline' ? 'id(s)' : 'source record id(s)';
+}
+
+function formatMessage(init: EvalEntityIdResolutionErrorInit): string {
+  if (init.kind === 'conflict') {
+    // Runtime label is uniformly "runtime entity ids" — every phase resolves
+    // requested ids against the same `entities` table, so the runtime-side
+    // identifier is invariant. Phase only renames the *requested* subject.
+    return `${subjectFor(init.phase)} ${init.requestedId ?? '<unknown>'} maps to multiple runtime entity ids in snapshot ${init.snapshotId}: ${init.previousEntityId ?? '<unknown>'} vs ${init.nextEntityId ?? '<unknown>'}`;
+  }
+  const missingCount = init.missingIds?.length ?? 0;
+  const sample = (init.sampleCases ?? []).join(', ');
+  const ellipsis = missingCount > LEGACY_EVAL_ID_ERROR_SAMPLE_LIMIT ? ', …' : '';
+  return `${subjectFor(init.phase)} values are unmapped in snapshot ${init.snapshotId}: ${missingCount} ${unmappedIdLabelFor(init.phase)} missing. Sample: ${sample}${ellipsis}`;
+}
+
+function rewrapWithPhase(error: unknown, phase: EvalEntityIdResolutionPhase): never {
+  if (error instanceof EvalEntityIdResolutionError) {
+    throw new EvalEntityIdResolutionError({ ...error.init, phase }, { cause: error });
+  }
+  throw error;
+}
+
 export function hasLegacyEvalExpectedEntityId(
   refs: readonly LegacyEvalExpectedEntityIdRef[],
 ): boolean {
@@ -93,23 +161,31 @@ export async function resolveEvalEntityIds(
     const nextEntityId = createCanonicalEntityId(row.entity_id);
     const prev = resolved.get(row.requested_id);
     if (prev !== undefined && prev !== nextEntityId) {
-      throw new Error(
-        `Offline eval entity_id ${row.requested_id} maps to multiple runtime entity ids in snapshot ${snapshotId}: ${prev} vs ${nextEntityId}`,
-      );
+      throw new EvalEntityIdResolutionError({
+        phase: 'offline',
+        kind: 'conflict',
+        snapshotId,
+        requestedId: row.requested_id,
+        previousEntityId: prev,
+        nextEntityId,
+      });
     }
     resolved.set(row.requested_id, nextEntityId);
   }
 
   const missingRequestedIds = uniqueRequestedIds.filter((requestedId) => !resolved.has(requestedId));
   if (missingRequestedIds.length > 0) {
-    const sample = refs
+    const sampleCases = refs
       .filter((ref) => missingRequestedIds.includes(ref.entityId))
       .slice(0, LEGACY_EVAL_ID_ERROR_SAMPLE_LIMIT)
-      .map((ref) => `${ref.caseId}:${ref.entityId}`)
-      .join(', ');
-    throw new Error(
-      `Offline eval entity_id values are unmapped in snapshot ${snapshotId}: ${missingRequestedIds.length} id(s) missing. Sample: ${sample}${missingRequestedIds.length > LEGACY_EVAL_ID_ERROR_SAMPLE_LIMIT ? ', …' : ''}`,
-    );
+      .map((ref) => `${ref.caseId}:${ref.entityId}`);
+    throw new EvalEntityIdResolutionError({
+      phase: 'offline',
+      kind: 'unmapped',
+      snapshotId,
+      missingIds: missingRequestedIds,
+      sampleCases,
+    });
   }
 
   return resolved;
@@ -128,15 +204,7 @@ export async function resolveLegacyEvalEntityIds(
   try {
     return await resolveEvalEntityIds(queryable, snapshotId, legacyRefs);
   } catch (error) {
-    if (!(error instanceof Error)) {
-      throw error;
-    }
-    throw new Error(
-      error.message
-        .replace('Offline eval entity_id ', 'Legacy eval entity_id ')
-        .replace('Offline eval entity_id values', 'Legacy eval entity_id values')
-        .replace(' id(s) missing', ' source record id(s) missing'),
-    );
+    rewrapWithPhase(error, 'legacy');
   }
 }
 
@@ -155,9 +223,6 @@ export async function resolveLegacyEvalExpectedEntityIds(
       })),
     );
   } catch (error) {
-    if (!(error instanceof Error)) {
-      throw error;
-    }
-    throw new Error(error.message.replaceAll('entity_id', 'expected_entity_id'));
+    rewrapWithPhase(error, 'legacy_expected');
   }
 }

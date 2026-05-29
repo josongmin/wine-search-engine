@@ -27,6 +27,7 @@ import {
   type StructuredLlmPort,
 } from '@domain/ai/port/structured-llm.port.js';
 import type { NormalizedConstraint } from '@shared/types/index.js';
+import { CLAUDE_SONNET_MODEL_ID } from '@domain/shared/constants/claude-models.js';
 import { containsHangul, normalizeHangulLexical } from '@shared/utils/hangul.js';
 import { parseSpans, resolveOverlaps } from '@domain/attribute/service/span-parser.js';
 import {
@@ -65,12 +66,12 @@ import {
   WINE_SEARCH_MIN_RESULT_LIMIT,
   type AnalysisContract,
   type AnalysisRequiredTool,
+  type AnalyzerIntent,
   type AnchorEntityType,
   type AnchorResolution,
   type ConstraintTierBundle,
   type Decomposition,
   type LlmFallbackOutcome,
-  type QueryIntent,
   type RecommendedBudget,
   type WineSearchAnalysis,
 } from './wine-search-schemas.js';
@@ -96,12 +97,13 @@ const PER_TOOL_CAP_RATIO = 0.6;
  *  WineSearchAnalysis JSON for an adversarial worst-case (multi-leg
  *  decomposition with full constraint set). */
 const LLM_FALLBACK_MAX_OUTPUT_TOKENS = 4096;
-/** Anthropic model id used for LLM fallback. The composition root will
- *  override via the `model` field on the request when wiring. Tests inject
- *  a stub port so the literal here is only the deterministic default.
- *  Format `claude-<family>-<gen>` per Anthropic Messages API spec — matches
- *  `claude-(opus|sonnet|haiku)-N-M`. `claude-4-sonnet-latest` is rejected with HTTP 400. */
-const LLM_FALLBACK_MODEL = 'claude-sonnet-4-6';
+/** Anthropic model id used for LLM fallback. Pulled from the
+ *  {@link CLAUDE_SONNET_MODEL_ID} SSoT in `@domain/shared/constants/claude-models`
+ *  so a future Sonnet bump (4.6 → 4.7 / 5.x) flips every analyzer/synthesizer
+ *  in lockstep — see the same constant's docstring for the migration story.
+ *  Tests inject a stub `StructuredLlmPort` so the literal here is only the
+ *  deterministic default that flows into the request shape. */
+const LLM_FALLBACK_MODEL = CLAUDE_SONNET_MODEL_ID;
 /** Minimum confidence to promote a resolved entity to an anchor. Below this
  *  we drop the candidate; the LLM fallback path is reserved for cases where
  *  *no* deterministic signal fires at all. */
@@ -356,6 +358,13 @@ export class QueryAnalyzerService {
     // input arrays are readonly (Zod's `.array()` infers `T[]`, not
     // `readonly T[]`). Materialize copies so the assignment is well-typed
     // without weakening the upstream readonly contracts.
+    //
+    // `callerInterpretation` is intentionally OMITTED from the initial shell
+    // — the schema marks it optional and we populate it exactly once after
+    // the LLM-fallback branch (below) so it reflects the final analysis.
+    // Computing it twice (once here, once after fallback) wasted ~half of
+    // every happy-path call and risked silent desync whenever a new
+    // `WineSearchAnalysis` field was added to one literal but not the other.
     let candidate: WineSearchAnalysis = {
       intent,
       anchors: [...anchors],
@@ -372,23 +381,6 @@ export class QueryAnalyzerService {
       recommendedBudget,
       hangulDominant,
       preservedSurface,
-      callerInterpretation: buildCallerSearchInterpretation({
-        intent,
-        anchors: [...anchors],
-        constraints: {
-          hard: [...constraintBundle.hard],
-          soft: [...constraintBundle.soft],
-          inferred: [...constraintBundle.inferred],
-        },
-        normalizedConstraints: [...constraints],
-        ...(requestedResultLimit !== undefined ? { requestedResultLimit } : {}),
-        ...(decomposition !== undefined ? { decomposition } : {}),
-        contract,
-        expectedMultiStep,
-        recommendedBudget,
-        hangulDominant,
-        preservedSurface,
-      }),
     };
 
     // LLM fallback — fully ambiguous query AND a port is available.
@@ -428,6 +420,13 @@ export class QueryAnalyzerService {
         };
       }
     }
+
+    // Final analysis: enrich the post-fallback candidate with its caller
+    // interpretation (single, authoritative computation) and the fallback
+    // observability flag, then validate. `buildCallerSearchInterpretation`
+    // takes the analysis it should reflect, so any future field added to
+    // `WineSearchAnalysis` automatically flows in without a parallel inline
+    // literal needing to be touched.
     candidate = {
       ...candidate,
       callerInterpretation: buildCallerSearchInterpretation(candidate),
@@ -655,7 +654,7 @@ function classifyIntent(args: {
   readonly decomposed: boolean;
   readonly anchorsCount: number;
   readonly constraintsCount: number;
-}): QueryIntent {
+}): AnalyzerIntent {
   if (args.pairingTagsCount > 0) return 'pair';
   if (args.decomposed) return 'compare';
   if (args.hasDrinkability && args.anchorsCount > 0) return 'drinkability';
@@ -704,7 +703,7 @@ function computeRecommendedBudget(args: {
 
 /**
  * Reconcile the classifier's lexical IntentClass with the analyzer's
- * QueryIntent. The classifier sees only the raw query; the analyzer also
+ * AnalyzerIntent. The classifier sees only the raw query; the analyzer also
  * has resolved pairing tags, anchors, and decomposition. Both surfaces
  * agree on the common cases; this function captures the few divergences
  * that matter for the retrieval-k lever.
@@ -720,7 +719,7 @@ function computeRecommendedBudget(args: {
  */
 function projectIntentClass(args: {
   readonly classifierIntentClass: IntentClass | undefined;
-  readonly analyzerIntent: QueryIntent;
+  readonly analyzerIntent: AnalyzerIntent;
 }): IntentClass {
   if (args.analyzerIntent === 'pair') return 'food_pairing';
   if (args.analyzerIntent === 'compare') return 'comparative';

@@ -22,7 +22,6 @@ import type {
   DecomposedSearchUseCasePort,
   HybridUseCasePort,
   InterpretUseCasePort,
-  ReplayUseCasePort,
   ResolveUseCasePort,
 } from '../application/search/port/search-route-usecases.port.js';
 import type { WatchlistServicePort } from '../application/watchlist/watchlist.service.js';
@@ -37,7 +36,6 @@ import type {
   ResponseBuilderPort,
 } from '../application/search/port/search-pipeline-deps.port.js';
 import type { EvalRunnerContract } from './container-eval-contracts.js';
-import type { AdaptiveToolExecutorContract } from './container-tool-contracts.js';
 import type { ChatLlmPort } from '../domain/ai/port/chat-llm.port.js';
 import type { CalibrationStore } from '../domain/resolver/port/calibration-store.port.js';
 import type { EntityDocumentLookupPort } from '../application/search/port/search-pipeline-deps.port.js';
@@ -47,8 +45,8 @@ import type { EntityDocumentLookupPort } from '../application/search/port/search
 import { QueryAnalyzerService } from '../application/wine-search/query-analyzer.js';
 import { DeterministicRouter } from '../application/wine-search/deterministic-router.js';
 import { ExecutionRunner } from '../application/wine-search/execution-runner.js';
-import { MiniLoopRunner } from '../application/wine-search/mini-loop.js';
-import { buildMiniLoopToolBundle } from '../application/wine-search/mini-loop-tool-bundle.js';
+import { WineAgentLoopRunner } from '../application/wine-search/wine-agent-loop.js';
+import { buildWineAgentLoopToolBundle } from '../application/wine-search/wine-agent-loop-tool-bundle.js';
 import { SynthesisRunner } from '../application/wine-search/synthesis-runner.js';
 import { SearchUseCaseAdapter } from '../application/wine-search/adapters/search-use-case-adapter.js';
 import {
@@ -77,7 +75,6 @@ export interface Container extends LearningContainerServices {
   readonly mixedSolver: MixedSolverPort;
   readonly entityLookup: EntityDocumentLookupPort;
   readonly searchUseCase: SearchExecutorPort;
-  readonly replayUseCase: ReplayUseCasePort;
   readonly interpretUseCase: InterpretUseCasePort;
   readonly resolveUseCase: ResolveUseCasePort;
   readonly autocompleteUseCase: AutocompleteUseCasePort;
@@ -86,7 +83,6 @@ export interface Container extends LearningContainerServices {
   readonly drinkingWindowUseCase: DrinkingWindowUseCasePort;
   readonly drinkingWindowPredictor: DrinkingWindowPredictorPort;
   readonly batchSearchUseCase: BatchSearchUseCasePort;
-  readonly adaptiveToolExecutor: AdaptiveToolExecutorContract;
   readonly watchlistService: WatchlistServicePort;
   readonly watchlistRuntime: WatchlistRuntimePort | null;
   readonly evalRunner: EvalRunnerContract | null;
@@ -97,8 +93,7 @@ export interface Container extends LearningContainerServices {
   /**
    * Plan-then-Execute wine-search orchestrator — present when
    * `WINE_SEARCH_ENABLED=true` and an Anthropic API key is configured.
-   * When undefined, the `/v1/wine-search` route is NOT registered (legacy
-   * `/v1/agent/*` remains the active surface).
+   * When undefined, the `/v1/wine-search` route is not registered.
    */
   readonly wineSearch?: WineSearchContainerServices | undefined;
 }
@@ -177,13 +172,13 @@ function buildWineSearchContainerServices(
   //      structured logs are filterable by component name.
   const wineSearchLogger = bootstrapLogger.child({ component: 'WineSearch' });
   // Track A's `QueryAnalyzerService` consumes a `{ warn, info }` shape;
-  // mini-loop and synthesis require an additional `error` method. Pino
+  // wine-agent-loop and synthesis require an additional `error` method. Pino
   // satisfies both — we pass the same logger instance.
   const queryAnalyzer = new QueryAnalyzerService({
     structuredLlm,
     logger: wineSearchLogger,
   });
-  const router = new DeterministicRouter({ now: () => new Date() });
+  const router = new DeterministicRouter();
   const executionRunner = new ExecutionRunner({
     searchUseCase: searchAdapter,
   });
@@ -198,7 +193,7 @@ function buildWineSearchContainerServices(
     process.env['WINE_SEARCH_TOOL_CACHE_ENABLED'] === '0'
       ? undefined
       : new RedisToolResultCache();
-  const miniLoopRunner = new MiniLoopRunner({
+  const wineAgentLoopRunner = new WineAgentLoopRunner({
     structuredLlm,
     logger: wineSearchLogger,
     ...(toolResultCache !== undefined ? { toolResultCache } : {}),
@@ -215,15 +210,15 @@ function buildWineSearchContainerServices(
   //      `@app/wine-search/wine-search-result-schemas.js`). No translation
   //      happens here — the HTTP route owns the single camelCase →
   //      snake_case re-case at the wire boundary.
-  // ── 4a) MiniLoop tool bundle. Without this slot the orchestrator falls
+  // ── 4a) WineAgentLoop tool bundle. Without this slot the orchestrator falls
   //       through to Synthesizer Layer 4 (graceful degradation) on
   //       multi-step plans — i.e. the new architecture would silently NOT
-  //       drive `MiniLoopRunner` for the ~10–20% of queries that need
+  //       drive `WineAgentLoopRunner` for the ~10–20% of queries that need
   //       multi-hop ReAct. The bundle reuses the SAME adapter instances
   //       already wired into `ExecutionRunner` so the deterministic and
   //       LLM-driven lanes share state, caches, and circuit breakers
   //       (CLAUDE.md rule 30 — SSoT for tool ports).
-  const miniLoopToolBundle = buildMiniLoopToolBundle({
+  const wineAgentLoopToolBundle = buildWineAgentLoopToolBundle({
     searchUseCase: searchAdapter,
     decomposedSearchUseCase: features.decomposedSearchUseCase,
     drinkingWindowUseCase: features.drinkingWindowUseCase,
@@ -238,9 +233,9 @@ function buildWineSearchContainerServices(
       queryAnalyzer,
       router,
       executionRunner,
-      miniLoopRunner,
+      wineAgentLoopRunner,
       synthesisRunner,
-      miniLoopToolBundle,
+      wineAgentLoopToolBundle,
       logger: bootstrapLogger,
     });
 

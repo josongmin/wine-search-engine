@@ -28,6 +28,7 @@ import {
   WineSearchCallerInterpretationSchema,
   WINE_SEARCH_MAX_CONSTRAINTS,
   WINE_SEARCH_MAX_QUERY_CHARS,
+  WINE_SEARCH_MAX_RETRIEVAL_K,
 } from './wine-search-schemas.js';
 
 // ---------------------------------------------------------------------------
@@ -70,15 +71,18 @@ const RepresentativeConceptSchema = z.object({
 }).strict();
 
 /** Soft cap on result-set size requested from a single SearchUseCase call.
- *  Aligned with `WINE_SEARCH_MAX_RETRIEVAL_K` so the analyzer-emitted
+ *  Sourced from {@link WINE_SEARCH_MAX_RETRIEVAL_K} so the analyzer-emitted
  *  adaptive retrieval k (up to 500 for `exploratory` intent — SSoT
  *  `RETRIEVAL_K_BY_INTENT` in `adaptive-budget.ts`) can flow through to the
- *  use case `limit` arg without being clamped. The HTTP-facing response
- *  cap (`MAX_SEARCH_RESULTS_PER_RESPONSE` = 200) still bounds the
- *  user-visible result set; the plan-level `limit` controls the candidate
- *  pool size used by the downstream reranker, which can legitimately
- *  exceed the response cap. */
-const EXECUTION_PLAN_MAX_LIMIT = 500;
+ *  use case `limit` arg without being clamped. Centralizing the ceiling
+ *  in {@link wine-search-schemas.ts} avoids the silent parse-failure mode
+ *  where one module raises the cap and the other rejects the wider value
+ *  (CLAUDE.md rule 30). The HTTP-facing response cap
+ *  (`MAX_SEARCH_RESULTS_PER_RESPONSE` = 200) still bounds the user-visible
+ *  result set; the plan-level `limit` controls the candidate pool size used
+ *  by the downstream reranker, which can legitimately exceed the response
+ *  cap. */
+const EXECUTION_PLAN_MAX_LIMIT = WINE_SEARCH_MAX_RETRIEVAL_K;
 
 export const SearchUseCaseInputSchema = z.object({
   query: z.string().min(1).max(WINE_SEARCH_MAX_QUERY_CHARS),
@@ -97,8 +101,8 @@ export type SearchUseCaseInput = z.infer<typeof SearchUseCaseInputSchema>;
 
 
 // ---------------------------------------------------------------------------
-// Multi-step handoff — describes a plan we hand off to the MiniLoop
-// orchestrator. The MiniLoop is implemented separately (see
+// Multi-step handoff — describes a plan we hand off to the WineAgentLoop
+// orchestrator. The WineAgentLoop is implemented separately (see
 // follow-up RFC); the router only emits the contract.
 // ---------------------------------------------------------------------------
 
@@ -143,7 +147,10 @@ export type PlanRejectReason = z.infer<typeof PlanRejectReasonSchema>;
 //
 // `as const` keeps the literal type information so
 // `typeof EXECUTION_PLAN_KINDS[number]` collapses to the exact union of
-// the 7 literals.
+// every literal in the tuple below. (Narrowed from 7 → 4 kinds in the
+// heuristic-tool purge, 2026-05; drinkability, single/parallel-step, and
+// fan-in kinds were consolidated into `single-search` / `parallel-search`
+// / `multi-step` with the WineAgentLoop orchestrator.)
 //
 // NOTE: order is load-bearing for `z.enum` — Zod surfaces the first entry
 // as the default in error messages. We list `single-search` first because

@@ -32,11 +32,11 @@ import { createTestServer, closeTestServer } from './test-server.js';
 import { QueryAnalyzerService } from '../../../src/application/wine-search/query-analyzer.js';
 import { DeterministicRouter } from '../../../src/application/wine-search/deterministic-router.js';
 import { ExecutionRunner } from '../../../src/application/wine-search/execution-runner.js';
-import { MiniLoopRunner } from '../../../src/application/wine-search/mini-loop.js';
+import { WineAgentLoopRunner } from '../../../src/application/wine-search/wine-agent-loop.js';
 import { SynthesisRunner } from '../../../src/application/wine-search/synthesis-runner.js';
 import { SearchUseCaseAdapter } from '../../../src/application/wine-search/adapters/search-use-case-adapter.js';
 import { WineSearchOrchestrator } from '../../../src/application/wine-search/wine-search-orchestrator.js';
-import type { OrchestratorMiniLoopToolBundle } from '../../../src/application/wine-search/wine-search-orchestrator.js';
+import type { OrchestratorWineAgentLoopToolBundle } from '../../../src/application/wine-search/wine-search-orchestrator.js';
 import type { QueryAnalyzerService } from '../../../src/application/wine-search/query-analyzer.js';
 import type { WineSearchRouteDeps } from '../../../src/interface/http/routes/wine-search.route.js';
 import { errorHandler } from '../../../src/interface/http/middleware/error-handler.js';
@@ -74,13 +74,13 @@ interface WineSearchTestContainerOptions {
    */
   readonly enableWineSearch?: boolean;
   /**
-   * Optional `miniLoopToolBundle` for the orchestrator. When provided, the
-   * orchestrator dispatches `multi-step` plans to the MiniLoopRunner instead
-   * of short-circuiting to Layer 4. Tests that exercise MiniLoop directly
+   * Optional `wineAgentLoopToolBundle` for the orchestrator. When provided, the
+   * orchestrator dispatches `multi-step` plans to the WineAgentLoopRunner instead
+   * of short-circuiting to Layer 4. Tests that exercise WineAgentLoop directly
    * must supply this. The default (undefined) preserves the existing
    * "Layer-4 degraded" behavior so prior hell tests keep passing.
    */
-  readonly miniLoopToolBundle?: OrchestratorMiniLoopToolBundle;
+  readonly wineAgentLoopToolBundle?: OrchestratorWineAgentLoopToolBundle;
   /**
    * Optional `queryAnalyzer` override. When provided, the orchestrator uses
    * this analyzer instead of the deterministic-first
@@ -157,11 +157,11 @@ export async function buildWineSearchTestContainer(
   // pre-existing runtime issues in the production SearchUseCase.
   const logger = { info: () => {}, warn: () => {}, error: () => {} };
   const queryAnalyzer = new QueryAnalyzerService({ structuredLlm: llm, logger });
-  const router = new DeterministicRouter({ now: () => new Date() });
+  const router = new DeterministicRouter();
   const executionRunner = new ExecutionRunner({
     searchUseCase: options.searchUseCase ?? searchAdapter,
   });
-  const miniLoopRunner = new MiniLoopRunner({ structuredLlm: llm, logger });
+  const wineAgentLoopRunner = new WineAgentLoopRunner({ structuredLlm: llm, logger });
   const synthesisRunner = new SynthesisRunner({ structuredLlm: llm, logger });
 
   const effectiveQueryAnalyzer = (options.queryAnalyzer ?? queryAnalyzer) as QueryAnalyzerService;
@@ -169,11 +169,11 @@ export async function buildWineSearchTestContainer(
     queryAnalyzer: effectiveQueryAnalyzer,
     router,
     executionRunner,
-    miniLoopRunner,
+    wineAgentLoopRunner,
     synthesisRunner,
     logger,
-    ...(options.miniLoopToolBundle !== undefined
-      ? { miniLoopToolBundle: options.miniLoopToolBundle }
+    ...(options.wineAgentLoopToolBundle !== undefined
+      ? { wineAgentLoopToolBundle: options.wineAgentLoopToolBundle }
       : {}),
   });
 

@@ -30,10 +30,16 @@ const BUDGET_BOUNDARY_KEYWORDS: readonly RegExp[] = [
 ] as const;
 
 /** Prestige / positioning signals. These shape recommendation semantics but
- *  MUST NOT promote a query into `budget_search`. */
+ *  MUST NOT promote a query into `budget_search`.
+ *
+ *  The English alternation intentionally excludes bare `fine` — too many
+ *  benign sentences contain it (`that is fine`, `fine print`, `pay a fine`)
+ *  for it to be a reliable prestige cue. The Korean alternation uses Unicode
+ *  word-boundary lookarounds (CLAUDE.md rule 8/24) so `최고급차`,
+ *  `고급스러운 음악` and other inline substrings do NOT match. */
 const PRESTIGE_KEYWORDS: readonly RegExp[] = [
-  /(?<!\p{L})(?<!\p{N})(?:premium|luxury|high[\s-]?end|fine)(?!\p{L})(?!\p{N})/iu,
-  /(?:비싼|비싸|고급|럭셔리|프리미엄)/u,
+  /(?<!\p{L})(?<!\p{N})(?:premium|luxury|high[\s-]?end)(?!\p{L})(?!\p{N})/iu,
+  /(?:^|[^\p{L}\p{N}])(?:비싼|비싸|고급|럭셔리|프리미엄)(?=$|[^\p{L}\p{N}])/u,
 ] as const;
 
 /** Pairing verbs only.

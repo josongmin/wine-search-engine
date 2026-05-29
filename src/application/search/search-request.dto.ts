@@ -1,6 +1,18 @@
 import type { NormalizedConstraint } from '../../domain/shared/types/constraint-bundle.js';
-import type { QueryIntent } from '../../domain/query/model/query-intent.js';
-import type { QueryClass } from '../../domain/shared/types/query-class.js';
+import type { WineSearchCallerInterpretation } from '../wine-search/wine-search-schemas.js';
+
+/**
+ * Caller-controlled search interpretation contract.
+ *
+ * Re-exports the Zod-inferred shape from
+ * {@link wine-search-schemas.ts} so the application has a single source of
+ * truth for the field set (CLAUDE.md rule 30). Previously this module
+ * declared a parallel interface that drifted silently from the Zod schema —
+ * any new field on the schema (e.g. `confidence`) would be silently dropped
+ * when the route mapper composed a `SearchRequest`. The re-export pins both
+ * sides to the same definition.
+ */
+export type CallerSearchInterpretation = WineSearchCallerInterpretation;
 
 export interface SearchRequestContext {
   readonly locale: string;
@@ -27,12 +39,6 @@ export interface SearchOptions {
 export interface RepresentativeConceptSearchContext {
   readonly field: 'country' | 'region' | 'appellation' | 'grape_primary' | 'wine_type';
   readonly value: string;
-}
-
-export interface CallerSearchInterpretation {
-  readonly authority: 'caller';
-  readonly intent: QueryIntent;
-  readonly queryClass: QueryClass;
 }
 
 /**

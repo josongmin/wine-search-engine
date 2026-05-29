@@ -8,8 +8,8 @@
  * (= 1) — adaptive k is a candidate-pool sizing lever, not a metadata
  * lookup widener.
  *
- * Mini-loop tool-input adapters are covered separately by
- * `adaptSearchInput` in `mini-loop.ts`; this file focuses on the planner
+ * Wine-agent-loop tool-input adapters are covered separately by
+ * `adaptSearchInput` in `wine-agent-loop.ts`; this file focuses on the planner
  * → executor handoff.
  *
  * Append-only (CLAUDE.md test discipline).
@@ -18,14 +18,12 @@
 import { describe, expect, it } from 'vitest';
 import { DeterministicRouter } from '../../src/application/wine-search/deterministic-router.js';
 import { ExecutionPlanSchema } from '../../src/application/wine-search/execution-plan-schemas.js';
-import { adaptSearchInput } from '../../src/application/wine-search/mini-loop.js';
+import { adaptSearchInput } from '../../src/application/wine-search/wine-agent-loop.js';
 import type { WineSearchAnalysis } from '../../src/application/wine-search/wine-search-schemas.js';
 import { EXACT_METADATA_SEARCH_LIMIT } from '../../src/domain/shared/constants/constraint-attributes.js';
 
-const FIXED_NOW = new Date('2026-05-24T00:00:00Z');
-
 function makeRouter(): DeterministicRouter {
-  return new DeterministicRouter({ now: () => FIXED_NOW });
+  return new DeterministicRouter();
 }
 
 function baseAnalysis(
@@ -162,8 +160,8 @@ describe('DeterministicRouter — schema bounds + adaptive k', () => {
   });
 });
 
-describe('mini-loop adaptSearchInput — LLM-vs-adaptive limit precedence', () => {
-  // The mini-loop runner threads `analysis.recommendedBudget.retrievalK`
+describe('wine-agent-loop adaptSearchInput — LLM-vs-adaptive limit precedence', () => {
+  // The wine-agent-loop runner threads `analysis.recommendedBudget.retrievalK`
   // into `adaptSearchInput(raw, adaptiveDefault)`. The contract:
   //   1. If the LLM emits a numeric `limit`, use it as-is.
   //   2. Otherwise fall back to `adaptiveDefault`.

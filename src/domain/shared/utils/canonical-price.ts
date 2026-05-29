@@ -25,10 +25,6 @@ function roundUsdToConstraintPrecision(priceUsd: number): number {
   return Math.round(priceUsd * 100) / 100;
 }
 
-export function roundConstraintUsd(priceUsd: number): number {
-  return roundUsdToConstraintPrecision(priceUsd);
-}
-
 function parseFiniteNumber(raw: string): number | null {
   const parsed = Number(raw.replace(/,/gu, ''));
   return Number.isFinite(parsed) ? parsed : null;
@@ -48,10 +44,6 @@ function isFiniteNumericRange(
 
 export function convertKrwToConstraintUsd(priceKrw: number): number {
   return roundUsdToConstraintPrecision(priceKrw / KRW_PER_USD_APPROXIMATE);
-}
-
-export function convertConstraintUsdToApproxKrw(priceUsd: number): number {
-  return Math.round(priceUsd * KRW_PER_USD_APPROXIMATE);
 }
 
 export function canonicalizePriceConstraintAttribute(attribute: string): string {

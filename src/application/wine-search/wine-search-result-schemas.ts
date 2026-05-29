@@ -16,7 +16,7 @@
  *   wire-shape mapping so a drift on either side fails `tsc` immediately.
  *
  * The `WineSearchOrchestrator` composes QueryAnalyzer → DeterministicRouter →
- * (ExecutionRunner OR MiniLoopRunner) → SynthesisRunner into a single async
+ * (ExecutionRunner OR WineAgentLoopRunner) → SynthesisRunner into a single async
  * `execute()` method. This module owns:
  *  - the public `WineSearchResult` shape returned to callers,
  *  - the per-phase `ExecutionStep` trace shape,
@@ -62,10 +62,10 @@ import type { AgentTerminationReason } from '@domain/agent/model/agent-step.js';
 import type { ToolOutcome } from '@domain/agent/model/tool-outcome.js';
 import type { TokenUsage } from '@domain/ai/port/structured-llm.port.js';
 import {
-  QueryIntentSchema,
+  AnalyzerIntentSchema,
   WINE_SEARCH_MAX_CONSTRAINTS,
   WINE_SEARCH_MAX_QUERY_CHARS,
-  type QueryIntent,
+  type AnalyzerIntent,
 } from './wine-search-schemas.js';
 import {
   SYNTHESIS_MAX_ANSWER_CHARS,
@@ -95,13 +95,13 @@ import type {
 export const ORCHESTRATOR_MAX_QUERY_CHARS = WINE_SEARCH_MAX_QUERY_CHARS;
 
 /** Soft cap on the per-step execution-step trace surfaced to callers. Two per
- *  phase (analyzer, router, runner/mini-loop, synthesizer) plus mini-loop
+ *  phase (analyzer, router, runner/wine-agent-loop, synthesizer) plus wine-agent-loop
  *  inner steps gives a worst-case ≤ 32 for the deepest legitimate plan
- *  (mini-loop 3 steps × 8 anchor drinkability fan-outs). */
+ *  (wine-agent-loop 3 steps × 8 anchor drinkability fan-outs). */
 const ORCHESTRATOR_MAX_EXECUTION_STEPS = 64;
 
 /** Soft cap on the tool-call set inside a single ExecutionStep. Aligned with
- *  `WINE_SEARCH_MAX_CONSTRAINTS` (32) so a single mini-loop turn cannot
+ *  `WINE_SEARCH_MAX_CONSTRAINTS` (32) so a single wine-agent-loop turn cannot
  *  surface more tool calls than the analyzer can have constraints. */
 const ORCHESTRATOR_MAX_TOOL_CALLS_PER_STEP = WINE_SEARCH_MAX_CONSTRAINTS;
 
@@ -114,7 +114,7 @@ const ORCHESTRATOR_MAX_OBSERVATIONS_PER_STEP = WINE_SEARCH_MAX_CONSTRAINTS;
 export const ORCHESTRATOR_STEP_SUMMARY_MAX_CHARS = 512;
 
 /** Maximum length of an observation string surfaced into a step trace. Same
- *  bound as the mini-loop's `MINI_LOOP_RESULT_PREVIEW_CHARS` for parity. */
+ *  bound as the wine-agent-loop's `WINE_AGENT_LOOP_RESULT_PREVIEW_CHARS` for parity. */
 const ORCHESTRATOR_OBSERVATION_MAX_CHARS = 2_000;
 
 /** Maximum length of a tool-call input field (key OR value). Tool inputs are
@@ -122,7 +122,7 @@ const ORCHESTRATOR_OBSERVATION_MAX_CHARS = 2_000;
 export const ORCHESTRATOR_TOOL_INPUT_MAX_CHARS = 4_000;
 
 /** Maximum cumulative tool-outcome count emitted. Defends against runaway
- *  mini-loop traces. Aligned with `WINE_SEARCH_MAX_ANCHORS * 4` (32) since
+ *  wine-agent-loop traces. Aligned with `WINE_SEARCH_MAX_ANCHORS * 4` (32) since
  *  drinkability fans out one outcome per anchor across up to four turns. */
 const ORCHESTRATOR_MAX_TOOL_OUTCOMES = 64;
 
@@ -191,7 +191,7 @@ const ExecutionStepSourceSchema = z.enum([
   'analyzer',
   'router',
   'runner',
-  'mini_loop',
+  'wine_agent_loop',
   'synthesizer',
 ]);
 
@@ -208,12 +208,12 @@ const ExecutionStepToolCallSchema = z.object({
 
 /**
  * A single per-phase entry in the unified trace. The orchestrator emits one
- * step per analyzer / router / synthesizer phase, and one step per mini-loop
+ * step per analyzer / router / synthesizer phase, and one step per wine-agent-loop
  * turn (each may contain multiple tool calls). The runner branch emits one
  * step per dispatched use case.
  *
  * `summary` is the human-readable one-line description. `toolCalls` and
- * `observations` are optional and parallel-indexed (matching the mini-loop
+ * `observations` are optional and parallel-indexed (matching the wine-agent-loop
  * substrate). `tokenUsage` is present when the phase consumed LLM tokens.
  */
 export const ExecutionStepSchema = z.object({
@@ -276,12 +276,12 @@ const PlanKindSchema = z.enum([
 /** Query intent enum surfaced into the result.
  *  Mirrors `WineSearchQueryIntentSchema` in the HTTP wire schema 1:1. The
  *  `'rejected'` slot is appended for queries the analyzer refused. */
-const ResultIntentSchema = z.union([QueryIntentSchema, z.literal('rejected')]);
+const ResultIntentSchema = z.union([AnalyzerIntentSchema, z.literal('rejected')]);
 
 // ---------------------------------------------------------------------------
 // `ToolOutcome` zod surface — defensive validation. We mirror only the fields
 // the orchestrator surfaces; consumers should reach into the original
-// ExecutionRunner / MiniLoop outcomes if they need the raw `result` field
+// ExecutionRunner / WineAgentLoop outcomes if they need the raw `result` field
 // (we keep `result: unknown` as `z.unknown().optional()` here so opaque
 // payloads still parse).
 // ---------------------------------------------------------------------------
@@ -319,7 +319,7 @@ export const WineSearchResultSchema = z.object({
   toolOutcomes: z.array(ToolOutcomeSchema).max(ORCHESTRATOR_MAX_TOOL_OUTCOMES),
   executionSteps: z.array(ExecutionStepSchema).max(ORCHESTRATOR_MAX_EXECUTION_STEPS),
   /** Sum of `executionSteps[i].toolCalls?.length` across every step whose
-   *  source is `'runner'` or `'mini_loop'` (the only step kinds that emit
+   *  source is `'runner'` or `'wine_agent_loop'` (the only step kinds that emit
    *  real tool calls). Surfaced at the top level so the HTTP wire's
    *  `execution.tool_call_count` is a pure case-rename — no recomputation
    *  at the HTTP boundary. */
@@ -358,7 +358,7 @@ export interface WineSearchResult {
    *  modes. See module docstring (S1 semantic split). */
   readonly terminationKind?: TerminationKind | undefined;
   readonly degradedReason?: AnswerResult['degradedReason'];
-  readonly intent: QueryIntent | 'rejected';
+  readonly intent: AnalyzerIntent | 'rejected';
   readonly planKind: ExecutionPlan['kind'];
 }
 

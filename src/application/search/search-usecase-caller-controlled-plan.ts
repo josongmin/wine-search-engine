@@ -16,7 +16,21 @@ const CALLER_CONTROLLED_PLANNER_VERSION = 'caller-controlled-v1';
 const CALLER_CONTROLLED_POLICY_RULE_VERSION = 'caller-controlled-v1';
 const CALLER_CONTROLLED_REASON_CODE = 'CALLER_CONTROLLED_PRIMITIVE_SEARCH';
 const DEFAULT_CALLER_CONTROLLED_MODE = 'auto';
+/** The hybrid lane is the only route this builder ever emits — entity/mixed
+ *  modes have their own caller-bypassing paths upstream and are explicitly
+ *  rejected by {@link isCallerControlledPrimitiveSearchRequest}. */
+const CALLER_CONTROLLED_ROUTE: QueryRoute = 'hybrid';
 const executionCompiler = new ExecutionCompiler();
+
+/**
+ * Subset of `SearchRequest['retrieval_mode']` that this builder admits.
+ * `entity` and `mixed` are intentionally excluded — they require anchor /
+ * identity-seal evidence that the caller-controlled fast-path does not
+ * gather. Restricting the type at module scope lets TypeScript exhaustively
+ * narrow the downstream switch instead of carrying dead `entity`/`mixed`
+ * branches that the runtime gate already prevents from executing.
+ */
+type CallerControlledAdmittedMode = 'auto' | 'hybrid';
 
 function resolveRequestedMode(
   request: SearchRequest,
@@ -24,49 +38,25 @@ function resolveRequestedMode(
   return request.retrieval_mode ?? request.options?.mode ?? DEFAULT_CALLER_CONTROLLED_MODE;
 }
 
-function resolveCallerControlledRoute(mode: NonNullable<SearchRequest['retrieval_mode']>): QueryRoute {
-  switch (mode) {
-    case 'entity':
-      return 'entity';
-    case 'mixed':
-      return 'mixed';
-    case 'auto':
-    case 'hybrid':
-      return 'hybrid';
-    default: {
-      const _exhaustive: never = mode;
-      throw new Error(`Unhandled caller-controlled search mode: ${String(_exhaustive)}`);
-    }
-  }
+function isAdmittedMode(
+  mode: NonNullable<SearchRequest['retrieval_mode']>,
+): mode is CallerControlledAdmittedMode {
+  return mode === 'auto' || mode === 'hybrid';
 }
 
-function resolveCallerControlledRetrievalMode(
-  request: SearchRequest,
-  route: QueryRoute,
-): RetrievalMode {
+function resolveCallerControlledRetrievalMode(request: SearchRequest): RetrievalMode {
   const callerInterpretation = request.callerInterpretation;
-  switch (route) {
-    case 'entity':
-      return 'entity_lookup';
-    case 'mixed':
-      return 'similar_items';
-    case 'hybrid':
-      if (callerInterpretation?.intent === 'pairing_search') {
-        return 'recommendation';
-      }
-      if (
-        callerInterpretation?.intent === 'facet_search'
-        || callerInterpretation?.intent === 'budget_search'
-        || callerInterpretation?.queryClass === 'pure_constraint'
-      ) {
-        return 'constraint_filter';
-      }
-      return 'attribute_search';
-    default: {
-      const _exhaustive: never = route;
-      throw new Error(`Unhandled caller-controlled route: ${String(_exhaustive)}`);
-    }
+  if (callerInterpretation?.intent === 'pairing_search') {
+    return 'recommendation';
   }
+  if (
+    callerInterpretation?.intent === 'facet_search'
+    || callerInterpretation?.intent === 'budget_search'
+    || callerInterpretation?.queryClass === 'pure_constraint'
+  ) {
+    return 'constraint_filter';
+  }
+  return 'attribute_search';
 }
 
 export function isCallerControlledPrimitiveSearchRequest(
@@ -75,8 +65,7 @@ export function isCallerControlledPrimitiveSearchRequest(
   if (request.callerInterpretation?.authority !== 'caller') {
     return false;
   }
-  const mode = resolveRequestedMode(request);
-  return mode !== 'entity' && mode !== 'mixed';
+  return isAdmittedMode(resolveRequestedMode(request));
 }
 
 export function buildCallerControlledPrimitivePlan(
@@ -88,18 +77,34 @@ export function buildCallerControlledPrimitivePlan(
   }
 
   const mode = resolveRequestedMode(request);
-  const route = resolveCallerControlledRoute(mode);
-  const retrievalMode = resolveCallerControlledRetrievalMode(request, route);
+  if (!isAdmittedMode(mode)) {
+    // Defensive: callers should gate via `isCallerControlledPrimitiveSearchRequest`
+    // before reaching this point. We throw rather than silently down-routing
+    // because entity/mixed modes have semantic admission contracts
+    // (identity-seal, anchor evidence) that the caller-controlled fast-path
+    // does not satisfy.
+    throw new Error(
+      `Caller-controlled primitive plan does not support retrieval mode=${mode}; only 'auto' or 'hybrid' are admitted.`,
+    );
+  }
+  void mode; // narrowing complete — actual route is the module-scope constant.
+
+  const route = CALLER_CONTROLLED_ROUTE;
+  const retrievalMode = resolveCallerControlledRetrievalMode(request);
   const normalizedQueryViews = buildNormalizedQueryViews(sanitizedQuery);
   const constraints = {
     hard: [...(request.filters ?? [])],
     soft: [...(request.preferences ?? [])],
     inferred: [],
   } as const;
+  // Hybrid-only fast-path: identity-seal and anchor evidence requirements are
+  // structural to entity/mixed routes, which this builder explicitly does not
+  // admit. The constraint-evidence flag still fires when the caller injected
+  // hard filters.
   const admissionContext = {
-    requires_identity_seal: route === 'entity' || route === 'mixed',
+    requires_identity_seal: false,
     requires_constraint_evidence: constraints.hard.length > 0,
-    requires_anchor_evidence: route === 'mixed',
+    requires_anchor_evidence: false,
   } as const;
   const planV2: QueryPlanV2 = {
     rawQuery: sanitizedQuery,
