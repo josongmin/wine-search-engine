@@ -4,10 +4,14 @@ import { WineSearchRouteContract } from './wine-search.contract.js';
 import {
   AgentMetricsRouteContract,
   HealthRouteContract,
+  HybridSearchRouteContract,
+  LexicalSearchRouteContract,
   LookupRouteContract,
+  LookupWineRouteContract,
   ReadyRouteContract,
   RetrievalDegradationMetricsRouteContract,
   SearchRouteContract,
+  SemanticSearchRouteContract,
   WatchlistListRouteContract,
   WatchlistCreateRouteContract,
   WatchlistDeleteRouteContract,
@@ -54,10 +58,17 @@ interface DeclaredHttpRouteContract {
  *           `Accept: application/vnd.cuvee.human+json`. Remaining: 23.
  *   4.0.0 — collapse the public/product surface to the three canonical
  *           entry points (2026-05-29): `POST /v1/search`,
- *           `POST /v1/search/lookup`, `POST /v1/wine-search`.
+ *           `POST /v1/search/lookup`, `POST /v1/agent`.
  *           Removed redundant or non-product legacy seams. Remaining: 13.
+ *   4.1.0 — T-IR-01: add path-authoritative primitive surface
+ *           (`POST /v1/search/{hybrid,semantic,lexical}` and
+ *           `POST /v1/lookup/wine`) alongside the legacy mode-monolith
+ *           routes (2026-05-29). MINOR bump — additive only.
+ *           Legacy `/v1/search` and `/v1/search/lookup` are kept until
+ *           T-IR-07 removes them, at which point this bumps to 5.0.0.
+ *           Remaining: 17.
  */
-export const HTTP_CONTRACT_CATALOG_VERSION = '4.0.0';
+export const HTTP_CONTRACT_CATALOG_VERSION = '4.1.0';
 
 export const DeclaredHttpRouteContractCatalog: readonly DeclaredHttpRouteContract[] = [
   { method: 'GET', url: '/health', contract: HealthRouteContract },
@@ -66,13 +77,17 @@ export const DeclaredHttpRouteContractCatalog: readonly DeclaredHttpRouteContrac
   { method: 'GET', url: '/metrics/retrieval-degradation', contract: RetrievalDegradationMetricsRouteContract },
   { method: 'POST', url: '/v1/search', contract: SearchRouteContract },
   { method: 'POST', url: '/v1/search/lookup', contract: LookupRouteContract },
+  { method: 'POST', url: '/v1/search/hybrid', contract: HybridSearchRouteContract },
+  { method: 'POST', url: '/v1/search/semantic', contract: SemanticSearchRouteContract },
+  { method: 'POST', url: '/v1/search/lexical', contract: LexicalSearchRouteContract },
+  { method: 'POST', url: '/v1/lookup/wine', contract: LookupWineRouteContract },
   { method: 'GET', url: '/v1/watchlist', contract: WatchlistListRouteContract },
   { method: 'POST', url: '/v1/watchlist', contract: WatchlistCreateRouteContract },
   { method: 'GET', url: '/v1/watchlist/:id', contract: WatchlistGetRouteContract },
   { method: 'DELETE', url: '/v1/watchlist/:id', contract: WatchlistDeleteRouteContract },
   { method: 'GET', url: '/v1/watchlist/:id/deliveries', contract: WatchlistDeliveriesRouteContract },
   { method: 'POST', url: '/v1/feedback', contract: FeedbackSubmitRouteContract },
-  { method: 'POST', url: '/v1/wine-search', contract: WineSearchRouteContract },
+  { method: 'POST', url: '/v1/agent', contract: WineSearchRouteContract },
 ] as const;
 
 function compareContracts(
@@ -178,7 +193,7 @@ export function computeHttpContractCatalogFingerprint(
  * failing test.
  */
 export const HTTP_CONTRACT_CATALOG_FINGERPRINT =
-  'a927a2f5943512a5a90a02473b252916b7d4420925af1981736aa96d608a3004';
+  'd9609188d1a5fec7d65f7b3c8a40965435afb93becf541ad96823f89688f84b4';
 
 export function buildDeclaredHttpRouteContractManifest(): HttpRouteContractManifest {
   const routes: RegisteredHttpRouteContract[] = DeclaredHttpRouteContractCatalog.map((entry) => {

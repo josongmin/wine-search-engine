@@ -55,6 +55,24 @@ export interface SearchRequest {
   readonly options?: SearchOptions | undefined;
   /** Top-level retrieval mode override. 'auto' defers to the planner. */
   readonly retrieval_mode?: 'auto' | 'entity' | 'hybrid' | 'mixed' | undefined;
+  /**
+   * Internal retrieval-lane discriminator set by the path-authoritative
+   * primitive HTTP routes (`/v1/search/{hybrid,semantic,lexical}`,
+   * `/v1/lookup/wine`). When set, downstream candidate-pool dispatch MUST
+   * honour it — `'semantic_only'` skips the lexical sparse leg and
+   * `'lexical_only'` skips the dense embedding leg. `'hybrid'` is equivalent
+   * to omitting the field (full RRF fusion). NEVER populated from a request
+   * body — this is route-authoritative (architecture-decision §2.2 — primitive
+   * selector is path, not body).
+   *
+   * Today the analyzer/router still receives `'hybrid'` for both `semantic`
+   * and `lexical` endpoints; full lane skipping is plumbed through the
+   * candidate-pool in a follow-up under T-IR-01-bis. The field exists now
+   * so the contract layer is stable and consumers can flip the runtime
+   * behaviour in a localized retrieval-side change rather than rewriting
+   * the HTTP boundary.
+   */
+  readonly retrievalLane?: 'hybrid' | 'semantic_only' | 'lexical_only' | undefined;
   /** Maximum number of result items to return (batch / caller-specified cap). */
   readonly limit?: number | undefined;
   /**

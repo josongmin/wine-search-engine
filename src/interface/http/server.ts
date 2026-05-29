@@ -17,6 +17,12 @@ import { deepKeysToSnake } from './middleware/snake-case-hook.js';
 import { registerSearchRoute } from './routes/search.route.js';
 import { registerLookupRoute } from './routes/lookup.route.js';
 import {
+  registerHybridSearchRoute,
+  registerLexicalSearchRoute,
+  registerLookupWineRoute,
+  registerSemanticSearchRoute,
+} from './routes/primitive-search.route.js';
+import {
   registerHealthRoutes,
   startEventLoopHeartbeat,
   type HealthRouteOptions,
@@ -382,10 +388,19 @@ export async function createServer(
     wineSearchOrchestrator: deps.wineSearch?.wineSearchOrchestrator,
   });
   registerLookupRoute(app, deps);
+  // T-IR-01 primitive surface — path-authoritative replacements for the
+  // mode-monolith `/v1/search` and the namespace-stuffed `/v1/search/lookup`.
+  // Registered alongside the legacy routes during the migration program;
+  // T-IR-07 deletes the legacy registrations once every internal and external
+  // consumer has cut over.
+  registerHybridSearchRoute(app, deps);
+  registerSemanticSearchRoute(app, deps);
+  registerLexicalSearchRoute(app, deps);
+  registerLookupWineRoute(app, deps);
   registerWatchlistRoute(app, deps);
   registerFeedbackRoute(app, deps);
   if (deps.wineSearch !== undefined) {
-    // Plan-then-Execute `/v1/wine-search` — the canonical agentic entry point.
+    // Plan-then-Execute `/v1/agent` — the canonical agentic entry point.
     // Registration requires an Anthropic credential at startup.
     registerWineSearchRoute(app, {
       wineSearchOrchestrator: deps.wineSearch.wineSearchOrchestrator,

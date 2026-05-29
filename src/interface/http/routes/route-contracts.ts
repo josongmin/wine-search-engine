@@ -4,6 +4,12 @@ import {
   SearchRequestSchema,
 } from '../schemas/search-request.schema.js';
 import {
+  HybridSearchRequestSchema,
+  LexicalSearchRequestSchema,
+  LookupWineRequestSchema,
+  SemanticSearchRequestSchema,
+} from '../schemas/primitive-search.schema.js';
+import {
   ComparisonSearchResponseSchema,
   ErrorResponseSchema,
   SearchResponseSchema,
@@ -251,6 +257,75 @@ export const SearchRouteContract = defineRouteContract({
   ],
   responses: {
     [HTTP_STATUS_OK]: z.union([SearchResponseSchema, ComparisonSearchResponseSchema]),
+    [HTTP_STATUS_BAD_REQUEST]: ErrorResponseSchema,
+    [HTTP_STATUS_FORBIDDEN]: ErrorResponseSchema,
+    [HTTP_STATUS_REQUEST_TIMEOUT]: ErrorResponseSchema,
+    [HTTP_STATUS_TOO_MANY_REQUESTS]: ErrorResponseSchema,
+    [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
+    [HTTP_STATUS_SERVICE_UNAVAILABLE]: ErrorResponseSchema,
+  },
+});
+
+// ---------------------------------------------------------------------------
+// T-IR-01 primitive surface — `/v1/search/{hybrid,semantic,lexical}` and
+// `/v1/lookup/wine`. The body shape is identical across all four; the URL
+// is the authority on which retrieval lane runs (architecture-decision §2.2).
+// ---------------------------------------------------------------------------
+
+const PrimitiveSearchResponseSchema = z.union([SearchResponseSchema, ComparisonSearchResponseSchema]);
+
+const PRIMITIVE_SEARCH_RESPONSES = {
+  [HTTP_STATUS_OK]: PrimitiveSearchResponseSchema,
+  [HTTP_STATUS_BAD_REQUEST]: ErrorResponseSchema,
+  [HTTP_STATUS_FORBIDDEN]: ErrorResponseSchema,
+  [HTTP_STATUS_REQUEST_TIMEOUT]: ErrorResponseSchema,
+  [HTTP_STATUS_TOO_MANY_REQUESTS]: ErrorResponseSchema,
+  [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
+  [HTTP_STATUS_SERVICE_UNAVAILABLE]: ErrorResponseSchema,
+} as const;
+
+const PRIMITIVE_SEARCH_CAPABILITIES = [
+  'security',
+  'planner',
+  'SAT',
+  'cache',
+  'route_resolution',
+  'ranked_post_route',
+] as const;
+
+export const HybridSearchRouteContract = defineRouteContract({
+  operationId: 'search.hybrid',
+  body: HybridSearchRequestSchema,
+  capabilities: PRIMITIVE_SEARCH_CAPABILITIES,
+  responses: PRIMITIVE_SEARCH_RESPONSES,
+});
+
+export const SemanticSearchRouteContract = defineRouteContract({
+  operationId: 'search.semantic',
+  body: SemanticSearchRequestSchema,
+  capabilities: PRIMITIVE_SEARCH_CAPABILITIES,
+  responses: PRIMITIVE_SEARCH_RESPONSES,
+});
+
+export const LexicalSearchRouteContract = defineRouteContract({
+  operationId: 'search.lexical',
+  body: LexicalSearchRequestSchema,
+  capabilities: PRIMITIVE_SEARCH_CAPABILITIES,
+  responses: PRIMITIVE_SEARCH_RESPONSES,
+});
+
+export const LookupWineRouteContract = defineRouteContract({
+  operationId: 'lookup.wine',
+  body: LookupWineRequestSchema,
+  capabilities: [
+    'security',
+    'planner',
+    'SAT',
+    'cache',
+    'resolver_only',
+  ],
+  responses: {
+    [HTTP_STATUS_OK]: SearchResponseSchema,
     [HTTP_STATUS_BAD_REQUEST]: ErrorResponseSchema,
     [HTTP_STATUS_FORBIDDEN]: ErrorResponseSchema,
     [HTTP_STATUS_REQUEST_TIMEOUT]: ErrorResponseSchema,
