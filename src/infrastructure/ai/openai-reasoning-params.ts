@@ -63,7 +63,7 @@ export type OpenAICallMode = 'analyze' | 'execute' | 'synthesize' | 'classify' |
  * coherent multi-fact composition.
  *
  *   - `analyze`     — structured JSON extraction (multi-query, HyDE, NL mapper).
- *   - `execute`     — mini-loop tool dispatch decisions.
+ *   - `execute`     — wine-agent-loop tool dispatch decisions.
  *   - `synthesize`  — final answer synthesis over the candidate pool.
  *   - `classify`    — single-token security verdict (injection classifier).
  *   - `chat`        — generic chat completion.

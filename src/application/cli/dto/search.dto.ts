@@ -5,7 +5,6 @@ import type {
   SearchOptions,
   RepresentativeConceptSearchContext,
 } from '../../search/search-request.dto.js';
-import type { HybridSearchOptions } from '../../search/hybrid-request.dto.js';
 import type { NormalizedConstraint } from '../../../domain/shared/types/constraint-bundle.js';
 
 export interface SearchRunInput {
@@ -21,13 +20,4 @@ export interface SearchRunInput {
   readonly representativeConcept?: RepresentativeConceptSearchContext | undefined;
 }
 
-export interface SearchHybridInput {
-  readonly query: string;
-  readonly context?: SearchRequestContext | undefined;
-  readonly sessionContext?: SearchSessionContext | undefined;
-  readonly queryBudget?: SearchQueryBudget | undefined;
-  readonly options?: HybridSearchOptions | undefined;
-}
-
 export type SearchRunResult = unknown;
-export type SearchHybridResult = unknown;

@@ -36,7 +36,6 @@ export type SubContainerId =
 
 /** Ports surfaced on the root `Container` type. Keep alphabetised. */
 export type ContainerPortId =
-  | 'adaptiveToolExecutor'
   | 'autocompleteUseCase'
   | 'batchSearchUseCase'
   | 'calibrationStore'
@@ -55,7 +54,6 @@ export type ContainerPortId =
   | 'mixedSolver'
   | 'queryPlanner'
   | 'ranker'
-  | 'replayUseCase'
   | 'resolveUseCase'
   | 'responseBuilder'
   | 'runtimeReadiness'
@@ -108,7 +106,6 @@ export const WIRING_MANIFEST: readonly SubContainerSpec[] = [
     dependsOn: ['core'],
     produces: [
       'searchUseCase',
-      'replayUseCase',
       'interpretUseCase',
       'resolveUseCase',
       'autocompleteUseCase',
@@ -123,7 +120,7 @@ export const WIRING_MANIFEST: readonly SubContainerSpec[] = [
   {
     id: 'aux-features',
     dependsOn: ['usecases'],
-    produces: ['adaptiveToolExecutor', 'evalRunner'],
+    produces: ['evalRunner'],
   },
 
   // Features bundle exposes everything the route layer consumes.

@@ -11,33 +11,28 @@ import type { SearchRequest } from '../../application/search/search-request.dto.
 import type { DecomposedSearchUseCasePort } from '../../application/search/port/search-route-usecases.port.js';
 import type { DrinkingWindowUseCasePort } from '../../application/drinking-window/port/drinking-window-usecase.port.js';
 import type { EntityDocumentLookupPort } from '../../application/search/port/search-pipeline-deps.port.js';
-import {
-  buildSearchToolStructuredFilters as buildContractSearchToolStructuredFilters,
-  buildSearchToolStructuredPreferences as buildContractSearchToolStructuredPreferences,
-  sanitizeOptionalToolNulls,
-} from '../../application/search/search-tool-contract.js';
+import { sanitizeOptionalToolNulls } from '../../application/search/search-tool-contract.js';
 import { normalizeLookupWineInput } from '../../application/search/lookup-wine-execution.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { ComparisonSearchResponse } from '../../domain/response/model/comparison-response.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { DrinkingWindowBlock } from '../../domain/response/model/result-item.js';
+import type { NormalizedConstraint } from '../../domain/shared/types/constraint-bundle.js';
 import type { SearchResponseV2Machine } from '../../interface/http/schemas/search-response-v2.schema.js';
 import { buildMachineResponseV2 } from '../../interface/http/response-builders/machine-response-builder-v2.js';
-import {
-  appendStructuredQueryClauses,
-  buildSearchToolSoftClauses,
-} from '../../application/search/search-tool-query-policy.js';
-import { buildSearchToolRetrievalCoreQuery } from '../../application/search/search-tool-retrieval-core.js';
 import {
   applySearchToolAlcoholResultPolicy,
   applySearchToolBudgetResultPolicy,
 } from '../../application/search/search-tool-result-policy.js';
 import {
+  buildAgentToolSearchRequest,
+  buildFoodPairingToolUseCaseInput,
+  buildSearchWinesToolUseCaseInput,
+  CALLER_CONTROLLED_FOOD_PAIRING_INTENT,
+} from '../../application/search/agent-tool-request-adapter.js';
+import {
   buildCompareWinesExecutionRequest,
   buildDrinkingWindowRequest,
-  buildFoodPairingFilters,
-  buildFoodPairingPreferences,
-  buildFoodPairingQuery,
   resolveFoodPairingBudgetKrw,
 } from '../../application/search/tool-execution-support.js';
 import { KRW_PER_USD_APPROXIMATE } from '../../domain/shared/constants.js';
@@ -54,24 +49,14 @@ import {
   FoodPairingInputSchema,
   SearchToolInputSchema,
 } from './tool-schemas.js';
-import {
-  createCanonicalEntityId,
-  type NormalizedConstraint,
-} from '../../domain/shared/types/index.js';
+import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
 
 const CLAUDE_TOOL_FILTER_MAPPING_VERSION = 'claude_tool_v1' as const;
 const CLAUDE_TOOL_DIVERSITY_MAPPING_VERSION = 'claude_tool_diversity_v1' as const;
-const FOOD_PAIRING_RETRIEVAL_MODE = 'hybrid' as const;
 const DEFAULT_SEARCH_LIMIT = 10;
-const CALLER_CONTROLLED_TOOL_QUERY_CLASS = 'semantic_preference' as const;
-const CALLER_CONTROLLED_SEARCH_INTENT = 'semantic_discovery' as const;
-const CALLER_CONTROLLED_FOOD_PAIRING_INTENT = 'pairing_search' as const;
+const DEFAULT_SEARCH_TOOL_MODE = 'auto';
 
 type SearchToolInput = z.infer<typeof SearchToolInputSchema>;
-
-type StructuredFilterInput = Parameters<typeof buildContractSearchToolStructuredFilters>[0];
-type StructuredPreferenceInput = Parameters<typeof buildContractSearchToolStructuredPreferences>[0];
-type SearchToolQueryInput = Parameters<typeof buildSearchToolRetrievalCoreQuery>[0];
 
 function formatValidationError(toolName: string, error: z.ZodError): { error: string } {
   return {
@@ -104,57 +89,21 @@ function parseToolInput<T extends z.ZodTypeAny>(
   };
 }
 
-function buildSearchToolStructuredFilters(input: StructuredFilterInput): readonly NormalizedConstraint[] {
-  return buildContractSearchToolStructuredFilters(input, CLAUDE_TOOL_FILTER_MAPPING_VERSION);
-}
-
-function buildSearchToolStructuredPreferences(input: StructuredPreferenceInput): readonly NormalizedConstraint[] {
-  return buildContractSearchToolStructuredPreferences(input, CLAUDE_TOOL_FILTER_MAPPING_VERSION);
-}
-
-function buildSearchToolQuery(input: SearchToolQueryInput): string {
-  const clauses = buildSearchToolSoftClauses({
-    ...input,
-    grape_primary: undefined,
+function buildSearchToolRequest(
+  input: SearchToolInput,
+  requestLimit?: number,
+): { readonly request: SearchRequest; readonly constraints: readonly NormalizedConstraint[] } {
+  const requestInput = buildSearchWinesToolUseCaseInput(input as Record<string, unknown>, {
+    mappingVersion: CLAUDE_TOOL_FILTER_MAPPING_VERSION,
+    includeCallerInterpretation: true,
+    fallbackMode: DEFAULT_SEARCH_TOOL_MODE,
   });
-  const retrievalCoreQuery = buildSearchToolRetrievalCoreQuery(input);
-  if (clauses.length === 0) {
-    return retrievalCoreQuery;
-  }
-  return appendStructuredQueryClauses(retrievalCoreQuery, clauses);
-}
-
-function shouldBypassPlannerForToolRetrievalMode(
-  retrievalMode: NonNullable<SearchToolInput['retrieval_mode']> | typeof FOOD_PAIRING_RETRIEVAL_MODE,
-): boolean {
-  return retrievalMode !== 'entity' && retrievalMode !== 'mixed';
-}
-
-function buildSearchToolRequest(input: SearchToolInput): SearchRequest {
-  const filters = buildSearchToolStructuredFilters(input);
-  const preferences = buildSearchToolStructuredPreferences(input);
-  const limit = input.limit ?? DEFAULT_SEARCH_LIMIT;
-  const retrievalMode = input.retrieval_mode ?? 'auto';
-  return {
-    query: buildSearchToolQuery(input),
-    limit,
-    options: {
-      mode: retrievalMode,
-      explain: false,
-      clarification: false,
-    },
-    ...(filters.length > 0 ? { filters } : {}),
-    ...(preferences.length > 0 ? { preferences } : {}),
-    ...(shouldBypassPlannerForToolRetrievalMode(retrievalMode)
-      ? {
-          callerInterpretation: {
-            authority: 'caller' as const,
-            intent: CALLER_CONTROLLED_SEARCH_INTENT,
-            queryClass: CALLER_CONTROLLED_TOOL_QUERY_CLASS,
-          },
-        }
-      : {}),
-  };
+  const filters = requestInput.filters ?? [];
+  const request = buildAgentToolSearchRequest(requestInput, {
+    overrideLimit: requestLimit ?? requestInput.limit ?? DEFAULT_SEARCH_LIMIT,
+    defaultMode: DEFAULT_SEARCH_TOOL_MODE,
+  });
+  return { request, constraints: filters };
 }
 
 function applySearchWinesResultPolicies(
@@ -276,11 +225,13 @@ export class WineToolExecutor {
     const candidateGatherLimit = wantsDiversity
       ? Math.max(returnLimit, SEARCH_TOOL_DIVERSITY_MIN_LIMIT)
       : returnLimit;
-    const structuredFilters = buildSearchToolStructuredFilters(validated);
-    const fallbackRequest = buildSearchToolRequest({
-      ...validated,
-      limit: candidateGatherLimit,
-    });
+    const { request: fallbackRequest, constraints: structuredFilters } = buildSearchToolRequest(
+      {
+        ...validated,
+        limit: candidateGatherLimit,
+      },
+      candidateGatherLimit,
+    );
 
     const response = await executeSearchWithTypedWineDiversityDiscovery({
       searchUseCase: this.deps.searchUseCase,
@@ -296,11 +247,7 @@ export class WineToolExecutor {
       buildTypedRequest: (wineType) => ({
         ...fallbackRequest,
         limit: candidateGatherLimit,
-        filters: withWineTypeFilter(
-          structuredFilters,
-          wineType,
-          CLAUDE_TOOL_DIVERSITY_MAPPING_VERSION,
-        ),
+        filters: withWineTypeFilter(structuredFilters, wineType, CLAUDE_TOOL_DIVERSITY_MAPPING_VERSION),
       }),
       resultPolicy: (searchResponse) => applySearchWinesResultPolicies(searchResponse, validated),
     });
@@ -340,29 +287,12 @@ export class WineToolExecutor {
       return validation.result;
     }
     const validated = validation.data;
-    const request: SearchRequest = {
-      query: buildFoodPairingQuery(validated),
-      options: {
-        mode: FOOD_PAIRING_RETRIEVAL_MODE,
-        explain: false,
-        clarification: false,
-      },
-      ...(buildFoodPairingFilters(validated, CLAUDE_TOOL_FILTER_MAPPING_VERSION).length > 0
-        ? { filters: buildFoodPairingFilters(validated, CLAUDE_TOOL_FILTER_MAPPING_VERSION) }
-        : {}),
-      ...(buildFoodPairingPreferences(validated, CLAUDE_TOOL_FILTER_MAPPING_VERSION).length > 0
-        ? { preferences: buildFoodPairingPreferences(validated, CLAUDE_TOOL_FILTER_MAPPING_VERSION) }
-        : {}),
-      ...(shouldBypassPlannerForToolRetrievalMode(FOOD_PAIRING_RETRIEVAL_MODE)
-        ? {
-            callerInterpretation: {
-              authority: 'caller' as const,
-              intent: CALLER_CONTROLLED_FOOD_PAIRING_INTENT,
-              queryClass: CALLER_CONTROLLED_TOOL_QUERY_CLASS,
-            },
-          }
-        : {}),
-    };
+    const requestInput = buildFoodPairingToolUseCaseInput(validated as Record<string, unknown>, {
+      mappingVersion: CLAUDE_TOOL_FILTER_MAPPING_VERSION,
+      includeCallerInterpretation: true,
+      callerIntent: CALLER_CONTROLLED_FOOD_PAIRING_INTENT,
+    });
+    const request = buildAgentToolSearchRequest(requestInput, { defaultMode: 'hybrid' });
     const response = await this.deps.searchUseCase.execute(request, requestId);
     const searchResponse = requireSearchOnlyToolResult('get_food_pairings', response);
     if ('error' in searchResponse) {

@@ -3,13 +3,12 @@ import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { SearchRequestBody } from '../../../src/interface/http/schemas/search-request.schema.js';
-import { ReplayRequestSchema, SearchRequestSchema } from '../../../src/interface/http/schemas/search-request.schema.js';
+import { SearchRequestSchema } from '../../../src/interface/http/schemas/search-request.schema.js';
 import type {
   ComparisonSearchResponseBody,
   ErrorResponseBody,
   SearchResponseBody,
 } from '../../../src/interface/http/schemas/search-response.schema.js';
-import type { ReplayRequestBody } from '../../../src/interface/http/schemas/search-request.schema.js';
 import {
   parseComparisonResponse,
   parseErrorResponse,
@@ -22,7 +21,6 @@ import {
   decodeAuthorityTraceRefDetailed,
   decodeSnapshotIdDetailed,
 } from '../../../src/domain/decision/service/id-schema-decoder.js';
-import { buildDecisionSnapshotId } from '../../../src/application/search/search-usecase-decision-snapshot.js';
 
 const SearchReplayFixtureExecutionTraceExpectationSchema = z.object({
   effective_route: z.enum(QUERY_ROUTES).optional(),
@@ -148,13 +146,12 @@ const SearchReplayFixtureErrorExpectationSchema = z.object({
 }).strict();
 
 const SearchReplayFixtureMetadataSchema = z.object({
-  use_live_snapshot: z.boolean().optional(),
   runtime_mode: z.enum(['inmemory', 'full_runtime']).optional(),
 }).strict();
 
 const SearchReplayFixtureCommonFieldsSchema = z.object({
   name: z.string().min(1),
-  endpoint: z.enum(['/v1/search', '/v1/search/replay']),
+  endpoint: z.literal('/v1/search'),
   execution_lane: z.enum(['self_contained', 'runtime_required']),
   response_family: z.enum(['search', 'comparison']).optional(),
   expected: z.union([
@@ -171,7 +168,6 @@ function addExecutionLaneInvariant(
     readonly execution_lane: 'self_contained' | 'runtime_required';
     readonly requires_runtime_capability?: readonly string[] | undefined;
     readonly metadata?: {
-      readonly use_live_snapshot?: boolean | undefined;
       readonly runtime_mode?: 'inmemory' | 'full_runtime' | undefined;
     } | undefined;
   },
@@ -199,17 +195,6 @@ function addExecutionLaneInvariant(
       path: ['metadata', 'runtime_mode'],
     });
   }
-  if (
-    fixture.execution_lane === 'runtime_required'
-    && fixture.metadata?.runtime_mode === 'full_runtime'
-    && fixture.metadata.use_live_snapshot !== true
-  ) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'full_runtime fixtures must set metadata.use_live_snapshot=true',
-      path: ['metadata', 'use_live_snapshot'],
-    });
-  }
 }
 
 const SearchFixtureSchema = SearchReplayFixtureCommonFieldsSchema.extend({
@@ -217,19 +202,9 @@ const SearchFixtureSchema = SearchReplayFixtureCommonFieldsSchema.extend({
   request: SearchRequestSchema,
 }).strict();
 
-const ReplayFixtureSchema = SearchReplayFixtureCommonFieldsSchema.extend({
-  endpoint: z.literal('/v1/search/replay'),
-  replay_request: ReplayRequestSchema,
-  snapshot_override: z.record(z.string(), z.unknown()).optional(),
-}).strict();
-
-const SearchReplayFixtureSchema = z
-  .discriminatedUnion('endpoint', [SearchFixtureSchema, ReplayFixtureSchema])
-  .superRefine(addExecutionLaneInvariant);
+const SearchReplayFixtureSchema = SearchFixtureSchema.superRefine(addExecutionLaneInvariant);
 
 export type SearchReplayFixtureFile = z.infer<typeof SearchReplayFixtureSchema>;
-type SearchHttpFixtureFile = z.infer<typeof SearchFixtureSchema>;
-type ReplayHttpFixtureFile = z.infer<typeof ReplayFixtureSchema>;
 
 export function loadSearchReplayFixtures(
   dir: string = path.join(process.cwd(), 'test/replay-fixtures/search'),
@@ -281,66 +256,16 @@ export function isFullRuntimeSearchReplayFixture(
     && fixture.metadata?.runtime_mode === 'full_runtime';
 }
 
-function _isSearchHttpFixture(
-  fixture: SearchReplayFixtureFile,
-): fixture is SearchHttpFixtureFile {
-  return fixture.endpoint === '/v1/search';
-}
-
-function isReplayHttpFixture(
-  fixture: SearchReplayFixtureFile,
-): fixture is ReplayHttpFixtureFile {
-  return fixture.endpoint === '/v1/search/replay';
-}
-
 export function classifySearchFixtureMode(
-  fixture: SearchReplayFixtureFile,
-): 'search' | 'replay' {
-  return fixture.endpoint === '/v1/search' ? 'search' : 'replay';
+  _fixture: SearchReplayFixtureFile,
+): 'search' {
+  return 'search';
 }
 
 export function buildSearchFixturePayload(
   fixture: SearchReplayFixtureFile,
-): SearchRequestBody | ReplayRequestBody {
-  if (fixture.endpoint === '/v1/search') {
-    return fixture.request;
-  }
-
-  const replayRequest = fixture.snapshot_override === undefined
-    ? fixture.replay_request
-    : {
-      ...fixture.replay_request,
-      decision_snapshot: {
-        ...fixture.replay_request.decision_snapshot,
-        ...fixture.snapshot_override,
-      },
-    };
-
-  if ('error_code' in fixture.expected) {
-    return ReplayRequestSchema.parse(replayRequest);
-  }
-
-  const snapshot = replayRequest.decision_snapshot;
-  const rebuiltSnapshot = {
-    ...snapshot,
-    snapshot_id: buildDecisionSnapshotId({
-      threshold_profile_id: snapshot.threshold_profile_id,
-      planner_version: snapshot.planner_version,
-      policy_rule_version: snapshot.policy_rule_version,
-      model_versions: snapshot.model_versions,
-      index_versions: snapshot.index_versions,
-      feature_flags: snapshot.feature_flags,
-      response_contract_version: snapshot.response_contract_version,
-      ...(snapshot.nondeterminism_notes !== undefined
-        ? { nondeterminism_notes: snapshot.nondeterminism_notes }
-        : {}),
-    }),
-  };
-
-  return ReplayRequestSchema.parse({
-    ...replayRequest,
-    decision_snapshot: rebuiltSnapshot,
-  });
+): SearchRequestBody {
+  return fixture.request;
 }
 
 function assertExactMatch(actual: unknown, expected: unknown, label: string): void {
@@ -362,80 +287,8 @@ function collectTraceDrift(
   }
 }
 
-async function buildLiveSnapshotReplayPayload(
-  fixture: ReplayHttpFixtureFile,
-  app: FastifyInstance,
-): Promise<ReplayRequestBody> {
-  const searchPayload = SearchRequestSchema.parse({
-    query: fixture.replay_request.query,
-    ...(fixture.replay_request.context !== undefined
-      ? { context: fixture.replay_request.context }
-      : {}),
-    ...(fixture.replay_request.sessionContext !== undefined
-      ? { sessionContext: fixture.replay_request.sessionContext }
-      : {}),
-    ...(fixture.replay_request.queryBudget !== undefined
-      ? { queryBudget: fixture.replay_request.queryBudget }
-      : {}),
-    ...(fixture.replay_request.options !== undefined
-      ? { options: fixture.replay_request.options }
-      : {}),
-  });
-
-  const preflightResponse = parseSearchResponse(
-    await postJson(app, '/v1/search', searchPayload),
-  );
-
-  return ReplayRequestSchema.parse({
-    ...fixture.replay_request,
-    decision_snapshot: {
-      ...preflightResponse.meta.decision_snapshot,
-    },
-    ...(preflightResponse.meta.determinism_fingerprint !== undefined
-      ? { expected_determinism_fingerprint: preflightResponse.meta.determinism_fingerprint }
-      : {}),
-    preflight_honesty_contract: {
-      execution_mode:
-        preflightResponse.engine_decision.execution_mode
-        ?? preflightResponse.meta.execution_mode
-        ?? 'authoritative',
-      degradation_reasons:
-        preflightResponse.engine_decision.degradation_reasons
-        ?? preflightResponse.meta.degradation_reasons
-        ?? [],
-      ...(
-        (
-          preflightResponse.engine_decision.blocking_eligible
-          ?? preflightResponse.meta.blocking_eligible
-        ) !== undefined
-          ? {
-              blocking_eligible:
-                preflightResponse.engine_decision.blocking_eligible
-                ?? preflightResponse.meta.blocking_eligible,
-            }
-          : {}
-      ),
-    },
-  });
-}
-
-async function buildExecutableReplayFixturePayload(
-  fixture: SearchReplayFixtureFile,
-  app: FastifyInstance,
-): Promise<SearchRequestBody | ReplayRequestBody> {
-  if (
-    !isReplayHttpFixture(fixture)
-    || fixture.metadata?.['use_live_snapshot'] !== true
-    || 'error_code' in fixture.expected
-  ) {
-    return buildSearchFixturePayload(fixture);
-  }
-
-  return buildLiveSnapshotReplayPayload(fixture, app);
-}
-
 /**
- * Drift classification for replay fixture assertions.
+ * Drift classification for search fixture assertions.
  *
  * Separates **result drift** (execution_mode, degradation_reasons — the user-visible
  * outcome changed) from **trace drift** (authority_trace_ref, snapshot_id,
@@ -478,7 +331,7 @@ export async function runSearchFixture(
   readonly response?: SearchResponseBody | ComparisonSearchResponseBody;
   readonly error?: ErrorResponseBody;
   readonly assertionSummary: {
-    readonly endpoint: '/v1/search' | '/v1/search/replay';
+    readonly endpoint: '/v1/search';
     readonly responseFamily: 'search' | 'comparison';
     readonly runtimeMode?: 'inmemory' | 'full_runtime' | undefined;
     readonly usedLiveSnapshot: boolean;
@@ -494,18 +347,15 @@ export async function runSearchFixture(
       readonly snapshotId?: ReturnType<typeof decodeSnapshotIdDetailed>;
     };
   };
-  readonly mode: 'search' | 'replay';
+  readonly mode: 'search';
 }> {
   const mode = classifySearchFixtureMode(fixture);
   const endpoint = fixture.endpoint;
   const responseFamily = fixture.response_family ?? 'search';
-  const usedLiveSnapshot = isReplayHttpFixture(fixture)
-    && fixture.metadata?.use_live_snapshot === true
-    && !('error_code' in fixture.expected);
   const httpResponse = await postJson(
     options.app,
     endpoint,
-    await buildExecutableReplayFixturePayload(fixture, options.app),
+    buildSearchFixturePayload(fixture),
   );
   if ('error_code' in fixture.expected) {
     const error = parseErrorResponse(httpResponse);
@@ -520,7 +370,7 @@ export async function runSearchFixture(
         endpoint,
         responseFamily,
         runtimeMode: fixture.metadata?.runtime_mode,
-        usedLiveSnapshot,
+        usedLiveSnapshot: false,
         skipped: false,
         assertedFields: ['error.code'],
         driftClassification: { resultFields: ['error.code'], traceFields: [] },
@@ -537,7 +387,7 @@ export async function runSearchFixture(
     assertComparisonFixtureExpectation(response, fixture);
     const authorityTraceRef = response.authority_trace_ref;
     if (authorityTraceRef === undefined) {
-      throw new Error('missing authority_trace_ref on comparison replay fixture response');
+      throw new Error('missing authority_trace_ref on comparison fixture response');
     }
     const authorityDecode = decodeAuthorityTraceRefDetailed(authorityTraceRef);
     if (!authorityDecode.ok) {
@@ -549,7 +399,7 @@ export async function runSearchFixture(
         endpoint,
         responseFamily,
         runtimeMode: fixture.metadata?.runtime_mode,
-        usedLiveSnapshot,
+        usedLiveSnapshot: false,
         skipped: false,
         assertedFields: [
           'comparison_intent',
@@ -577,7 +427,7 @@ export async function runSearchFixture(
   const traceDrifts = assertSearchFixtureExpectation(response, fixture);
   const authorityTraceRef = response.engine_decision.authority_trace_ref ?? response.meta.authority_trace_ref;
   if (authorityTraceRef === undefined) {
-    throw new Error('missing authority_trace_ref on replay fixture response');
+    throw new Error('missing authority_trace_ref on search fixture response');
   }
   const authorityDecode = decodeAuthorityTraceRefDetailed(authorityTraceRef);
   if (!authorityDecode.ok) {
@@ -586,7 +436,7 @@ export async function runSearchFixture(
   const runtimeCorrelationRef = response.engine_decision.runtime_correlation_ref
     ?? response.meta.runtime_correlation_ref;
   if (runtimeCorrelationRef === undefined) {
-    throw new Error('missing runtime_correlation_ref on replay fixture response');
+    throw new Error('missing runtime_correlation_ref on search fixture response');
   }
   const snapshotId = response.engine_decision.decision_snapshot.snapshot_id;
   const snapshotDecode = decodeSnapshotIdDetailed(snapshotId);
@@ -594,7 +444,7 @@ export async function runSearchFixture(
     throw new Error(JSON.stringify(snapshotDecode.error));
   }
   if (response.meta.determinism_fingerprint === undefined) {
-    throw new Error('missing determinism_fingerprint on replay fixture response');
+    throw new Error('missing determinism_fingerprint on search fixture response');
   }
   return {
     response,
@@ -602,7 +452,7 @@ export async function runSearchFixture(
       endpoint,
       responseFamily,
       runtimeMode: fixture.metadata?.runtime_mode,
-      usedLiveSnapshot,
+      usedLiveSnapshot: false,
       skipped: false,
       assertedFields: fixture.expected.golden_trace !== undefined
         ? [

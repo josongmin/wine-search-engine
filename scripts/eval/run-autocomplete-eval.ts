@@ -562,11 +562,23 @@ export function extractAutocompleteRankedEntityIds(responseBody: unknown): reado
   const suggestions = Array.isArray(body['suggestions'])
     ? body['suggestions'] as Record<string, unknown>[]
     : [];
+  if (suggestions.length > 0) {
+    return suggestions
+      .map((suggestion) => {
+        const entity = (suggestion['entity'] ?? {}) as Record<string, unknown>;
+        const entityId = entity['entity_id'] ?? entity['entityId'] ?? suggestion['entity_id'] ?? suggestion['entityId'];
+        return typeof entityId === 'string' ? entityId : '';
+      })
+      .filter((entityId) => entityId.length > 0);
+  }
 
-  return suggestions
-    .map((suggestion) => {
-      const entity = (suggestion['entity'] ?? {}) as Record<string, unknown>;
-      const entityId = entity['entity_id'] ?? entity['entityId'] ?? suggestion['entity_id'] ?? suggestion['entityId'];
+  const results = Array.isArray(body['results'])
+    ? body['results'] as Record<string, unknown>[]
+    : [];
+  return results
+    .map((result) => {
+      const entity = (result['entity'] ?? {}) as Record<string, unknown>;
+      const entityId = entity['entity_id'] ?? entity['entityId'];
       return typeof entityId === 'string' ? entityId : '';
     })
     .filter((entityId) => entityId.length > 0);
@@ -574,7 +586,10 @@ export function extractAutocompleteRankedEntityIds(responseBody: unknown): reado
 
 export function extractAutocompleteStatus(responseBody: unknown): AutocompleteStatus | undefined {
   if (typeof responseBody !== 'object' || responseBody === null) return undefined;
-  const status = (responseBody as Record<string, unknown>)['status'];
+  const body = responseBody as Record<string, unknown>;
+  const status = body['status']
+    ?? ((body['engine_decision'] as Record<string, unknown> | undefined)?.['decision_status'])
+    ?? ((body['engineDecision'] as Record<string, unknown> | undefined)?.['decisionStatus']);
   return status === 'resolved' || status === 'ambiguous' || status === 'failed'
     ? status
     : undefined;
@@ -654,7 +669,7 @@ export async function fetchLiveAutocompleteRankings(
   timeoutMs: number,
   concurrency: number,
 ): Promise<Map<string, RankedPrediction>> {
-  const endpoint = new URL('/v1/entity/autocomplete', apiUrl).toString();
+  const endpoint = new URL('/v1/search/lookup', apiUrl).toString();
   const mappings = await mapPool(
     cases,
     concurrency,

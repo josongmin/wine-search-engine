@@ -1,16 +1,16 @@
 /**
- * MiniLoopToolBundle — production tool definitions + dispatch ports for the
- * mini-loop's native `tool_use` driver.
+ * WineAgentLoopToolBundle — production tool definitions + dispatch ports for the
+ * wine-agent-loop's native `tool_use` driver.
  *
  * Track C handoff (architectural context):
  *  - `DeterministicRouter` emits a `multi-step` `ExecutionPlan` for the
  *    ~10–20% of queries that genuinely need ReAct-style multi-hop work.
- *  - `WineSearchOrchestrator` then dispatches that plan to `MiniLoopRunner`
- *    IFF a `miniLoopToolBundle` was wired into its deps (otherwise it
+ *  - `WineSearchOrchestrator` then dispatches that plan to `WineAgentLoopRunner`
+ *    IFF a `wineAgentLoopToolBundle` was wired into its deps (otherwise it
  *    short-circuits to Synthesizer Layer 4 "degraded" — see the orchestrator's
  *    multi-step branch).
  *  - This file is the production bundle: five `ToolDefinition`s (one per
- *    `KNOWN_AGENT_TOOL_NAMES`) plus the `MiniLoopToolPorts` that the runner's
+ *    `KNOWN_AGENT_TOOL_NAMES`) plus the `WineAgentLoopToolPorts` that the runner's
  *    tool dispatcher invokes. Without this wiring the new architecture
  *    silently falls back to Layer 4 — verified by Track C's earlier report.
  *
@@ -28,7 +28,7 @@
  *    bundled wiring test.
  *
  * Tool input contracts:
- *  - Schemas align with what `MiniLoopRunner`'s `invokeToolPort` dispatcher
+ *  - Schemas align with what `WineAgentLoopRunner`'s `invokeToolPort` dispatcher
  *    accepts. `search_wines` supports both direct `filters/preferences` and
  *    the richer structured field surface (`max_alcohol_pct`, `occasion`,
  *    `styles`, `wine_type`, `country`, ...), matching the agent-tools path.
@@ -54,7 +54,7 @@ import {
   buildSearchToolQueryField,
   validateSearchToolVintageRange,
 } from '../search/search-tool-contract.js';
-import type { MiniLoopToolPorts } from './mini-loop-schemas.js';
+import type { WineAgentLoopToolPorts } from './wine-agent-loop-schemas.js';
 
 // ---------------------------------------------------------------------------
 // Named constants (CLAUDE.md rule 15)
@@ -220,7 +220,7 @@ void ToolOptionalStringField;
 // ---------------------------------------------------------------------------
 // Tool descriptions — short, domain-grounded; the LLM reads these to decide
 // when to invoke. Kept ≤ ~200 chars so the static system block stays cache-
-// friendly. SSoT for tool semantics lives in `mini-loop.ts`'s dispatcher.
+// friendly. SSoT for tool semantics lives in `wine-agent-loop.ts`'s dispatcher.
 // ---------------------------------------------------------------------------
 
 const SEARCH_WINES_DESCRIPTION =
@@ -271,10 +271,10 @@ export const COMPARE_WINES_TOOL_DEF: ToolDefinition = {
 };
 
 /** Frozen production tool list. Module-scope const so every
- *  `buildMiniLoopToolBundle` call returns the exact same array identity —
+ *  `buildWineAgentLoopToolBundle` call returns the exact same array identity —
  *  prompt cache benefit on the Anthropic side and a simple equality check
  *  in tests. */
-const MINI_LOOP_TOOL_DEFS: readonly ToolDefinition[] = Object.freeze([
+const WINE_AGENT_LOOP_TOOL_DEFS: readonly ToolDefinition[] = Object.freeze([
   SEARCH_WINES_TOOL_DEF,
   LOOKUP_WINE_TOOL_DEF,
   GET_FOOD_PAIRINGS_TOOL_DEF,
@@ -283,34 +283,34 @@ const MINI_LOOP_TOOL_DEFS: readonly ToolDefinition[] = Object.freeze([
 ]);
 
 // ---------------------------------------------------------------------------
-// Bundle shape — matches `OrchestratorMiniLoopToolBundle` structurally so
+// Bundle shape — matches `OrchestratorWineAgentLoopToolBundle` structurally so
 // the orchestrator's deps slot accepts it without an explicit cast.
 // ---------------------------------------------------------------------------
 
-export interface MiniLoopToolBundle {
+export interface WineAgentLoopToolBundle {
   readonly tools: readonly ToolDefinition[];
-  readonly toolPorts: MiniLoopToolPorts;
+  readonly toolPorts: WineAgentLoopToolPorts;
 }
 
 /**
- * Construct the production mini-loop tool bundle.
+ * Construct the production wine-agent-loop tool bundle.
  *
  * The `tools` array is the SAME identity on every call (frozen module
  * const). Only the `toolPorts` wrapper changes — that's the per-container
  * dependency injection seam.
  */
-export function buildMiniLoopToolBundle(
-  toolPorts: MiniLoopToolPorts,
-): MiniLoopToolBundle {
+export function buildWineAgentLoopToolBundle(
+  toolPorts: WineAgentLoopToolPorts,
+): WineAgentLoopToolBundle {
   return {
-    tools: MINI_LOOP_TOOL_DEFS,
+    tools: WINE_AGENT_LOOP_TOOL_DEFS,
     toolPorts,
   };
 }
 
 // ---------------------------------------------------------------------------
 // Defensive parity assertions — if `KNOWN_AGENT_TOOL_NAMES` ever drifts from
-// the five production tools the mini-loop dispatcher knows about, the
+// the five production tools the wine-agent-loop dispatcher knows about, the
 // `satisfies KnownAgentToolName` checks above already fail at compile time.
 // We still surface a runtime assert here so a future SSoT mutation that
 // somehow type-checks (e.g. a *broader* enum) still trips a test.
@@ -318,7 +318,7 @@ export function buildMiniLoopToolBundle(
 
 /** The set of tool names this bundle exposes — for assertion-style imports
  *  in tests. Always equals `KNOWN_AGENT_TOOL_NAMES` by construction. */
-export const MINI_LOOP_TOOL_NAMES: readonly KnownAgentToolName[] = [
+export const WINE_AGENT_LOOP_TOOL_NAMES: readonly KnownAgentToolName[] = [
   'search_wines',
   'lookup_wine',
   'get_food_pairings',
@@ -326,19 +326,19 @@ export const MINI_LOOP_TOOL_NAMES: readonly KnownAgentToolName[] = [
   'compare_wines',
 ];
 
-// Compile-time guarantee: every name in MINI_LOOP_TOOL_NAMES exists in the
+// Compile-time guarantee: every name in WINE_AGENT_LOOP_TOOL_NAMES exists in the
 // SSoT enum. If `KNOWN_AGENT_TOOL_NAMES` shrinks, this fails at type-check.
-const _MINI_LOOP_TOOL_NAMES_SSOT_CHECK: ReadonlyArray<
+const _WINE_AGENT_LOOP_TOOL_NAMES_SSOT_CHECK: ReadonlyArray<
   (typeof KNOWN_AGENT_TOOL_NAMES)[number]
-> = MINI_LOOP_TOOL_NAMES;
-void _MINI_LOOP_TOOL_NAMES_SSOT_CHECK;
+> = WINE_AGENT_LOOP_TOOL_NAMES;
+void _WINE_AGENT_LOOP_TOOL_NAMES_SSOT_CHECK;
 
 // Compile-time guarantee in the OTHER direction: every name in
-// `KNOWN_AGENT_TOOL_NAMES` must also appear in `MINI_LOOP_TOOL_NAMES`. The
+// `KNOWN_AGENT_TOOL_NAMES` must also appear in `WINE_AGENT_LOOP_TOOL_NAMES`. The
 // subset-only check above silently passes when the SSoT *grows* (e.g. a new
-// `lookup_wine` is added to the SSoT but never wired into the mini-loop) —
+// `lookup_wine` is added to the SSoT but never wired into the wine-agent-loop) —
 // which was the exact drift that hid the lookup_wine wiring gap. This
 // reverse assignment closes the loop: now BOTH directions trip the
 // type-checker on any drift.
-const _SsoT_subset_of_Mini: ReadonlyArray<(typeof MINI_LOOP_TOOL_NAMES)[number]> = KNOWN_AGENT_TOOL_NAMES;
+const _SsoT_subset_of_Mini: ReadonlyArray<(typeof WINE_AGENT_LOOP_TOOL_NAMES)[number]> = KNOWN_AGENT_TOOL_NAMES;
 void _SsoT_subset_of_Mini;

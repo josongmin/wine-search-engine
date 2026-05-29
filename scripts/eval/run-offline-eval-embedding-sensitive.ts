@@ -4,8 +4,21 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
-import { writeEmbeddingSensitiveHumanGoldCorpus } from './build-embedding-sensitive-human-gold-corpus.js';
+import { loadConfig } from '../../src/config/env.js';
+import { createPgPool, shouldUsePgPool } from '../../src/infrastructure/db/pg-pool.js';
+import { loadSearchSnapshotRuntimeState } from '../../src/infrastructure/health/search-snapshot-readiness.js';
+import { buildEmbeddingSensitiveHumanGoldCorpus } from './build-embedding-sensitive-human-gold-corpus.js';
 import { resolveCliDataPathArg } from './cli-data-path.js';
+import {
+  applyResolvedHumanGoldRuntimeEntityIds,
+  assertHumanGoldRuntimeCoverage,
+  collectHumanGoldCatalogRows,
+  loadHumanGoldCatalogLookup,
+  resolveHumanGoldRuntimeEntityIds,
+  summarizeHumanGoldRuntimeCoverage,
+} from './embedding-sensitive-human-gold-runtime-corpus.js';
+import { isLocalApiUrl } from './live-benchmark-preflight.js';
+import type { GoldenQuery } from '../etl/types.js';
 
 interface Args {
   readonly input?: string;
@@ -203,6 +216,65 @@ function buildEmbeddingAblationReport(args: {
   };
 }
 
+interface ReadySnapshotResponse {
+  readonly snapshot_health?: {
+    readonly active_snapshot_id?: string | undefined;
+  } | undefined;
+}
+
+async function resolveTargetSnapshotId(apiUrl: string): Promise<string> {
+  const response = await fetch(`${apiUrl}/ready`, {
+    signal: AbortSignal.timeout(5_000),
+  }).catch(() => undefined);
+  if (response?.ok) {
+    const body = (await response.json()) as ReadySnapshotResponse;
+    const snapshotId = body.snapshot_health?.active_snapshot_id?.trim();
+    if ((snapshotId?.length ?? 0) > 0) {
+      return snapshotId!;
+    }
+  }
+
+  if (!isLocalApiUrl(apiUrl)) {
+    throw new Error(
+      'embedding-sensitive human-gold auto-corpus requires a local live runtime that exposes snapshot_health.active_snapshot_id, or an explicit --input/--fixture-corpus.',
+    );
+  }
+
+  return (await loadSearchSnapshotRuntimeState()).snapshotId;
+}
+
+async function buildSnapshotBoundHumanGoldCorpus(args: {
+  readonly apiUrl: string;
+}): Promise<readonly GoldenQuery[]> {
+  const queries = await buildEmbeddingSensitiveHumanGoldCorpus();
+  const snapshotId = await resolveTargetSnapshotId(args.apiUrl);
+  const config = loadConfig();
+  if (!shouldUsePgPool(config.pg)) {
+    throw new Error(
+      'embedding-sensitive human-gold runtime coverage requires Postgres config when targeting a live runtime.',
+    );
+  }
+
+  const pool = createPgPool(config.pg);
+  try {
+    const catalogLookup = await loadHumanGoldCatalogLookup();
+    const catalogRows = collectHumanGoldCatalogRows({
+      queries,
+      catalogLookup,
+    });
+    const resolution = await resolveHumanGoldRuntimeEntityIds(pool, snapshotId, catalogRows);
+    const summary = summarizeHumanGoldRuntimeCoverage({
+      queries,
+      snapshotId,
+      resolution,
+    });
+    assertHumanGoldRuntimeCoverage(summary);
+    return applyResolvedHumanGoldRuntimeEntityIds(queries, resolution.resolvedIds);
+  } finally {
+    await pool.end();
+  }
+}
+
 async function prepareEmbeddingSensitiveInput(args: Args): Promise<string | undefined> {
   if (args.input !== undefined) {
     return args.input;
@@ -215,9 +287,16 @@ async function prepareEmbeddingSensitiveInput(args: Args): Promise<string | unde
     '/tmp',
     `embedding-sensitive-human-gold-corpus-${process.pid}.jsonl`,
   );
-  const queries = await writeEmbeddingSensitiveHumanGoldCorpus({ outputPath });
+  const queries = await buildSnapshotBoundHumanGoldCorpus({
+    apiUrl: args.apiUrl,
+  });
+  await fs.writeFile(
+    outputPath,
+    queries.map((query) => JSON.stringify(query)).join('\n') + '\n',
+    'utf8',
+  );
   process.stdout.write(
-    `embedding-sensitive corpus: human-gold ${queries.length} queries -> ${outputPath}\n`,
+    `embedding-sensitive corpus: human-gold snapshot-bound ${queries.length} queries -> ${outputPath}\n`,
   );
   return outputPath;
 }

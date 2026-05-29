@@ -11,12 +11,10 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createTestServer, closeTestServer, type TestServer } from './helpers/test-server.js';
 import {
-  parseInterpretResponse,
   parseSearchResponse,
   postJson,
   getSearchDecisionStatus,
 } from './helpers/http-transport.js';
-import { fetchReplaySnapshot, makeReplaySnapshot } from './helpers/replay-snapshot.js';
 
 let server: TestServer;
 
@@ -78,20 +76,6 @@ describe('Korean entity resolution', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json() as Record<string, unknown>;
     expect('clarification' in body).toBe(true);
-  });
-
-  it("'오푸스원' interpret → normalizedQuery preserves Korean (no \\u escape sequences)", async () => {
-    const res = await post('/v1/search/interpret', { query: '오푸스원' });
-
-    expect(res.statusCode).toBe(200);
-    const plan = parseInterpretResponse(res);
-    const normalized = plan.normalized_query;
-    // The raw JSON string must not contain \u-escaped codepoints for Korean characters
-    // (i.e. the JSON serializer must emit the characters directly, not as \uXXXX)
-    expect(res.body).not.toMatch(/\\u[0-9a-fA-F]{4}/);
-    // And the value itself must be a non-empty string
-    expect(typeof normalized).toBe('string');
-    expect(normalized.length).toBeGreaterThan(0);
   });
 
   it("'Chateau Margaux' (no accent) entity mode → resolves (decisionStatus not 'failed')", async () => {
@@ -189,47 +173,6 @@ describe('Content-Type enforcement', () => {
     });
 
     expect(response.statusCode).toBe(200);
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Snapshot field mismatch (RFC-015)
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('Snapshot field mismatch (RFC-015)', () => {
-  const MATCHING_SNAPSHOT = makeReplaySnapshot();
-
-  it.each([
-    ['policy_rule_version mismatch', { ...MATCHING_SNAPSHOT, policy_rule_version: '9.9.9' }],
-    ['threshold_profile_id mismatch', { ...MATCHING_SNAPSHOT, threshold_profile_id: 'custom-profile' }],
-    ['planner_version mismatch', { ...MATCHING_SNAPSHOT, planner_version: '2.0.0' }],
-    ['model_versions mismatch', { ...MATCHING_SNAPSHOT, model_versions: { embedding: 'text-embedding-3-small-v2' } }],
-    ['feature_flags mismatch (extra flag)', { ...MATCHING_SNAPSHOT, feature_flags: { experimental: true } }],
-  ])('%s → 409 SNAPSHOT_MISMATCH', async (_label, decision_snapshot) => {
-    const res = await post('/v1/search/replay', {
-      query: 'Opus One 2018',
-      decision_snapshot,
-    });
-
-    expect(res.statusCode).toBe(409);
-    const body = res.json() as Record<string, unknown>;
-    const error = body['error'] as Record<string, unknown>;
-    expect(error['code']).toBe('SNAPSHOT_MISMATCH');
-  });
-
-  it('exact matching snapshot → 200 (control case)', async () => {
-    const matchingSnapshot = await fetchReplaySnapshot(server.app, {
-      query: 'Opus One 2018',
-    });
-    const res = await post('/v1/search/replay', {
-      query: 'Opus One 2018',
-      decision_snapshot: matchingSnapshot,
-    });
-
-    expect(res.statusCode).toBe(200);
-    const body = parseSearchResponse(res);
-    expect(body).toHaveProperty('engine_decision');
-    expect(body).toHaveProperty('results');
   });
 });
 

@@ -4,7 +4,6 @@ import { createDefaultRegistry } from '../command-registry.js';
 import type { CliIo } from '../io.js';
 import type { CommandContext } from '../../../application/cli/context/command-context.js';
 import type { AuthFacadePort } from '../../../application/cli/port/auth-facade.port.js';
-import { CliError } from '../../../application/cli/command/cli-error.js';
 import {
   EXIT_SUCCESS,
   EXIT_USAGE,
@@ -23,13 +22,8 @@ function makeCapture(): { io: CliIo; stdout: () => string; stderr: () => string 
   };
 }
 
-interface FakeContextOverrides {
-  readonly rawApiCall?: () => Promise<never>;
-}
-
 function fakeContext(
   auth: Partial<AuthFacadePort>,
-  overrides: FakeContextOverrides = {},
 ): CommandContext {
   return {
     target: 'local',
@@ -42,12 +36,7 @@ function fakeContext(
     facades: {
       auth: auth as AuthFacadePort,
       search: { __facade: 'search' } as never,
-      entity: { __facade: 'entity' } as never,
       wineSearch: { __facade: 'wine-search' } as never,
-      rawApi: {
-        call: overrides.rawApiCall ?? (() => Promise.resolve({ status: 200, statusText: 'OK', headers: {}, body: {} } as never)),
-        openApi: () => Promise.resolve({ path: '/openapi.json', document: {} }),
-      } as never,
     },
   };
 }
@@ -70,12 +59,7 @@ describe('CLI smoke proof rail', () => {
     expect(out).toContain('auth status');
     expect(out).toContain('auth doctor');
     expect(out).toContain('search run');
-    expect(out).toContain('search hybrid');
-    expect(out).toContain('entity resolve');
-    expect(out).toContain('entity autocomplete');
     expect(out).toContain('wine-search run');
-    expect(out).toContain('api call');
-    expect(out).toContain('api openapi');
 
     // The hidden kernel self-test must NOT appear in the documented surface.
     expect(out).not.toContain('system ping');
@@ -106,32 +90,6 @@ describe('CLI smoke proof rail', () => {
     });
     expect(code).toBe(EXIT_USAGE);
     expect(cap.stderr()).toContain('Incomplete command');
-  });
-
-  it('api call against default local target reports usage error (exit 2)', async () => {
-    // Mirrors the production LocalRawApiInvoker contract: local target rejects
-    // raw HTTP calls with CliError.usage. Keeps the test offline by injecting
-    // a buildContext whose rawApi.call deterministically rejects with the same
-    // usage error — proves the user-error vs runtime-error distinction.
-    const cap = makeCapture();
-    const code = await runCli(['api', 'call', 'GET', '/health'], {
-      io: cap.io,
-      registry: createDefaultRegistry(),
-      buildContext: () =>
-        fakeContext(
-          {},
-          {
-            rawApiCall: () =>
-              Promise.reject(
-                CliError.usage(
-                  'Local api call is unsupported. Use typed commands for local execution or switch to --target remote.',
-                ),
-              ),
-          },
-        ),
-    });
-    expect(code).toBe(EXIT_USAGE);
-    expect(cap.stderr()).toContain('Local api call is unsupported');
   });
 
   it('hidden system ping runs end-to-end (kernel self-test)', async () => {

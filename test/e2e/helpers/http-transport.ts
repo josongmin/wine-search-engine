@@ -1,17 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodType } from 'zod';
 import {
-  AutocompleteResponseSchema,
   ComparisonSearchResponseSchema,
   ErrorResponseSchema,
-  InterpretResponseSchema,
-  ResolveResponseSchema,
   SearchResponseSchema,
-  type AutocompleteResponseBody,
   type ComparisonSearchResponseBody,
   type ErrorResponseBody,
-  type InterpretResponseBody,
-  type ResolveResponseBody,
   type SearchResponseBody,
 } from '../../../src/interface/http/schemas/search-response.schema.js';
 
@@ -44,14 +38,6 @@ export async function postJson(
     body: response.body,
     json: () => JSON.parse(response.body) as unknown,
   };
-}
-
-export async function postReplayJson(
-  app: FastifyInstance,
-  body: unknown,
-  headers?: Record<string, string>,
-): Promise<JsonHttpResponse> {
-  return postJson(app, '/v1/search/replay', body, headers);
 }
 
 export async function getJson(
@@ -121,18 +107,6 @@ export function parseComparisonResponse(response: JsonHttpResponse): ComparisonS
 
 export function parseErrorResponse(response: JsonHttpResponse): ErrorResponseBody {
   return parseWithSchema(response, ErrorResponseSchema, 'error response');
-}
-
-export function parseInterpretResponse(response: JsonHttpResponse): InterpretResponseBody {
-  return parseWithSchema(response, InterpretResponseSchema, 'interpret response');
-}
-
-export function parseResolveResponse(response: JsonHttpResponse): ResolveResponseBody {
-  return parseWithSchema(response, ResolveResponseSchema, 'resolve response');
-}
-
-export function parseAutocompleteResponse(response: JsonHttpResponse): AutocompleteResponseBody {
-  return parseWithSchema(response, AutocompleteResponseSchema, 'autocomplete response');
 }
 
 export function getSearchDecision(body: SearchResponseBody): SearchResponseBody['engine_decision'] {

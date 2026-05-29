@@ -8,17 +8,9 @@ function readWorkspaceFile(relativePath: string): string {
   return fs.readFileSync(path.join(workspaceRoot, relativePath), 'utf8');
 }
 
-function readWorkspaceFileIfExists(relativePath: string): string | null {
-  const fullPath = path.join(workspaceRoot, relativePath);
-  return fs.existsSync(fullPath) ? fs.readFileSync(fullPath, 'utf8') : null;
-}
-
 describe('replay fixture CI lane parity', () => {
   const workflow = readWorkspaceFile('.github/workflows/replay-fixtures.yml');
   const bootstrapSmoke = readWorkspaceFile('scripts/bootstrap-smoke.sh');
-  // wave4Board is a bugbash doc that may be cleaned up — assertions are gated
-  // on its presence so the parity test does not break when docs are archived.
-  const wave4Board = readWorkspaceFileIfExists('docs/bugbash/apr-6-hardening-wave4.md');
   const packageJson = JSON.parse(readWorkspaceFile('package.json')) as {
     readonly scripts: Record<string, string>;
   };
@@ -37,11 +29,6 @@ describe('replay fixture CI lane parity', () => {
     expect(bootstrapSmoke).toContain('pnpm run test:e2e:replay:fixtures:self-contained');
     expect(bootstrapSmoke).toContain("execution_lane='self_contained'");
     expect(bootstrapSmoke).toContain('self-contained fixtures must not declare requires_runtime_capability');
-    if (wave4Board !== null) {
-      expect(wave4Board).toContain(
-        '| Replay fixture executable subset | 완료 | `endpoint` discriminator 기준으로 self-contained `/v1/search` + `/v1/search/replay` fixture 모두 HTTP 실행 가능 |',
-      );
-    }
   });
 
   it('keeps the runtime-required in-memory lane executable and aligned across workflow, scripts, and package scripts', () => {
@@ -59,11 +46,6 @@ describe('replay fixture CI lane parity', () => {
     );
     expect(bootstrapSmoke).toContain('runtime-required fixtures execute in the dedicated capability-aware lane');
     expect(bootstrapSmoke).toContain('pnpm run test:e2e:replay:fixtures:runtime-required');
-    if (wave4Board !== null) {
-      expect(wave4Board).toContain(
-        '| Full replay HTTP/runtime matrix | 완료 | `execution_lane` 기준 self-contained + runtime-required replay fixture를 capability-aware in-memory HTTP lane에서 실행하고 CI에 고정 |',
-      );
-    }
   });
 
   it('keeps the full-runtime replay lane aligned across workflow and package scripts without polluting bootstrap smoke', () => {

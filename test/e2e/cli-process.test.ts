@@ -50,7 +50,7 @@ describe('wine CLI (process boundary, offline)', () => {
     expect(r.code).toBe(0);
     expect(r.stdout).toContain('Usage:');
     expect(r.stdout).toContain('Global options:');
-    for (const cmd of ['auth status', 'search run', 'entity resolve', 'wine-search run', 'api call', 'api openapi']) {
+    for (const cmd of ['auth status', 'search run', 'wine-search run']) {
       expect(r.stdout).toContain(cmd);
     }
     // hidden kernel self-test must not surface in the help tree
@@ -88,20 +88,6 @@ describe('wine CLI (process boundary, offline)', () => {
     expect(payload.ok).toBe(true);
     expect(payload.target).toBe('local');
     expect(payload.requestId).toMatch(/[0-9a-f-]{36}/);
-  });
-
-  it('api call on the local target is a usage error (exit 2)', async () => {
-    const r = await runCli(['api', 'call', 'GET', '/health']);
-    expect(r.code).toBe(2);
-    expect(r.stderr).toContain('Local api call is unsupported');
-  });
-
-  it('api openapi builds the in-process bridge document (exit 0)', async () => {
-    const r = await runCli(['api', 'openapi', '--json']);
-    expect(r.code).toBe(0);
-    const payload = JSON.parse(r.stdout) as { path: string; document: { openapi?: string } };
-    expect(payload.path).toBe('/openapi.json');
-    expect(typeof payload.document.openapi).toBe('string');
   });
 
   it('auth path reports the Codex auth file location (exit 0)', async () => {

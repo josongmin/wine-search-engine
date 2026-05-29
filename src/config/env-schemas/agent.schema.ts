@@ -55,10 +55,4 @@ export const AgentEnvSchema = z.object({
     .enum(['true', 'false'])
     .transform((v) => v === 'true')
     .default('false'),
-
-  /**
-   * When true, GET /v1/agent/benchmark-scenarios returns the quick-profile scenario list.
-   * When false, that route responds with 404. When unset, defaults to on in non-production.
-   */
-  ENABLE_AGENT_BENCHMARK_UI: z.enum(['true', 'false']).optional(),
 });

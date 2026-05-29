@@ -1,9 +1,9 @@
 /**
  * POST /v1/wine-search — Plan-then-Execute wine search endpoint.
  *
- * Public HTTP surface for the new orchestrator (`WineSearchOrchestrator`)
- * that replaces the ReAct-style `/v1/agent` loop. This is a deliberate
- * breaking redesign:
+ * Public HTTP surface for the canonical orchestrator
+ * (`WineSearchOrchestrator`). This is a deliberate
+ * redesign:
  *
  *   - Steps are uniform (every step carries a `tool_calls[]` and
  *     `observations[]` array, even when there is only one of each — the

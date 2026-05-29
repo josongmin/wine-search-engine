@@ -1,10 +1,10 @@
 /**
- * ToolResultCachePort — driven-side port for memoizing PtE mini-loop tool
+ * ToolResultCachePort — driven-side port for memoizing PtE wine-agent-loop tool
  * dispatches.
  *
  * Identical `(toolName, normalizedInput)` invocations re-execute the entire
  * downstream pipeline (Vespa retrieval, PG queries, etc.). This port lets
- * the mini-loop short-circuit the second-and-onward call with a cache hit.
+ * the wine-agent-loop short-circuit the second-and-onward call with a cache hit.
  *
  * Design rules:
  *  - Port lives in `application/` (the consumer-owned namespace) so the
@@ -13,7 +13,7 @@
  *    deterministic mock instead.
  *  - Fail-open contract: any infra failure on the adapter side MUST surface
  *    as `null` (for get) or a no-op (for set); the cache MUST NOT throw into
- *    the mini-loop. The caller never sees Redis errors.
+ *    the wine-agent-loop. The caller never sees Redis errors.
  *  - TTLs are sourced from the per-tool SSoT in
  *    `@shared/constants/tool-cache-ttl.js`; callers pass the resolved value
  *    explicitly so the port surface stays tool-agnostic.
@@ -44,7 +44,7 @@ export interface ToolResultRecord {
 export interface ToolResultCachePort {
   /**
    * Returns the cached record on hit, `null` on miss / corrupt entry /
-   * infra error. MUST NOT throw — fail-open is required by the mini-loop's
+   * infra error. MUST NOT throw — fail-open is required by the wine-agent-loop's
    * pre-flight check contract.
    */
   get(key: ToolCacheKey): Promise<ToolResultRecord | null>;

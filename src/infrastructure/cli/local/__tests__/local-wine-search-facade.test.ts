@@ -20,7 +20,7 @@ function buildFakeOrchestratorResult(): unknown {
       cacheCreationTokens: 0,
     },
     intent: 'wine_search',
-    planKind: 'mini_loop',
+    planKind: 'wine_agent_loop',
     terminationReason: 'final_answer',
     layer: 'agent',
     policyBlocked: false,

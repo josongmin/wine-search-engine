@@ -16,11 +16,11 @@
  *    flows through the synthesizer).
  *  - Router rejected → Layer 4 / blocked.
  *  - ExecutionRunner returns 'error' → synthesizer Layer 4 fallback.
- *  - ExecutionRunner returns 'multi-step-required' → handoff to mini-loop
+ *  - ExecutionRunner returns 'multi-step-required' → handoff to wine-agent-loop
  *    fallback step → synthesizer runs.
- *  - Multi-step plan via miniLoopRunner → executionSteps grows by one per
- *    mini-loop step + analyzer + router + synthesizer.
- *  - MiniLoop terminates with `loop_detected` → terminationReason dominates
+ *  - Multi-step plan via wineAgentLoopRunner → executionSteps grows by one per
+ *    wine-agent-loop step + analyzer + router + synthesizer.
+ *  - WineAgentLoop terminates with `loop_detected` → terminationReason dominates
  *    the synthesizer's softer 'answer' transition.
  *  - Aborted mid-analyzer → terminationReason='aborted' (returned, NOT
  *    thrown — see contract doc on `WineSearchOrchestrator.execute`).
@@ -49,13 +49,13 @@ import type { SearchResponseV1 } from '@domain/response/model/search-response.js
 import { DeterministicRouter } from '../deterministic-router.js';
 import type { SearchUseCasePort } from '../execution-runner.js';
 import { ExecutionRunner } from '../execution-runner.js';
-import { MiniLoopRunner } from '../mini-loop.js';
+import { WineAgentLoopRunner } from '../wine-agent-loop.js';
 import { QueryAnalyzerService } from '../query-analyzer.js';
 import { SynthesisRunner } from '../synthesis-runner.js';
 import { type SynthesisAnswer } from '../synthesis-schemas.js';
 import {
   WineSearchOrchestrator,
-  type OrchestratorMiniLoopToolBundle,
+  type OrchestratorWineAgentLoopToolBundle,
   type WineSearchInput,
 } from '../wine-search-orchestrator.js';
 import {
@@ -163,7 +163,7 @@ function makeSearchPort(
 function buildOrchestrator(opts?: {
   llm?: StubLlm;
   searchPort?: SearchUseCasePort;
-  miniLoopToolBundle?: OrchestratorMiniLoopToolBundle;
+  wineAgentLoopToolBundle?: OrchestratorWineAgentLoopToolBundle;
   clockSteps?: readonly number[]; // sequential clock.now() values
 }) {
   const llm = opts?.llm ?? makeStubLlm();
@@ -173,7 +173,7 @@ function buildOrchestrator(opts?: {
   const executionRunner = new ExecutionRunner({
     searchUseCase: opts?.searchPort ?? makeSearchPort(),
   });
-  const miniLoopRunner = new MiniLoopRunner({ structuredLlm: llm, logger });
+  const wineAgentLoopRunner = new WineAgentLoopRunner({ structuredLlm: llm, logger });
   const synthesisRunner = new SynthesisRunner({ structuredLlm: llm, logger });
 
   const clockSteps = opts?.clockSteps ?? [];
@@ -192,11 +192,11 @@ function buildOrchestrator(opts?: {
     queryAnalyzer,
     router,
     executionRunner,
-    miniLoopRunner,
+    wineAgentLoopRunner,
     synthesisRunner,
     logger,
     clock,
-    ...(opts?.miniLoopToolBundle !== undefined ? { miniLoopToolBundle: opts.miniLoopToolBundle } : {}),
+    ...(opts?.wineAgentLoopToolBundle !== undefined ? { wineAgentLoopToolBundle: opts.wineAgentLoopToolBundle } : {}),
   });
   return { orchestrator, logger, llm };
 }
@@ -403,15 +403,15 @@ describe('WineSearchOrchestrator — runner outcomes', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Multi-step (MiniLoop) path
+// Multi-step (WineAgentLoop) path
 // ---------------------------------------------------------------------------
 
-describe('WineSearchOrchestrator — multi-step (mini-loop)', () => {
+describe('WineSearchOrchestrator — multi-step (wine-agent-loop)', () => {
   it('orchestrator-level token accumulation flows through analyzer→synthesizer', async () => {
     // Pinned invariant: the orchestrator routes a generic Korean
     // recommendation query through analyzer → router → runner →
     // synthesizer and accumulates TokenUsage from each LLM call. The
-    // mini-loop branch itself is exercised in mini-loop.test.ts; this
+    // wine-agent-loop branch itself is exercised in wine-agent-loop.test.ts; this
     // test verifies the orchestrator's wiring + accumulator math.
     //
     // The synthesizer may make 1 or 2 structured-LLM calls depending on
@@ -436,7 +436,7 @@ describe('WineSearchOrchestrator — multi-step (mini-loop)', () => {
     expect(result.tokenUsage.outputTokens).toBeGreaterThanOrEqual(70);
   });
 
-  it('multi-step plan without miniLoopToolBundle → degraded fallback (terminationReason=fallback)', async () => {
+  it('multi-step plan without wineAgentLoopToolBundle → degraded fallback (terminationReason=fallback)', async () => {
     // Construct an analyzer/router combo that emits a `multi-step` plan.
     // The cleanest way is via a query that has a pairing-extractor hit
     // but no anchor + no required tool decision — historically this
@@ -538,7 +538,7 @@ describe('WineSearchOrchestrator — phase ordering', () => {
     const { orchestrator } = buildOrchestrator({ llm, searchPort });
     const result = await orchestrator.execute(runInput({ query: 'Pinot Noir under $50' }));
 
-    const allowedSources = new Set(['analyzer', 'router', 'runner', 'mini_loop', 'synthesizer']);
+    const allowedSources = new Set(['analyzer', 'router', 'runner', 'wine_agent_loop', 'synthesizer']);
     for (let i = 0; i < result.executionSteps.length; i++) {
       const step = result.executionSteps[i];
       expect(step).toBeDefined();

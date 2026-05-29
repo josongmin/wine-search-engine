@@ -4,14 +4,11 @@ import {
   MAX_QUERY_BUDGET_DENSE_CALLS,
   MAX_QUERY_BUDGET_LATENCY_MS,
   MAX_QUERY_BUDGET_RERANK_LIMIT,
-  MAX_SEARCH_SHORT_STRING_LIST,
   MAX_SESSION_ENTITY_ID_CHARS,
   MAX_SESSION_ID_CHARS,
   MAX_SESSION_PREVIOUS_ENTITIES,
 } from '../constants.js';
 import {
-  DecisionSnapshotSchema,
-  HybridOptionsSchema,
   QueryBudgetSchema,
   QueryStringSchema,
   SearchContextSchema,
@@ -140,41 +137,3 @@ export const LookupRequestSchema = withLookupAliases({
 });
 
 export type LookupRequestBody = z.infer<typeof LookupRequestSchema>;
-
-export const ReplayRequestSchema = withRequestAliases({
-  query: QueryStringSchema,
-  decision_snapshot: DecisionSnapshotSchema,
-  context: SearchContextSchema.optional(),
-  options: SearchOptionsSchema.optional(),
-  expected_response_hash: z.string().min(1).optional(),
-  expected_determinism_fingerprint: z.string().min(1).optional(),
-  preflight_honesty_contract: z.object({
-    execution_mode: z.enum(['authoritative', 'degraded', 'heuristic', 'advisory']),
-    degradation_reasons: z.array(z.string().min(1)).max(MAX_SEARCH_SHORT_STRING_LIST),
-    blocking_eligible: z.boolean().optional(),
-  }).strict().optional(),
-});
-
-export type ReplayRequestBody = z.infer<typeof ReplayRequestSchema>;
-
-export const InterpretRequestSchema = withRequestAliases({
-  query: QueryStringSchema,
-  context: SearchContextSchema.optional(),
-});
-
-export type InterpretRequestBody = z.infer<typeof InterpretRequestSchema>;
-
-export const ResolveRequestSchema = withRequestAliases({
-  query: QueryStringSchema,
-  context: SearchContextSchema.optional(),
-});
-
-export type ResolveRequestBody = z.infer<typeof ResolveRequestSchema>;
-
-export const HybridRequestSchema = withRequestAliases({
-  query: QueryStringSchema,
-  context: SearchContextSchema.optional(),
-  options: HybridOptionsSchema.optional(),
-});
-
-export type HybridRequestBody = z.infer<typeof HybridRequestSchema>;

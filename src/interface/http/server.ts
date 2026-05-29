@@ -15,23 +15,14 @@ import { registerRequestContext } from './middleware/request-context.js';
 import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
 import { deepKeysToSnake } from './middleware/snake-case-hook.js';
 import { registerSearchRoute } from './routes/search.route.js';
-import { registerInternalBenchmarkRoute } from './routes/internal-benchmark.route.js';
 import { registerLookupRoute } from './routes/lookup.route.js';
-import { registerBatchSearchRoute } from './routes/batch-search.route.js';
-import { registerReplayRoute } from './routes/replay.route.js';
-import { registerInterpretRoute } from './routes/interpret.route.js';
-import { registerResolveRoute } from './routes/resolve.route.js';
-import { registerAutocompleteRoute } from './routes/autocomplete.route.js';
-import { registerHybridRoute } from './routes/hybrid.route.js';
 import {
   registerHealthRoutes,
   startEventLoopHeartbeat,
   type HealthRouteOptions,
 } from './routes/health.route.js';
-import { registerClaudeToolsRoute } from './routes/claude-tools.route.js';
 import { registerWatchlistRoute } from './routes/watchlist.route.js';
 import { registerFeedbackRoute } from './routes/feedback.route.js';
-import { registerAgentBenchmarkScenariosRoute } from './routes/agent-benchmark-scenarios.route.js';
 import { registerWineSearchRoute } from './routes/wine-search.route.js';
 import { registerOpenApiRoute } from './routes/openapi.route.js';
 import type { HttpServerDeps } from './routes/route-deps.js';
@@ -103,11 +94,6 @@ export interface ServerOptions {
    * @default 30000
    */
   readonly requestTimeout?: number;
-  /**
-   * Expose GET /v1/agent/benchmark-scenarios (quick-profile scenario list for web lab).
-   * When omitted, enabled for non-production NODE_ENV.
-   */
-  readonly enableAgentBenchmarkUi?: boolean;
 }
 
 async function registerCorsSupport(
@@ -273,7 +259,6 @@ export async function createServer(
   // In production: allow only explicit CORS_ALLOWED_ORIGINS entries.
   // Uses @fastify/cors via registerCorsSupport.
   const nodeEnv = options?.nodeEnv ?? 'development';
-  const enableAgentBenchmarkUi = options?.enableAgentBenchmarkUi ?? nodeEnv !== 'production';
   const allowedOrigins = options?.corsAllowedOrigins ?? '';
   if (options?.enableCors ?? true) {
     await registerCorsSupport(app, { nodeEnv, allowedOrigins });
@@ -392,32 +377,20 @@ export async function createServer(
       ? { metricsDebugSecret: resolvedMetricsDebugSecret }
       : {}),
   });
-  registerClaudeToolsRoute(app, deps);
   registerSearchRoute(app, {
     ...deps,
     wineSearchOrchestrator: deps.wineSearch?.wineSearchOrchestrator,
   });
-  registerInternalBenchmarkRoute(app, deps);
   registerLookupRoute(app, deps);
-  registerBatchSearchRoute(app, deps);
-  registerReplayRoute(app, deps);
-  registerInterpretRoute(app, deps);
-  registerResolveRoute(app, deps);
-  if (deps.autocompleteUseCase !== undefined) {
-    registerAutocompleteRoute(app, { autocompleteUseCase: deps.autocompleteUseCase });
-  }
-  registerHybridRoute(app, deps);
   registerWatchlistRoute(app, deps);
   registerFeedbackRoute(app, deps);
   if (deps.wineSearch !== undefined) {
-    // Plan-then-Execute `/v1/wine-search` — the canonical agentic entry point
-    // after the 3.0.0 cutover (replaces legacy `/v1/agent` ReAct surface).
+    // Plan-then-Execute `/v1/wine-search` — the canonical agentic entry point.
     // Registration requires an Anthropic credential at startup.
     registerWineSearchRoute(app, {
       wineSearchOrchestrator: deps.wineSearch.wineSearchOrchestrator,
     });
   }
-  registerAgentBenchmarkScenariosRoute(app, { enabled: enableAgentBenchmarkUi });
   registerOpenApiRoute(app);
 
   // Epic 3: Optional evaluation run at startup (fire-and-forget)

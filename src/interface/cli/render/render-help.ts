@@ -48,7 +48,8 @@ export function renderHelp(registry: CommandRegistry, io: CliIo): void {
     'Examples:',
     '  wine auth doctor --json',
     '  wine search run --q "opus one 2018" --target local --json',
-    '  wine api call GET /openapi.json --target remote --base-url http://localhost:4000',
+    '  wine search run --q "barolo" --retrieval-mode hybrid --target remote --json',
+    '  wine wine-search run --q "스테이크랑 마실 와인 추천해줘" --json',
   );
 
   io.write(`${lines.join('\n')}\n`);

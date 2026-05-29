@@ -7,9 +7,7 @@ import type { CommandContext } from '../../../application/cli/context/command-co
 import type { CommandResult } from '../../../application/cli/context/command-result.js';
 import type { AuthFacadePort } from '../../../application/cli/port/auth-facade.port.js';
 import type { SearchFacadePort } from '../../../application/cli/port/search-facade.port.js';
-import type { EntityFacadePort } from '../../../application/cli/port/entity-facade.port.js';
 import type { WineSearchFacadePort } from '../../../application/cli/port/wine-search-facade.port.js';
-import type { RawApiInvokerPort } from '../../../application/cli/port/raw-api-invoker.port.js';
 import { CliError } from '../../../application/cli/command/cli-error.js';
 import {
   EXIT_AUTH,
@@ -46,9 +44,7 @@ function fakeContext(
   auth: Partial<AuthFacadePort>,
   overrides: Partial<{
     search: SearchFacadePort;
-    entity: EntityFacadePort;
     wineSearch: WineSearchFacadePort;
-    rawApi: RawApiInvokerPort;
     readTextFile: (path: string) => Promise<string>;
   }> = {},
 ): CommandContext {
@@ -66,25 +62,12 @@ function fakeContext(
         overrides.search
         ?? ({
           run: () => Promise.resolve({ ok: true }),
-          hybrid: () => Promise.resolve({ ok: true }),
         } as SearchFacadePort),
-      entity:
-        overrides.entity
-        ?? ({
-          resolve: () => Promise.resolve({ status: 'ok', candidates: [], topEntity: null, decision_trace_ref: 'd', authority_trace_ref: 'a' }),
-          autocomplete: () => Promise.resolve({ status: 'ok', suggestions: [], decision_trace_ref: 'd', authority_trace_ref: 'a' }),
-        } as EntityFacadePort),
       wineSearch:
         overrides.wineSearch
         ?? ({
           run: () => Promise.resolve({ answer: 'ok' }),
         } as WineSearchFacadePort),
-      rawApi:
-        overrides.rawApi
-        ?? ({
-          call: () => Promise.resolve({ status: 200, statusText: 'OK', headers: {}, body: {} }),
-          openApi: () => Promise.resolve({ path: '/openapi.json', document: {} }),
-        } as RawApiInvokerPort),
     },
   };
 }
@@ -224,41 +207,11 @@ describe('runCli', () => {
           {
             search: {
               run: (input) => Promise.resolve({ echoed_query: input.query }),
-              hybrid: () => Promise.resolve({}),
             },
           },
         ),
     });
     expect(code).toBe(EXIT_SUCCESS);
     expect(JSON.parse(cap.stdout())).toEqual({ echoed_query: 'opus one 2018' });
-  });
-
-  it('loads @file body in api call and returns execution exit code on http error', async () => {
-    const cap = makeCapture();
-    const code = await runCli(['api', 'call', 'POST', '/v1/search', '--body', '@/tmp/req.json', '--json'], {
-      io: cap.io,
-      buildContext: () =>
-        fakeContext(
-          {},
-          {
-            readTextFile: () => Promise.resolve('{"query":"opus one"}'),
-            rawApi: {
-              call: (_input) =>
-                Promise.resolve({
-                  status: 422,
-                  statusText: 'Unprocessable Entity',
-                  headers: { 'content-type': 'application/json' },
-                  body: { error: 'bad' },
-                  rawText: '{"error":"bad"}',
-                }),
-              openApi: () => Promise.resolve({ path: '/openapi.json', document: {} }),
-            },
-          },
-        ),
-    });
-    expect(code).toBe(EXIT_EXECUTION);
-    const payload = JSON.parse(cap.stdout()) as { status: number; body: { error: string } };
-    expect(payload.status).toBe(422);
-    expect(payload.body.error).toBe('bad');
   });
 });

@@ -1,5 +1,5 @@
 /**
- * MiniLoopRunner — the lean ReAct loop for genuinely multi-hop queries.
+ * WineAgentLoopRunner — the lean ReAct loop for genuinely multi-hop queries.
  *
  * Sits between `DeterministicRouter` (which decides multi-step is needed)
  * and `SynthesisRunner` (which composes the final answer). The runner
@@ -20,7 +20,7 @@
  *     `recordParallelBatch` (atomic across a batch) and reacts to
  *     `loop_detected` by surfacing an explicit observation back to the
  *     model. After
- *     `MINI_LOOP_LOOP_DETECTED_TERMINATE_COUNT` rejections the loop
+ *     `WINE_AGENT_LOOP_LOOP_DETECTED_TERMINATE_COUNT` rejections the loop
  *     terminates.
  *  4. Per-step timeout is enforced via `withTimeout`
  *     (SSoT — `agent-tool-execution-support.ts`). Abort listeners are
@@ -30,7 +30,7 @@
  *  6. Tool dispatch uses `buildToolOutcome`
  *     (SSoT — `agent-tool-execution-support.ts`). No fabricated outcomes.
  *  7. Directive copy is Korean when `analysis.hangulDominant`, English
- *     otherwise (CLAUDE.md i18n discipline — see `mini-loop-schemas.ts`).
+ *     otherwise (CLAUDE.md i18n discipline — see `wine-agent-loop-schemas.ts`).
  */
 
 import { createHash } from 'node:crypto';
@@ -55,26 +55,24 @@ import {
 } from '../agent/agent-tool-execution-support.js';
 import { normalizeLookupWineInput } from '../search/lookup-wine-execution.js';
 import {
-  buildSearchToolStructuredFilters,
-  buildSearchToolStructuredPreferences,
   sanitizeOptionalToolNulls,
 } from '../search/search-tool-contract.js';
 import { applySearchToolBudgetResultPolicy } from '../search/search-tool-result-policy.js';
 import {
+  buildFoodPairingToolUseCaseInput,
+  buildSearchWinesToolUseCaseInput,
+  CALLER_CONTROLLED_FOOD_PAIRING_INTENT,
+} from '../search/agent-tool-request-adapter.js';
+import {
   buildCompareWinesExecutionRequest,
   buildDrinkingWindowRequest,
-  buildFoodPairingFilters,
-  buildFoodPairingPreferences,
-  buildFoodPairingQuery,
   resolveFoodPairingBudgetKrw,
 } from '../search/tool-execution-support.js';
 import { KNOWN_AGENT_TOOL_NAMES_DISPLAY } from '@domain/agent/model/agent-tool-attempt-schema.js';
 import { KRW_PER_USD_APPROXIMATE } from '@domain/shared/constants.js';
 import { toolResultCacheTtlSeconds } from '@domain/shared/constants/tool-cache-ttl.js';
-import { stableStringify } from '@domain/shared/utils/stable-stringify.js';
 import {
   createCanonicalEntityId,
-  type NormalizedConstraint,
 } from '@shared/types/index.js';
 import type { ToolResultCachePort } from './port/tool-result-cache.port.js';
 import {
@@ -82,31 +80,32 @@ import {
   makeZeroTokenUsage,
 } from './synthesis-schemas.js';
 import {
-  MINI_LOOP_DEFAULT_MODEL,
-  MINI_LOOP_DIRECTIVE_IGNORED_TERMINATE_COUNT,
-  MINI_LOOP_LOOP_DETECTED_TERMINATE_COUNT,
-  MINI_LOOP_MAX_DRINKABILITY_ENTITY_IDS,
+  WINE_AGENT_LOOP_DEFAULT_MODEL,
+  WINE_AGENT_LOOP_DIRECTIVE_IGNORED_TERMINATE_COUNT,
+  WINE_AGENT_LOOP_LOOP_DETECTED_TERMINATE_COUNT,
+  WINE_AGENT_LOOP_MAX_DRINKABILITY_ENTITY_IDS,
   selectDirectiveCopy,
-  type MiniLoopDirective,
-  type MiniLoopDirectiveCopy,
-  type MiniLoopInput,
-  type MiniLoopOutcome,
-  type MiniLoopStep,
-  type MiniLoopToolCall,
-  type MiniLoopToolPorts,
-} from './mini-loop-schemas.js';
+  type WineAgentLoopDirective,
+  type WineAgentLoopDirectiveCopy,
+  type WineAgentLoopInput,
+  type WineAgentLoopOutcome,
+  type WineAgentLoopStep,
+  type WineAgentLoopToolCall,
+  type WineAgentLoopToolPorts,
+} from './wine-agent-loop-schemas.js';
 import { getCanonicalNormalizedConstraints } from './wine-search-schemas.js';
+import { stableStringify } from '@shared/utils/stable-stringify.js';
 import {
   CHECK_DRINKING_WINDOW_INPUT_SCHEMA,
   COMPARE_WINES_INPUT_SCHEMA,
   GET_FOOD_PAIRINGS_INPUT_SCHEMA,
   SEARCH_WINES_INPUT_SCHEMA,
-} from './mini-loop-tool-bundle.js';
+} from './wine-agent-loop-tool-bundle.js';
 import type {
   SearchUseCaseInput,
 } from './execution-plan-schemas.js';
 
-const defaultLog = bootstrapLogger.child({ component: 'MiniLoopRunner' });
+const defaultLog = bootstrapLogger.child({ component: 'WineAgentLoopRunner' });
 
 // ---------------------------------------------------------------------------
 // Named constants (CLAUDE.md rule 15)
@@ -115,24 +114,24 @@ const defaultLog = bootstrapLogger.child({ component: 'MiniLoopRunner' });
 /** Maximum size of the rolling chat history sent to the LLM, in characters.
  *  Keeps the per-step token cost predictable when the model emits chatty
  *  observations. */
-const MINI_LOOP_MAX_HISTORY_CHARS = 12_000;
+const WINE_AGENT_LOOP_MAX_HISTORY_CHARS = 12_000;
 
 /** Truncation tail appended when the rolling history is clipped. */
-const MINI_LOOP_HISTORY_TRUNCATION_TAIL = '\n…[mini-loop history truncated]';
+const WINE_AGENT_LOOP_HISTORY_TRUNCATION_TAIL = '\n…[wine-agent-loop history truncated]';
 
 /** Empty-result string used by `buildToolOutcome` to classify
  *  `empty_result`. Mirrors the format produced by agent tools (search
  *  returning zero results). */
-const MINI_LOOP_NO_MATCH_PREFIX = 'NO_MATCH: ';
+const WINE_AGENT_LOOP_NO_MATCH_PREFIX = 'NO_MATCH: ';
 
 /** Maximum number of result items we serialize back to the LLM per tool
  *  outcome. Search responses can be long; we only need the top few to
  *  drive the next reasoning step. */
-const MINI_LOOP_RESULT_PREVIEW_LIMIT = 5;
+const WINE_AGENT_LOOP_RESULT_PREVIEW_LIMIT = 5;
 
 /** Magnitude that triggers the "result preview truncated" suffix in the
  *  observation. */
-const MINI_LOOP_RESULT_PREVIEW_CHARS = 1_500;
+const WINE_AGENT_LOOP_RESULT_PREVIEW_CHARS = 1_500;
 
 /** Truncated SHA-256 hex chars for cache-key input hash. 16 hex = 64 bits;
  *  collision probability ≈ 10⁻¹⁰ at 100K cached entries. Matches the
@@ -143,7 +142,7 @@ const TOOL_CACHE_INPUT_HASH_HEX_CHARS = 16;
 // System prompt — static so it benefits from prompt caching.
 // ---------------------------------------------------------------------------
 
-const MINI_LOOP_SYSTEM_PROMPT = [
+const WINE_AGENT_LOOP_SYSTEM_PROMPT = [
   'You are a wine search agent driving a small, focused ReAct loop.',
   '',
   'Available tools:',
@@ -166,14 +165,14 @@ const MINI_LOOP_SYSTEM_PROMPT = [
 // ---------------------------------------------------------------------------
 
 interface RunnerState {
-  readonly steps: MiniLoopStep[];
+  readonly steps: WineAgentLoopStep[];
   readonly toolOutcomes: ToolOutcome[];
   tokenUsage: TokenUsage;
   terminationReason: AgentTerminationReason;
   loopDetectedCount: number;
   /** Consecutive turns where the model emitted an answer but a directive
    *  blocked acceptance. Reset on every other transition. After
-   *  MINI_LOOP_DIRECTIVE_IGNORED_TERMINATE_COUNT consecutive ignores, the
+   *  WINE_AGENT_LOOP_DIRECTIVE_IGNORED_TERMINATE_COUNT consecutive ignores, the
    *  loop terminates (zombie-loop kill switch). */
   directiveIgnoredCount: number;
   /** Set once when the LLM emits an answer the contract accepts. */
@@ -199,17 +198,17 @@ function makeInitialState(): RunnerState {
 // Logger seam
 // ---------------------------------------------------------------------------
 
-interface MiniLoopRunnerLogger {
+interface WineAgentLoopRunnerLogger {
   warn(payload: Record<string, unknown>, msg: string): void;
   info(payload: Record<string, unknown>, msg: string): void;
   error(payload: Record<string, unknown>, msg: string): void;
 }
 
-interface MiniLoopRunnerDeps {
+interface WineAgentLoopRunnerDeps {
   readonly structuredLlm: StructuredLlmPort;
-  readonly logger?: MiniLoopRunnerLogger;
+  readonly logger?: WineAgentLoopRunnerLogger;
   /** Override of the Anthropic model id used for `execute`. Defaults to
-   *  `MINI_LOOP_DEFAULT_MODEL`. */
+   *  `WINE_AGENT_LOOP_DEFAULT_MODEL`. */
   readonly model?: string;
   /**
    * Optional Redis-backed memoization for (toolName, normalizedInput) →
@@ -226,30 +225,30 @@ interface MiniLoopRunnerDeps {
 // Runner
 // ---------------------------------------------------------------------------
 
-export class MiniLoopRunner {
+export class WineAgentLoopRunner {
   private readonly structuredLlm: StructuredLlmPort;
-  private readonly logger: MiniLoopRunnerLogger;
+  private readonly logger: WineAgentLoopRunnerLogger;
   private readonly model: string;
   private readonly toolResultCache: ToolResultCachePort | undefined;
   /** Resolved once at runner construction; mirror the existing
    *  `DISABLED_TOOLS` pattern (snapshot env state at module/runner load). */
   private readonly toolCacheEnabled: boolean;
 
-  constructor(deps: MiniLoopRunnerDeps) {
+  constructor(deps: WineAgentLoopRunnerDeps) {
     this.structuredLlm = deps.structuredLlm;
     this.logger = deps.logger ?? defaultLog;
-    this.model = deps.model ?? MINI_LOOP_DEFAULT_MODEL;
+    this.model = deps.model ?? WINE_AGENT_LOOP_DEFAULT_MODEL;
     this.toolResultCache = deps.toolResultCache;
     this.toolCacheEnabled = readToolCacheEnabledEnv();
   }
 
-  async run(input: MiniLoopInput): Promise<MiniLoopOutcome> {
+  async run(input: WineAgentLoopInput): Promise<WineAgentLoopOutcome> {
     const state = makeInitialState();
     const copy = selectDirectiveCopy(input.analysis.hangulDominant);
     const agentConfig = buildAgentConfigFromInput(input);
     const budget = new StepBudget(agentConfig);
 
-    let pendingDirective: MiniLoopDirective | undefined = input.initialDirective;
+    let pendingDirective: WineAgentLoopDirective | undefined = input.initialDirective;
     // History grows with one entry per turn — kept short because the
     // adapter handles prompt caching of the static system prompt.
     const history: ChatMessage[] = [
@@ -323,7 +322,7 @@ export class MiniLoopRunner {
         });
         this.logger.warn(
           { requestId: input.requestId, err: message, reason, stepIndex: state.steps.length - 1 },
-          '[MiniLoopRunner] step failed',
+          '[WineAgentLoopRunner] step failed',
         );
         break;
       }
@@ -342,7 +341,7 @@ export class MiniLoopRunner {
           // Surface an observation back to the model. If we've already hit
           // the terminate threshold, end the loop now (CLAUDE.md rule 19 —
           // a "stop processing" flag must be paired with control flow).
-          if (state.loopDetectedCount >= MINI_LOOP_LOOP_DETECTED_TERMINATE_COUNT) {
+          if (state.loopDetectedCount >= WINE_AGENT_LOOP_LOOP_DETECTED_TERMINATE_COUNT) {
             state.terminationReason = transitionTerminationReason(
               state.terminationReason,
               admit.reason ?? 'loop_detected',
@@ -421,7 +420,7 @@ export class MiniLoopRunner {
         // Persist into rolling state.
         for (const outcome of toolOutcomes) state.toolOutcomes.push(outcome);
 
-        const step: MiniLoopStep = {
+        const step: WineAgentLoopStep = {
           index: state.steps.length,
           kind: 'tool_use',
           reasoning: stepResult.reasoning,
@@ -450,7 +449,7 @@ export class MiniLoopRunner {
 
       // 7e. Text turn — either a final answer or the model bailed.
       const trimmedAnswer = stepResult.text.trim();
-      const step: MiniLoopStep = {
+      const step: WineAgentLoopStep = {
         index: state.steps.length,
         kind: 'answer',
         reasoning: stepResult.reasoning,
@@ -494,11 +493,11 @@ export class MiniLoopRunner {
 
       // Zombie-loop kill switch (rule 19 — flag-set means stop processing):
       // if the model has refused to honor the directive
-      // MINI_LOOP_DIRECTIVE_IGNORED_TERMINATE_COUNT consecutive times,
+      // WINE_AGENT_LOOP_DIRECTIVE_IGNORED_TERMINATE_COUNT consecutive times,
       // terminate with max_steps so the synthesizer can compose a degraded
       // response.
       state.directiveIgnoredCount += 1;
-      if (state.directiveIgnoredCount >= MINI_LOOP_DIRECTIVE_IGNORED_TERMINATE_COUNT) {
+      if (state.directiveIgnoredCount >= WINE_AGENT_LOOP_DIRECTIVE_IGNORED_TERMINATE_COUNT) {
         state.terminationReason = transitionTerminationReason(state.terminationReason, 'max_steps');
         break;
       }
@@ -520,13 +519,13 @@ export class MiniLoopRunner {
   // -------------------------------------------------------------------------
 
   private async runOneTurn(
-    input: MiniLoopInput,
+    input: WineAgentLoopInput,
     history: readonly ChatMessage[],
     _budget: StepBudget,
-    _copy: MiniLoopDirectiveCopy,
+    _copy: WineAgentLoopDirectiveCopy,
     stepIndex: number,
   ): Promise<StepResult> {
-    throwIfAborted(input.abortSignal, 'MiniLoopRunner aborted before LLM call');
+    throwIfAborted(input.abortSignal, 'WineAgentLoopRunner aborted before LLM call');
 
     // Per-step abort controller chained to the caller's signal.
     const local = new AbortController();
@@ -534,7 +533,7 @@ export class MiniLoopRunner {
     let cleanupListener: (() => void) | undefined;
     if (outerSignal !== undefined) {
       const onAbort = (): void => {
-        local.abort(abortError(`MiniLoop step ${stepIndex} aborted by caller`));
+        local.abort(abortError(`WineAgentLoop step ${stepIndex} aborted by caller`));
       };
       if (outerSignal.aborted) {
         onAbort();
@@ -548,7 +547,7 @@ export class MiniLoopRunner {
       const request: ExecuteRequest = {
         messages: history,
         tools: input.tools,
-        systemPrompt: MINI_LOOP_SYSTEM_PROMPT,
+        systemPrompt: WINE_AGENT_LOOP_SYSTEM_PROMPT,
         enablePromptCache: true,
         maxOutputTokens: input.maxOutputTokens,
         perStepTimeoutMs: input.perStepTimeoutMs,
@@ -559,7 +558,7 @@ export class MiniLoopRunner {
       const executed = await withTimeout(
         this.structuredLlm.execute(request),
         input.perStepTimeoutMs,
-        `MiniLoop step ${stepIndex} timed out`,
+        `WineAgentLoop step ${stepIndex} timed out`,
       );
       return mapExecuteResult(executed);
     } finally {
@@ -572,8 +571,8 @@ export class MiniLoopRunner {
   // -------------------------------------------------------------------------
 
   private async dispatchTool(
-    call: MiniLoopToolCall,
-    ports: MiniLoopToolPorts,
+    call: WineAgentLoopToolCall,
+    ports: WineAgentLoopToolPorts,
     requestId: string,
     stepIndex: number,
     toolPosition: number,
@@ -625,7 +624,7 @@ export class MiniLoopRunner {
     let cleanupListener: (() => void) | undefined;
     if (abortSignal !== undefined) {
       const onAbort = (): void => {
-        local.abort(abortError(`MiniLoop tool "${call.tool}" aborted by caller`));
+        local.abort(abortError(`WineAgentLoop tool "${call.tool}" aborted by caller`));
       };
       if (abortSignal.aborted) {
         onAbort();
@@ -644,7 +643,7 @@ export class MiniLoopRunner {
       const result = await withTimeout(
         work,
         perStepTimeoutMs,
-        `MiniLoop tool "${call.tool}" timed out after ${perStepTimeoutMs}ms`,
+        `WineAgentLoop tool "${call.tool}" timed out after ${perStepTimeoutMs}ms`,
       );
       rawResult = result.rawResult;
       observation = result.observation;
@@ -704,7 +703,7 @@ export class MiniLoopRunner {
           // and move on.
           this.logger.warn(
             { err, tool: call.tool },
-            '[MiniLoopRunner] tool cache write threw despite fail-open contract',
+            '[WineAgentLoopRunner] tool cache write threw despite fail-open contract',
           );
         });
       }
@@ -718,7 +717,7 @@ export class MiniLoopRunner {
 // Helpers — pure functions
 // ---------------------------------------------------------------------------
 
-function buildAgentConfigFromInput(input: MiniLoopInput): AgentConfig {
+function buildAgentConfigFromInput(input: WineAgentLoopInput): AgentConfig {
   // Mirrors AgentConfig shape so StepBudget gets exactly what it needs.
   // `seed` / `toolTimeoutMs` / `parallelBatchTimeoutMs` are intentionally
   // omitted (exactOptionalPropertyTypes — CLAUDE.md "TypeScript" rule).
@@ -726,7 +725,7 @@ function buildAgentConfigFromInput(input: MiniLoopInput): AgentConfig {
     maxSteps: input.maxSteps,
     agentTimeoutMs: input.agentTimeoutMs,
     perStepTimeoutMs: input.perStepTimeoutMs,
-    maxContextChars: MINI_LOOP_MAX_HISTORY_CHARS,
+    maxContextChars: WINE_AGENT_LOOP_MAX_HISTORY_CHARS,
     maxTotalTokens: input.maxTotalTokens,
   };
 }
@@ -753,7 +752,7 @@ function isTimeoutLikeError(err: unknown): boolean {
 type StepResult =
   | {
       readonly kind: 'tool_use';
-      readonly toolCalls: readonly MiniLoopToolCall[];
+      readonly toolCalls: readonly WineAgentLoopToolCall[];
       readonly reasoning: string;
       readonly tokenUsage: TokenUsage;
     }
@@ -807,7 +806,7 @@ const DISABLED_TOOLS: ReadonlySet<string> = new Set(
     .filter((s) => s.length > 0),
 );
 const FAIL_CLOSED_PREFIX = 'TOOL_UNAVAILABLE:';
-const MINI_LOOP_TOOL_FILTER_MAPPING_VERSION = 'mini_loop_tool_v1' as const;
+const WINE_AGENT_LOOP_TOOL_FILTER_MAPPING_VERSION = 'wine_agent_loop_tool_v1' as const;
 
 function invalidToolInputObservation(
   tool: string,
@@ -833,8 +832,8 @@ function invalidToolInputObservation(
  * the tool's purpose.
  */
 async function invokeToolPort(
-  call: MiniLoopToolCall,
-  ports: MiniLoopToolPorts,
+  call: WineAgentLoopToolCall,
+  ports: WineAgentLoopToolPorts,
   requestId: string,
   signal: AbortSignal,
   adaptiveRetrievalKDefault: number | undefined,
@@ -868,7 +867,7 @@ async function invokeToolPort(
     case 'lookup_wine': {
       // High-precision identity resolution. SOLID H2: routed through the
       // shared `normalizeLookupWineInput` so the agent-tools branch and the
-      // mini-loop branch validate against the IDENTICAL schema (trim,
+      // wine-agent-loop branch validate against the IDENTICAL schema (trim,
       // placeholder rejection, query length). Before extraction, this case
       // did a bare `typeof query === 'string'` check that silently accepted
       // " " or "__TODO__" — see SOLID H2 audit notes.
@@ -902,20 +901,14 @@ async function invokeToolPort(
           validation.error.issues.map((issue) => issue.message),
         );
       }
-      const filters = buildFoodPairingFilters(
-        validation.data,
-        MINI_LOOP_TOOL_FILTER_MAPPING_VERSION,
-      );
-      const preferences = buildFoodPairingPreferences(
-        validation.data,
-        MINI_LOOP_TOOL_FILTER_MAPPING_VERSION,
-      );
+      const searchInput = buildFoodPairingToolUseCaseInput(validation.data as Record<string, unknown>, {
+        mappingVersion: WINE_AGENT_LOOP_TOOL_FILTER_MAPPING_VERSION,
+        includeCallerInterpretation: true,
+        callerIntent: CALLER_CONTROLLED_FOOD_PAIRING_INTENT,
+      });
       const result = await ports.searchUseCase.execute(
         {
-          query: buildFoodPairingQuery(validation.data),
-          ...(filters.length > 0 ? { filters: [...filters] } : {}),
-          ...(preferences.length > 0 ? { preferences: [...preferences] } : {}),
-          mode: 'hybrid',
+          ...searchInput,
         },
         requestId,
         { abortSignal: signal },
@@ -987,7 +980,7 @@ async function invokeToolPort(
       }
       const executionRequest = buildCompareWinesExecutionRequest(
         validation.data,
-        MINI_LOOP_TOOL_FILTER_MAPPING_VERSION,
+        WINE_AGENT_LOOP_TOOL_FILTER_MAPPING_VERSION,
       );
       const result = await ports.decomposedSearchUseCase.execute(
         executionRequest.subQueries,
@@ -1004,14 +997,14 @@ async function invokeToolPort(
     default: {
       return {
         rawResult: null,
-        observation: `Tool "${call.tool}" is not supported in the mini-loop. Use one of: ${KNOWN_AGENT_TOOL_NAMES_DISPLAY}.`,
+        observation: `Tool "${call.tool}" is not supported in the wine-agent-loop. Use one of: ${KNOWN_AGENT_TOOL_NAMES_DISPLAY}.`,
       };
     }
   }
 }
 
 /**
- * Mini-loop's tool-input adapter for `search_wines`. Exported for direct
+ * Wine-agent-loop's tool-input adapter for `search_wines`. Exported for direct
  * regression testing of the adaptive-k vs LLM-limit precedence rule. The
  * function is otherwise an implementation detail of `invokeToolPort` and
  * callers outside the runner SHOULD NOT depend on it.
@@ -1022,63 +1015,16 @@ export function adaptSearchInput(
   raw: Record<string, unknown>,
   adaptiveRetrievalKDefault: number | undefined,
 ): SearchUseCaseInput {
-  const query = typeof raw['query'] === 'string' && raw['query'].length > 0
-    ? raw['query']
-    : '';
-  // We intentionally keep the surface minimal — the runner trusts the
-  // LLM's query and forwards filters/preferences when present. Bounds are
-  // enforced downstream by the use case port itself.
-  //
-  // Adaptive `limit` precedence (SOTA cost/quality lever):
-  //   1. LLM-emitted `limit` (when present & finite) — the model may
-  //      intentionally narrow/widen for a multi-hop reasoning step. We
-  //      never override an explicit value.
-  //   2. `adaptiveRetrievalKDefault` from `recommendedBudget.retrievalK`
-  //      (SSoT `RETRIEVAL_K_BY_INTENT` in `adaptive-budget.ts`).
-  //   3. Omit the field — downstream use case applies its own default.
-  const llmLimit = typeof raw['limit'] === 'number' && Number.isFinite(raw['limit'])
-    ? raw['limit']
-    : undefined;
-  const resolvedLimit = llmLimit ?? adaptiveRetrievalKDefault;
-  const explicitFilters = Array.isArray(raw['filters'])
-    ? raw['filters'] as SearchUseCaseInput['filters']
-    : [];
-  const explicitPreferences = Array.isArray(raw['preferences'])
-    ? raw['preferences'] as SearchUseCaseInput['preferences']
-    : [];
-  const structuredFilters = buildSearchToolStructuredFilters(raw, MINI_LOOP_TOOL_FILTER_MAPPING_VERSION);
-  const structuredPreferences = buildSearchToolStructuredPreferences(raw, MINI_LOOP_TOOL_FILTER_MAPPING_VERSION);
-  const filters = mergeStructuredConstraints(explicitFilters, structuredFilters);
-  const preferences = mergeStructuredConstraints(explicitPreferences, structuredPreferences);
-  const resolvedMode = typeof raw['mode'] === 'string'
-    ? raw['mode']
-    : typeof raw['retrieval_mode'] === 'string'
-      ? raw['retrieval_mode']
-      : undefined;
+  const built = buildSearchWinesToolUseCaseInput(raw, {
+    mappingVersion: WINE_AGENT_LOOP_TOOL_FILTER_MAPPING_VERSION,
+    adaptiveRetrievalKDefault,
+    includeCallerInterpretation: true,
+  });
   return {
-    query,
-    ...(filters.length > 0 ? { filters } : {}),
-    ...(preferences.length > 0 ? { preferences } : {}),
-    ...(resolvedMode !== undefined ? { mode: resolvedMode as SearchUseCaseInput['mode'] } : {}),
-    ...(resolvedLimit !== undefined ? { limit: resolvedLimit } : {}),
+    ...built,
+    ...(built.filters !== undefined ? { filters: [...built.filters] } : {}),
+    ...(built.preferences !== undefined ? { preferences: [...built.preferences] } : {}),
   };
-}
-
-function mergeStructuredConstraints(
-  explicit: readonly NormalizedConstraint[] | undefined,
-  derived: readonly NormalizedConstraint[],
-): NormalizedConstraint[] {
-  const out: NormalizedConstraint[] = [];
-  const seen = new Set<string>();
-  const append = (constraint: NormalizedConstraint): void => {
-    const key = `${constraint.attribute}\u0000${constraint.operator}\u0000${stableStringify(constraint.value)}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    out.push(constraint);
-  };
-  for (const constraint of explicit ?? []) append(constraint);
-  for (const constraint of derived) append(constraint);
-  return out;
 }
 
 
@@ -1093,9 +1039,9 @@ function formatSearchObservation(result: unknown): string {
   const record = result as Record<string, unknown>;
   const results = record['results'];
   if (!Array.isArray(results) || results.length === 0) {
-    return `${MINI_LOOP_NO_MATCH_PREFIX}search returned 0 results`;
+    return `${WINE_AGENT_LOOP_NO_MATCH_PREFIX}search returned 0 results`;
   }
-  const preview = results.slice(0, MINI_LOOP_RESULT_PREVIEW_LIMIT)
+  const preview = results.slice(0, WINE_AGENT_LOOP_RESULT_PREVIEW_LIMIT)
     .map((r) => {
       if (r === null || typeof r !== 'object') return null;
       const entity = (r as Record<string, unknown>)['entity'];
@@ -1120,11 +1066,11 @@ function formatGenericObservation(tool: string, result: unknown): string {
 }
 
 function clipObservation(text: string): string {
-  if (text.length <= MINI_LOOP_RESULT_PREVIEW_CHARS) return text;
-  return `${text.slice(0, MINI_LOOP_RESULT_PREVIEW_CHARS)}…[truncated]`;
+  if (text.length <= WINE_AGENT_LOOP_RESULT_PREVIEW_CHARS) return text;
+  return `${text.slice(0, WINE_AGENT_LOOP_RESULT_PREVIEW_CHARS)}…[truncated]`;
 }
 
-function serializeAssistantToolCalls(calls: readonly MiniLoopToolCall[]): string {
+function serializeAssistantToolCalls(calls: readonly WineAgentLoopToolCall[]): string {
   if (calls.length === 0) return '[no tool calls]';
   return calls
     .map((c) => `tool=${c.tool} input=${safeJsonStringify(c.input)}`)
@@ -1132,7 +1078,7 @@ function serializeAssistantToolCalls(calls: readonly MiniLoopToolCall[]): string
 }
 
 function serializeToolResults(
-  calls: readonly MiniLoopToolCall[],
+  calls: readonly WineAgentLoopToolCall[],
   observations: readonly string[],
 ): string {
   const lines: string[] = [];
@@ -1160,7 +1106,7 @@ function safeJsonStringify(value: unknown): string {
 
 /**
  * Env-gated kill switch for the tool-result cache. Read ONCE per
- * `MiniLoopRunner` construction (mirrors the `DISABLED_TOOLS` snapshot
+ * `WineAgentLoopRunner` construction (mirrors the `DISABLED_TOOLS` snapshot
  * pattern higher up in this file). Default ON; set to `'0'` to disable
  * entirely (e.g. for bench debugging).
  */
@@ -1255,10 +1201,10 @@ function sanitizeResultForCache(result: unknown): unknown {
 // ---------------------------------------------------------------------------
 
 export function computeNextDirective(
-  input: MiniLoopInput,
+  input: WineAgentLoopInput,
   state: RunnerStateView,
-  copy: MiniLoopDirectiveCopy,
-): MiniLoopDirective | undefined {
+  copy: WineAgentLoopDirectiveCopy,
+): WineAgentLoopDirective | undefined {
   const contract = input.analysis.contract;
   const outcomes = state.toolOutcomes;
 
@@ -1308,10 +1254,10 @@ export function computeNextDirective(
 
 interface RunnerStateView {
   readonly toolOutcomes: readonly ToolOutcome[];
-  readonly steps: readonly MiniLoopStep[];
+  readonly steps: readonly WineAgentLoopStep[];
 }
 
-function hasRelaxableConstraints(analysis: MiniLoopInput['analysis']): boolean {
+function hasRelaxableConstraints(analysis: WineAgentLoopInput['analysis']): boolean {
   // Non-must-have constraints are eligible for relaxation. The
   // WineSearchAnalysis schema marks must-have via `mustHave: true` on each
   // NormalizedConstraint. Anything without `mustHave === true` is
@@ -1322,7 +1268,7 @@ function hasRelaxableConstraints(analysis: MiniLoopInput['analysis']): boolean {
   });
 }
 
-function collectRelaxableAttributes(analysis: MiniLoopInput['analysis']): readonly string[] {
+function collectRelaxableAttributes(analysis: WineAgentLoopInput['analysis']): readonly string[] {
   const attrs: string[] = [];
   for (const c of getCanonicalNormalizedConstraints(analysis)) {
     const record = c as Record<string, unknown>;
@@ -1331,7 +1277,7 @@ function collectRelaxableAttributes(analysis: MiniLoopInput['analysis']): readon
     if (typeof attribute === 'string' && attribute.length > 0) attrs.push(attribute);
   }
   // De-dupe while preserving order.
-  return Array.from(new Set(attrs)).slice(0, MINI_LOOP_MAX_DRINKABILITY_ENTITY_IDS);
+  return Array.from(new Set(attrs)).slice(0, WINE_AGENT_LOOP_MAX_DRINKABILITY_ENTITY_IDS);
 }
 
 function alreadyRetriedRelax(state: RunnerStateView): boolean {
@@ -1353,8 +1299,8 @@ function alreadyRetriedRelax(state: RunnerStateView): boolean {
 
 function appendDirectiveMessage(
   history: readonly ChatMessage[],
-  directive: MiniLoopDirective,
-  _copy: MiniLoopDirectiveCopy,
+  directive: WineAgentLoopDirective,
+  _copy: WineAgentLoopDirectiveCopy,
 ): readonly ChatMessage[] {
   // The directive carries its own (locale-aware) instruction string.
   return [...history, { role: 'user', content: `[directive] ${directive.instruction}` }];
@@ -1372,14 +1318,14 @@ function trimHistoryInPlace(history: ChatMessage[]): void {
   // observable behaviour is unchanged.
   let total = 0;
   for (const m of history) total += m.content.length;
-  if (total <= MINI_LOOP_MAX_HISTORY_CHARS) return;
+  if (total <= WINE_AGENT_LOOP_MAX_HISTORY_CHARS) return;
 
   const head = history[0];
   if (head === undefined) return;
 
   // Walk from index 1 onward; advance the cut point until the budget fits.
   let cutFrom = 1;
-  while (cutFrom < history.length && total > MINI_LOOP_MAX_HISTORY_CHARS) {
+  while (cutFrom < history.length && total > WINE_AGENT_LOOP_MAX_HISTORY_CHARS) {
     const m = history[cutFrom];
     if (m === undefined) break;
     total -= m.content.length;
@@ -1392,6 +1338,6 @@ function trimHistoryInPlace(history: ChatMessage[]): void {
   history.push(head);
   for (const m of kept) history.push(m);
   if (history.length === 1) {
-    history.push({ role: 'user', content: MINI_LOOP_HISTORY_TRUNCATION_TAIL });
+    history.push({ role: 'user', content: WINE_AGENT_LOOP_HISTORY_TRUNCATION_TAIL });
   }
 }

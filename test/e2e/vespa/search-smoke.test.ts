@@ -56,17 +56,15 @@ describe.skipIf(!HAS_REACHABLE_VESPA)('Vespa E2E — smoke lane', () => {
     expect(fakeMlService.countRequests('/rerank')).toBeGreaterThan(0);
   });
 
-  it('resolve route stays wired to the learned matcher over HTTP', async () => {
-    const response = await postJson(server.app, '/v1/entity/resolve', {
+  it('entity-mode search stays wired to the learned matcher over HTTP', async () => {
+    const response = await postJson(server.app, '/v1/search', {
       query: '오푸스원',
+      options: { mode: 'entity', explain: false, clarification: false },
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual(
-      expect.objectContaining({
-        status: expect.any(String),
-      }),
-    );
+    const body = parseSearchResponse(response);
+    expect(body.engine_decision.decision_status).toMatch(/^(resolved|ambiguous)$/);
     expect(fakeMlService.countRequests('/match')).toBeGreaterThan(0);
   });
 });

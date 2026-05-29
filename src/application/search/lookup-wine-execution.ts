@@ -3,9 +3,9 @@
  * for the `lookup_wine` tool's input contract + dispatch).
  *
  * Before this module existed, the `lookup_wine` semantics were duplicated
- * across `agent-tools.ts` (full schema + dispatch) and `mini-loop.ts` /
- * `mini-loop-tool-bundle.ts` (a permissive schema + a separate inline
- * dispatch that skipped placeholder/trim guards). The mini-loop path could
+ * across `agent-tools.ts` (full schema + dispatch) and `wine-agent-loop.ts` /
+ * `wine-agent-loop-tool-bundle.ts` (a permissive schema + a separate inline
+ * dispatch that skipped placeholder/trim guards). The wine-agent-loop path could
  * silently accept inputs the agent-tools path rejected — producing two
  * subtly different "lookup_wine" tools.
  *
@@ -14,7 +14,7 @@
  *    schema used by every dispatcher.
  *  - {@link normalizeLookupWineInput} — pure input normalization (validate
  *    via the schema, clamp the limit). Dispatchers whose port surface
- *    differs from {@link SearchExecutorPort} (e.g. the mini-loop runner's
+ *    differs from {@link SearchExecutorPort} (e.g. the wine-agent-loop runner's
  *    `SearchUseCasePort` which takes the flatter `SearchUseCaseInput` shape)
  *    use this to inherit the SAME validation/clamp semantics without
  *    coupling to the executor port.
@@ -38,7 +38,7 @@ import {
  *
  * The query field uses {@link buildSearchToolQueryField} so the same trim +
  * placeholder + max-length guards apply uniformly across every dispatcher
- * (legacy agent-tools, mini-loop, future tool runners). The `limit` field is
+ * (legacy agent-tools, wine-agent-loop, future tool runners). The `limit` field is
  * intentionally unbounded at the schema layer — an LLM emitting `limit: 5`
  * should not fail the entire tool call; the dispatch helpers below clamp to
  * {@link LOOKUP_WINE_LIMIT_MAX}.
@@ -81,7 +81,7 @@ type LookupWineInputNormalizationResult =
  * clamp pattern.
  *
  * Use this from dispatchers whose underlying port shape does NOT match
- * {@link SearchExecutorPort} (e.g. the mini-loop's `SearchUseCasePort`,
+ * {@link SearchExecutorPort} (e.g. the wine-agent-loop's `SearchUseCasePort`,
  * which takes `SearchUseCaseInput` rather than `SearchRequest`).
  */
 export function normalizeLookupWineInput(

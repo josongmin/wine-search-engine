@@ -1,6 +1,6 @@
 /**
  * E4-U2: Machine Response Builder V2 — Machine/Tool Sidecar Surface
- * Exposed only via /v1/claude-tools route. NOT wired into /v2/search/* handlers.
+ * Internal machine/executor surface. NOT wired into any public /v1 or /v2 HTTP route.
  * See response-builder.ts (E4-U1) for the main runtime surface.
  */
 
@@ -8,7 +8,7 @@
  * T6.3: Machine Response Builder V2
  *
  * Builds a structured provenance/evidence envelope for machine/LLM consumers.
- * Exposed only via the /v1/claude-tools seam — NOT via any /v2/search/* route.
+ * Used by the internal `WineToolExecutor` seam — NOT via any public /v2/search/* route.
  *
  * Design contract:
  * - Serialises the full ComponentScores object as-is.

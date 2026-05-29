@@ -734,27 +734,25 @@ describe('Hell-Combo C5: Concurrency + state poisoning', () => {
 // Category 6 — Cross-orchestrator path safety (3 cases)
 // ---------------------------------------------------------------------------
 
-describe('Hell-Combo C6: Cross-orchestrator paths', () => {
+describe('Hell-Combo C6: Cross-surface paths', () => {
   let harness: WineSearchTestHarness;
   afterEach(async () => { if (harness !== undefined) await harness.cleanup(); });
 
-  it('C6-01: Interleaved POST /v1/wine-search + POST /v1/agent → no shared mutable state', async () => {
+  it('C6-01: Interleaved POST /v1/wine-search + POST /v1/search → no shared mutable state', async () => {
     harness = await buildBenignHarness();
-    // Interleave 5 requests against /v1/wine-search and 5 against /v1/agent.
-    // /v1/agent may or may not be registered; if 404, that's still
-    // acceptable — we only assert no 5xx and no cross-contamination.
+    // Interleave 5 requests against /v1/wine-search and 5 against /v1/search.
     const wineSearch = Array.from({ length: 5 }, () =>
       postWineSearch(harness, { query: '와인 추천' }),
     );
-    const agent = Array.from({ length: 5 }, () =>
+    const search = Array.from({ length: 5 }, () =>
       harness.app.inject({
         method: 'POST',
-        url: '/v1/agent',
+        url: '/v1/search',
         headers: { 'content-type': 'application/json' },
         payload: JSON.stringify({ query: 'wine' }),
       }),
     );
-    const all = await Promise.all([...wineSearch, ...agent]);
+    const all = await Promise.all([...wineSearch, ...search]);
     for (const res of all) {
       expect(res.statusCode).toBeLessThan(500);
     }

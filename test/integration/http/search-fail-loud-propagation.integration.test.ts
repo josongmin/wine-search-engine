@@ -70,12 +70,6 @@ function createMockDeps(response: ReturnType<typeof buildFailLoudSearchResponse>
       execute: vi.fn().mockResolvedValue(response),
     },
     decomposedSearchUseCase: { execute: vi.fn() },
-    batchSearchUseCase: { execute: vi.fn() },
-    replayUseCase: { execute: vi.fn() },
-    interpretUseCase: { execute: vi.fn() },
-    resolveUseCase: { execute: vi.fn() },
-    hybridUseCase: { execute: vi.fn() },
-    adaptiveToolExecutor: { executeWithFallback: vi.fn() },
     watchlistService: {
       create: vi.fn(),
       getByIdForUser: vi.fn(),

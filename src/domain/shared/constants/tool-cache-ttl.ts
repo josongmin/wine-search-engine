@@ -1,7 +1,7 @@
 /**
  * Tool Result Cache — per-tool TTL SSoT.
  *
- * Drives `ToolResultCachePort.set(..., ttlSeconds)` for the PtE mini-loop's
+ * Drives `ToolResultCachePort.set(..., ttlSeconds)` for the PtE wine-agent-loop's
  * memoization layer. Each TTL is justified against the volatility of the
  * underlying corpus / projection that the tool's downstream pipeline reads.
  *

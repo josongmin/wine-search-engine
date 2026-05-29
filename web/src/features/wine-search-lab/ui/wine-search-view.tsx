@@ -4,16 +4,12 @@
  * WineSearchView — UI for the Plan-then-Execute orchestrator
  * (`POST /v1/wine-search`).
  *
- * Sibling of {@link AgentLabView} (not a replacement — strangler-fig
- * coexistence). Surfaces the new wire fields the agent UI cannot:
- *
  *   - `meta.intent` + `meta.plan_kind`
  *   - `meta.termination.{reason, layer, kind?, degraded_reason?}`
  *   - `meta.policy_blocked` (typed boolean, no longer inferred)
  *   - `execution.steps[].source` (analyzer / router / runner / mini_loop / synthesizer)
  *   - `execution.tool_call_count`
- *   - `execution.steps[].tool_calls[].{name, arguments}` (renamed from
- *     `tool`/`input` in the legacy /v1/agent surface)
+ *   - `execution.steps[].tool_calls[].{name, arguments}`
  *
  * Special states rendered explicitly:
  *   - `meta.termination.kind === 'security_block'` → red banner (true block).
@@ -35,8 +31,7 @@ import { Button } from '@/shared/ui/button';
 import { Card } from '@/shared/ui/card';
 import { cn } from '@/shared/lib';
 
-/** Default `max_steps` mirrors the orchestrator default and the legacy
- *  AgentLabView default so the two surfaces feel comparable. */
+/** Default `max_steps` mirrors the orchestrator default. */
 const DEFAULT_MAX_STEPS = 5;
 
 /** Lower/upper bound for the `max_steps` input. Server-side Zod accepts

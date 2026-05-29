@@ -7,7 +7,7 @@
  * dependency-injection boundary, we:
  *
  *  - keep every other component (`QueryAnalyzerService`,
- *    `DeterministicRouter`, `ExecutionRunner`, `SynthesisRunner`, `MiniLoopRunner`)
+ *    `DeterministicRouter`, `ExecutionRunner`, `SynthesisRunner`, `WineAgentLoopRunner`)
  *    running for real,
  *  - bypass `api.anthropic.com` entirely (HERMETIC tests, no env vars, no
  *    `process.env.ANTHROPIC_API_KEY` plumbing required),
@@ -100,9 +100,9 @@ export interface StructuredLlmMockOptions {
     | AnalyzeMockOutcome
     | ((req: AnalyzeRequest<z.ZodTypeAny>) => AnalyzeMockOutcome | Promise<AnalyzeMockOutcome>);
   /**
-   * Execute handler — only used by the mini-loop multi-step branch. Omitted
+   * Execute handler — only used by the wine-agent-loop multi-step branch. Omitted
    * by default because none of the e2e scenarios exercise multi-step plans
-   * (those require a `miniLoopToolBundle` we do not wire).
+   * (those require a `wineAgentLoopToolBundle` we do not wire).
    */
   readonly execute?: (req: ExecuteRequest) => ExecuteResult | Promise<ExecuteResult>;
 }
@@ -203,7 +203,7 @@ export function buildStructuredLlmMock(options: StructuredLlmMockOptions = {}): 
   const executeMock = vi.fn(async (req: ExecuteRequest): Promise<ExecuteResult> => {
     if (req.abortSignal !== undefined) observedAbortSignals.push(req.abortSignal);
     if (options.execute === undefined) {
-      // No scripted response — return a benign end-of-turn so the mini-loop
+      // No scripted response — return a benign end-of-turn so the wine-agent-loop
       // exits gracefully if some test path reaches it unexpectedly.
       return {
         kind: 'text',

@@ -8,17 +8,10 @@ const REPO_ROOT = path.resolve(TEST_DIR, '../../../..');
 const CONTRACT_ROUTE_FILES = [
   'src/interface/http/routes/search.route.ts',
   'src/interface/http/routes/lookup.route.ts',
-  'src/interface/http/routes/batch-search.route.ts',
-  'src/interface/http/routes/replay.route.ts',
-  'src/interface/http/routes/interpret.route.ts',
-  'src/interface/http/routes/resolve.route.ts',
-  'src/interface/http/routes/hybrid.route.ts',
   'src/interface/http/routes/watchlist.route.ts',
   'src/interface/http/routes/health.route.ts',
-  'src/interface/http/routes/claude-tools.route.ts',
   'src/interface/http/routes/feedback.route.ts',
-  'src/interface/http/routes/agent.route.ts',
-  'src/interface/http/routes/agent-benchmark-scenarios.route.ts',
+  'src/interface/http/routes/wine-search.route.ts',
 ] as const;
 
 function readRouteFile(routePath: string): string {

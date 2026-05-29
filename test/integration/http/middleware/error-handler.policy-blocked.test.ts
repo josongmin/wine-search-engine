@@ -2,13 +2,8 @@ import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import {
-  DeterminismViolationError,
-  SnapshotMismatchError,
-  UnexpectedReplayResponseError,
-} from '../../../../src/application/search/replay.usecase.js';
 import { UnexpectedDecomposedResponseError } from '../../../../src/application/search/decomposed-search.usecase.js';
-import { BlockingMissError } from '../../../../src/domain/shared/error/domain-error.js';
+import { BlockingMissError, DomainError } from '../../../../src/domain/shared/error/domain-error.js';
 import {
   POLICY_BLOCKED_CODE,
   POLICY_BLOCKED_MESSAGE,
@@ -17,6 +12,24 @@ import {
 import { errorHandler } from '../../../../src/interface/http/middleware/error-handler.js';
 import { registerRequestContext } from '../../../../src/interface/http/middleware/request-context.js';
 import { ErrorResponseSchema } from '../../../../src/interface/http/schemas/search-response.schema.js';
+
+class SnapshotMismatchError extends DomainError {
+  constructor() {
+    super('SNAPSHOT_MISMATCH', 'Decision snapshot mismatch.');
+  }
+}
+
+class DeterminismViolationError extends DomainError {
+  constructor() {
+    super('DETERMINISM_VIOLATION', 'Determinism fingerprint mismatch.');
+  }
+}
+
+class UnexpectedReplayResponseError extends DomainError {
+  constructor() {
+    super('UNEXPECTED_REPLAY_RESPONSE', 'Unexpected replay response shape.');
+  }
+}
 
 describe('errorHandler policy-blocked contract', () => {
   let app: FastifyInstance;
@@ -49,28 +62,11 @@ describe('errorHandler policy-blocked contract', () => {
     });
 
     app.get('/snapshot-mismatch', async () => {
-      throw new SnapshotMismatchError(
-        {
-          model_versions: {},
-          index_versions: {},
-          policy_rule_version: 'expected',
-          threshold_profile_id: 'default',
-          planner_version: '1.0.0',
-          feature_flags: {},
-        },
-        {
-          model_versions: {},
-          index_versions: {},
-          policy_rule_version: 'actual',
-          threshold_profile_id: 'default',
-          planner_version: '1.0.0',
-          feature_flags: {},
-        },
-      );
+      throw new SnapshotMismatchError();
     });
 
     app.get('/determinism-violation', async () => {
-      throw new DeterminismViolationError('expected-hash', 'actual-hash');
+      throw new DeterminismViolationError();
     });
 
     app.get('/blocking-miss', async () => {

@@ -3,7 +3,7 @@
  *
  * Module-scope tool definitions and synthesis schemas are constructed
  * ONCE and reused across every LLM call. Without the WeakMap cache the
- * converter ran for every mini-loop turn × N tools, plus every synthesis
+ * converter ran for every wine-agent-loop turn × N tools, plus every synthesis
  * request. The cache amortises that cost to one conversion per schema
  * identity for the process lifetime.
  *

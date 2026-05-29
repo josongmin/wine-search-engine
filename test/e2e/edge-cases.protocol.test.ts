@@ -2,16 +2,14 @@
  * E2E protocol and endpoint edge cases for the Wine Search Engine.
  *
  * Covers routing/method handling, response-body JSON integrity,
- * Accept-header behavior, and interpret/resolve endpoint edge cases.
+ * Accept-header behavior, and canonical search/lookup edge cases.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createTestServer, closeTestServer, type TestServer } from './helpers/test-server.js';
 import {
-  parseInterpretResponse,
   postJson,
 } from './helpers/http-transport.js';
-import { makeReplaySnapshot } from './helpers/replay-snapshot.js';
 
 let server: TestServer;
 
@@ -69,20 +67,9 @@ describe('HTTP method and routing', () => {
 });
 
 describe('Response body integrity', () => {
-  const MATCHING_SNAPSHOT = makeReplaySnapshot();
-
   it.each([
     ['search', () => post('/v1/search', { query: 'Opus One 2018' })],
-    ['hybrid', () => post('/v1/search/hybrid', { query: '풀바디 레드 와인' })],
-    ['interpret', () => post('/v1/search/interpret', { query: 'Opus One' })],
-    ['resolve', () => post('/v1/entity/resolve', { query: 'Opus One 2018' })],
-    [
-      'replay',
-      () => post('/v1/search/replay', {
-        query: 'Opus One 2018',
-        decision_snapshot: MATCHING_SNAPSHOT,
-      }),
-    ],
+    ['lookup', () => post('/v1/search/lookup', { query: 'Opus One 2018' })],
   ])('POST /v1/%s response body is always valid JSON', async (_label, runRequest) => {
     const res = await runRequest();
     expectValidJsonBody(res);
@@ -129,65 +116,24 @@ describe('Header and protocol edge cases', () => {
   });
 });
 
-describe('Interpret endpoint edge cases', () => {
-  it('/v1/search/interpret with Korean mixed query — rawQuery preserved exactly', async () => {
-    const query = '오푸스원 같은 가성비 와인';
-    const res = await post('/v1/search/interpret', { query });
-
-    expect(res.statusCode).toBe(200);
-    const plan = parseInterpretResponse(res);
-    expect(plan.raw_query).toBe(query);
-    expect(plan.normalized_query).toBeTruthy();
-    expect(['entity', 'hybrid', 'mixed']).toContain(plan.route);
-  });
-
-  it('plannerVersion is semver-like string (starts with X.Y)', async () => {
-    const res = await post('/v1/search/interpret', { query: 'Opus One' });
-
-    expect(res.statusCode).toBe(200);
-    const plan = parseInterpretResponse(res);
-    expect(typeof plan.planner_version).toBe('string');
-    expect(plan.planner_version).toMatch(/^\d+\.\d+/);
-  });
-
-  it('constraints is always an object (not null/undefined)', async () => {
-    const res = await post('/v1/search/interpret', {
-      query: '풀바디 레드 와인 10만원 이하',
-    });
-
-    expect(res.statusCode).toBe(200);
-    const plan = res.json() as Record<string, unknown>;
-    expect(typeof plan['constraints']).toBe('object');
-    expect(plan['constraints']).not.toBeNull();
-  });
-});
-
-describe('Resolve endpoint edge cases', () => {
-  it('/v1/entity/resolve returns correct shape for known entity', async () => {
-    const res = await post('/v1/entity/resolve', { query: 'Opus One 2018' });
+describe('Lookup endpoint edge cases', () => {
+  it('/v1/search/lookup returns a valid search envelope for a known entity', async () => {
+    const res = await post('/v1/search/lookup', { query: 'Opus One 2018' });
 
     expect(res.statusCode).toBe(200);
     const body = res.json() as Record<string, unknown>;
-    expect(['resolved', 'ambiguous', 'failed']).toContain(body['status']);
-    expect(Array.isArray(body['candidates'])).toBe(true);
-    expect(typeof body['decision_trace_ref']).toBe('string');
+    expect(body['query_type']).toBe('search');
+    expect(Array.isArray(body['results'])).toBe(true);
+    expect(typeof body['meta']).toBe('object');
   });
 
-  it('/v1/entity/resolve for ambiguous query returns candidates array', async () => {
-    const res = await post('/v1/entity/resolve', { query: '마고' });
+  it('/v1/search/lookup rejects comparison-style queries with a valid JSON error body', async () => {
+    const res = await post('/v1/search/lookup', { query: 'Opus One vs Sassicaia' });
 
-    expect(res.statusCode).toBe(200);
-    const body = res.json() as Record<string, unknown>;
-    expect(Array.isArray(body['candidates'])).toBe(true);
-  });
-
-  it('/v1/entity/resolve for completely unknown query has ambiguous or failed status', async () => {
-    const res = await post('/v1/entity/resolve', {
-      query: 'zzz_extremely_unknown_wine_xyz_9999',
-    });
-
-    expect(res.statusCode).toBe(200);
-    const body = res.json() as Record<string, unknown>;
-    expect(['ambiguous', 'failed']).toContain(body['status']);
+    expect(res.statusCode).toBe(400);
+    const body = expectValidJsonBody(res) as Record<string, unknown>;
+    const error = body['error'] as Record<string, unknown>;
+    expect(typeof error['code']).toBe('string');
+    expect(typeof error['message']).toBe('string');
   });
 });

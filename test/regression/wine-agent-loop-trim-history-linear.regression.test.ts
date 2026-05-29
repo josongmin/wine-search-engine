@@ -2,14 +2,14 @@
  * Regression: `trimHistoryInPlace` runs in O(N), not O(N²) (F6).
  *
  * Pre-fix implementation summed the entire tail's content length on every
- * `tail.shift()`. With deep history (e.g. a long mini-loop conversation
+ * `tail.shift()`. With deep history (e.g. a long wine-agent-loop conversation
  * with many tool turns) this was quadratic — measurable jank.
  *
- * We exercise the trimmer through `MiniLoopRunner.run` indirectly via a
+ * We exercise the trimmer through `WineAgentLoopRunner.run` indirectly via a
  * mock LLM that emits many tool turns. The observable contract:
  *  - the trim preserves the FIRST message (user anchor),
  *  - drops oldest messages from index 1 onward,
- *  - keeps total content under `MINI_LOOP_MAX_HISTORY_CHARS` (12_000),
+ *  - keeps total content under `WINE_AGENT_LOOP_MAX_HISTORY_CHARS` (12_000),
  *  - completes quickly even for large histories (linear scaling).
  *
  * The complexity claim is asserted indirectly: we time the trimmer over a
@@ -27,25 +27,25 @@
 
 import { describe, it, expect } from 'vitest';
 
-// Constants mirrored from mini-loop.ts module scope.
-const MINI_LOOP_MAX_HISTORY_CHARS = 12_000;
-const MINI_LOOP_HISTORY_TRUNCATION_TAIL = '[history truncated]';
+// Constants mirrored from wine-agent-loop.ts module scope.
+const WINE_AGENT_LOOP_MAX_HISTORY_CHARS = 12_000;
+const WINE_AGENT_LOOP_HISTORY_TRUNCATION_TAIL = '[history truncated]';
 
 interface ChatMessageLite { role: 'user' | 'assistant' | 'system' | 'tool'; content: string }
 
 // Copy of the post-F6 implementation. The actual module-internal function
 // is byte-equivalent — if the SSoT drifts, this test still pins the
-// expected behaviour and we'll catch the divergence via the mini-loop e2e
+// expected behaviour and we'll catch the divergence via the wine-agent-loop e2e
 // suite. Adding the re-impl here is a pragmatic compromise vs. exporting
 // internal helpers.
 function trimReference(history: ChatMessageLite[]): void {
   let total = 0;
   for (const m of history) total += m.content.length;
-  if (total <= MINI_LOOP_MAX_HISTORY_CHARS) return;
+  if (total <= WINE_AGENT_LOOP_MAX_HISTORY_CHARS) return;
   const head = history[0];
   if (head === undefined) return;
   let cutFrom = 1;
-  while (cutFrom < history.length && total > MINI_LOOP_MAX_HISTORY_CHARS) {
+  while (cutFrom < history.length && total > WINE_AGENT_LOOP_MAX_HISTORY_CHARS) {
     const m = history[cutFrom];
     if (m === undefined) break;
     total -= m.content.length;
@@ -56,7 +56,7 @@ function trimReference(history: ChatMessageLite[]): void {
   history.push(head);
   for (const m of kept) history.push(m);
   if (history.length === 1) {
-    history.push({ role: 'user', content: MINI_LOOP_HISTORY_TRUNCATION_TAIL });
+    history.push({ role: 'user', content: WINE_AGENT_LOOP_HISTORY_TRUNCATION_TAIL });
   }
 }
 
@@ -68,7 +68,7 @@ function buildHistory(messageCount: number, charsPerMessage: number): ChatMessag
   return out;
 }
 
-describe('mini-loop trimHistoryInPlace — linear scaling (F6 regression)', () => {
+describe('wine-agent-loop trimHistoryInPlace — linear scaling (F6 regression)', () => {
   it('preserves the head message and drops oldest tail until budget fits', () => {
     // 30 messages × 1000 chars = 30_000 chars; budget 12_000 → drop ~18.
     const history = buildHistory(30, 1000);
@@ -76,7 +76,7 @@ describe('mini-loop trimHistoryInPlace — linear scaling (F6 regression)', () =
     expect(history[0]?.content).toBe('anchor query');
     let total = 0;
     for (const m of history) total += m.content.length;
-    expect(total).toBeLessThanOrEqual(MINI_LOOP_MAX_HISTORY_CHARS);
+    expect(total).toBeLessThanOrEqual(WINE_AGENT_LOOP_MAX_HISTORY_CHARS);
   });
 
   it('emits the truncation tail when only the head survives', () => {
@@ -84,12 +84,12 @@ describe('mini-loop trimHistoryInPlace — linear scaling (F6 regression)', () =
     // remains since the single tail message would blow the budget.
     const history: ChatMessageLite[] = [
       { role: 'user', content: 'anchor query' },
-      { role: 'user', content: 'x'.repeat(MINI_LOOP_MAX_HISTORY_CHARS + 5_000) },
+      { role: 'user', content: 'x'.repeat(WINE_AGENT_LOOP_MAX_HISTORY_CHARS + 5_000) },
     ];
     trimReference(history);
     expect(history.length).toBe(2);
     expect(history[0]?.content).toBe('anchor query');
-    expect(history[1]?.content).toBe(MINI_LOOP_HISTORY_TRUNCATION_TAIL);
+    expect(history[1]?.content).toBe(WINE_AGENT_LOOP_HISTORY_TRUNCATION_TAIL);
   });
 
   it('is no-op when total content is within budget', () => {
@@ -113,6 +113,6 @@ describe('mini-loop trimHistoryInPlace — linear scaling (F6 regression)', () =
     expect(elapsedMs).toBeLessThan(50);
     let total = 0;
     for (const m of history) total += m.content.length;
-    expect(total).toBeLessThanOrEqual(MINI_LOOP_MAX_HISTORY_CHARS);
+    expect(total).toBeLessThanOrEqual(WINE_AGENT_LOOP_MAX_HISTORY_CHARS);
   });
 });

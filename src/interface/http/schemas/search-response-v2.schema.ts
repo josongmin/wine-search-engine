@@ -6,23 +6,18 @@
  * Route                        Response Schema              Consumer
  * ─────────────────────────────────────────────────────────────────────────────
  * POST /v1/search              SearchResponseSchema (V1)    Human + adapter
- * POST /v1/search/hybrid       SearchResponseSchema (V1)    Human + adapter
- * POST /v1/search/interpret    InterpretResponseSchema (V1) Human + adapter
- * POST /v1/entity/resolve      ResolveResponseSchema (V1)   Human + adapter
- * POST /v1/batch-search        BatchSearchResponseSchema     Human + adapter
- * POST /v1/search/replay       SearchResponseSchema (V1)    Human + adapter
- * GET|POST /v1/claude-tools    WineToolExecutor result      Machine / LLM
+ * POST /v1/search/lookup       SearchResponseSchema (V1)    Human + adapter
+ * POST /v1/wine-search         WineSearchResponseSchema     Agent runtime
  *
  * POST /v2/search              SearchResponseV2Human        Human
  * POST /v2/search/hybrid       SearchResponseV2Human        Human
  * POST /v2/search/interpret    InterpretResponseV2          Human
- * (machine V2)                 SearchResponseV2Machine      Via /v1/claude-tools seam only
+ * (machine V2)                 SearchResponseV2Machine      Internal executor seam only
  * ─────────────────────────────────────────────────────────────────────────────
  *
  * V1 contracts are maintained until post-Wave-3 deprecation.
- * Machine V2 is not exposed via /v2/search/* — LLM consumers continue to use
- * the /v1/claude-tools seam, which the WineToolExecutor will wrap with V2
- * machine response projection when ready (T6.5+).
+ * Machine V2 is not exposed via /v2/search/* — it remains an internal
+ * `WineToolExecutor` projection rather than a public HTTP contract.
  */
 
 import { z } from 'zod';
@@ -199,7 +194,7 @@ export const SearchResponseV2HumanSchema = z.union([
 /**
  * Machine/LLM-optimised result item for V2 machine responses.
  * Exposes full scoring detail for programmatic consumption.
- * NOT returned via /v2/search/* — only via the /v1/claude-tools seam.
+ * NOT returned via /v2/search/* — internal executor projection only.
  */
 export const ResultItemV2MachineSchema = z.object({
   entityId: z.string().min(1),
@@ -219,8 +214,8 @@ export const ResultItemV2MachineSchema = z.object({
 
 /**
  * V2 machine-optimised search response envelope.
- * Exposed only via the /v1/claude-tools seam (WineToolExecutor), NOT via
- * any /v2/search/* route. Handler wiring deferred to T6.5.
+ * Exposed only via the internal `WineToolExecutor` seam, NOT via any
+ * public /v2/search/* route.
  */
 export const SearchResponseV2MachineSchema = z.object({
   queryId: z.string().min(1),

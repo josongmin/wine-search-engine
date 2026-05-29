@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import type { SnapshotVersions } from '../../src/application/search/search.usecase.js';
 import type { DrinkingWindowPredictorPort } from '../../src/domain/drinking-window/port/drinking-window-predictor.port.js';
 import type { RerankerPort } from '../../src/domain/ranking/port/reranker.port.js';
 import type { LearnedMatcherPort } from '../../src/domain/resolver/port/learned-matcher.port.js';
@@ -15,24 +14,6 @@ import {
   runSearchFixture,
   type SearchReplayFixtureFile,
 } from '../replay-fixtures/search/run-search-fixture.js';
-
-function buildRuntimeSnapshotVersions(
-  fixture: SearchReplayFixtureFile,
-): SnapshotVersions {
-  if (fixture.endpoint !== '/v1/search/replay') {
-    return {
-      modelVersions: {},
-      indexVersions: {},
-      featureFlags: {},
-    };
-  }
-
-  return {
-    modelVersions: { ...fixture.replay_request.decision_snapshot.model_versions },
-    indexVersions: { ...fixture.replay_request.decision_snapshot.index_versions },
-    featureFlags: {},
-  };
-}
 
 function buildRuntimeLearnedMatcher(
   fixture: SearchReplayFixtureFile,
@@ -94,7 +75,6 @@ describe('search replay fixtures — runtime-required HTTP lane', () => {
     it(`executes runtime-required fixture ${file}`, async () => {
       const server: TestServer = await createTestServer({
         containerOptions: {
-          snapshotVersions: buildRuntimeSnapshotVersions(fixture),
           learnedMatcher: buildRuntimeLearnedMatcher(fixture),
           reranker: buildRuntimeReranker(fixture),
           drinkingWindowPredictor: buildRuntimeDrinkingWindowPredictor(fixture),
@@ -114,6 +94,7 @@ describe('search replay fixtures — runtime-required HTTP lane', () => {
         expect(mode).toBe(classifySearchFixtureMode(fixture));
         expect(assertionSummary.endpoint).toBe(fixture.endpoint);
         expect(assertionSummary.runtimeMode).toBe('inmemory');
+        expect(assertionSummary.usedLiveSnapshot).toBe(false);
         expect(assertionSummary.skipped).toBe(false);
         if ('error_code' in fixture.expected) {
           expect(assertionSummary.errorCode).toBe(fixture.expected.error_code);

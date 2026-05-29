@@ -25,10 +25,6 @@ async function post(path: string, body: unknown) {
   return postJson(server.app, path, body);
 }
 
-async function postReplay(body: unknown) {
-  return post('/v1/search/replay', body);
-}
-
 async function expectSearchNot500(
   query: string,
   expectedStatuses: readonly number[],
@@ -247,23 +243,8 @@ describe('Input validation edge cases', () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it('interpret rejects mixed camelCase and snake_case aliases together', async () => {
-    const res = await post('/v1/search/interpret', {
-      query: 'Opus One',
-      sessionContext: {
-        sessionId: 'sess-1',
-        previousEntities: ['wine:opus-one-2018'],
-      },
-      session_context: {
-        session_id: 'sess-2',
-        previous_entities: ['wine:opus-one-2018'],
-      },
-    });
-    expect(res.statusCode).toBe(400);
-  });
-
-  it('resolve rejects mixed camelCase and snake_case aliases together', async () => {
-    const res = await post('/v1/entity/resolve', {
+  it('lookup rejects mixed camelCase and snake_case query budget aliases together', async () => {
+    const res = await post('/v1/search/lookup', {
       query: 'Opus One',
       queryBudget: {
         maxLatencyMs: 1000,
@@ -274,50 +255,6 @@ describe('Input validation edge cases', () => {
         max_latency_ms: 1000,
         max_candidates: 10,
         rerank_limit: 5,
-      },
-    });
-    expect(res.statusCode).toBe(400);
-  });
-
-  it('batch-search rejects mixed camelCase and snake_case aliases together inside an item', async () => {
-    const res = await post('/v1/batch-search', {
-      batch_id: 'batch-conflict',
-      requests: [
-        {
-          id: '1',
-          query: 'Opus One',
-          sessionContext: {
-            sessionId: 'sess-1',
-            previousEntities: ['wine:opus-one-2018'],
-          },
-          session_context: {
-            session_id: 'sess-2',
-            previous_entities: ['wine:opus-one-2018'],
-          },
-        },
-      ],
-    });
-    expect(res.statusCode).toBe(400);
-  });
-
-  it('replay missing all required snapshot fields — returns 400', async () => {
-    const res = await postReplay({
-      query: 'Opus One',
-      decision_snapshot: {},
-    });
-    expect(res.statusCode).toBe(400);
-  });
-
-  it('replay snapshot with wrong types (model_versions as string) — returns 400', async () => {
-    const res = await postReplay({
-      query: 'Opus One',
-      decision_snapshot: {
-        model_versions: 'not-an-object',
-        index_versions: {},
-        policy_rule_version: '1.0.0',
-        threshold_profile_id: 'default',
-        planner_version: '1.0.0',
-        feature_flags: {},
       },
     });
     expect(res.statusCode).toBe(400);

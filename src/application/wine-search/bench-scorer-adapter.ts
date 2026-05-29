@@ -24,12 +24,12 @@
  *
  * Mapping notes (verify-by-reading `ScenarioExecution` at
  *  `test/benchmark/agent/scorer.ts:134`):
- *   - `stepCount` counts only steps with `source ∈ { 'runner', 'mini_loop' }`.
+ *   - `stepCount` counts only steps with `source ∈ { 'runner', 'wine_agent_loop' }`.
  *     Analyzer / router / synthesizer phases are bookkeeping; they do not
  *     represent "agent steps" in the scorer's sense and would inflate the
  *     step-efficiency penalty otherwise.
  *   - `toolCallCount` is taken from the top-level `result.toolCallCount`
- *     (already an invariant: sum of `toolCalls.length` across runner+mini_loop
+ *     (already an invariant: sum of `toolCalls.length` across runner+wine_agent_loop
  *     steps, set by the orchestrator and validated by its Zod schema).
  *   - `totalTokens` keeps only `{ input, output }`. Cache tokens
  *     (`cacheReadTokens` + `cacheCreationTokens`) are dropped — the scorer's
@@ -88,12 +88,12 @@ export interface ScenarioExecutionLike {
 // Named constants (CLAUDE.md rule 15)
 // ---------------------------------------------------------------------------
 
-/** Source-kind allowlist for `stepCount`: only runner / mini_loop steps
+/** Source-kind allowlist for `stepCount`: only runner / wine_agent_loop steps
  *  represent "real" agent steps that emit tool calls. Analyzer / router /
  *  synthesizer phases are framework bookkeeping. */
 const SCORER_STEP_SOURCES: ReadonlySet<ExecutionStep['source']> = new Set([
   'runner',
-  'mini_loop',
+  'wine_agent_loop',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -139,7 +139,7 @@ export function mapAgentTerminationToScenario(
  * `ToolCallTrace[]` shape the scorer consumes (`{ tool, input }` where `input`
  * is a stringified JSON object — matches the legacy adapter's call shape).
  *
- * Only steps whose `source` is `'runner'` or `'mini_loop'` are inspected.
+ * Only steps whose `source` is `'runner'` or `'wine_agent_loop'` are inspected.
  * The orchestrator's top-level `toolCallCount` invariant pins the same set,
  * so the flattened length here MUST equal `result.toolCallCount`.
  */
@@ -164,7 +164,7 @@ function extractWineSearchToolsUsed(
 /**
  * Flatten the per-step `observations` arrays into a single ordered list.
  *
- * Like `extractWineSearchToolsUsed`, only runner / mini_loop step
+ * Like `extractWineSearchToolsUsed`, only runner / wine_agent_loop step
  * observations are surfaced. We additionally filter out empty strings —
  * those carry no signal and would dilute the scorer's `contextRecall` and
  * `faithfulness` dimensions (parity with `test/benchmark/agent/runner.ts:1330`
@@ -198,7 +198,7 @@ export function wineSearchResultToScenarioExecution(
 ): ScenarioExecutionLike {
   const toolsUsed = extractWineSearchToolsUsed(result.executionSteps);
   const observations = extractWineSearchObservations(result.executionSteps);
-  // Step count: only runner / mini_loop sourced steps. Avoids inflating the
+  // Step count: only runner / wine_agent_loop sourced steps. Avoids inflating the
   // step-efficiency penalty when analyzer/router/synthesizer phases are
   // present in the trace.
   let stepCount = 0;

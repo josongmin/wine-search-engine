@@ -6,7 +6,7 @@ import { api } from '@/shared/api';
 export function useEntityResolve(query: string, enabled = true) {
   return useQuery({
     queryKey: ['entity-resolve', query],
-    queryFn: () => api.entityResolve({ query }),
+    queryFn: () => api.lookupEntity({ query }),
     enabled: enabled && query.length > 0,
     staleTime: 5 * 60 * 1000,
   });

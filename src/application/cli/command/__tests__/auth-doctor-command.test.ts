@@ -60,9 +60,7 @@ function makeCtx(args: {
     facades: {
       auth: args.auth,
       search: {} as never,
-      entity: {} as never,
       wineSearch: {} as never,
-      rawApi: {} as never,
     },
   };
 }

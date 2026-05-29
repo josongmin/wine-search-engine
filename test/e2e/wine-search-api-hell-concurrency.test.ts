@@ -3,22 +3,22 @@
  *
  * Companion to wine-search-api-hell-{http,pipeline,adversarial}.test.ts. This
  * file attacks the SHARED-MUTABLE-STATE SEAMS introduced by the new
- * Plan-then-Execute orchestrator + MiniLoop + StepBudget + TerminationStateMachine
+ * Plan-then-Execute orchestrator + WineAgentLoop + StepBudget + TerminationStateMachine
  * stack:
  *
  *   - WineSearchOrchestrator (`src/application/wine-search/wine-search-orchestrator.ts`)
  *     holds a per-execute `OrchestratorState` in a function-local closure; the
  *     class itself carries deps + logger + clock as instance fields (read-only
  *     after construction).
- *   - MiniLoopRunner (`src/application/wine-search/mini-loop.ts`) instantiates a
+ *   - WineAgentLoopRunner (`src/application/wine-search/wine-agent-loop.ts`) instantiates a
  *     fresh `StepBudget` PER `run()` call and a fresh local `RunnerState`. It
  *     also adds `AbortSignal addEventListener('abort', ...)` per LLM turn AND
  *     per tool dispatch — every listener has a matching `removeEventListener`
- *     in a `finally` block (mini-loop.ts:474, 527).
+ *     in a `finally` block (wine-agent-loop.ts:474, 527).
  *   - StepBudget (`src/domain/agent/service/step-budget.ts`) is INTERNALLY
  *     STATEFUL via `stepCount`, `seenActions` (Set), `perToolCallCounts` (Map),
  *     `perToolNormalizedQueries` (Map<string, string[]>). Per-request isolation
- *     depends on the mini-loop creating a fresh instance each run.
+ *     depends on the wine-agent-loop creating a fresh instance each run.
  *   - TerminationStateMachine (`src/domain/agent/service/termination-state-machine.ts`)
  *     is a PURE FUNCTION; the priority table is a module-level
  *     `Object.freeze`-able constant. No closure-captured mutable state.
@@ -34,15 +34,15 @@
  *  - 50+ parallel requests with DISTINCT marker tokens: no cross-talk
  *    (synthesized answer mentions ITS OWN marker, none of the siblings').
  *  - StepBudget instances do NOT share state across concurrent runs (the
- *    mini-loop never reuses a single instance across `run()` calls).
+ *    wine-agent-loop never reuses a single instance across `run()` calls).
  *  - TerminationStateMachine returns consistent priority winners across
  *    100 concurrent invocations (pure function — no shared state).
  *  - After 1000 fast requests, the in-process `Set<AbortSignal>` count from
  *    the LLM mock does NOT grow without bound (we track distinct identities).
  *  - Process memory after 1000 fast requests stays within a generous bound
  *    (statistical — the per-request closure footprint is bounded by GC).
- *  - `/v1/agent` and `/v1/wine-search` interleaved: both orchestrators retain
- *    their own state (no cross-orchestrator corruption).
+ *  - `/v1/search` and `/v1/wine-search` interleaved: both surfaces retain
+ *    their own state (no cross-surface corruption).
  *
  * SCOPE — ADDITIVE ONLY:
  *  - New file under test/e2e (added to e2e.wine-search.config.ts include list).
@@ -60,7 +60,7 @@
  *    boundary (every catch must `state.terminationReason = transition(...)`
  *    AND `return`).
  *  - Rule 20: pre-flight budget check race verified (the `canProceed` /
- *    `recordParallelBatch` ordering in mini-loop.ts:214,286).
+ *    `recordParallelBatch` ordering in wine-agent-loop.ts:214,286).
  *  - Rule 23: false-positive guard — legitimate Korean queries that contain
  *    blocked substrings remain unblocked under concurrency.
  *  - Rule 33: every shared seam (StepBudget, TerminationStateMachine) is
@@ -408,8 +408,8 @@ describe('POST /v1/wine-search — Hell C2: Abort race conditions', () => {
   it('C2-3: AbortSignal listener count is bounded — no listener leak after 100 sequential requests', async () => {
     // The route registers one `request.raw.once('aborted', ...)` listener
     // per request and removes it in `finally` (wine-search.route.ts:129).
-    // The orchestrator + mini-loop register short-lived `addEventListener`
-    // calls and matching removeEventListener in `finally` (mini-loop.ts:474,
+    // The orchestrator + wine-agent-loop register short-lived `addEventListener`
+    // calls and matching removeEventListener in `finally` (wine-agent-loop.ts:474,
     // 527). After each request completes the lifecycleController is aborted,
     // which fires once and is then unreferenceable. We assert by probing each
     // observed signal's `aborted` state — a real leak would leave signals
@@ -471,8 +471,8 @@ describe('POST /v1/wine-search — Hell C2: Abort race conditions', () => {
 
 describe('StepBudget — Hell C3: per-request isolation', () => {
   it('C3-1: two StepBudget instances do not share state (Set / Map references are not aliased)', () => {
-    // The MiniLoopRunner constructs a fresh StepBudget per `run()` call
-    // (mini-loop.ts:199 — `new StepBudget(agentConfig)`). Defensive: prove
+    // The WineAgentLoopRunner constructs a fresh StepBudget per `run()` call
+    // (wine-agent-loop.ts:199 — `new StepBudget(agentConfig)`). Defensive: prove
     // two instances have INDEPENDENT internal state.
     const a = new StepBudget(makeBudgetConfig(5));
     const b = new StepBudget(makeBudgetConfig(5));
@@ -494,7 +494,7 @@ describe('StepBudget — Hell C3: per-request isolation', () => {
   });
 
   it('C3-2: 50 concurrent StepBudget runs are independent (no cross-pollination of seenActions)', async () => {
-    // Simulate 50 concurrent mini-loop runs: each creates its own StepBudget
+    // Simulate 50 concurrent wine-agent-loop runs: each creates its own StepBudget
     // and records 3 calls with DIFFERENT tools (so the per-tool cap and
     // near-duplicate Jaccard cannot interfere — we want to isolate the
     // "shared state across instances" property, not test the loop-detection

@@ -1,5 +1,5 @@
 /**
- * Regression: Tool Result Cache for the PtE mini-loop dispatch.
+ * Regression: Tool Result Cache for the PtE wine-agent-loop dispatch.
  *
  * Locks in:
  *  1. `stableStringify` is deterministic — identical objects produce
@@ -19,7 +19,7 @@
  *  8. TTL map covers exactly KNOWN_AGENT_TOOL_NAMES (no drift).
  *
  * No live Redis required — the adapter is constructed against a deterministic
- * in-memory mock; the mini-loop is exercised with a stub structured-LLM.
+ * in-memory mock; the wine-agent-loop is exercised with a stub structured-LLM.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -37,17 +37,17 @@ import type {
   ToolUseCall,
 } from '../../src/domain/ai/port/structured-llm.port.js';
 import type { SearchResponseV1 } from '../../src/domain/response/model/search-response.js';
-import { MiniLoopRunner } from '../../src/application/wine-search/mini-loop.js';
+import { WineAgentLoopRunner } from '../../src/application/wine-search/wine-agent-loop.js';
 import {
-  MINI_LOOP_DEFAULT_AGENT_TIMEOUT_MS,
-  MINI_LOOP_DEFAULT_MAX_OUTPUT_TOKENS,
-  MINI_LOOP_DEFAULT_MAX_STEPS,
-  MINI_LOOP_DEFAULT_MAX_TOTAL_TOKENS,
-  MINI_LOOP_DEFAULT_PER_STEP_TIMEOUT_MS,
-  MINI_LOOP_DEFAULT_PER_TOOL_CAP,
-  type MiniLoopInput,
-  type MiniLoopToolPorts,
-} from '../../src/application/wine-search/mini-loop-schemas.js';
+  WINE_AGENT_LOOP_DEFAULT_AGENT_TIMEOUT_MS,
+  WINE_AGENT_LOOP_DEFAULT_MAX_OUTPUT_TOKENS,
+  WINE_AGENT_LOOP_DEFAULT_MAX_STEPS,
+  WINE_AGENT_LOOP_DEFAULT_MAX_TOTAL_TOKENS,
+  WINE_AGENT_LOOP_DEFAULT_PER_STEP_TIMEOUT_MS,
+  WINE_AGENT_LOOP_DEFAULT_PER_TOOL_CAP,
+  type WineAgentLoopInput,
+  type WineAgentLoopToolPorts,
+} from '../../src/application/wine-search/wine-agent-loop-schemas.js';
 import type {
   SearchUseCasePort,
 } from '../../src/application/wine-search/execution-runner.js';
@@ -66,7 +66,7 @@ import {
 import { KNOWN_AGENT_TOOL_NAMES } from '../../src/domain/agent/model/agent-tool-attempt-schema.js';
 
 // ---------------------------------------------------------------------------
-// Helpers (mirrors the existing mini-loop.test.ts fixture style)
+// Helpers (mirrors the existing wine-agent-loop.test.ts fixture style)
 // ---------------------------------------------------------------------------
 
 const REQUEST_ID = 'req-tool-cache-001';
@@ -90,7 +90,7 @@ function makeAnalysis(): WineSearchAnalysis {
       hasEntityMetadataSignal: false,
     },
     expectedMultiStep: true,
-    recommendedBudget: { maxSteps: MINI_LOOP_DEFAULT_MAX_STEPS, perToolCap: MINI_LOOP_DEFAULT_PER_TOOL_CAP },
+    recommendedBudget: { maxSteps: WINE_AGENT_LOOP_DEFAULT_MAX_STEPS, perToolCap: WINE_AGENT_LOOP_DEFAULT_PER_TOOL_CAP },
     hangulDominant: false,
     preservedSurface: 'fixture-query',
   };
@@ -117,7 +117,7 @@ function makeSearchPort(
   };
 }
 
-function makeToolPorts(overrides?: Partial<MiniLoopToolPorts>): MiniLoopToolPorts {
+function makeToolPorts(overrides?: Partial<WineAgentLoopToolPorts>): WineAgentLoopToolPorts {
   return {
     searchUseCase: overrides?.searchUseCase ?? makeSearchPort(),
   };
@@ -173,19 +173,19 @@ function makeToolDefs(): readonly ToolDefinition[] {
   ];
 }
 
-function makeInput(overrides: Partial<MiniLoopInput>): MiniLoopInput {
+function makeInput(overrides: Partial<WineAgentLoopInput>): WineAgentLoopInput {
   return {
     query: overrides.query ?? 'recommend a Burgundy Pinot Noir',
     analysis: overrides.analysis ?? makeAnalysis(),
     requestId: overrides.requestId ?? REQUEST_ID,
     tools: overrides.tools ?? makeToolDefs(),
     toolPorts: overrides.toolPorts ?? makeToolPorts(),
-    perStepTimeoutMs: overrides.perStepTimeoutMs ?? MINI_LOOP_DEFAULT_PER_STEP_TIMEOUT_MS,
-    agentTimeoutMs: overrides.agentTimeoutMs ?? MINI_LOOP_DEFAULT_AGENT_TIMEOUT_MS,
-    maxSteps: overrides.maxSteps ?? MINI_LOOP_DEFAULT_MAX_STEPS,
-    maxTotalTokens: overrides.maxTotalTokens ?? MINI_LOOP_DEFAULT_MAX_TOTAL_TOKENS,
-    maxOutputTokens: overrides.maxOutputTokens ?? MINI_LOOP_DEFAULT_MAX_OUTPUT_TOKENS,
-    perToolCap: overrides.perToolCap ?? MINI_LOOP_DEFAULT_PER_TOOL_CAP,
+    perStepTimeoutMs: overrides.perStepTimeoutMs ?? WINE_AGENT_LOOP_DEFAULT_PER_STEP_TIMEOUT_MS,
+    agentTimeoutMs: overrides.agentTimeoutMs ?? WINE_AGENT_LOOP_DEFAULT_AGENT_TIMEOUT_MS,
+    maxSteps: overrides.maxSteps ?? WINE_AGENT_LOOP_DEFAULT_MAX_STEPS,
+    maxTotalTokens: overrides.maxTotalTokens ?? WINE_AGENT_LOOP_DEFAULT_MAX_TOTAL_TOKENS,
+    maxOutputTokens: overrides.maxOutputTokens ?? WINE_AGENT_LOOP_DEFAULT_MAX_OUTPUT_TOKENS,
+    perToolCap: overrides.perToolCap ?? WINE_AGENT_LOOP_DEFAULT_PER_TOOL_CAP,
     ...(overrides.initialDirective !== undefined ? { initialDirective: overrides.initialDirective } : {}),
     ...(overrides.abortSignal !== undefined ? { abortSignal: overrides.abortSignal } : {}),
   };
@@ -311,7 +311,7 @@ describe('Tool Result Cache — TTL map', () => {
   });
 });
 
-describe('Tool Result Cache — MiniLoopRunner integration', () => {
+describe('Tool Result Cache — WineAgentLoopRunner integration', () => {
   beforeEach(() => {
     __resetRedisToolResultCacheWarnLatchesForTests();
   });
@@ -330,7 +330,7 @@ describe('Tool Result Cache — MiniLoopRunner integration', () => {
         async () => asToolUseResult([toolUse('search_wines', { query: 'cache-test' })]),
         async () => asTextResult('answer1'),
       ]);
-      const runner1 = new MiniLoopRunner({ structuredLlm: llm1, logger: makeLogger(), toolResultCache: cache });
+      const runner1 = new WineAgentLoopRunner({ structuredLlm: llm1, logger: makeLogger(), toolResultCache: cache });
       const out1 = await runner1.run(makeInput({ toolPorts: makeToolPorts({ searchUseCase: searchPort }) }));
       expect(out1.terminationReason).toBe('answer');
       expect(searchPort.executeMock).toHaveBeenCalledTimes(1);
@@ -341,7 +341,7 @@ describe('Tool Result Cache — MiniLoopRunner integration', () => {
         async () => asToolUseResult([toolUse('search_wines', { query: 'cache-test' })]),
         async () => asTextResult('answer2'),
       ]);
-      const runner2 = new MiniLoopRunner({ structuredLlm: llm2, logger: makeLogger(), toolResultCache: cache });
+      const runner2 = new WineAgentLoopRunner({ structuredLlm: llm2, logger: makeLogger(), toolResultCache: cache });
       const out2 = await runner2.run(makeInput({ toolPorts: makeToolPorts({ searchUseCase: searchPort }) }));
       expect(out2.terminationReason).toBe('answer');
       // Tool executed only once (the cache short-circuits the second turn).
@@ -361,14 +361,14 @@ describe('Tool Result Cache — MiniLoopRunner integration', () => {
         async () => asToolUseResult([toolUse('search_wines', { query: 'first' })]),
         async () => asTextResult('a'),
       ]);
-      await new MiniLoopRunner({ structuredLlm: llm1, logger: makeLogger(), toolResultCache: cache })
+      await new WineAgentLoopRunner({ structuredLlm: llm1, logger: makeLogger(), toolResultCache: cache })
         .run(makeInput({ toolPorts: makeToolPorts({ searchUseCase: searchPort }) }));
 
       const llm2 = makeStubLlm([
         async () => asToolUseResult([toolUse('search_wines', { query: 'second' })]),
         async () => asTextResult('b'),
       ]);
-      await new MiniLoopRunner({ structuredLlm: llm2, logger: makeLogger(), toolResultCache: cache })
+      await new WineAgentLoopRunner({ structuredLlm: llm2, logger: makeLogger(), toolResultCache: cache })
         .run(makeInput({ toolPorts: makeToolPorts({ searchUseCase: searchPort }) }));
 
       expect(searchPort.executeMock).toHaveBeenCalledTimes(2);
@@ -384,7 +384,7 @@ describe('Tool Result Cache — MiniLoopRunner integration', () => {
         async () => asToolUseResult([toolUse('search_wines', { query: 'ttl-test' })]),
         async () => asTextResult('done'),
       ]);
-      await new MiniLoopRunner({ structuredLlm: llm, logger: makeLogger(), toolResultCache: cache })
+      await new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger(), toolResultCache: cache })
         .run(makeInput({ toolPorts: makeToolPorts({ searchUseCase: searchPort }) }));
 
       expect(cache.setMock).toHaveBeenCalledTimes(1);
@@ -412,7 +412,7 @@ describe('Tool Result Cache — MiniLoopRunner integration', () => {
         async () => asToolUseResult([toolUse('search_wines', { query: 'fail-open' })]),
         async () => asTextResult('ok'),
       ]);
-      const out = await new MiniLoopRunner({ structuredLlm: llm, logger: makeLogger(), toolResultCache: failOpenCache })
+      const out = await new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger(), toolResultCache: failOpenCache })
         .run(makeInput({ toolPorts: makeToolPorts({ searchUseCase: searchPort }) }));
       expect(out.terminationReason).toBe('answer');
       expect(searchPort.executeMock).toHaveBeenCalledTimes(1);
@@ -427,7 +427,7 @@ describe('Tool Result Cache — MiniLoopRunner integration', () => {
         async () => asToolUseResult([toolUse('search_wines', { query: 'disabled' })]),
         async () => asTextResult('ok'),
       ]);
-      await new MiniLoopRunner({ structuredLlm: llm, logger: makeLogger(), toolResultCache: cache })
+      await new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger(), toolResultCache: cache })
         .run(makeInput({ toolPorts: makeToolPorts({ searchUseCase: searchPort }) }));
 
       expect(cache.getMock).not.toHaveBeenCalled();
@@ -454,7 +454,7 @@ describe('Tool Result Cache — MiniLoopRunner integration', () => {
         async () => asToolUseResult([toolUse('search_wines', { query: 'fail-tool' })]),
         async () => asTextResult('ok'),
       ]);
-      await new MiniLoopRunner({ structuredLlm: llm, logger: makeLogger(), toolResultCache: cache })
+      await new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger(), toolResultCache: cache })
         .run(makeInput({ toolPorts: makeToolPorts({ searchUseCase: searchPort }) }));
 
       // execError path → set NEVER called (we don't cache failures)
@@ -472,7 +472,7 @@ describe('Tool Result Cache — MiniLoopRunner integration', () => {
         async () => asToolUseResult([toolUse('search_wines', { query: 'reorder', limit: 5 })]),
         async () => asTextResult('a'),
       ]);
-      await new MiniLoopRunner({ structuredLlm: llm1, logger: makeLogger(), toolResultCache: cache })
+      await new WineAgentLoopRunner({ structuredLlm: llm1, logger: makeLogger(), toolResultCache: cache })
         .run(makeInput({ toolPorts: makeToolPorts({ searchUseCase: searchPort }) }));
 
       // Second run with input B,A (same fields, different insertion order) — should HIT cache
@@ -480,7 +480,7 @@ describe('Tool Result Cache — MiniLoopRunner integration', () => {
         async () => asToolUseResult([toolUse('search_wines', { limit: 5, query: 'reorder' })]),
         async () => asTextResult('b'),
       ]);
-      await new MiniLoopRunner({ structuredLlm: llm2, logger: makeLogger(), toolResultCache: cache })
+      await new WineAgentLoopRunner({ structuredLlm: llm2, logger: makeLogger(), toolResultCache: cache })
         .run(makeInput({ toolPorts: makeToolPorts({ searchUseCase: searchPort }) }));
 
       // Tool executed once — second was a cache hit.

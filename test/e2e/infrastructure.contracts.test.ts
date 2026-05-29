@@ -9,13 +9,9 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createTestServer, closeTestServer, type TestServer } from './helpers/test-server.js';
 import {
   getSearchDecision,
-  getSearchDecisionSnapshot,
   getSearchMeta,
   parseSearchResponse,
 } from './helpers/http-transport.js';
-import { makeReplaySnapshot } from './helpers/replay-snapshot.js';
-
-const MATCHING_SNAPSHOT = makeReplaySnapshot();
 
 function injectSearch(
   server: TestServer,
@@ -25,19 +21,6 @@ function injectSearch(
   return server.app.inject({
     method: 'POST',
     url: '/v1/search',
-    headers,
-    payload: JSON.stringify(payload),
-  });
-}
-
-function injectReplay(
-  server: TestServer,
-  payload: Record<string, unknown>,
-  headers: Record<string, string> = { 'content-type': 'application/json' },
-) {
-  return server.app.inject({
-    method: 'POST',
-    url: '/v1/search/replay',
     headers,
     payload: JSON.stringify(payload),
   });
@@ -90,7 +73,6 @@ let unsupportedXmlResponse: Awaited<ReturnType<typeof injectSearch>>;
 let missingContentTypeResponse: Awaited<ReturnType<TestServer['app']['inject']>>;
 let resolvedResponse: Awaited<ReturnType<typeof injectSearch>>;
 let validationErrorResponse: Awaited<ReturnType<typeof injectSearch>>;
-let snapshotMismatchResponse: Awaited<ReturnType<typeof injectReplay>>;
 
 beforeAll(async () => {
   staticContractServer = await createTestServer();
@@ -100,7 +82,6 @@ beforeAll(async () => {
     missingContentTypeResponse,
     resolvedResponse,
     validationErrorResponse,
-    snapshotMismatchResponse,
   ] = await Promise.all([
     injectSearch(staticContractServer, { query: 'Opus One' }, {
       'content-type': 'text/plain',
@@ -115,10 +96,6 @@ beforeAll(async () => {
     }),
     injectSearch(staticContractServer, { query: 'Opus One 2018' }),
     injectSearch(staticContractServer, { query: '' }),
-    injectReplay(staticContractServer, {
-      query: 'Opus One 2018',
-      decision_snapshot: { ...MATCHING_SNAPSHOT, policy_rule_version: '9.9.9' },
-    }),
   ]);
 });
 
@@ -235,7 +212,6 @@ describe('Group 7: Error Response Completeness (RFC-014)', () => {
 
   const errorCaseGetters = [
     ['400 VALIDATION_ERROR', () => validationErrorResponse, 400],
-    ['409 SNAPSHOT_MISMATCH', () => snapshotMismatchResponse, 409],
     ['415 UNSUPPORTED_MEDIA_TYPE', () => unsupportedTextPlainResponse, 415],
   ] as const;
 
@@ -260,14 +236,12 @@ describe('Group 7: Error Response Completeness (RFC-014)', () => {
 
   it.each([
     ['400 VALIDATION_ERROR', () => validationErrorResponse],
-    ['409 SNAPSHOT_MISMATCH', () => snapshotMismatchResponse],
   ])('%s error.request_id matches X-Request-Id header', async (_label, getResponse) => {
     const response = getResponse();
     expect(readErrorObject(response)['request_id']).toBe(getInjectedRequestId(response));
   });
 
   it.each([
-    ['409 SNAPSHOT_MISMATCH', () => snapshotMismatchResponse, 'SNAPSHOT_MISMATCH'],
     ['415 UNSUPPORTED_MEDIA_TYPE', () => unsupportedTextPlainResponse, 'UNSUPPORTED_MEDIA_TYPE'],
     ['400 VALIDATION_ERROR', () => validationErrorResponse, 'VALIDATION_ERROR'],
   ])('%s remains non-retryable', async (_label, getResponse, expectedCode) => {

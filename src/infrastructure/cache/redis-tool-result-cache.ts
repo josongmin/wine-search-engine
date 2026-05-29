@@ -1,7 +1,7 @@
 /**
  * RedisToolResultCache — driven-side adapter for `ToolResultCachePort`.
  *
- * Stores PtE mini-loop tool outputs keyed by (toolName, sha256-16 of stable
+ * Stores PtE wine-agent-loop tool outputs keyed by (toolName, sha256-16 of stable
  * stringified normalized input). Mirrors the `RedisEmbeddingCache` /
  * `RedisPhraseCache` patterns:
  *  - Uses {@link getRedisClient} (async — re-resolved on every op so a
@@ -14,7 +14,7 @@
  *    so a pathological tool response can never blow Redis memory.
  *
  * Out of scope (intentional): stats counters, scan/delete-by-pattern. The
- * mini-loop cache is a HOT path (~p95 < 5ms) — keep the read path minimal.
+ * wine-agent-loop cache is a HOT path (~p95 < 5ms) — keep the read path minimal.
  * Stats can be added later by mirroring `RedisCache.getValidatedWithStats`.
  */
 
@@ -59,7 +59,7 @@ const MAX_TOOL_CACHE_PAYLOAD_BYTES = 1_048_576;
 const ToolResultRecordSchema = z.object({
   // `unknown` rather than a refined shape — each tool returns a different
   // payload (search response, comparison response, drinkability probe …).
-  // The mini-loop downstream re-applies any per-tool typing.
+  // The wine-agent-loop downstream re-applies any per-tool typing.
   result: z.unknown(),
   // `createdAt` is a writer-side timestamp (Date.now()). `.finite()` rejects
   // NaN/Infinity which would otherwise pass `.number()`.

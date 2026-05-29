@@ -78,7 +78,7 @@ const SYNTHESIS_WINE_RECORD_MAX_CHARS = 320;
  * name, kind, decision-engine signals, error / postcondition messages). Per
  * outcome — outcomes do not pack tightly into a single budget; a partial
  * result outcome is allowed up to this many chars of metadata before
- * truncation. Empirically (mini-loop traces) the max observed legitimate
+ * truncation. Empirically (wine-agent-loop traces) the max observed legitimate
  * value is ~180 chars.
  */
 const SYNTHESIS_OUTCOME_META_MAX_CHARS = 256;

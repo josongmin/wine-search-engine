@@ -1,7 +1,6 @@
 import { SearchUseCase } from '../application/search/search.usecase.js';
 import type { MultiQueryGenerator } from '../domain/retrieval/service/multi-query-generator.js';
 import type { HydeGenerator } from '../domain/retrieval/service/hyde-generator.js';
-import { ReplayUseCase } from '../application/search/replay.usecase.js';
 import { InterpretUseCase } from '../application/search/interpret.usecase.js';
 import { ResolveUseCase } from '../application/search/resolve.usecase.js';
 import { AutocompleteUseCase } from '../application/search/autocomplete.usecase.js';
@@ -21,7 +20,6 @@ import type {
   DecomposedSearchUseCasePort,
   HybridUseCasePort,
   InterpretUseCasePort,
-  ReplayUseCasePort,
   ResolveUseCasePort,
 } from '../application/search/port/search-route-usecases.port.js';
 import type { CoreContainerServices } from './container-core.js';
@@ -29,7 +27,6 @@ import type { Config } from './env.js';
 
 export interface UseCaseContainerServices {
   readonly searchUseCase: SearchExecutorPort;
-  readonly replayUseCase: ReplayUseCasePort;
   readonly interpretUseCase: InterpretUseCasePort;
   readonly resolveUseCase: ResolveUseCasePort;
   readonly autocompleteUseCase: AutocompleteUseCasePort;
@@ -120,10 +117,6 @@ export function buildUseCaseContainerServices(
 
   return {
     searchUseCase,
-    replayUseCase: new ReplayUseCase({
-      searchUseCase,
-      snapshotVersions: core.snapshotVersions,
-    }),
     interpretUseCase: new InterpretUseCase({
       queryPlanner: core.queryPlanner,
       querySanitizer: core.querySanitizer,

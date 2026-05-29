@@ -1,20 +1,11 @@
 import { createHash } from 'node:crypto';
 import type { HttpRouteContract } from './route-contracts.js';
 import { WineSearchRouteContract } from './wine-search.contract.js';
-import { AgentBenchmarkScenariosRouteContract } from './agent-benchmark-scenarios.route.js';
 import {
   AgentMetricsRouteContract,
-  BatchSearchRouteContract,
-  ClaudeToolsExecuteRouteContract,
-  ClaudeToolsListRouteContract,
   HealthRouteContract,
-  HybridRouteContract,
-  InterpretRouteContract,
   LookupRouteContract,
-  AutocompleteRouteContract,
   ReadyRouteContract,
-  ReplayRouteContract,
-  ResolveRouteContract,
   RetrievalDegradationMetricsRouteContract,
   SearchRouteContract,
   WatchlistListRouteContract,
@@ -61,37 +52,26 @@ interface DeclaredHttpRouteContract {
  *           catalog entries (2026-05-23). These were never wired into
  *           server.ts; V2 served via content-negotiation on /v1/* with
  *           `Accept: application/vnd.cuvee.human+json`. Remaining: 23.
- *   3.0.0 — cutover from legacy ReAct agent to Plan-then-Execute
- *           (2026-05-23). Removed `POST /v1/agent` (and its
- *           AgentRouteContract); the canonical agentic endpoint is
- *           `POST /v1/wine-search`. Bench parity was proven before
- *           the cut. `/v1/agent/benchmark-scenarios` is kept (web lab
- *           still uses it for scenario discovery). Remaining: 22.
+ *   4.0.0 — collapse the public/product surface to the three canonical
+ *           entry points (2026-05-29): `POST /v1/search`,
+ *           `POST /v1/search/lookup`, `POST /v1/wine-search`.
+ *           Removed redundant or non-product legacy seams. Remaining: 13.
  */
-export const HTTP_CONTRACT_CATALOG_VERSION = '3.0.0';
+export const HTTP_CONTRACT_CATALOG_VERSION = '4.0.0';
 
 export const DeclaredHttpRouteContractCatalog: readonly DeclaredHttpRouteContract[] = [
   { method: 'GET', url: '/health', contract: HealthRouteContract },
   { method: 'GET', url: '/ready', contract: ReadyRouteContract },
   { method: 'GET', url: '/metrics/agent', contract: AgentMetricsRouteContract },
   { method: 'GET', url: '/metrics/retrieval-degradation', contract: RetrievalDegradationMetricsRouteContract },
-  { method: 'GET', url: '/v1/claude-tools', contract: ClaudeToolsListRouteContract },
-  { method: 'POST', url: '/v1/claude-tools', contract: ClaudeToolsExecuteRouteContract },
   { method: 'POST', url: '/v1/search', contract: SearchRouteContract },
   { method: 'POST', url: '/v1/search/lookup', contract: LookupRouteContract },
-  { method: 'POST', url: '/v1/batch-search', contract: BatchSearchRouteContract },
-  { method: 'POST', url: '/v1/search/replay', contract: ReplayRouteContract },
-  { method: 'POST', url: '/v1/search/interpret', contract: InterpretRouteContract },
-  { method: 'POST', url: '/v1/entity/resolve', contract: ResolveRouteContract },
-  { method: 'POST', url: '/v1/entity/autocomplete', contract: AutocompleteRouteContract },
-  { method: 'POST', url: '/v1/search/hybrid', contract: HybridRouteContract },
   { method: 'GET', url: '/v1/watchlist', contract: WatchlistListRouteContract },
   { method: 'POST', url: '/v1/watchlist', contract: WatchlistCreateRouteContract },
   { method: 'GET', url: '/v1/watchlist/:id', contract: WatchlistGetRouteContract },
   { method: 'DELETE', url: '/v1/watchlist/:id', contract: WatchlistDeleteRouteContract },
   { method: 'GET', url: '/v1/watchlist/:id/deliveries', contract: WatchlistDeliveriesRouteContract },
   { method: 'POST', url: '/v1/feedback', contract: FeedbackSubmitRouteContract },
-  { method: 'GET', url: '/v1/agent/benchmark-scenarios', contract: AgentBenchmarkScenariosRouteContract },
   { method: 'POST', url: '/v1/wine-search', contract: WineSearchRouteContract },
 ] as const;
 
@@ -198,7 +178,7 @@ export function computeHttpContractCatalogFingerprint(
  * failing test.
  */
 export const HTTP_CONTRACT_CATALOG_FINGERPRINT =
-  '2405338c23cebd1f374cb25a842919e10fffbeeea45d8581cf2fc8903d82b06d';
+  'a927a2f5943512a5a90a02473b252916b7d4420925af1981736aa96d608a3004';
 
 export function buildDeclaredHttpRouteContractManifest(): HttpRouteContractManifest {
   const routes: RegisteredHttpRouteContract[] = DeclaredHttpRouteContractCatalog.map((entry) => {

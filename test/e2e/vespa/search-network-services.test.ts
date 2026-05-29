@@ -72,18 +72,15 @@ describe.skipIf(!HAS_REACHABLE_VESPA)('Vespa E2E — external ML services', () =
     );
   });
 
-  it('resolve route hits learned matcher over real HTTP once candidates are hydrated', async () => {
-    const response = await postJson(server.app, '/v1/entity/resolve', {
+  it('entity-mode search hits learned matcher over real HTTP once candidates are hydrated', async () => {
+    const response = await postJson(server.app, '/v1/search', {
       query: '오푸스원',
+      options: { mode: 'entity', explain: false, clarification: false },
     });
 
     expect(response.statusCode).toBe(200);
-    const body = response.json();
-    expect(body).toEqual(
-      expect.objectContaining({
-        status: expect.any(String),
-      }),
-    );
+    const body = parseSearchResponse(response);
+    expect(body.engine_decision.decision_status).toMatch(/^(resolved|ambiguous)$/);
 
     expect(fakeMlService.countRequests('/match')).toBeGreaterThan(0);
 
@@ -123,19 +120,17 @@ describe.skipIf(!HAS_REACHABLE_VESPA)('Vespa E2E — external ML services', () =
     expect(fakeMlService.countRequests('/rerank')).toBeGreaterThan(0);
   });
 
-  it('resolve route degrades gracefully when learned matcher returns 500', async () => {
+  it('entity-mode search degrades gracefully when learned matcher returns 500', async () => {
     fakeMlService.setFailure('/match', 500, { error: 'matcher_down' });
 
-    const response = await postJson(server.app, '/v1/entity/resolve', {
+    const response = await postJson(server.app, '/v1/search', {
       query: '오푸스원',
+      options: { mode: 'entity', explain: false, clarification: false },
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual(
-      expect.objectContaining({
-        status: expect.any(String),
-      }),
-    );
+    const body = parseSearchResponse(response);
+    expect(body.engine_decision.decision_status).toMatch(/^(resolved|ambiguous|failed)$/);
     expect(fakeMlService.countRequests('/match')).toBeGreaterThan(0);
   });
 });

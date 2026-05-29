@@ -1,7 +1,7 @@
 /**
  * Wine-search tool-bundle composition-root wiring spec.
  *
- * Asserts the CLAUDE.md rule 33 invariant for the mini-loop tool bundle:
+ * Asserts the CLAUDE.md rule 33 invariant for the wine-agent-loop tool bundle:
  * the bundle is constructed at the composition root and reaches
  * `WineSearchOrchestratorImpl`'s deps slot. Without this, multi-step plans
  * silently fall through to Synthesizer Layer 4 — covered by Track C's
@@ -57,10 +57,8 @@ vi.mock('../container-features.js', () => ({
     resolveUseCase: {} as never,
     hybridUseCase: {} as never,
     batchSearchUseCase: {} as never,
-    replayUseCase: {} as never,
     autocompleteUseCase: {} as never,
     drinkingWindowUseCase: { check: vi.fn() } as never,
-    adaptiveToolExecutor: {} as never,
     evalRunner: null,
   })),
 }));
@@ -80,7 +78,7 @@ vi.mock('../container-learning.js', () => ({
   })),
 }));
 
-describe('createContainer — mini-loop tool bundle wiring', () => {
+describe('createContainer — wine-agent-loop tool bundle wiring', () => {
   const originalEnv = { ...process.env };
 
   beforeEach(() => {
@@ -113,7 +111,7 @@ describe('createContainer — mini-loop tool bundle wiring', () => {
     expect(container.wineSearch?.wineSearchOrchestrator).toBeDefined();
     // We do not invoke `.execute(...)` — only assert that the orchestrator
     // assembled with the tool bundle. The unit lane for the bundle itself
-    // covers its shape (`mini-loop-tool-bundle.test.ts`).
+    // covers its shape (`wine-agent-loop-tool-bundle.test.ts`).
     expect(typeof container.wineSearch?.wineSearchOrchestrator.execute).toBe(
       'function',
     );

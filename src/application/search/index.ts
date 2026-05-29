@@ -4,4 +4,3 @@
  */
 export { SearchUseCase } from './search.usecase.js';
 export { BatchSearchUseCase } from './batch-search.usecase.js';
-export { ReplayUseCase } from './replay.usecase.js';

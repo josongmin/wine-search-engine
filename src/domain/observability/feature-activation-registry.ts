@@ -102,10 +102,10 @@ registerFeature('multi_query_rewrite', () =>
   process.env['WINE_SEARCH_MULTI_QUERY_ENABLED'] === 'false' ? 'off' : 'on',
 );
 
-/** Mini-loop tool result cache (Redis-backed). */
+/** Wine-agent-loop tool result cache (Redis-backed). */
 registerFeature('tool_result_cache', () =>
   // Default ON (cache enabled). `'0'` disables it. Mirrors the
-  // semantics of `src/application/wine-search/mini-loop.ts`.
+  // semantics of `src/application/wine-search/wine-agent-loop.ts`.
   process.env['WINE_SEARCH_TOOL_CACHE_ENABLED'] === '0' ? 'off' : 'on',
 );
 

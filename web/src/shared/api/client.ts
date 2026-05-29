@@ -1,16 +1,12 @@
 import type {
   SearchRequest,
   SearchResponse,
-  EntityResolveRequest,
   EntityResolveResponse,
   FeedbackRequest,
   FeedbackResponse,
   WatchlistCreateRequest,
   WatchlistEntry,
   WatchlistListResponse,
-  AgentBenchmarkScenariosResponse,
-  AgentExecuteRequest,
-  AgentExecuteResponse,
   WineSearchRequest,
   WineSearchResponse,
 } from './types';
@@ -20,12 +16,9 @@ import { getSubjectId } from '@/shared/lib/subject';
 // Default: http://localhost:4000 (Fastify dev server)
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 const DEFAULT_TIMEOUT_MS = 30_000;
-/** Agent loop can exceed default browser/fetch timeouts. */
-const AGENT_EXECUTE_TIMEOUT_MS = 180_000;
-/** Plan-then-execute wine-search shares the same patience ceiling as the
- *  legacy agent loop — the planner can fan out several Vespa round-trips
- *  before synthesis. Aligned with the wire schema's `agent_timeout_ms`
- *  upper bound (120_000 ms) plus headroom for network + serialization. */
+/** Plan-then-execute wine-search can fan out several Vespa round-trips
+ * before synthesis. Aligned with the wire schema's `agent_timeout_ms`
+ * upper bound (120_000 ms) plus headroom for network + serialization. */
 const WINE_SEARCH_EXECUTE_TIMEOUT_MS = 180_000;
 
 export class ApiError extends Error {
@@ -140,20 +133,22 @@ export const api = {
     });
   },
 
-  searchHybrid(body: SearchRequest, opts: ApiCallOptions = {}) {
-    return request<SearchResponse>('/v1/search/hybrid', {
+  async lookupEntity(body: SearchRequest, opts: ApiCallOptions = {}) {
+    const response = await request<SearchResponse>('/v1/search/lookup', {
       method: 'POST',
       body: JSON.stringify(body),
       externalSignal: opts.signal,
     });
-  },
+    if (response.query_type === 'comparison' || response.results.length === 0) {
+      throw new ApiError(404, 'ENTITY_NOT_FOUND', 'No lookup candidate matched the requested wine');
+    }
 
-  entityResolve(body: EntityResolveRequest, opts: ApiCallOptions = {}) {
-    return request<EntityResolveResponse>('/v1/entity/resolve', {
-      method: 'POST',
-      body: JSON.stringify(body),
-      externalSignal: opts.signal,
-    });
+    const [top, ...rest] = response.results;
+    return {
+      entity: top.entity,
+      confidence: top.relevance_score,
+      alternatives: rest.map((candidate) => candidate.entity),
+    } satisfies EntityResolveResponse;
   },
 
   submitFeedback(body: FeedbackRequest, opts: ApiCallOptions = {}) {
@@ -174,36 +169,9 @@ export const api = {
     },
   },
 
-  agent: {
-    listBenchmarkScenarios(opts: ApiCallOptions = {}) {
-      return request<AgentBenchmarkScenariosResponse>(
-        '/v1/agent/benchmark-scenarios',
-        { method: 'GET', externalSignal: opts.signal },
-      );
-    },
-
-    execute(body: AgentExecuteRequest, opts: ApiCallOptions = {}) {
-      return request<AgentExecuteResponse>(
-        '/v1/agent',
-        {
-          method: 'POST',
-          body: JSON.stringify(body),
-          externalSignal: opts.signal,
-        },
-        AGENT_EXECUTE_TIMEOUT_MS,
-      );
-    },
-  },
-
   /**
-   * Plan-then-Execute wine search (POST /v1/wine-search). New orchestrator
-   * surface gated by `WINE_SEARCH_ENABLED` server-side. BREAKING vs
-   * `/v1/agent` — see {@link WineSearchResponse} in `./types`.
-   *
-   * NOTE: The legacy `api.agent.execute` is intentionally retained for
-   * strangler-fig coexistence. Callers MUST NOT mix the two response
-   * shapes — the discriminator is `query_type` (`'agent'` vs
-   * `'wine_search'`).
+   * Plan-then-Execute wine search (POST /v1/wine-search).
+   * This is the canonical agentic API surface.
    */
   wineSearch: {
     execute(body: WineSearchRequest, opts: ApiCallOptions = {}) {

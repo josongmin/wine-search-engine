@@ -22,7 +22,7 @@ pnpm install --frozen-lockfile
 pnpm run typecheck
 pnpm run build
 pnpm run verify:http-contracts
-# Replay lane contract:
+# Fixture lane contract:
 # - executable subset is selected by execution_lane='self_contained'
 # - self-contained fixtures must not declare requires_runtime_capability
 # - runtime-required fixtures execute in the dedicated capability-aware lane

@@ -6,7 +6,7 @@
  * SearchResponseV1 through ResponseBuilder.build() — not through any V2 builder.
  *
  * V2 builders are sidecar / adapter surfaces:
- *  - {@link MachineResponseBuilderV2} — exposed only via /v1/claude-tools seam
+ *  - {@link MachineResponseBuilderV2} — internal machine/executor projection only
  *  - {@link HumanResponseBuilderV2}   — human-oriented interpret/explain sidecar
  *
  * Do NOT promote V2 builders to main runtime contract without an explicit

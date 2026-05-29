@@ -588,30 +588,11 @@ export interface OfflinePerQueryMetrics {
 }
 
 interface EvalSearchRequestBody {
-  readonly requests: readonly {
-    readonly id: string;
-    readonly query: string;
-    readonly retrieval_mode: 'auto' | 'entity' | 'hybrid' | 'mixed';
+  readonly query: string;
+  readonly retrieval_mode: 'auto' | 'entity' | 'hybrid' | 'mixed';
+  readonly options: {
     readonly explain: false;
-  }[];
-  readonly options?: {
-    readonly timeout_ms: number;
   };
-}
-
-const DEFAULT_BATCH_SEARCH_TIMEOUT_MS = 30_000;
-
-function normalizeBatchSearchTimeout(rawTimeoutMs: number): number {
-  if (!Number.isFinite(rawTimeoutMs)) {
-    return DEFAULT_BATCH_SEARCH_TIMEOUT_MS;
-  }
-  if (rawTimeoutMs < 1_000) {
-    return 1_000;
-  }
-  if (rawTimeoutMs > DEFAULT_BATCH_SEARCH_TIMEOUT_MS) {
-    return DEFAULT_BATCH_SEARCH_TIMEOUT_MS;
-  }
-  return Math.round(rawTimeoutMs);
 }
 
 export function buildEvalExecutionFailureDecision(): DecisionOutcome {
@@ -649,14 +630,10 @@ export function buildEvalSearchRequestBody(query: GoldenQuery): EvalSearchReques
   const mode = mapEvalRetrievalModeToRouteFamily(retrievalMode);
 
   return {
-    requests: [{
-      id: query.qid,
-      query: query.query,
-      retrieval_mode: mode,
-      explain: false,
-    }],
+    query: query.query,
+    retrieval_mode: mode,
     options: {
-      timeout_ms: DEFAULT_BATCH_SEARCH_TIMEOUT_MS,
+      explain: false,
     },
   };
 }
@@ -741,21 +718,14 @@ async function resolveRuntimeEvalEntityIdsIfNeeded(args: {
 }
 
 async function executeSearch(goldenQuery: GoldenQuery, timeoutMs: number): Promise<SearchResult> {
-  // Call the running search API
   const apiUrl = process.env['SEARCH_API_URL'] ?? 'http://localhost:3000';
   const requestBody = buildEvalSearchRequestBody(goldenQuery);
-  const batchRequestBody = {
-    ...requestBody,
-    options: {
-      timeout_ms: normalizeBatchSearchTimeout(timeoutMs),
-    },
-  };
 
   try {
-    const response = await fetch(`${apiUrl}/v1/batch-search`, {
+    const response = await fetch(`${apiUrl}/v1/search`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(batchRequestBody),
+      body: JSON.stringify(requestBody),
       signal: AbortSignal.timeout(timeoutMs),
     });
 
@@ -766,32 +736,9 @@ async function executeSearch(goldenQuery: GoldenQuery, timeoutMs: number): Promi
       };
     }
 
-    const rawBatchResponse = (await response.json()) as Record<string, unknown>;
-    const results = (rawBatchResponse['results'] ?? []) as Record<string, unknown>[];
-    const queryResult = (
-      results.find(
-        (entry) =>
-          entry !== null
-          && typeof entry === 'object'
-          && (entry as Record<string, unknown>)['id'] === goldenQuery.qid
-      ) as Record<string, unknown> | undefined
-    ) ?? (results[0] as Record<string, unknown> | undefined);
-
-    if (
-      queryResult === undefined
-      || queryResult['status'] !== 'succeeded'
-      || typeof queryResult['response'] !== 'object'
-      || queryResult['response'] === null
-    ) {
-      return {
-        ranked: [],
-        decision: buildEvalExecutionFailureDecision(),
-      };
-    }
-
     // Parse response — robust to both snake_case (public API) and camelCase
     // (legacy internal) field naming from transport adapters.
-    const raw = (queryResult['response'] as Record<string, unknown>);
+    const raw = (await response.json()) as Record<string, unknown>;
     const engineDecision = (raw['engine_decision'] ?? raw['engineDecision'] ?? {}) as Record<string, unknown>;
     const meta = (raw['meta'] ?? {}) as Record<string, unknown>;
     const rawResults = (raw['results'] ?? []) as Record<string, unknown>[];

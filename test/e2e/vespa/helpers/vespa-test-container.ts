@@ -43,7 +43,6 @@ import { SearchUseCase } from '../../../../src/application/search/search.usecase
 import { DecomposedSearchUseCase } from '../../../../src/application/search/decomposed-search.usecase.js';
 import { BatchSearchUseCase } from '../../../../src/application/search/batch-search.usecase.js';
 import { DrinkingWindowUseCase } from '../../../../src/application/drinking-window/drinking-window.usecase.js';
-import { ReplayUseCase } from '../../../../src/application/search/replay.usecase.js';
 import { InterpretUseCase } from '../../../../src/application/search/interpret.usecase.js';
 import { ResolveUseCase } from '../../../../src/application/search/resolve.usecase.js';
 import { AutocompleteUseCase } from '../../../../src/application/search/autocomplete.usecase.js';
@@ -321,10 +320,6 @@ export async function createVespaTestContainer(
     ltrModels,
   });
 
-  const replayUseCase = new ReplayUseCase({
-    searchUseCase,
-    snapshotVersions,
-  });
   const interpretUseCase = new InterpretUseCase({
     queryPlanner,
     querySanitizer,
@@ -389,7 +384,6 @@ export async function createVespaTestContainer(
     responseBuilder,
     mixedSolver,
     searchUseCase,
-    replayUseCase,
     interpretUseCase,
     resolveUseCase,
     autocompleteUseCase,

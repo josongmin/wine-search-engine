@@ -36,7 +36,6 @@ vi.mock('../container-features.js', () => ({
     builderCalls.features(runtime);
     return {
       searchUseCase: {} as never,
-      replayUseCase: {} as never,
       interpretUseCase: {} as never,
       resolveUseCase: {} as never,
       autocompleteUseCase: {} as never,
@@ -44,7 +43,6 @@ vi.mock('../container-features.js', () => ({
       decomposedSearchUseCase: {} as never,
       drinkingWindowUseCase: {} as never,
       batchSearchUseCase: {} as never,
-      adaptiveToolExecutor: {} as never,
       evalRunner: null,
     };
   }),

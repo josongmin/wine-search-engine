@@ -556,7 +556,7 @@ interface ToolInputNormalizer {
   normalizeParallelSlotInput(
     input: SearchUseCaseInput,
     analysis: WineSearchAnalysis,
-    slot: { readonly wineType: string; readonly limit?: number },
+    slot: { readonly wineType: string; readonly limit?: number | undefined },
     slotCount: number,
   ): SearchUseCaseInput;
 

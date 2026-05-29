@@ -8,7 +8,7 @@
  *     caller-supplied schema). Used for plan/route stages where the model
  *     output must conform to a strict shape.
  *  2. {@link StructuredLlmPort.execute}    — multi-step tool-use loop driver
- *     for a MiniLoop / Plan-then-Execute orchestrator. Returns either a
+ *     for a WineAgentLoop / Plan-then-Execute orchestrator. Returns either a
  *     plain-text turn (`end_turn` / `max_tokens` / `refusal`) or a list of
  *     `tool_use` blocks the orchestrator must dispatch to tool handlers.
  *  3. {@link StructuredLlmPort.synthesize} — post-execution grounded

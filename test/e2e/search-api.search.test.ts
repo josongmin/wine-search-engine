@@ -190,26 +190,6 @@ describe('POST /v1/search — happy paths', () => {
     expect(body.meta.execution_contract?.lane_trace?.general?.participated).toBe(true);
   });
 
-  it('keeps /v1/search/hybrid on the general-only contract', async () => {
-    const res = await postJson(
-      server.app,
-      '/v1/search/hybrid',
-      { query: '풀바디 레드 와인', options: { explain: true, clarification: false } },
-    );
-
-    expect(res.statusCode).toBe(200);
-    const body = parseSearchResponse(res);
-    expect(body.meta.audit_extension?.execution_trace).toMatchObject({
-      effective_route: 'hybrid',
-      retrieval_mode_source: 'api_override',
-      execution_topology: 'general_only',
-    });
-    expect(body.engine_decision.execution_topology).toBe('general_only');
-    expect(body.meta.execution_contract?.execution_topology).toBe('general_only');
-    expect(body.meta.execution_contract?.lane_trace?.identity?.participated).toBe(false);
-    expect(body.meta.execution_contract?.lane_trace?.general?.participated).toBe(true);
-  });
-
   it('keeps /v1/search/lookup on the entity-only contract', async () => {
     const res = await postJson(
       server.app,

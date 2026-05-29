@@ -1,6 +1,5 @@
 import type { CoreContainerServices } from './container-core.js';
 import type { EvalRunnerContract } from './container-eval-contracts.js';
-import type { AdaptiveToolExecutorContract } from './container-tool-contracts.js';
 import type { RuntimeHandles } from './runtime-handles.js';
 import type { Config } from './env.js';
 import type {
@@ -13,10 +12,9 @@ import type {
   DecomposedSearchUseCasePort,
   HybridUseCasePort,
   InterpretUseCasePort,
-  ReplayUseCasePort,
   ResolveUseCasePort,
 } from '../application/search/port/search-route-usecases.port.js';
-import { buildAdaptiveToolExecutor, buildEvalRunner } from './container-aux-features.js';
+import { buildEvalRunner } from './container-aux-features.js';
 import {
   buildUseCaseContainerServices,
   type UseCaseExtensions,
@@ -24,7 +22,6 @@ import {
 
 interface FeatureContainerServices {
   readonly searchUseCase: SearchExecutorPort;
-  readonly replayUseCase: ReplayUseCasePort;
   readonly interpretUseCase: InterpretUseCasePort;
   readonly resolveUseCase: ResolveUseCasePort;
   readonly autocompleteUseCase: AutocompleteUseCasePort;
@@ -32,7 +29,6 @@ interface FeatureContainerServices {
   readonly decomposedSearchUseCase: DecomposedSearchUseCasePort;
   readonly drinkingWindowUseCase: DrinkingWindowUseCasePort;
   readonly batchSearchUseCase: BatchSearchUseCasePort;
-  readonly adaptiveToolExecutor: AdaptiveToolExecutorContract;
   readonly evalRunner: EvalRunnerContract | null;
 }
 
@@ -43,12 +39,10 @@ export function buildFeatureContainerServices(
   useCaseExtensions: UseCaseExtensions = {},
 ): FeatureContainerServices {
   const useCases = buildUseCaseContainerServices(core, config, useCaseExtensions);
-  const adaptiveToolExecutor = buildAdaptiveToolExecutor(useCases);
   const evalRunner = buildEvalRunner(runtime.pool, useCases.searchUseCase);
 
   return {
     ...useCases,
-    adaptiveToolExecutor,
     evalRunner,
   };
 }

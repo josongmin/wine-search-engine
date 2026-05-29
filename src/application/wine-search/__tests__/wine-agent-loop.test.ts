@@ -1,5 +1,5 @@
 /**
- * MiniLoopRunner — integration tests.
+ * WineAgentLoopRunner — integration tests.
  *
  * Covers:
  *  - Happy path (single search → answer).
@@ -36,22 +36,22 @@ import { StructuredLlmTimeoutError } from '@domain/ai/port/structured-llm.port.j
 import type { SearchResponseV1 } from '@domain/response/model/search-response.js';
 import {
   computeNextDirective,
-  MiniLoopRunner,
-} from '../mini-loop.js';
+  WineAgentLoopRunner,
+} from '../wine-agent-loop.js';
 import {
-  MINI_LOOP_DEFAULT_AGENT_TIMEOUT_MS,
-  MINI_LOOP_DEFAULT_MAX_OUTPUT_TOKENS,
-  MINI_LOOP_DEFAULT_MAX_STEPS,
-  MINI_LOOP_DEFAULT_MAX_TOTAL_TOKENS,
-  MINI_LOOP_DEFAULT_PER_STEP_TIMEOUT_MS,
-  MINI_LOOP_DEFAULT_PER_TOOL_CAP,
-  MINI_LOOP_DIRECTIVE_COPY_ENGLISH,
-  MINI_LOOP_DIRECTIVE_COPY_KOREAN,
+  WINE_AGENT_LOOP_DEFAULT_AGENT_TIMEOUT_MS,
+  WINE_AGENT_LOOP_DEFAULT_MAX_OUTPUT_TOKENS,
+  WINE_AGENT_LOOP_DEFAULT_MAX_STEPS,
+  WINE_AGENT_LOOP_DEFAULT_MAX_TOTAL_TOKENS,
+  WINE_AGENT_LOOP_DEFAULT_PER_STEP_TIMEOUT_MS,
+  WINE_AGENT_LOOP_DEFAULT_PER_TOOL_CAP,
+  WINE_AGENT_LOOP_DIRECTIVE_COPY_ENGLISH,
+  WINE_AGENT_LOOP_DIRECTIVE_COPY_KOREAN,
   selectDirectiveCopy,
-  type MiniLoopInput,
-  type MiniLoopStep,
-  type MiniLoopToolPorts,
-} from '../mini-loop-schemas.js';
+  type WineAgentLoopInput,
+  type WineAgentLoopStep,
+  type WineAgentLoopToolPorts,
+} from '../wine-agent-loop-schemas.js';
 import type {
   SearchUseCasePort,
 } from '../execution-runner.js';
@@ -67,7 +67,7 @@ import { createCanonicalEntityId } from '../../../domain/shared/types/index.js';
 // Fixtures
 // ---------------------------------------------------------------------------
 
-const REQUEST_ID = 'req-mini-loop-0001';
+const REQUEST_ID = 'req-wine-agent-loop-0001';
 
 function makeLogger() {
   return {
@@ -103,7 +103,7 @@ function makeAnalysis(opts?: {
       ...(opts?.requiredTool !== undefined ? { requiredTool: opts.requiredTool } : {}),
     },
     expectedMultiStep: true,
-    recommendedBudget: { maxSteps: MINI_LOOP_DEFAULT_MAX_STEPS, perToolCap: MINI_LOOP_DEFAULT_PER_TOOL_CAP },
+    recommendedBudget: { maxSteps: WINE_AGENT_LOOP_DEFAULT_MAX_STEPS, perToolCap: WINE_AGENT_LOOP_DEFAULT_PER_TOOL_CAP },
     hangulDominant: opts?.hangulDominant ?? false,
     preservedSurface: 'fixture-query',
   };
@@ -219,7 +219,7 @@ function makeEntityLookupPort(): EntityDocumentLookupPort & {
   };
 }
 
-function makeToolPorts(overrides?: Partial<MiniLoopToolPorts>): MiniLoopToolPorts {
+function makeToolPorts(overrides?: Partial<WineAgentLoopToolPorts>): WineAgentLoopToolPorts {
   return {
     searchUseCase: overrides?.searchUseCase ?? makeSearchPort(),
     ...(overrides?.decomposedSearchUseCase !== undefined
@@ -251,13 +251,13 @@ function makeStubLlm(
     analyze: <TSchema extends z.ZodTypeAny>(
       _req: AnalyzeRequest<TSchema>,
     ): Promise<AnalyzeResult<z.infer<TSchema>>> => {
-      throw new Error('analyze should not be called by MiniLoopRunner');
+      throw new Error('analyze should not be called by WineAgentLoopRunner');
     },
     execute: (req: ExecuteRequest) => executeMock(req),
     synthesize: <TSchema extends z.ZodTypeAny>(
       _req: SynthesizeRequest<TSchema>,
     ): Promise<SynthesizeResult<z.infer<TSchema>>> => {
-      throw new Error('synthesize should not be called by MiniLoopRunner');
+      throw new Error('synthesize should not be called by WineAgentLoopRunner');
     },
   };
 }
@@ -304,19 +304,19 @@ function makeToolDefs(): readonly ToolDefinition[] {
   ];
 }
 
-function makeInput(overrides: Partial<MiniLoopInput> & { readonly analysis?: WineSearchAnalysis }): MiniLoopInput {
+function makeInput(overrides: Partial<WineAgentLoopInput> & { readonly analysis?: WineSearchAnalysis }): WineAgentLoopInput {
   return {
     query: overrides.query ?? 'recommend a Burgundy Pinot Noir',
     analysis: overrides.analysis ?? makeAnalysis(),
     requestId: overrides.requestId ?? REQUEST_ID,
     tools: overrides.tools ?? makeToolDefs(),
     toolPorts: overrides.toolPorts ?? makeToolPorts(),
-    perStepTimeoutMs: overrides.perStepTimeoutMs ?? MINI_LOOP_DEFAULT_PER_STEP_TIMEOUT_MS,
-    agentTimeoutMs: overrides.agentTimeoutMs ?? MINI_LOOP_DEFAULT_AGENT_TIMEOUT_MS,
-    maxSteps: overrides.maxSteps ?? MINI_LOOP_DEFAULT_MAX_STEPS,
-    maxTotalTokens: overrides.maxTotalTokens ?? MINI_LOOP_DEFAULT_MAX_TOTAL_TOKENS,
-    maxOutputTokens: overrides.maxOutputTokens ?? MINI_LOOP_DEFAULT_MAX_OUTPUT_TOKENS,
-    perToolCap: overrides.perToolCap ?? MINI_LOOP_DEFAULT_PER_TOOL_CAP,
+    perStepTimeoutMs: overrides.perStepTimeoutMs ?? WINE_AGENT_LOOP_DEFAULT_PER_STEP_TIMEOUT_MS,
+    agentTimeoutMs: overrides.agentTimeoutMs ?? WINE_AGENT_LOOP_DEFAULT_AGENT_TIMEOUT_MS,
+    maxSteps: overrides.maxSteps ?? WINE_AGENT_LOOP_DEFAULT_MAX_STEPS,
+    maxTotalTokens: overrides.maxTotalTokens ?? WINE_AGENT_LOOP_DEFAULT_MAX_TOTAL_TOKENS,
+    maxOutputTokens: overrides.maxOutputTokens ?? WINE_AGENT_LOOP_DEFAULT_MAX_OUTPUT_TOKENS,
+    perToolCap: overrides.perToolCap ?? WINE_AGENT_LOOP_DEFAULT_PER_TOOL_CAP,
     ...(overrides.initialDirective !== undefined ? { initialDirective: overrides.initialDirective } : {}),
     ...(overrides.abortSignal !== undefined ? { abortSignal: overrides.abortSignal } : {}),
   };
@@ -326,13 +326,13 @@ function makeInput(overrides: Partial<MiniLoopInput> & { readonly analysis?: Win
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('MiniLoopRunner — happy path', () => {
+describe('WineAgentLoopRunner — happy path', () => {
   it('single search → answer → terminates with reason=answer in 2 steps', async () => {
     const llm = makeStubLlm([
       async () => asToolUseResult([toolUse('search_wines', { query: 'Burgundy Pinot Noir' })]),
       async () => asTextResult('I recommend Burgundy Pinot Noir based on the results.'),
     ]);
-    const runner = new MiniLoopRunner({ structuredLlm: llm, logger: makeLogger() });
+    const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
     const out = await runner.run(makeInput({}));
 
     expect(out.terminationReason).toBe('answer');
@@ -346,7 +346,7 @@ describe('MiniLoopRunner — happy path', () => {
   });
 });
 
-describe('MiniLoopRunner — relax constraints retry', () => {
+describe('WineAgentLoopRunner — relax constraints retry', () => {
   it('empty search → relax directive → second search succeeds → answer', async () => {
     const searchPort = makeSearchPort((_input, _reqId) => {
       const callIdx = searchPort.executeMock.mock.calls.length;
@@ -358,7 +358,7 @@ describe('MiniLoopRunner — relax constraints retry', () => {
       async () => asToolUseResult([toolUse('search_wines', { query: 'rare 1947 Mouton (relaxed)' })]),
       async () => asTextResult('After relaxing price, found wine-relaxed.'),
     ]);
-    const runner = new MiniLoopRunner({ structuredLlm: llm, logger: makeLogger() });
+    const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
     const out = await runner.run(makeInput({
       analysis: makeAnalysis({
         constraints: [
@@ -375,7 +375,7 @@ describe('MiniLoopRunner — relax constraints retry', () => {
   });
 });
 
-describe('MiniLoopRunner — required tool directive', () => {
+describe('WineAgentLoopRunner — required tool directive', () => {
   it('model emits answer first → required_tool directive injected → tool called → answer accepted', async () => {
     const llm = makeStubLlm([
       // Model tries to answer prematurely — must be rejected because
@@ -386,7 +386,7 @@ describe('MiniLoopRunner — required tool directive', () => {
       // Final answer accepted.
       async () => asTextResult('Riesling pairs well with spicy Korean BBQ.'),
     ]);
-    const runner = new MiniLoopRunner({ structuredLlm: llm, logger: makeLogger() });
+    const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
     const out = await runner.run(makeInput({
       analysis: makeAnalysis({ requiredTool: 'get_food_pairings' }),
       maxSteps: 5,
@@ -410,7 +410,7 @@ describe('MiniLoopRunner — required tool directive', () => {
       ]),
       async () => asTextResult('Riesling works here.'),
     ]);
-    const runner = new MiniLoopRunner({ structuredLlm: llm, logger: makeLogger() });
+    const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
     const out = await runner.run(makeInput({
       analysis: makeAnalysis({ requiredTool: 'get_food_pairings' }),
       toolPorts: makeToolPorts({ searchUseCase: searchPort }),
@@ -432,7 +432,7 @@ describe('MiniLoopRunner — required tool directive', () => {
   });
 });
 
-describe('MiniLoopRunner — extended tool dispatch', () => {
+describe('WineAgentLoopRunner — extended tool dispatch', () => {
   it('dispatches compare_wines through decomposedSearchUseCase', async () => {
     const comparisonPort = makeDecomposedSearchPort();
     const llm = makeStubLlm([
@@ -441,7 +441,7 @@ describe('MiniLoopRunner — extended tool dispatch', () => {
       ]),
       async () => asTextResult('Both are strong candidates.'),
     ]);
-    const runner = new MiniLoopRunner({ structuredLlm: llm, logger: makeLogger() });
+    const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
     const out = await runner.run(makeInput({
       toolPorts: makeToolPorts({ decomposedSearchUseCase: comparisonPort }),
       maxSteps: 4,
@@ -462,7 +462,7 @@ describe('MiniLoopRunner — extended tool dispatch', () => {
       ]),
       async () => asTextResult('2026 is a good window.'),
     ]);
-    const runner = new MiniLoopRunner({ structuredLlm: llm, logger: makeLogger() });
+    const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
     const out = await runner.run(makeInput({
       toolPorts: makeToolPorts({
         drinkingWindowUseCase: drinkingWindowPort,
@@ -478,14 +478,14 @@ describe('MiniLoopRunner — extended tool dispatch', () => {
   });
 });
 
-describe('MiniLoopRunner — grounded search required', () => {
+describe('WineAgentLoopRunner — grounded search required', () => {
   it('model emits answer first → grounded_search_required → search → answer', async () => {
     const llm = makeStubLlm([
       async () => asTextResult('Try a Bordeaux.'),
       async () => asToolUseResult([toolUse('search_wines', { query: 'Bordeaux' })]),
       async () => asTextResult('Recommend Wine wine-1 from Bordeaux.'),
     ]);
-    const runner = new MiniLoopRunner({ structuredLlm: llm, logger: makeLogger() });
+    const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
     const out = await runner.run(makeInput({
       analysis: makeAnalysis({ requiresGroundedWineSearch: true }),
       maxSteps: 5,
@@ -496,7 +496,7 @@ describe('MiniLoopRunner — grounded search required', () => {
   });
 });
 
-describe('MiniLoopRunner — loop detection', () => {
+describe('WineAgentLoopRunner — loop detection', () => {
   it('two identical tool calls → loop_detected counter → terminate with loop_detected', async () => {
     // Same input each time — StepBudget will reject as exact-key loop on
     // the 2nd call. The runner gets one retry budget; we exhaust it by
@@ -507,14 +507,14 @@ describe('MiniLoopRunner — loop detection', () => {
       async () => asToolUseResult([sameCall]),
       async () => asToolUseResult([sameCall]),
     ]);
-    const runner = new MiniLoopRunner({ structuredLlm: llm, logger: makeLogger() });
+    const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
     const out = await runner.run(makeInput({ maxSteps: 5 }));
 
     expect(out.terminationReason).toBe('loop_detected');
   });
 });
 
-describe('MiniLoopRunner — max steps', () => {
+describe('WineAgentLoopRunner — max steps', () => {
   it('model keeps calling tools → step budget exhausts → max_steps termination', async () => {
     const llm = makeStubLlm([
       async () => asToolUseResult([toolUse('search_wines', { query: 'q1' }, 'tu-1')]),
@@ -522,7 +522,7 @@ describe('MiniLoopRunner — max steps', () => {
       async () => asToolUseResult([toolUse('search_wines', { query: 'q3 also distinct' }, 'tu-3')]),
       async () => asToolUseResult([toolUse('search_wines', { query: 'q4' }, 'tu-4')]),
     ]);
-    const runner = new MiniLoopRunner({ structuredLlm: llm, logger: makeLogger() });
+    const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
     const out = await runner.run(makeInput({ maxSteps: 2 }));
 
     // After exhausting maxSteps, the loop terminates without an answer.
@@ -530,7 +530,7 @@ describe('MiniLoopRunner — max steps', () => {
   });
 });
 
-describe('MiniLoopRunner — token budget', () => {
+describe('WineAgentLoopRunner — token budget', () => {
   it('large LLM responses accumulate to maxTotalTokens → terminate with budget', async () => {
     const heavyUsage = makeTokenUsage(20_000, 5_000);
     const llm = makeStubLlm([
@@ -538,14 +538,14 @@ describe('MiniLoopRunner — token budget', () => {
       // Should not reach here because token budget terminates first.
       async () => asTextResult('answer', heavyUsage),
     ]);
-    const runner = new MiniLoopRunner({ structuredLlm: llm, logger: makeLogger() });
+    const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
     const out = await runner.run(makeInput({ maxTotalTokens: 10_000, maxSteps: 5 }));
 
     expect(out.terminationReason).toBe('budget');
   });
 });
 
-describe('MiniLoopRunner — per-step timeout', () => {
+describe('WineAgentLoopRunner — per-step timeout', () => {
   it('LLM call exceeds perStepTimeoutMs → terminate with timeout', async () => {
     const llm = makeStubLlm([
       // Throw a synthetic timeout-like error matching withTimeout's shape.
@@ -553,7 +553,7 @@ describe('MiniLoopRunner — per-step timeout', () => {
         throw new StructuredLlmTimeoutError('synthetic step timeout');
       },
     ]);
-    const runner = new MiniLoopRunner({ structuredLlm: llm, logger: makeLogger() });
+    const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
     const out = await runner.run(makeInput({ perStepTimeoutMs: 10 }));
 
     expect(out.terminationReason).toBe('timeout');
@@ -561,14 +561,14 @@ describe('MiniLoopRunner — per-step timeout', () => {
   });
 });
 
-describe('MiniLoopRunner — abort', () => {
+describe('WineAgentLoopRunner — abort', () => {
   it('caller aborts before first step → terminate with aborted', async () => {
     const controller = new AbortController();
     controller.abort();
     const llm = makeStubLlm([
       async () => asToolUseResult([toolUse('search_wines', { query: 'x' })]),
     ]);
-    const runner = new MiniLoopRunner({ structuredLlm: llm, logger: makeLogger() });
+    const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
     const out = await runner.run(makeInput({ abortSignal: controller.signal }));
 
     expect(out.terminationReason).toBe('aborted');
@@ -576,7 +576,7 @@ describe('MiniLoopRunner — abort', () => {
   });
 });
 
-describe('MiniLoopRunner — zombie loop fix', () => {
+describe('WineAgentLoopRunner — zombie loop fix', () => {
   it('model keeps emitting answers despite directives → loop terminates gracefully', async () => {
     // Contract requires get_food_pairings, but the model just keeps
     // answering. Without functional directive recomputation this would
@@ -588,21 +588,21 @@ describe('MiniLoopRunner — zombie loop fix', () => {
       async () => asTextResult('answer 4'),
       async () => asTextResult('answer 5'),
     ]);
-    const runner = new MiniLoopRunner({ structuredLlm: llm, logger: makeLogger() });
+    const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
     const out = await runner.run(makeInput({
       analysis: makeAnalysis({ requiredTool: 'get_food_pairings' }),
-      maxSteps: MINI_LOOP_DEFAULT_MAX_STEPS,
+      maxSteps: WINE_AGENT_LOOP_DEFAULT_MAX_STEPS,
     }));
 
     // Loop must terminate (no infinite recursion). With the directive
     // ignored kill switch, two consecutive premature answers terminate at
     // max_steps; budget would only fire if termination is delayed.
     expect(['max_steps', 'error', 'budget']).toContain(out.terminationReason);
-    expect(out.steps.length).toBeLessThanOrEqual(MINI_LOOP_DEFAULT_MAX_STEPS + 1);
+    expect(out.steps.length).toBeLessThanOrEqual(WINE_AGENT_LOOP_DEFAULT_MAX_STEPS + 1);
   });
 });
 
-describe('MiniLoopRunner — Korean directive copy', () => {
+describe('WineAgentLoopRunner — Korean directive copy', () => {
   it('hangulDominant=true → Korean directive surfaced to model', async () => {
     let observedDirectiveMessage = '';
     const llm = makeStubLlm([
@@ -620,7 +620,7 @@ describe('MiniLoopRunner — Korean directive copy', () => {
       },
       async () => asTextResult('wine-1 추천합니다.'),
     ]);
-    const runner = new MiniLoopRunner({ structuredLlm: llm, logger: makeLogger() });
+    const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
     const out = await runner.run(makeInput({
       query: '와인 추천해주세요',
       analysis: makeAnalysis({ hangulDominant: true, requiresGroundedWineSearch: true }),
@@ -630,7 +630,7 @@ describe('MiniLoopRunner — Korean directive copy', () => {
     expect(out.terminationReason).toBe('answer');
     expect(observedDirectiveMessage).toContain('search_wines');
     expect(observedDirectiveMessage).toMatch(/[가-힣]/u);  // contains Hangul
-    expect(observedDirectiveMessage).toBe(`[directive] ${MINI_LOOP_DIRECTIVE_COPY_KOREAN.groundedSearch}`);
+    expect(observedDirectiveMessage).toBe(`[directive] ${WINE_AGENT_LOOP_DIRECTIVE_COPY_KOREAN.groundedSearch}`);
   });
 
   it('hangulDominant=false → English directive surfaced to model', async () => {
@@ -649,7 +649,7 @@ describe('MiniLoopRunner — Korean directive copy', () => {
       },
       async () => asTextResult('Recommend wine-1.'),
     ]);
-    const runner = new MiniLoopRunner({ structuredLlm: llm, logger: makeLogger() });
+    const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
     const out = await runner.run(makeInput({
       query: 'recommend a wine',
       analysis: makeAnalysis({ hangulDominant: false, requiresGroundedWineSearch: true }),
@@ -657,11 +657,11 @@ describe('MiniLoopRunner — Korean directive copy', () => {
     }));
 
     expect(out.terminationReason).toBe('answer');
-    expect(observedDirectiveMessage).toBe(`[directive] ${MINI_LOOP_DIRECTIVE_COPY_ENGLISH.groundedSearch}`);
+    expect(observedDirectiveMessage).toBe(`[directive] ${WINE_AGENT_LOOP_DIRECTIVE_COPY_ENGLISH.groundedSearch}`);
   });
 });
 
-describe('MiniLoopRunner — token accumulation', () => {
+describe('WineAgentLoopRunner — token accumulation', () => {
   it('aggregates inputTokens / outputTokens / cacheRead / cacheCreation across steps', async () => {
     const usage1: TokenUsage = {
       inputTokens: 100, outputTokens: 50,
@@ -675,7 +675,7 @@ describe('MiniLoopRunner — token accumulation', () => {
       async () => asToolUseResult([toolUse('search_wines', { query: 'q' })], usage1),
       async () => asTextResult('answer', usage2),
     ]);
-    const runner = new MiniLoopRunner({ structuredLlm: llm, logger: makeLogger() });
+    const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
     const out = await runner.run(makeInput({}));
 
     expect(out.terminationReason).toBe('answer');
@@ -702,7 +702,7 @@ describe('computeNextDirective (pure function)', () => {
         durationMs: 1,
         result: o.result,
       })),
-      steps: [] as MiniLoopStep[],
+      steps: [] as WineAgentLoopStep[],
     };
   }
 
@@ -713,7 +713,7 @@ describe('computeNextDirective (pure function)', () => {
     const out = computeNextDirective(input, makeStateView([]), selectDirectiveCopy(false));
     expect(out?.kind).toBe('grounded_search_required');
     if (out?.kind === 'grounded_search_required') {
-      expect(out.instruction).toBe(MINI_LOOP_DIRECTIVE_COPY_ENGLISH.groundedSearch);
+      expect(out.instruction).toBe(WINE_AGENT_LOOP_DIRECTIVE_COPY_ENGLISH.groundedSearch);
     }
   });
 

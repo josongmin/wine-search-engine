@@ -10,7 +10,7 @@
  *       worst-case "model surrendered to the prompt" scenario).
  *
  * The privilege boundary is the **tool surface** (`KNOWN_AGENT_TOOL_NAMES`
- * hard switch in `mini-loop.ts:invokeToolPort()` L649-688) and the **response
+ * hard switch in `wine-agent-loop.ts:invokeToolPort()` L649-688) and the **response
  * schema** (`WineSearchResponseSchema` length/structure bounds enforced at
  * `mapResultToResponse`), NOT the heuristic regex sanitizer.
  *
@@ -41,8 +41,8 @@
  * is contained by the architectural boundary regardless".
  *
  * Files cited:
- *   - src/application/wine-search/mini-loop.ts          invokeToolPort L649-688 (hard switch on 4 known tools)
- *   - src/application/wine-search/mini-loop-tool-bundle.ts                  (SSoT for tool names)
+ *   - src/application/wine-search/wine-agent-loop.ts          invokeToolPort L649-688 (hard switch on 4 known tools)
+ *   - src/application/wine-search/wine-agent-loop-tool-bundle.ts                  (SSoT for tool names)
  *   - src/domain/agent/model/agent-tool-attempt-schema.ts                   (KNOWN_AGENT_TOOL_NAMES)
  *   - src/interface/http/schemas/wine-search.schema.ts  ANSWER_MAX_CHARS L88, WineSearchResponseSchema
  *   - test/e2e/helpers/wine-search-test-container.ts    pipeline harness

@@ -12,13 +12,9 @@ import { CodexAuthStoreAdapter } from '../infrastructure/cli/auth/codex-auth-sto
 import { ChatGptModelCatalogProbeAdapter } from '../infrastructure/cli/auth/chatgpt-model-catalog-probe.js';
 import { CodexLoginDelegateAdapter } from '../infrastructure/cli/auth/codex-login-delegate.js';
 import { LocalSearchFacade } from '../infrastructure/cli/local/local-search-facade.js';
-import { LocalEntityFacade } from '../infrastructure/cli/local/local-entity-facade.js';
 import { LocalWineSearchFacade } from '../infrastructure/cli/local/local-wine-search-facade.js';
-import { LocalRawApiInvoker } from '../infrastructure/cli/local/local-raw-api-invoker.js';
 import { RemoteSearchFacade } from '../infrastructure/cli/remote/remote-search-facade.js';
-import { RemoteEntityFacade } from '../infrastructure/cli/remote/remote-entity-facade.js';
 import { RemoteWineSearchFacade } from '../infrastructure/cli/remote/remote-wine-search-facade.js';
-import { RemoteRawApiInvoker } from '../infrastructure/cli/remote/remote-raw-api-invoker.js';
 
 /**
  * CLI composition root. Its ONLY job is to turn resolved global args into a
@@ -46,17 +42,13 @@ function resolveFacadeRegistry(env: EnvLike, profile: ResolvedCliProfile): CliFa
     return {
       auth: buildAuthFacade(env),
       search: new LocalSearchFacade(),
-      entity: new LocalEntityFacade(),
       wineSearch: new LocalWineSearchFacade(),
-      rawApi: new LocalRawApiInvoker(),
     };
   }
   return {
     auth: buildAuthFacade(env),
     search: new RemoteSearchFacade(profile),
-    entity: new RemoteEntityFacade(profile),
     wineSearch: new RemoteWineSearchFacade(profile),
-    rawApi: new RemoteRawApiInvoker(profile),
   };
 }
 

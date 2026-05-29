@@ -74,30 +74,10 @@ describe.skipIf(!CAN_RUN_TSX_SUBPROCESS)('HTTP contract OpenAPI bridge', () => {
         },
       ],
     }));
-    expect(document.paths['/v1/search/hybrid']?.post).toEqual(expect.objectContaining({
-      operationId: 'search.hybrid',
-      'x-search-capabilities': [
-        'security',
-        'decomposition',
-        'planner',
-        'SAT',
-        'cache',
-        'forced_hybrid_retrieval',
-        'ranked_post_route',
-      ],
-    }));
-    expect(document.paths['/v1/search/interpret']?.post).toEqual(expect.objectContaining({
-      operationId: 'search.interpret',
-      'x-search-capabilities': ['security', 'planner_only'],
-    }));
-    expect(document.paths['/v1/entity/resolve']?.post).toEqual(expect.objectContaining({
-      operationId: 'entity.resolve',
-      'x-search-capabilities': ['security', 'planner', 'SAT', 'resolver_only'],
-    }));
-    expect(document.paths['/v1/entity/autocomplete']?.post).toEqual(expect.objectContaining({
-      operationId: 'entity.autocomplete',
-      'x-search-capabilities': ['security', 'planner', 'SAT', 'resolver_only'],
-    }));
+    expect(document.paths['/v1/search/hybrid']).toBeUndefined();
+    expect(document.paths['/v1/search/interpret']).toBeUndefined();
+    expect(document.paths['/v1/entity/resolve']).toBeUndefined();
+    expect(document.paths['/v1/entity/autocomplete']).toBeUndefined();
     expect(document.paths['/v1/watchlist']?.post?.responses['201']).toEqual(expect.objectContaining({
       content: {
         'application/json': {
@@ -107,31 +87,10 @@ describe.skipIf(!CAN_RUN_TSX_SUBPROCESS)('HTTP contract OpenAPI bridge', () => {
         },
       },
     }));
-    expect(document.paths['/v1/batch-search']?.post).toEqual(expect.objectContaining({
-      operationId: 'search.batch',
-      'x-contract-has-body': true,
-      'x-contract-has-params': false,
-      'x-contract-success-status-codes': [200],
-      'x-contract-error-status-codes': [400, 429, 500, 503],
-    }));
-    expect(document.paths['/v1/batch-search']?.post?.responses['200']).toEqual(expect.objectContaining({
-      content: {
-        'application/json': {
-          schema: expect.objectContaining({
-            type: 'object',
-            properties: expect.objectContaining({
-              batch_status: expect.objectContaining({
-                type: 'string',
-                enum: ['succeeded', 'partial_failure', 'failed'],
-              }),
-              has_failures: expect.objectContaining({
-                type: 'boolean',
-              }),
-            }),
-          }),
-        },
-      },
-    }));
+    expect(document.paths['/v1/batch-search']).toBeUndefined();
+    expect(document.paths['/v1/search/replay']).toBeUndefined();
+    expect(document.paths['/v1/claude-tools']).toBeUndefined();
+    expect(document.paths['/v1/agent/benchmark-scenarios']).toBeUndefined();
   });
 
   it(

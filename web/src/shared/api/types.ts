@@ -430,81 +430,10 @@ export interface WatchlistListResponse {
   total: number;
 }
 
-// ── Agent (POST /v1/agent) & benchmark lab (GET /v1/agent/benchmark-scenarios) ──
-
-export interface AgentBenchmarkUiScenarioDto {
-  id: number;
-  tier: string;
-  query: string;
-  description: string;
-  profile: 'quick';
-}
-
-export interface AgentBenchmarkScenariosResponse {
-  scenarios: readonly AgentBenchmarkUiScenarioDto[];
-}
-
-export interface AgentToolCallDto {
-  tool: string;
-  input: Record<string, unknown>;
-}
-
-export interface AgentStepDto {
-  index: number;
-  thought: string;
-  action?: AgentToolCallDto;
-  observation?: string;
-  actions?: readonly AgentToolCallDto[];
-  observations?: readonly string[];
-  answer?: string;
-  duration_ms: number;
-  token_count: { input: number; output: number };
-}
-
-export interface AgentExecuteResponse {
-  query_type: 'agent';
-  answer: string;
-  steps: readonly AgentStepDto[];
-  meta: {
-    request_id: string;
-    total_duration_ms: number;
-    tool_call_count: number;
-    termination_reason: string;
-    fallback_applied: boolean;
-    total_tokens: { input: number; output: number };
-  };
-}
-
-export interface AgentExecuteRequest {
-  query: string;
-  options?: { max_steps?: number };
-}
-
 // ── Wine Search (POST /v1/wine-search) ──
 //
-// New Plan-then-Execute orchestrator surface. BREAKING vs `/v1/agent`:
-//   - `tool_calls[].{ name, arguments }` instead of `{ tool, input }`.
-//   - Every step carries uniform `tool_calls[]` + `observations[]` arrays —
-//     the legacy `action` / `actions[]` split is gone.
-//   - `meta.intent` and `meta.plan_kind` replace `meta.analysisIntent`.
-//   - `meta.termination` is a nested record (`reason`, `layer`, optional
-//     `kind`, optional `degraded_reason`). Old `termination_reason`,
-//     `fallback_applied` siblings are gone.
-//   - `meta.policy_blocked` is a typed boolean; do NOT infer it from
-//     `termination_reason` + `fallback_trace`.
-//   - `meta.termination.degraded_reason` adds a `'unexpected_error'` slot
-//     (P-M1: distinguishes runtime crashes from malformed LLM output).
-//   - `meta.termination.kind` discriminates the two `reason: 'blocked'`
-//     cases: `'security_block'` (policy_blocked=true) vs
-//     `'unsupported_intent'` (policy_blocked=false, coverage-gap template).
-//   - `execution` wraps `steps[]` and `tool_call_count` into one record
-//     (top-level `steps[]` is gone).
-//
-// Wire shape is snake_case across the boundary. We keep that here to
-// match the existing /v1/search and /v1/agent local convention.
-//
-// The legacy /v1/agent types above are kept intact for strangler-fig
-// coexistence — DO NOT delete them.
+// Canonical agentic surface.
+// Wire shape is snake_case across the boundary to match the rest of the API.
 
 export type WineSearchStepSource =
   | 'analyzer'

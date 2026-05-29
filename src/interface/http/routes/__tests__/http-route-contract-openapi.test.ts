@@ -55,49 +55,13 @@ describe('HTTP contract OpenAPI bridge', () => {
         },
       ],
     }));
-    expect(document.paths['/v1/search/hybrid']?.post).toEqual(expect.objectContaining({
-      operationId: 'search.hybrid',
-      'x-search-capabilities': [
-        'security',
-        'decomposition',
-        'planner',
-        'SAT',
-        'cache',
-        'forced_hybrid_retrieval',
-        'ranked_post_route',
-      ],
-    }));
-    expect(document.paths['/v1/search/interpret']?.post).toEqual(expect.objectContaining({
-      operationId: 'search.interpret',
-      'x-search-capabilities': ['security', 'planner_only'],
-    }));
-    expect(document.paths['/v1/entity/resolve']?.post).toEqual(expect.objectContaining({
-      operationId: 'entity.resolve',
-      'x-search-capabilities': ['security', 'planner', 'SAT', 'resolver_only'],
-    }));
-    expect(document.paths['/v1/entity/autocomplete']?.post).toEqual(expect.objectContaining({
-      operationId: 'entity.autocomplete',
-      'x-search-capabilities': ['security', 'planner', 'SAT', 'resolver_only'],
-    }));
-    expect(
-      document.paths['/v1/search/replay']?.post?.requestBody?.content['application/json'].schema,
-    ).toEqual(
-      expect.objectContaining({
-        type: 'object',
-        properties: expect.objectContaining({
-          query: expect.objectContaining({ type: 'string' }),
-          decision_snapshot: expect.objectContaining({ type: 'object' }),
-          preflight_honesty_contract: expect.objectContaining({
-            type: 'object',
-            properties: expect.objectContaining({
-              execution_mode: expect.objectContaining({
-                enum: ['authoritative', 'degraded', 'heuristic', 'advisory'],
-              }),
-              degradation_reasons: expect.objectContaining({ type: 'array' }),
-            }),
-          }),
-        }),
-      }),
-    );
+    expect(document.paths['/v1/search/hybrid']).toBeUndefined();
+    expect(document.paths['/v1/search/interpret']).toBeUndefined();
+    expect(document.paths['/v1/entity/resolve']).toBeUndefined();
+    expect(document.paths['/v1/entity/autocomplete']).toBeUndefined();
+    expect(document.paths['/v1/search/replay']).toBeUndefined();
+    expect(document.paths['/v1/claude-tools']).toBeUndefined();
+    expect(document.paths['/v1/batch-search']).toBeUndefined();
+    expect(document.paths['/v1/agent/benchmark-scenarios']).toBeUndefined();
   });
 });

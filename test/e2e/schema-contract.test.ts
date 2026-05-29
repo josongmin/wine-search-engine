@@ -17,9 +17,7 @@ import {
   parseErrorResponse,
   parseSearchResponse,
   postJson,
-  postReplayJson,
 } from './helpers/http-transport.js';
-import { makeReplaySnapshot } from './helpers/replay-snapshot.js';
 
 let server: TestServer;
 
@@ -202,37 +200,6 @@ describe('Error Response Schema Contract (RFC-014 §5)', () => {
     expect(error.failure_reason === null || typeof error.failure_reason === 'string').toBe(true);
   });
 
-  it('409 SNAPSHOT_MISMATCH has correct error shape', async () => {
-    const response = await postReplayJson(server.app, {
-      query: 'Opus One 2018',
-      decision_snapshot: makeReplaySnapshot({
-        policy_rule_version: '99.0.0',
-        threshold_profile_id: 'wrong',
-        planner_version: '99.0.0',
-      }),
-    });
-
-    expect(response.statusCode).toBe(409);
-    const result = ErrorResponseSchema.safeParse(response.json());
-    expect(result.success).toBe(true);
-
-    const error = parseErrorResponse(response).error;
-    expect(error.code).toBe('SNAPSHOT_MISMATCH');
-    expect(error.request_id).toBeTruthy();
-    expect(error.retryable).toBe(false);
-  });
-
-  it('replay helper posts to the expected endpoint contract', async () => {
-    const response = await postReplayJson(server.app, {
-      query: 'Opus One 2018',
-      decision_snapshot: makeReplaySnapshot({
-        policy_rule_version: '9.9.9',
-      }),
-    });
-
-    expect(response.statusCode).toBe(409);
-    expect(parseErrorResponse(response).error.code).toBe('SNAPSHOT_MISMATCH');
-  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

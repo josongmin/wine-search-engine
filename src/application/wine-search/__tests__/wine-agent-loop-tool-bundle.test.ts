@@ -1,5 +1,5 @@
 /**
- * MiniLoopToolBundle — unit tests.
+ * WineAgentLoopToolBundle — unit tests.
  *
  * Verifies the production tool-bundle contract:
  *  - Bundle exposes exactly five tools (one per `KNOWN_AGENT_TOOL_NAMES`).
@@ -16,63 +16,63 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { KNOWN_AGENT_TOOL_NAMES } from '@domain/agent/model/agent-tool-attempt-schema.js';
-import type { MiniLoopToolPorts } from '../mini-loop-schemas.js';
+import type { WineAgentLoopToolPorts } from '../wine-agent-loop-schemas.js';
 import {
-  buildMiniLoopToolBundle,
+  buildWineAgentLoopToolBundle,
   CHECK_DRINKING_WINDOW_TOOL_DEF,
   COMPARE_WINES_TOOL_DEF,
   GET_FOOD_PAIRINGS_TOOL_DEF,
   LOOKUP_WINE_TOOL_DEF,
-  MINI_LOOP_TOOL_NAMES,
+  WINE_AGENT_LOOP_TOOL_NAMES,
   SEARCH_WINES_TOOL_DEF,
-} from '../mini-loop-tool-bundle.js';
+} from '../wine-agent-loop-tool-bundle.js';
 
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
 
 /** Stub ports — identity matters more than behaviour for these tests. The
- *  mini-loop dispatcher invokes these only at runtime, not at bundle build
+ *  wine-agent-loop dispatcher invokes these only at runtime, not at bundle build
  *  time. */
-function makeStubToolPorts(): MiniLoopToolPorts {
+function makeStubToolPorts(): WineAgentLoopToolPorts {
   return {
     searchUseCase: { execute: async () => { throw new Error('unused in test'); } },
-  } as MiniLoopToolPorts;
+  } as WineAgentLoopToolPorts;
 }
 
 // ---------------------------------------------------------------------------
 // Bundle shape
 // ---------------------------------------------------------------------------
 
-describe('buildMiniLoopToolBundle', () => {
+describe('buildWineAgentLoopToolBundle', () => {
   it('returns one tool definition per KNOWN_AGENT_TOOL_NAMES', () => {
-    const bundle = buildMiniLoopToolBundle(makeStubToolPorts());
+    const bundle = buildWineAgentLoopToolBundle(makeStubToolPorts());
     expect(bundle.tools).toHaveLength(KNOWN_AGENT_TOOL_NAMES.length);
     expect(bundle.tools).toHaveLength(5);
   });
 
   it('preserves the toolPorts identity (no cloning)', () => {
     const ports = makeStubToolPorts();
-    const bundle = buildMiniLoopToolBundle(ports);
+    const bundle = buildWineAgentLoopToolBundle(ports);
     expect(bundle.toolPorts).toBe(ports);
   });
 
   it('returns identical tool-def identity across calls (prompt-cache hygiene)', () => {
-    const a = buildMiniLoopToolBundle(makeStubToolPorts());
-    const b = buildMiniLoopToolBundle(makeStubToolPorts());
+    const a = buildWineAgentLoopToolBundle(makeStubToolPorts());
+    const b = buildWineAgentLoopToolBundle(makeStubToolPorts());
     expect(a.tools).toBe(b.tools); // same frozen module const
     expect(a.tools[0]).toBe(b.tools[0]); // same per-tool const
   });
 
   it('exposes tool names that exactly match KNOWN_AGENT_TOOL_NAMES', () => {
-    const bundle = buildMiniLoopToolBundle(makeStubToolPorts());
+    const bundle = buildWineAgentLoopToolBundle(makeStubToolPorts());
     const names = bundle.tools.map((t) => t.name).sort();
     const expected = [...KNOWN_AGENT_TOOL_NAMES].sort();
     expect(names).toEqual(expected);
   });
 
-  it('MINI_LOOP_TOOL_NAMES matches the SSoT enum content', () => {
-    const sortedBundle = [...MINI_LOOP_TOOL_NAMES].sort();
+  it('WINE_AGENT_LOOP_TOOL_NAMES matches the SSoT enum content', () => {
+    const sortedBundle = [...WINE_AGENT_LOOP_TOOL_NAMES].sort();
     const sortedSsot = [...KNOWN_AGENT_TOOL_NAMES].sort();
     expect(sortedBundle).toEqual(sortedSsot);
   });

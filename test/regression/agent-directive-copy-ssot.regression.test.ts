@@ -5,20 +5,20 @@
  * History: the `grounded_search_required` and `required_tool` instruction
  * strings were authored independently in
  *   - `src/application/agent/agent-contract-policy.ts`
- *   - `src/application/wine-search/mini-loop-schemas.ts`
- *     (`MINI_LOOP_DIRECTIVE_COPY_ENGLISH`)
+ *   - `src/application/wine-search/wine-agent-loop-schemas.ts`
+ *     (`WINE_AGENT_LOOP_DIRECTIVE_COPY_ENGLISH`)
  * Drift between the two would silently break unit tests asserting exact
  * directive strings and would cause inconsistent model behavior between
- * the legacy agent loop and the new mini-loop runner.
+ * the legacy agent loop and the new wine-agent-loop runner.
  *
  * Invariants locked here:
  *  - The SSoT exposes both English and Korean copy variants for each
  *    directive kind the runner emits.
- *  - The mini-loop `_ENGLISH` / `_KOREAN` bundles are byte-identical to
+ *  - The wine-agent-loop `_ENGLISH` / `_KOREAN` bundles are byte-identical to
  *    the SSoT for `groundedSearch`, `relax`, `loopDetected`.
  *  - Parameterized templates (`requiredTool(tool)`,
  *    `pendingDrinkability(entityIds)`) produce identical output between
- *    the SSoT and the mini-loop bundle for representative inputs
+ *    the SSoT and the wine-agent-loop bundle for representative inputs
  *    (including Korean entity ids).
  *
  * Append-only test: never delete this file.
@@ -26,9 +26,9 @@
 import { describe, expect, it } from 'vitest';
 import { AGENT_DIRECTIVE_COPY } from '@domain/agent/copy/directive-copy.js';
 import {
-  MINI_LOOP_DIRECTIVE_COPY_ENGLISH,
-  MINI_LOOP_DIRECTIVE_COPY_KOREAN,
-} from '../../src/application/wine-search/mini-loop-schemas.js';
+  WINE_AGENT_LOOP_DIRECTIVE_COPY_ENGLISH,
+  WINE_AGENT_LOOP_DIRECTIVE_COPY_KOREAN,
+} from '../../src/application/wine-search/wine-agent-loop-schemas.js';
 
 describe('SSoT: AGENT_DIRECTIVE_COPY shape', () => {
   it('exposes English and Korean variants', () => {
@@ -60,46 +60,46 @@ describe('SSoT: AGENT_DIRECTIVE_COPY shape', () => {
   });
 });
 
-describe('SSoT: mini-loop directive copy is byte-identical to SSoT', () => {
+describe('SSoT: wine-agent-loop directive copy is byte-identical to SSoT', () => {
   it('English: relax, groundedSearch, loopDetected match the SSoT exactly', () => {
-    expect(MINI_LOOP_DIRECTIVE_COPY_ENGLISH.relax).toBe(
+    expect(WINE_AGENT_LOOP_DIRECTIVE_COPY_ENGLISH.relax).toBe(
       AGENT_DIRECTIVE_COPY.english.relax,
     );
-    expect(MINI_LOOP_DIRECTIVE_COPY_ENGLISH.groundedSearch).toBe(
+    expect(WINE_AGENT_LOOP_DIRECTIVE_COPY_ENGLISH.groundedSearch).toBe(
       AGENT_DIRECTIVE_COPY.english.groundedSearch,
     );
-    expect(MINI_LOOP_DIRECTIVE_COPY_ENGLISH.loopDetected).toBe(
+    expect(WINE_AGENT_LOOP_DIRECTIVE_COPY_ENGLISH.loopDetected).toBe(
       AGENT_DIRECTIVE_COPY.english.loopDetected,
     );
   });
 
   it('Korean: relax, groundedSearch, loopDetected match the SSoT exactly', () => {
-    expect(MINI_LOOP_DIRECTIVE_COPY_KOREAN.relax).toBe(
+    expect(WINE_AGENT_LOOP_DIRECTIVE_COPY_KOREAN.relax).toBe(
       AGENT_DIRECTIVE_COPY.korean.relax,
     );
-    expect(MINI_LOOP_DIRECTIVE_COPY_KOREAN.groundedSearch).toBe(
+    expect(WINE_AGENT_LOOP_DIRECTIVE_COPY_KOREAN.groundedSearch).toBe(
       AGENT_DIRECTIVE_COPY.korean.groundedSearch,
     );
-    expect(MINI_LOOP_DIRECTIVE_COPY_KOREAN.loopDetected).toBe(
+    expect(WINE_AGENT_LOOP_DIRECTIVE_COPY_KOREAN.loopDetected).toBe(
       AGENT_DIRECTIVE_COPY.korean.loopDetected,
     );
   });
 
   it('English requiredTool produces the same output as the SSoT for a sample tool name', () => {
-    expect(MINI_LOOP_DIRECTIVE_COPY_ENGLISH.requiredTool('search_wines')).toBe(
+    expect(WINE_AGENT_LOOP_DIRECTIVE_COPY_ENGLISH.requiredTool('search_wines')).toBe(
       AGENT_DIRECTIVE_COPY.english.requiredTool('search_wines'),
     );
   });
 
   it('Korean requiredTool produces the same output as the SSoT for a sample tool name', () => {
-    expect(MINI_LOOP_DIRECTIVE_COPY_KOREAN.requiredTool('search_wines')).toBe(
+    expect(WINE_AGENT_LOOP_DIRECTIVE_COPY_KOREAN.requiredTool('search_wines')).toBe(
       AGENT_DIRECTIVE_COPY.korean.requiredTool('search_wines'),
     );
   });
 
   it('English pendingDrinkability produces the same output as the SSoT for ASCII ids', () => {
     const ids: readonly string[] = ['wine-1', 'wine-2'];
-    expect(MINI_LOOP_DIRECTIVE_COPY_ENGLISH.pendingDrinkability(ids)).toBe(
+    expect(WINE_AGENT_LOOP_DIRECTIVE_COPY_ENGLISH.pendingDrinkability(ids)).toBe(
       AGENT_DIRECTIVE_COPY.english.pendingDrinkability(ids),
     );
   });
@@ -109,7 +109,7 @@ describe('SSoT: mini-loop directive copy is byte-identical to SSoT', () => {
     // template uses string concatenation only — there is no regex — so the
     // assertion mainly guarantees identical output.
     const ids: readonly string[] = ['오퍼스원-2018', 'wine-2'];
-    expect(MINI_LOOP_DIRECTIVE_COPY_KOREAN.pendingDrinkability(ids)).toBe(
+    expect(WINE_AGENT_LOOP_DIRECTIVE_COPY_KOREAN.pendingDrinkability(ids)).toBe(
       AGENT_DIRECTIVE_COPY.korean.pendingDrinkability(ids),
     );
   });

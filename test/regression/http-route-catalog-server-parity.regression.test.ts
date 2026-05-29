@@ -24,20 +24,9 @@ import type { HttpServerDeps } from '../../src/interface/http/routes/route-deps.
 
 function createStubDeps(): HttpServerDeps {
   const noopExecute = { execute: vi.fn() };
-  // All optional capability deps are populated so every conditional
-  // `if (deps.X !== undefined) registerXRoute(...)` branch fires. The catalog
-  // declares routes; this test asserts each declared route is actually wired
-  // when its capability is provisioned.
   return {
     searchUseCase: noopExecute,
     decomposedSearchUseCase: noopExecute,
-    batchSearchUseCase: noopExecute,
-    replayUseCase: noopExecute,
-    interpretUseCase: noopExecute,
-    resolveUseCase: noopExecute,
-    hybridUseCase: noopExecute,
-    autocompleteUseCase: noopExecute,
-    adaptiveToolExecutor: { executeWithFallback: vi.fn() },
     watchlistService: {
       create: vi.fn(),
       getByIdForUser: vi.fn(),

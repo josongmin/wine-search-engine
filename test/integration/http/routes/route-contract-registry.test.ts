@@ -13,7 +13,7 @@ describe('HTTP route contract registry', () => {
     await closeTestServer(server);
   });
 
-  it('registers contract-backed routes with stable operation ids and status maps', () => {
+  it('registers only the canonical public/product route contracts plus retained system routes', () => {
     const contracts = getRegisteredHttpRouteContracts(server.app);
 
     expect(contracts).toEqual(expect.arrayContaining([
@@ -59,26 +59,6 @@ describe('HTTP route contract registry', () => {
       },
       {
         method: 'POST',
-        url: '/v1/claude-tools',
-        operationId: 'tools.execute',
-        hasBody: true,
-        hasParams: false,
-        responseStatusCodes: [200, 400, 500],
-        successStatusCodes: [200],
-        errorStatusCodes: [400, 500],
-      },
-      {
-        method: 'GET',
-        url: '/v1/claude-tools',
-        operationId: 'tools.list',
-        hasBody: false,
-        hasParams: false,
-        responseStatusCodes: [200, 500],
-        successStatusCodes: [200],
-        errorStatusCodes: [500],
-      },
-      {
-        method: 'POST',
         url: '/v1/search',
         operationId: 'search.execute',
         hasBody: true,
@@ -91,66 +71,6 @@ describe('HTTP route contract registry', () => {
         method: 'POST',
         url: '/v1/search/lookup',
         operationId: 'search.lookup',
-        hasBody: true,
-        hasParams: false,
-        responseStatusCodes: [200, 400, 403, 408, 429, 500, 503],
-        successStatusCodes: [200],
-        errorStatusCodes: [400, 403, 408, 429, 500, 503],
-      },
-      {
-        method: 'POST',
-        url: '/v1/batch-search',
-        operationId: 'search.batch',
-        hasBody: true,
-        hasParams: false,
-        responseStatusCodes: [200, 400, 429, 500, 503],
-        successStatusCodes: [200],
-        errorStatusCodes: [400, 429, 500, 503],
-      },
-      {
-        method: 'POST',
-        url: '/v1/search/replay',
-        operationId: 'search.replay',
-        hasBody: true,
-        hasParams: false,
-        responseStatusCodes: [200, 400, 403, 409, 429, 500, 503],
-        successStatusCodes: [200],
-        errorStatusCodes: [400, 403, 409, 429, 500, 503],
-      },
-      {
-        method: 'POST',
-        url: '/v1/search/interpret',
-        operationId: 'search.interpret',
-        hasBody: true,
-        hasParams: false,
-        responseStatusCodes: [200, 400, 403, 408, 429, 500, 503],
-        successStatusCodes: [200],
-        errorStatusCodes: [400, 403, 408, 429, 500, 503],
-      },
-      {
-        method: 'POST',
-        url: '/v1/entity/resolve',
-        operationId: 'entity.resolve',
-        hasBody: true,
-        hasParams: false,
-        responseStatusCodes: [200, 400, 403, 408, 429, 500, 503],
-        successStatusCodes: [200],
-        errorStatusCodes: [400, 403, 408, 429, 500, 503],
-      },
-      {
-        method: 'POST',
-        url: '/v1/entity/autocomplete',
-        operationId: 'entity.autocomplete',
-        hasBody: true,
-        hasParams: false,
-        responseStatusCodes: [200, 400, 403, 408, 429, 500, 503],
-        successStatusCodes: [200],
-        errorStatusCodes: [400, 403, 408, 429, 500, 503],
-      },
-      {
-        method: 'POST',
-        url: '/v1/search/hybrid',
-        operationId: 'search.hybrid',
         hasBody: true,
         hasParams: false,
         responseStatusCodes: [200, 400, 403, 408, 429, 500, 503],
@@ -217,16 +137,16 @@ describe('HTTP route contract registry', () => {
         successStatusCodes: [201],
         errorStatusCodes: [400, 429, 500, 503],
       },
-      {
-        method: 'GET',
-        url: '/v1/agent/benchmark-scenarios',
-        operationId: 'agent.benchmarkScenarios.list',
-        hasBody: false,
-        hasParams: false,
-        responseStatusCodes: [200, 404],
-        successStatusCodes: [200],
-        errorStatusCodes: [404],
-      },
+    ]));
+
+    expect(contracts).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ url: '/v1/claude-tools' }),
+      expect.objectContaining({ url: '/v1/batch-search' }),
+      expect.objectContaining({ url: '/v1/search/replay' }),
+      expect.objectContaining({ url: '/v1/search/interpret' }),
+      expect.objectContaining({ url: '/v1/entity/resolve' }),
+      expect.objectContaining({ url: '/v1/entity/autocomplete' }),
+      expect.objectContaining({ url: '/v1/search/hybrid' }),
     ]));
   });
 });

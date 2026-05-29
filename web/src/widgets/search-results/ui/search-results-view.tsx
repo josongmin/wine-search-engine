@@ -83,8 +83,7 @@ function ResultsContent() {
   if (!data) return null;
 
   // T-E9-01: Union-safe discriminant check before accessing response fields.
-  // Guard against future response union types (e.g. AgentExecuteResponse)
-  // by verifying query_type before accessing search-specific fields.
+  // Guard against future response unions by verifying query_type first.
   if (data.query_type !== 'search') return null;
 
   const isComparison = data.result_type === 'comparison';

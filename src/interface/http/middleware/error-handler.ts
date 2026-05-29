@@ -4,7 +4,6 @@ import { isAbortError } from '../../../domain/shared/cooperative-abort.js';
 import { DomainError } from '../../../domain/shared/error/domain-error.js';
 import { CIRCUIT_BREAKER_OPEN_CODE } from '../../../domain/shared/error/circuit-breaker-open-error.js';
 import { POLICY_BLOCKED_CODE } from '../../../domain/shared/error/policy-blocked.js';
-import { SnapshotMismatchError } from '../../../application/search/replay.usecase.js';
 import {
   buildSearchErrorResponse,
   sendSearchErrorResponse,
@@ -116,7 +115,6 @@ function isDomainErrorRetryable(code: string): boolean {
  *
  * Handles:
  * - DomainError -> appropriate HTTP status + RFC-014 error contract
- * - SnapshotMismatchError -> 409
  * - ZodError -> 400 (validation error)
  * - Unknown errors -> 500
  *
@@ -329,22 +327,6 @@ export function errorHandler(
     );
 
     sendSearchErrorResponse(request, reply, HTTP_STATUS_BAD_REQUEST, body);
-    return;
-  }
-
-  // SnapshotMismatchError — 409 Conflict
-  if (error instanceof SnapshotMismatchError) {
-    request.log.warn({ requestId, code: error.code }, 'snapshot_mismatch');
-
-    const body = buildSearchErrorResponse(
-      requestId,
-      error.code,
-      error.message,
-      null,
-      false,
-    );
-
-    sendSearchErrorResponse(request, reply, HTTP_STATUS_CONFLICT, body);
     return;
   }
 

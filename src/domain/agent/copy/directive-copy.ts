@@ -1,20 +1,20 @@
 /**
  * Directive copy — single source of truth (SSoT) for the natural-language
- * strings that the agent layer and the mini-loop runner inject into the
+ * strings that the agent layer and the wine-agent-loop runner inject into the
  * LLM context as authoritative directives.
  *
  * Rationale (CLAUDE.md rule 25 / 30): the same directive copy was previously
  * authored independently in two places:
  *   - `src/application/agent/agent-contract-policy.ts` (English-only,
  *     "grounded_search_required" and "required_tool" instruction strings).
- *   - `src/application/wine-search/mini-loop-schemas.ts`
- *     (`MINI_LOOP_DIRECTIVE_COPY_ENGLISH` + `MINI_LOOP_DIRECTIVE_COPY_KOREAN`).
+ *   - `src/application/wine-search/wine-agent-loop-schemas.ts`
+ *     (`WINE_AGENT_LOOP_DIRECTIVE_COPY_ENGLISH` + `WINE_AGENT_LOOP_DIRECTIVE_COPY_KOREAN`).
  *
  * The English variants are byte-identical. Drift would cause inconsistent
- * model behavior between the legacy agent loop and the new mini-loop runner,
+ * model behavior between the legacy agent loop and the new wine-agent-loop runner,
  * and would silently break unit tests that assert exact directive strings.
  *
- * The mini-loop also owns Korean copy + the `relax_constraints_retry`,
+ * The wine-agent-loop also owns Korean copy + the `relax_constraints_retry`,
  * `pending_drinkability_check`, `loop_detected` directives that the agent
  * contract policy does NOT use. We expose those here too so any future
  * consumer can pick the same canonical strings.
@@ -71,7 +71,7 @@ function buildKoreanPendingDrinkabilityInstruction(
 /**
  * Bundle of directive copy strings keyed by directive kind.
  *
- * Why this shape: the mini-loop runner picks copy by `hangulDominant` and
+ * Why this shape: the wine-agent-loop runner picks copy by `hangulDominant` and
  * calls per-directive accessors; the agent contract policy emits one
  * English directive at a time. Both call sites consume the same bundle.
  */

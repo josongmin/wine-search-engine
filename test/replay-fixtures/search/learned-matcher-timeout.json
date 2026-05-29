@@ -1,25 +1,13 @@
 {
   "name": "learned-matcher-timeout",
-  "endpoint": "/v1/search/replay",
+  "endpoint": "/v1/search",
   "execution_lane": "runtime_required",
-  "replay_request": {
+  "request": {
     "query": "오푸스원",
     "options": {
       "mode": "entity",
       "explain": false,
       "clarification": false
-    },
-    "decision_snapshot": {
-      "snapshot_id": "default:1.0.0:1.0.0::",
-      "model_versions": {
-        "learned_matcher": "timeout-test"
-      },
-      "index_versions": {},
-      "policy_rule_version": "1.0.0",
-      "threshold_profile_id": "default",
-      "planner_version": "1.0.0",
-      "feature_flags": {},
-      "response_contract_version": "search_response_v1"
     }
   },
   "expected": {
@@ -27,8 +15,7 @@
     "degradation_reasons": ["learned_matcher_timeout"]
   },
   "metadata": {
-    "use_live_snapshot": true,
     "runtime_mode": "full_runtime"
   },
-  "requires_runtime_capability": ["replay_route", "learned_matcher_runtime"]
+  "requires_runtime_capability": ["learned_matcher_runtime"]
 }

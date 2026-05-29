@@ -25,11 +25,11 @@ describe('search replay fixtures', () => {
     expect(fixtures.some(({ fixture }) => isExecutableSearchReplayFixture(fixture))).toBe(true);
   });
 
-  it('keeps at least one executable replay fixture for the self-contained HTTP lane', () => {
+  it('keeps at least one executable canonical search fixture for the self-contained HTTP lane', () => {
     expect(
       fixtures.some(({ fixture }) =>
         isExecutableSearchReplayFixture(fixture)
-        && classifySearchFixtureMode(fixture) === 'replay'),
+        && classifySearchFixtureMode(fixture) === 'search'),
     ).toBe(true);
   });
 
@@ -40,6 +40,8 @@ describe('search replay fixtures', () => {
   for (const { file, fixture } of fixtures) {
     it(`fixture ${file} has v2 fixture contract`, () => {
       expect(typeof fixture.name).toBe('string');
+      expect(fixture.endpoint).toBe('/v1/search');
+      expect(fixture.request).toBeDefined();
       if ('error_code' in fixture.expected) {
         expect(typeof fixture.expected.error_code).toBe('string');
       } else if (fixture.response_family === 'comparison') {
@@ -49,7 +51,6 @@ describe('search replay fixtures', () => {
         expect(fixture.expected.execution_mode).toBeDefined();
         expect(Array.isArray(fixture.expected.degradation_reasons)).toBe(true);
       }
-      expect(Number(fixture.request !== undefined) + Number(fixture.replay_request !== undefined)).toBe(1);
     });
 
     it(`fixture ${file} keeps self-contained classification consistent`, () => {
@@ -70,46 +71,11 @@ describe('search replay fixtures', () => {
     });
 
     it(`fixture ${file} can be routed by helper mode without ad-hoc logic`, () => {
-      expect(classifySearchFixtureMode(fixture)).toBe(
-        fixture.request !== undefined ? 'search' : 'replay',
-      );
+      expect(classifySearchFixtureMode(fixture)).toBe('search');
     });
   }
 
-  it('applies snapshot_override by rebuilding the replay payload', () => {
-    const payload = buildSearchFixturePayload({
-      name: 'override',
-      endpoint: '/v1/search/replay',
-      execution_lane: 'self_contained',
-      replay_request: {
-        query: 'Opus One 2018',
-        decision_snapshot: {
-          snapshot_id: 'snapshot:v1:default:1.0.0:1.0.0:abcdef',
-          model_versions: {},
-          index_versions: {},
-          policy_rule_version: '1.0.0',
-          threshold_profile_id: 'default',
-          planner_version: '1.0.0',
-          feature_flags: {},
-          response_contract_version: 'search_response_v1',
-        },
-      },
-      snapshot_override: {
-        snapshot_id: 'snapshot:v1:default:1.0.0:1.0.0:override',
-        nondeterminism_notes: 'runtime override',
-      },
-      expected: {
-        execution_mode: 'authoritative',
-        degradation_reasons: [],
-      },
-    });
-
-    expect('decision_snapshot' in payload).toBe(true);
-    expect(payload.decision_snapshot.snapshot_id).toMatch(/^snapshot:v1:default:1\.0\.0:1\.0\.0:/);
-    expect(payload.decision_snapshot.nondeterminism_notes).toBe('runtime override');
-  });
-
-  it('keeps plain search fixtures free of replay-only override behavior', () => {
+  it('returns the canonical /v1/search payload without replay-only overlays', () => {
     const payload = buildSearchFixturePayload({
       name: 'search-only',
       endpoint: '/v1/search',

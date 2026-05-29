@@ -90,7 +90,7 @@ function buildConfig(
   if (parsed.AGENT_ENABLED && !hasChatCredential) {
     throw new Error(
       'AGENT_ENABLED=true requires OPENAI_API_KEY, OPENAI_API_KEYS, or a Codex ChatGPT login token. ' +
-        'Set a chat credential or unset AGENT_ENABLED — silently disabling the agent route (POST /v1/agent/*) is not allowed.',
+        'Set a chat credential or unset AGENT_ENABLED — silently disabling the agentic runtime is not allowed.',
     );
   }
 
@@ -286,17 +286,6 @@ function buildConfig(
        */
       fastAnswerBypassPlanner: parsed.AGENT_FAST_ANSWER_BYPASS_PLANNER,
     },
-
-    /**
-     * Web / tooling: benchmark scenario catalog (GET /v1/agent/benchmark-scenarios).
-     * Production default off unless ENABLE_AGENT_BENCHMARK_UI=true.
-     */
-    enableAgentBenchmarkUi:
-      parsed.ENABLE_AGENT_BENCHMARK_UI === 'true'
-        ? true
-        : parsed.ENABLE_AGENT_BENCHMARK_UI === 'false'
-          ? false
-          : parsed.NODE_ENV !== 'production',
 
     /** Kill switches for feature flags / circuit breakers. */
     killSwitch: {

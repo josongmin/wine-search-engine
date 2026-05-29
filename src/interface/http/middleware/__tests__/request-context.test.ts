@@ -20,7 +20,7 @@ describe('isOpsRoute — request logging cardinality (R6 H7)', () => {
 
   it('does NOT classify business routes as ops routes', () => {
     expect(isOpsRoute('/v1/search')).toBe(false);
-    expect(isOpsRoute('/v1/agent')).toBe(false);
+    expect(isOpsRoute('/v1/wine-search')).toBe(false);
     expect(isOpsRoute('/v1/watchlist/:id')).toBe(false);
   });
 

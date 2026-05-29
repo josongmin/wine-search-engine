@@ -1,5 +1,5 @@
 /**
- * Regression: mini-loop tool dispatch shape (SOLID H1/H2 follow-up).
+ * Regression: wine-agent-loop tool dispatch shape (SOLID H1/H2 follow-up).
  *
  * Three invariants:
  *   1. `lookup_wine` routes through the shared schema — empty / placeholder
@@ -13,7 +13,7 @@
  *      new tool to the SSoT propagates here without an edit.
  *
  * The runner's `invokeToolPort` is not exported, so we exercise it via the
- * public `MiniLoopRunner.run` entrypoint with a fake LLM port that emits the
+ * public `WineAgentLoopRunner.run` entrypoint with a fake LLM port that emits the
  * tool_use we want to test.
  */
 
@@ -31,17 +31,17 @@ import type {
   ToolDefinition,
   ToolUseCall,
 } from '../../src/domain/ai/port/structured-llm.port.js';
-import { MiniLoopRunner } from '../../src/application/wine-search/mini-loop.js';
+import { WineAgentLoopRunner } from '../../src/application/wine-search/wine-agent-loop.js';
 import {
-  MINI_LOOP_DEFAULT_AGENT_TIMEOUT_MS,
-  MINI_LOOP_DEFAULT_MAX_OUTPUT_TOKENS,
-  MINI_LOOP_DEFAULT_MAX_STEPS,
-  MINI_LOOP_DEFAULT_MAX_TOTAL_TOKENS,
-  MINI_LOOP_DEFAULT_PER_STEP_TIMEOUT_MS,
-  MINI_LOOP_DEFAULT_PER_TOOL_CAP,
-  type MiniLoopInput,
-  type MiniLoopToolPorts,
-} from '../../src/application/wine-search/mini-loop-schemas.js';
+  WINE_AGENT_LOOP_DEFAULT_AGENT_TIMEOUT_MS,
+  WINE_AGENT_LOOP_DEFAULT_MAX_OUTPUT_TOKENS,
+  WINE_AGENT_LOOP_DEFAULT_MAX_STEPS,
+  WINE_AGENT_LOOP_DEFAULT_MAX_TOTAL_TOKENS,
+  WINE_AGENT_LOOP_DEFAULT_PER_STEP_TIMEOUT_MS,
+  WINE_AGENT_LOOP_DEFAULT_PER_TOOL_CAP,
+  type WineAgentLoopInput,
+  type WineAgentLoopToolPorts,
+} from '../../src/application/wine-search/wine-agent-loop-schemas.js';
 import { KNOWN_AGENT_TOOL_NAMES_DISPLAY } from '../../src/domain/agent/model/agent-tool-attempt-schema.js';
 import type {
   SearchUseCasePort,
@@ -50,7 +50,7 @@ import type { SearchResponseV1 } from '../../src/domain/response/model/search-re
 import type { WineSearchAnalysis } from '../../src/application/wine-search/wine-search-schemas.js';
 
 // ---------------------------------------------------------------------------
-// Fixtures (slim copies of the mini-loop.test.ts shared helpers — keeping
+// Fixtures (slim copies of the wine-agent-loop.test.ts shared helpers — keeping
 // regression coverage self-contained).
 // ---------------------------------------------------------------------------
 
@@ -80,7 +80,7 @@ function makeAnalysis(): WineSearchAnalysis {
       hasEntityMetadataSignal: false,
     },
     expectedMultiStep: true,
-    recommendedBudget: { maxSteps: MINI_LOOP_DEFAULT_MAX_STEPS, perToolCap: MINI_LOOP_DEFAULT_PER_TOOL_CAP },
+    recommendedBudget: { maxSteps: WINE_AGENT_LOOP_DEFAULT_MAX_STEPS, perToolCap: WINE_AGENT_LOOP_DEFAULT_PER_TOOL_CAP },
     hangulDominant: false,
     preservedSurface: 'fixture-query',
   };
@@ -91,7 +91,7 @@ function makeSearchPort(): SearchUseCasePort & { readonly executeMock: ReturnTyp
   return { executeMock, execute: (input, reqId, _opts) => executeMock(input, reqId) };
 }
 
-function makeToolPorts(overrides?: Partial<MiniLoopToolPorts>): MiniLoopToolPorts {
+function makeToolPorts(overrides?: Partial<WineAgentLoopToolPorts>): WineAgentLoopToolPorts {
   return {
     searchUseCase: overrides?.searchUseCase ?? makeSearchPort(),
   };
@@ -156,7 +156,7 @@ function makePassthroughToolDef(name: string): ToolDefinition {
   };
 }
 
-function makeInput(overrides: Partial<MiniLoopInput>): MiniLoopInput {
+function makeInput(overrides: Partial<WineAgentLoopInput>): WineAgentLoopInput {
   return {
     query: 'q',
     analysis: makeAnalysis(),
@@ -170,12 +170,12 @@ function makeInput(overrides: Partial<MiniLoopInput>): MiniLoopInput {
       makePassthroughToolDef('mystery_tool'),
     ],
     toolPorts: overrides.toolPorts ?? makeToolPorts(),
-    perStepTimeoutMs: MINI_LOOP_DEFAULT_PER_STEP_TIMEOUT_MS,
-    agentTimeoutMs: MINI_LOOP_DEFAULT_AGENT_TIMEOUT_MS,
-    maxSteps: MINI_LOOP_DEFAULT_MAX_STEPS,
-    maxTotalTokens: MINI_LOOP_DEFAULT_MAX_TOTAL_TOKENS,
-    maxOutputTokens: MINI_LOOP_DEFAULT_MAX_OUTPUT_TOKENS,
-    perToolCap: MINI_LOOP_DEFAULT_PER_TOOL_CAP,
+    perStepTimeoutMs: WINE_AGENT_LOOP_DEFAULT_PER_STEP_TIMEOUT_MS,
+    agentTimeoutMs: WINE_AGENT_LOOP_DEFAULT_AGENT_TIMEOUT_MS,
+    maxSteps: WINE_AGENT_LOOP_DEFAULT_MAX_STEPS,
+    maxTotalTokens: WINE_AGENT_LOOP_DEFAULT_MAX_TOTAL_TOKENS,
+    maxOutputTokens: WINE_AGENT_LOOP_DEFAULT_MAX_OUTPUT_TOKENS,
+    perToolCap: WINE_AGENT_LOOP_DEFAULT_PER_TOOL_CAP,
   };
 }
 
@@ -183,14 +183,14 @@ function makeInput(overrides: Partial<MiniLoopInput>): MiniLoopInput {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('mini-loop dispatch — lookup_wine uses shared normalizer (H2)', () => {
+describe('wine-agent-loop dispatch — lookup_wine uses shared normalizer (H2)', () => {
   it('rejects an empty query with an invalid-input observation; never calls the search port', async () => {
     const searchPort = makeSearchPort();
     const llm = makeStubLlm([
       async () => asToolUseResult([toolUse('lookup_wine', { query: '' })]),
       async () => asTextResult('Done.'),
     ]);
-    const runner = new MiniLoopRunner({ structuredLlm: llm });
+    const runner = new WineAgentLoopRunner({ structuredLlm: llm });
     const out = await runner.run(makeInput({
       toolPorts: makeToolPorts({ searchUseCase: searchPort }),
     }));
@@ -198,18 +198,18 @@ describe('mini-loop dispatch — lookup_wine uses shared normalizer (H2)', () =>
     const firstStep = out.steps[0];
     expect(firstStep?.kind).toBe('tool_use');
     expect(firstStep?.observations[0]).toMatch(/invalid input/i);
-    // The mini-loop's lookup branch must use the shared normalizer's validation
+    // The wine-agent-loop's lookup branch must use the shared normalizer's validation
     // BEFORE invoking the search port.
     expect(searchPort.executeMock).not.toHaveBeenCalled();
   });
 
-  it('rejects a placeholder query (the bug the legacy mini-loop dispatcher missed)', async () => {
+  it('rejects a placeholder query (the bug the legacy wine-agent-loop dispatcher missed)', async () => {
     const searchPort = makeSearchPort();
     const llm = makeStubLlm([
       async () => asToolUseResult([toolUse('lookup_wine', { query: '__TODO__' })]),
       async () => asTextResult('Done.'),
     ]);
-    const runner = new MiniLoopRunner({ structuredLlm: llm });
+    const runner = new WineAgentLoopRunner({ structuredLlm: llm });
     const out = await runner.run(makeInput({
       toolPorts: makeToolPorts({ searchUseCase: searchPort }),
     }));
@@ -224,7 +224,7 @@ describe('mini-loop dispatch — lookup_wine uses shared normalizer (H2)', () =>
       async () => asToolUseResult([toolUse('lookup_wine', { query: 'Sassicaia', limit: 999 })]),
       async () => asTextResult('Found.'),
     ]);
-    const runner = new MiniLoopRunner({ structuredLlm: llm });
+    const runner = new WineAgentLoopRunner({ structuredLlm: llm });
     await runner.run(makeInput({
       toolPorts: makeToolPorts({ searchUseCase: searchPort }),
     }));
@@ -238,13 +238,13 @@ describe('mini-loop dispatch — lookup_wine uses shared normalizer (H2)', () =>
   });
 });
 
-describe('mini-loop dispatch — unknown tool branch uses SSoT display string', () => {
+describe('wine-agent-loop dispatch — unknown tool branch uses SSoT display string', () => {
   it('default-case observation lists all known tools via KNOWN_AGENT_TOOL_NAMES_DISPLAY', async () => {
     const llm = makeStubLlm([
       async () => asToolUseResult([toolUse('mystery_tool', { foo: 'bar' })]),
       async () => asTextResult('Sorry.'),
     ]);
-    const runner = new MiniLoopRunner({ structuredLlm: llm });
+    const runner = new WineAgentLoopRunner({ structuredLlm: llm });
     const out = await runner.run(makeInput({}));
 
     const obs = out.steps[0]?.observations[0] ?? '';

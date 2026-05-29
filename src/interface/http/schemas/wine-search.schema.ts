@@ -2,9 +2,8 @@
  * Zod schemas for the new POST /v1/wine-search endpoint.
  *
  * This is the public HTTP surface for the Plan-then-Execute wine-search
- * orchestrator (replacement of the ReAct-style /v1/agent loop). It is a
- * breaking redesign vs /v1/agent — the response shape is intentionally
- * leaner and disambiguated:
+ * orchestrator. The response shape is intentionally leaner and
+ * disambiguated:
  *
  *   - `steps[]` is a single uniform array (the legacy `action` vs
  *     `actions[]` duality is gone — every step carries a `tool_calls[]`
@@ -44,9 +43,8 @@
  *
  * Every numeric bound is a named const (rule 15) with a domain
  * justification comment. String/array bounds reuse module-scoped
- * constants from `../constants.js` where parity with the existing
- * /v1/agent contract matters (`MAX_AGENT_HTTP_QUERY_CHARS`,
- * `MAX_AGENT_STEPS_CAP`).
+ * constants from `../constants.js` for consistency
+ * (`MAX_AGENT_HTTP_QUERY_CHARS`, `MAX_AGENT_STEPS_CAP`).
  */
 
 import { z } from 'zod';
@@ -91,7 +89,7 @@ const STEP_OBSERVATION_MAX = 8;
 export const ANSWER_MAX_CHARS = 3_000;
 
 /**
- * Step-array cap: analyzer + router + runner + mini-loop + synthesizer can
+ * Step-array cap: analyzer + router + runner + wine-agent-loop + synthesizer can
  * each emit one or more steps within a single execution. With a
  * `max_steps = MAX_AGENT_STEPS_CAP (=10)` budget for the tool-call loop, the
  * full step array can carry the tool-loop steps plus a fixed pre/post
@@ -124,14 +122,15 @@ export type TokenUsageBody = z.infer<typeof TokenUsageSchema>;
  *  - `router`: deterministic-router plan selection.
  *  - `runner`: top-level execution-runner step (single/parallel/comparison
  *    search, etc.).
- *  - `mini_loop`: nested ReAct mini-loop inside a `multi-step` plan.
+ *  - `wine_agent_loop`: wire tag for the nested WineAgentLoop inside a
+ *    `multi-step` plan.
  *  - `synthesizer`: final answer synthesis.
  */
 const WineSearchStepSourceSchema = z.enum([
   'analyzer',
   'router',
   'runner',
-  'mini_loop',
+  'wine_agent_loop',
   'synthesizer',
 ]);
 

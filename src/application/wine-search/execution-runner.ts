@@ -108,7 +108,7 @@ export class ExecutionRunner {
         case 'parallel-search':
           return await this.runParallelSearch(plan.searches, ctx, perStepTimeoutMs, logCtx);
         case 'multi-step':
-          bootstrapLogger.info(logCtx, '[ExecutionRunner] handoff to MiniLoop');
+          bootstrapLogger.info(logCtx, '[ExecutionRunner] handoff to WineAgentLoop');
           return { kind: 'multi-step-required', handoff: plan.handoff };
         case 'reject':
           bootstrapLogger.info({ ...logCtx, reason: plan.reason }, '[ExecutionRunner] plan rejected');

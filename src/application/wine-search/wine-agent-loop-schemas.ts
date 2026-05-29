@@ -1,7 +1,7 @@
 /**
- * MiniLoopRunner — typed schemas (plans, directives, step records, output).
+ * WineAgentLoopRunner — typed schemas (plans, directives, step records, output).
  *
- * The MiniLoopRunner is the lean ReAct loop for the ~10–20% of queries that
+ * The WineAgentLoopRunner is the lean ReAct loop for the ~10–20% of queries that
  * genuinely need multi-hop. It sits between `DeterministicRouter`
  * (which decides multi-step is needed) and `SynthesisRunner` (which produces
  * the final answer). The runner drives `StructuredLlmPort.execute` with
@@ -10,7 +10,7 @@
  * sticky state on the runner.
  *
  * Why a dedicated schemas file?
- *  - Keeps the loop body in `mini-loop.ts` lean and free of type plumbing.
+ *  - Keeps the loop body in `wine-agent-loop.ts` lean and free of type plumbing.
  *  - Lets tests import the typed input/output shapes without pulling in
  *    Logger or LLM-port wiring.
  *  - All numeric defaults are named consts here (CLAUDE.md rule 15) with a
@@ -36,9 +36,9 @@ import type { WineSearchAnalysis } from './wine-search-schemas.js';
 // ---------------------------------------------------------------------------
 // Named constants (CLAUDE.md rule 15).
 //
-// The MiniLoop budget is intentionally tighter than `DEFAULT_AGENT_CONFIG`
+// The WineAgentLoop budget is intentionally tighter than `DEFAULT_AGENT_CONFIG`
 // (maxSteps=5, agentTimeoutMs=25_000, perStepTimeoutMs=10_000,
-// maxTotalTokens=50_000). Mini-loop only fires for the small slice of
+// maxTotalTokens=50_000). Wine-agent-loop only fires for the small slice of
 // queries that truly need multi-hop, so we want them to either resolve in
 // ≤3 LLM turns or terminate fast and hand back to the synthesizer.
 //
@@ -55,7 +55,7 @@ import type { WineSearchAnalysis } from './wine-search-schemas.js';
  *  (2) follow-up tool call driven by directive, (3) final answer. Anything
  *  beyond that escalates back to the synthesizer rather than burning more
  *  tokens. */
-export const MINI_LOOP_DEFAULT_MAX_STEPS = 3;
+export const WINE_AGENT_LOOP_DEFAULT_MAX_STEPS = 3;
 
 /** Per-tool invocation cap for the StepBudget. Two is the minimum that
  *  still allows constraint-relaxation retries (initial + 1 relax). The
@@ -63,45 +63,45 @@ export const MINI_LOOP_DEFAULT_MAX_STEPS = 3;
  *  internally — we pass 2 as the AgentConfig hint to ensure the adaptive
  *  formula `max(MIN, ceil(maxSteps * 0.6))` evaluates to a sensible value
  *  when maxSteps=3 (yields cap=3). */
-export const MINI_LOOP_DEFAULT_PER_TOOL_CAP = 2;
+export const WINE_AGENT_LOOP_DEFAULT_PER_TOOL_CAP = 2;
 
 /** Per-LLM-call timeout. 12s exceeds the synthesis runner's 10s default
- *  because mini-loop calls also do tool-use parsing and we want enough
+ *  because wine-agent-loop calls also do tool-use parsing and we want enough
  *  headroom for legitimate searches over Vespa. */
-export const MINI_LOOP_DEFAULT_PER_STEP_TIMEOUT_MS = 12_000;
+export const WINE_AGENT_LOOP_DEFAULT_PER_STEP_TIMEOUT_MS = 12_000;
 
-/** Wall-clock cap for the entire mini-loop. 25_000ms leaves ≈5s for the
+/** Wall-clock cap for the entire wine-agent-loop. 25_000ms leaves ≈5s for the
  *  downstream synthesizer to compose the final response within the typical
  *  30s HTTP budget. */
-export const MINI_LOOP_DEFAULT_AGENT_TIMEOUT_MS = 25_000;
+export const WINE_AGENT_LOOP_DEFAULT_AGENT_TIMEOUT_MS = 25_000;
 
 /** Hard cap on aggregated tokens across the loop. Tighter than the agent
- *  default (50_000) because mini-loop is the rare path, not the standard
+ *  default (50_000) because wine-agent-loop is the rare path, not the standard
  *  one. Reaching this cap is itself a signal to fall back. */
-export const MINI_LOOP_DEFAULT_MAX_TOTAL_TOKENS = 30_000;
+export const WINE_AGENT_LOOP_DEFAULT_MAX_TOTAL_TOKENS = 30_000;
 
-/** Maximum tokens the LLM may emit in a single mini-loop turn. Sized so
+/** Maximum tokens the LLM may emit in a single wine-agent-loop turn. Sized so
  *  one verbose tool_use call (~3 fields, ~50 tokens of JSON) plus a brief
  *  thinking block fits comfortably without bursting the per-step budget. */
-export const MINI_LOOP_DEFAULT_MAX_OUTPUT_TOKENS = 1_024;
+export const WINE_AGENT_LOOP_DEFAULT_MAX_OUTPUT_TOKENS = 1_024;
 
 /** After this many `loop_detected` rejections the loop terminates with
  *  reason 'loop_detected'. One rejection is recoverable (the model can try
  *  a different angle); two is structural thrashing. */
-export const MINI_LOOP_LOOP_DETECTED_TERMINATE_COUNT = 2;
+export const WINE_AGENT_LOOP_LOOP_DETECTED_TERMINATE_COUNT = 2;
 
 /** After this many consecutive turns where the model emits an answer but
  *  a pending directive blocks acceptance, terminate with `max_steps`. The
  *  explicit zombie-loop kill switch: if the model refuses to honor a
  *  directive twice in a row, no further iteration will help and the
  *  synthesizer downstream can compose a degraded response. */
-export const MINI_LOOP_DIRECTIVE_IGNORED_TERMINATE_COUNT = 2;
+export const WINE_AGENT_LOOP_DIRECTIVE_IGNORED_TERMINATE_COUNT = 2;
 
 /** Maximum number of entity ids embedded in a single
  *  `pending_drinkability_check` directive. Aligns with
  *  `WINE_SEARCH_MAX_ANCHORS` (8) without re-importing the constant — the
  *  schema below validates against this same bound. */
-export const MINI_LOOP_MAX_DRINKABILITY_ENTITY_IDS = 8;
+export const WINE_AGENT_LOOP_MAX_DRINKABILITY_ENTITY_IDS = 8;
 
 /** Maximum characters for a constraint attribute name (e.g. 'maxPriceKrw').
  *  64 chars covers the longest observed attribute name with headroom. */
@@ -116,12 +116,12 @@ const DIRECTIVE_INSTRUCTION_MAX_CHARS = 512;
  *  are UUIDs or canonical-label slugs; 128 covers both. */
 const DIRECTIVE_ENTITY_ID_MAX_CHARS = 128;
 
-/** Default Anthropic model id for mini-loop execution. Overrideable via
+/** Default Anthropic model id for wine-agent-loop execution. Overrideable via
  *  runner deps for tests / future routing.
  *  Format `claude-<family>-<gen>` per Anthropic Messages API spec — matches
  *  `claude-(opus|sonnet|haiku)-N-M`. `claude-4-sonnet-latest` is rejected with HTTP 400. */
 import { CLAUDE_SONNET_MODEL_ID } from '@domain/shared/constants/claude-models.js';
-export const MINI_LOOP_DEFAULT_MODEL = CLAUDE_SONNET_MODEL_ID;
+export const WINE_AGENT_LOOP_DEFAULT_MODEL = CLAUDE_SONNET_MODEL_ID;
 
 // ---------------------------------------------------------------------------
 // AgentToolName re-export — convenience for runner consumers.
@@ -144,18 +144,18 @@ const AgentToolNameSchema = z.enum(KNOWN_AGENT_TOOL_NAMES);
 // next pass.
 // ---------------------------------------------------------------------------
 
-export const MiniLoopDirectiveSchema = z.discriminatedUnion('kind', [
+export const WineAgentLoopDirectiveSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('relax_constraints_retry'),
     /** Constraint attributes (e.g. 'maxPriceKrw', 'vintageMin') the model
      *  is allowed to drop to widen the search. Empty array means "use your
      *  judgment about which non-must-have to relax". */
-    relaxableConstraintAttributes: z.array(z.string().min(1).max(DIRECTIVE_CONSTRAINT_ATTRIBUTE_MAX_CHARS)).max(MINI_LOOP_MAX_DRINKABILITY_ENTITY_IDS),
+    relaxableConstraintAttributes: z.array(z.string().min(1).max(DIRECTIVE_CONSTRAINT_ATTRIBUTE_MAX_CHARS)).max(WINE_AGENT_LOOP_MAX_DRINKABILITY_ENTITY_IDS),
     instruction: z.string().min(1).max(DIRECTIVE_INSTRUCTION_MAX_CHARS),
   }).strict(),
   z.object({
     kind: z.literal('pending_drinkability_check'),
-    entityIds: z.array(z.string().min(1).max(DIRECTIVE_ENTITY_ID_MAX_CHARS)).min(1).max(MINI_LOOP_MAX_DRINKABILITY_ENTITY_IDS),
+    entityIds: z.array(z.string().min(1).max(DIRECTIVE_ENTITY_ID_MAX_CHARS)).min(1).max(WINE_AGENT_LOOP_MAX_DRINKABILITY_ENTITY_IDS),
     instruction: z.string().min(1).max(DIRECTIVE_INSTRUCTION_MAX_CHARS),
   }).strict(),
   z.object({
@@ -168,26 +168,26 @@ export const MiniLoopDirectiveSchema = z.discriminatedUnion('kind', [
     instruction: z.string().min(1).max(DIRECTIVE_INSTRUCTION_MAX_CHARS),
   }).strict(),
 ]);
-export type MiniLoopDirective = z.infer<typeof MiniLoopDirectiveSchema>;
+export type WineAgentLoopDirective = z.infer<typeof WineAgentLoopDirectiveSchema>;
 
 // ---------------------------------------------------------------------------
 // Step record — one LLM turn (single call or tool-use batch).
 // ---------------------------------------------------------------------------
 
-export interface MiniLoopToolCall {
+export interface WineAgentLoopToolCall {
   readonly tool: string;
   readonly input: Record<string, unknown>;
 }
 
-export type MiniLoopStepKind = 'answer' | 'tool_use' | 'error';
+export type WineAgentLoopStepKind = 'answer' | 'tool_use' | 'error';
 
-export interface MiniLoopStep {
+export interface WineAgentLoopStep {
   readonly index: number;
-  readonly kind: MiniLoopStepKind;
+  readonly kind: WineAgentLoopStepKind;
   /** Free-form reasoning surfaced by the LLM. Empty for `error` steps. */
   readonly reasoning: string;
   /** Tool calls fired in this turn. Empty for `answer` and `error`. */
-  readonly toolCalls: readonly MiniLoopToolCall[];
+  readonly toolCalls: readonly WineAgentLoopToolCall[];
   /** Compact textual observations (one per tool call, parallel index). */
   readonly observations: readonly string[];
   /** Typed companion outcomes (one per tool call, parallel index). */
@@ -209,7 +209,7 @@ export interface MiniLoopStep {
 // `SearchUseCasePort`, etc. (SSoT — CLAUDE.md rule 30).
 // ---------------------------------------------------------------------------
 
-export interface MiniLoopToolPorts {
+export interface WineAgentLoopToolPorts {
   readonly searchUseCase: SearchUseCasePort;
   readonly decomposedSearchUseCase?: DecomposedSearchUseCasePort | undefined;
   readonly drinkingWindowUseCase?: DrinkingWindowUseCasePort | undefined;
@@ -220,19 +220,19 @@ export interface MiniLoopToolPorts {
 // Input + outcome
 // ---------------------------------------------------------------------------
 
-export interface MiniLoopInput {
+export interface WineAgentLoopInput {
   readonly query: string;
   readonly analysis: WineSearchAnalysis;
   /** Directive seeded by `DeterministicRouter` when applicable. Optional —
    *  if absent the runner starts with no directive and recomputes after the
    *  first LLM turn. */
-  readonly initialDirective?: MiniLoopDirective | undefined;
+  readonly initialDirective?: WineAgentLoopDirective | undefined;
   readonly requestId: string;
   /** Tool definitions for native `tool_use`. Re-uses the structured-LLM
    *  port type so callers can build them once and share with other
    *  consumers. */
   readonly tools: readonly ToolDefinition[];
-  readonly toolPorts: MiniLoopToolPorts;
+  readonly toolPorts: WineAgentLoopToolPorts;
   readonly perStepTimeoutMs: number;
   readonly agentTimeoutMs: number;
   readonly maxSteps: number;
@@ -242,14 +242,14 @@ export interface MiniLoopInput {
   readonly abortSignal?: AbortSignal | undefined;
 }
 
-export interface MiniLoopOutcome {
-  readonly steps: readonly MiniLoopStep[];
+export interface WineAgentLoopOutcome {
+  readonly steps: readonly WineAgentLoopStep[];
   readonly toolOutcomes: readonly ToolOutcome[];
   readonly terminationReason: AgentTerminationReason;
   readonly tokenUsage: TokenUsage;
   readonly stoppedAtStep: number;
   /** Final answer string, if any. The synthesizer downstream may still
-   *  rewrite this — the mini-loop only collects it. */
+   *  rewrite this — the wine-agent-loop only collects it. */
   readonly answer?: string | undefined;
 }
 
@@ -259,7 +259,7 @@ export interface MiniLoopOutcome {
 // runner agree on the exact strings.
 // ---------------------------------------------------------------------------
 
-export interface MiniLoopDirectiveCopy {
+export interface WineAgentLoopDirectiveCopy {
   readonly relax: string;
   readonly groundedSearch: string;
   readonly requiredTool: (tool: AgentToolName) => string;
@@ -267,13 +267,13 @@ export interface MiniLoopDirectiveCopy {
   readonly loopDetected: string;
 }
 
-// MINI_LOOP_DIRECTIVE_COPY_{KOREAN,ENGLISH} are thin adapters over the SSoT
-// `AGENT_DIRECTIVE_COPY` (CLAUDE.md rule 25/30). The mini-loop runner needs
+// WINE_AGENT_LOOP_DIRECTIVE_COPY_{KOREAN,ENGLISH} are thin adapters over the SSoT
+// `AGENT_DIRECTIVE_COPY` (CLAUDE.md rule 25/30). The wine-agent-loop runner needs
 // the `requiredTool` callback typed as `(tool: AgentToolName) => string`
 // rather than the SSoT's `(tool: string) => string`; the adapter narrows the
 // type while reusing the same string content. Strings remain identical.
 
-export const MINI_LOOP_DIRECTIVE_COPY_KOREAN: MiniLoopDirectiveCopy = {
+export const WINE_AGENT_LOOP_DIRECTIVE_COPY_KOREAN: WineAgentLoopDirectiveCopy = {
   relax: AGENT_DIRECTIVE_COPY.korean.relax,
   groundedSearch: AGENT_DIRECTIVE_COPY.korean.groundedSearch,
   requiredTool: (tool) => AGENT_DIRECTIVE_COPY.korean.requiredTool(tool),
@@ -282,7 +282,7 @@ export const MINI_LOOP_DIRECTIVE_COPY_KOREAN: MiniLoopDirectiveCopy = {
   loopDetected: AGENT_DIRECTIVE_COPY.korean.loopDetected,
 } as const;
 
-export const MINI_LOOP_DIRECTIVE_COPY_ENGLISH: MiniLoopDirectiveCopy = {
+export const WINE_AGENT_LOOP_DIRECTIVE_COPY_ENGLISH: WineAgentLoopDirectiveCopy = {
   relax: AGENT_DIRECTIVE_COPY.english.relax,
   groundedSearch: AGENT_DIRECTIVE_COPY.english.groundedSearch,
   requiredTool: (tool) => AGENT_DIRECTIVE_COPY.english.requiredTool(tool),
@@ -291,6 +291,6 @@ export const MINI_LOOP_DIRECTIVE_COPY_ENGLISH: MiniLoopDirectiveCopy = {
   loopDetected: AGENT_DIRECTIVE_COPY.english.loopDetected,
 } as const;
 
-export function selectDirectiveCopy(hangulDominant: boolean): MiniLoopDirectiveCopy {
-  return hangulDominant ? MINI_LOOP_DIRECTIVE_COPY_KOREAN : MINI_LOOP_DIRECTIVE_COPY_ENGLISH;
+export function selectDirectiveCopy(hangulDominant: boolean): WineAgentLoopDirectiveCopy {
+  return hangulDominant ? WINE_AGENT_LOOP_DIRECTIVE_COPY_KOREAN : WINE_AGENT_LOOP_DIRECTIVE_COPY_ENGLISH;
 }

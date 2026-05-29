@@ -51,7 +51,6 @@ vi.mock('../container-features.js', () => ({
     resolveUseCase: {} as never,
     hybridUseCase: {} as never,
     batchSearchUseCase: {} as never,
-    replayUseCase: {} as never,
   })),
 }));
 

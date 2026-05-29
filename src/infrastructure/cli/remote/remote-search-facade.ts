@@ -1,8 +1,6 @@
 import type { SearchFacadePort } from '../../../application/cli/port/search-facade.port.js';
 import type { CliFacadeRequestOptions } from '../../../application/cli/port/facade-request-options.port.js';
 import type {
-  SearchHybridInput,
-  SearchHybridResult,
   SearchRunInput,
   SearchRunResult,
 } from '../../../application/cli/dto/search.dto.js';
@@ -26,16 +24,6 @@ function toSearchBody(input: SearchRunInput): Record<string, unknown> {
   };
 }
 
-function toHybridBody(input: SearchHybridInput): Record<string, unknown> {
-  return {
-    query: input.query,
-    ...(input.context !== undefined ? { context: input.context } : {}),
-    ...(input.sessionContext !== undefined ? { sessionContext: input.sessionContext } : {}),
-    ...(input.queryBudget !== undefined ? { queryBudget: input.queryBudget } : {}),
-    ...(input.options !== undefined ? { options: input.options } : {}),
-  };
-}
-
 export class RemoteSearchFacade implements SearchFacadePort {
   private readonly http: RemoteHttpClient;
 
@@ -49,20 +37,6 @@ export class RemoteSearchFacade implements SearchFacadePort {
         method: 'POST',
         path: '/v1/search',
         body: toSearchBody(input),
-      },
-      options,
-    );
-  }
-
-  async hybrid(
-    input: SearchHybridInput,
-    options: CliFacadeRequestOptions,
-  ): Promise<SearchHybridResult> {
-    return await this.http.requestJson<SearchHybridResult>(
-      {
-        method: 'POST',
-        path: '/v1/search/hybrid',
-        body: toHybridBody(input),
       },
       options,
     );

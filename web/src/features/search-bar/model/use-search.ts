@@ -34,8 +34,8 @@ function sanitizeQuery(input: string): string {
 export function useSearch(query: string, enabled = true) {
   const safeQuery = sanitizeQuery(query);
   return useQuery<SearchResponse>({
-    // Endpoint + mode are part of the cache key so /v1/search and
-    // /v1/search/hybrid (or different option modes) can never share.
+    // Endpoint + mode are part of the cache key so different search modes
+    // never share cached results accidentally.
     queryKey: ['search', '/v1/search', 'auto', safeQuery],
     queryFn: ({ signal }) => {
       const body: SearchRequest = {

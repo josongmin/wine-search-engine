@@ -7,7 +7,6 @@ import type {
   BatchSearchRequestItem,
   BatchSearchResponse,
 } from '../batch-search.dto.js';
-import type { ReplayRequest } from '../replay-request.dto.js';
 import type { InterpretRequest } from '../interpret-request.dto.js';
 import type { InterpretResultWithV2 } from '../interpret.usecase.js';
 import type { ResolveRequest } from '../resolve-request.dto.js';
@@ -72,12 +71,6 @@ export interface BatchSearchUseCasePort {
     batchId?: string,
     executionContext?: BatchSearchExecutionContext,
   ): Promise<BatchSearchResponse>;
-}
-
-export type ReplayExecutionOptions = RequestExecutionContext;
-
-export interface ReplayUseCasePort {
-  execute(request: ReplayRequest, requestId: string, options?: ReplayExecutionOptions): Promise<SearchResponseV1>;
 }
 
 export type InterpretExecutionOptions = RequestExecutionContext;

@@ -37,7 +37,6 @@ import { SearchUseCase } from '../../../src/application/search/search.usecase.js
 import { DecomposedSearchAdapter } from '../../../src/application/search/decomposed-search-adapter.js';
 import { DecomposedSearchUseCase } from '../../../src/application/search/decomposed-search.usecase.js';
 import { BatchSearchUseCase } from '../../../src/application/search/batch-search.usecase.js';
-import { ReplayUseCase } from '../../../src/application/search/replay.usecase.js';
 import { InterpretUseCase } from '../../../src/application/search/interpret.usecase.js';
 import { ResolveUseCase } from '../../../src/application/search/resolve.usecase.js';
 import { AutocompleteUseCase } from '../../../src/application/search/autocomplete.usecase.js';
@@ -326,10 +325,6 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
   const decomposedSearchUseCase = decomposedRef.impl;
   const batchSearchUseCase = new BatchSearchUseCase(searchUseCase);
 
-  const replayUseCase = new ReplayUseCase({
-    searchUseCase,
-    snapshotVersions,
-  });
   const interpretUseCase = new InterpretUseCase({
     queryPlanner,
     querySanitizer,
@@ -392,7 +387,6 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
     responseBuilder,
     mixedSolver,
     searchUseCase,
-    replayUseCase,
     interpretUseCase,
     resolveUseCase,
     autocompleteUseCase,

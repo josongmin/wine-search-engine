@@ -38,7 +38,7 @@ import type {
 
 import { DeterministicRouter } from '../../src/application/wine-search/deterministic-router.js';
 import { ExecutionRunner } from '../../src/application/wine-search/execution-runner.js';
-import { MiniLoopRunner } from '../../src/application/wine-search/mini-loop.js';
+import { WineAgentLoopRunner } from '../../src/application/wine-search/wine-agent-loop.js';
 import { QueryAnalyzerService } from '../../src/application/wine-search/query-analyzer.js';
 import { SynthesisRunner } from '../../src/application/wine-search/synthesis-runner.js';
 import { type SynthesisAnswer } from '../../src/application/wine-search/synthesis-schemas.js';
@@ -115,13 +115,13 @@ function buildOrchestrator() {
   const queryAnalyzer = new QueryAnalyzerService({ structuredLlm: undefined, logger });
   const router = new DeterministicRouter();
   const executionRunner = new ExecutionRunner({ searchUseCase: makeSearchPort() });
-  const miniLoopRunner = new MiniLoopRunner({ structuredLlm: llm, logger });
+  const wineAgentLoopRunner = new WineAgentLoopRunner({ structuredLlm: llm, logger });
   const synthesisRunner = new SynthesisRunner({ structuredLlm: llm, logger });
   return new WineSearchOrchestrator({
     queryAnalyzer,
     router,
     executionRunner,
-    miniLoopRunner,
+    wineAgentLoopRunner,
     synthesisRunner,
     logger,
   });

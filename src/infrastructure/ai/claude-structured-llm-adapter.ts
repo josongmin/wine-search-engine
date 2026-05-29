@@ -199,7 +199,7 @@ export type JsonSchema = Record<string, unknown>;
  *
  * Same Zod schema instance → same JsonSchema output, deterministically.
  * Production tools / synthesis schemas are constructed ONCE at module init
- * and reused across every LLM call (mini-loop turn × N tools, every synth
+ * and reused across every LLM call (wine-agent-loop turn × N tools, every synth
  * request, every analyze). Without the cache the converter ran on every
  * invocation; with it, the cost is amortised to one conversion per schema
  * identity for the process lifetime.

@@ -1,7 +1,7 @@
 /**
- * Regression: MiniLoopRunner dispatches multi-tool LLM turns in PARALLEL.
+ * Regression: WineAgentLoopRunner dispatches multi-tool LLM turns in PARALLEL.
  *
- * The legacy implementation (mini-loop.ts:340-354) used a `for...await` loop
+ * The legacy implementation (wine-agent-loop.ts:340-354) used a `for...await` loop
  * to call `dispatchTool` once per tool call emitted by the LLM. When a
  * single LLM turn emits 2-3 tool calls (common: compare + two
  * drinking-window checks), serial dispatch tripled per-step latency.
@@ -12,8 +12,8 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { z } from 'zod';
-import { MiniLoopRunner } from '../../src/application/wine-search/mini-loop.js';
-import type { MiniLoopInput } from '../../src/application/wine-search/mini-loop-schemas.js';
+import { WineAgentLoopRunner } from '../../src/application/wine-search/wine-agent-loop.js';
+import type { WineAgentLoopInput } from '../../src/application/wine-search/wine-agent-loop-schemas.js';
 import type {
   StructuredLlmPort,
   ExecuteRequest,
@@ -65,7 +65,7 @@ function makeAnalysis(): WineSearchAnalysis {
   };
 }
 
-describe('mini-loop parallel tool dispatch (F1 regression)', () => {
+describe('wine-agent-loop parallel tool dispatch (F1 regression)', () => {
   it('starts ALL tool dispatches before any of them resolves (Promise.all shape)', async () => {
     let inFlight = 0;
     let peakInFlight = 0;
@@ -91,7 +91,7 @@ describe('mini-loop parallel tool dispatch (F1 regression)', () => {
       { tool: 'search_wines', input: { query: 'c' } },
     ]);
 
-    const runner = new MiniLoopRunner({
+    const runner = new WineAgentLoopRunner({
       structuredLlm: llm,
       logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as never,
     });
@@ -102,7 +102,7 @@ describe('mini-loop parallel tool dispatch (F1 regression)', () => {
       inputSchema: z.object({ query: z.string() }),
     } as const;
 
-    const input: MiniLoopInput = {
+    const input: WineAgentLoopInput = {
       query: 'test',
       analysis: makeAnalysis(),
       requestId: 'req-parallel',

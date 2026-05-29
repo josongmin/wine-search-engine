@@ -7,12 +7,7 @@ import { AuthDoctorCommand } from '../../application/cli/command/auth/doctor.com
 import { AuthLoginCommand } from '../../application/cli/command/auth/login.command.js';
 import { AuthWhoamiCommand } from '../../application/cli/command/auth/whoami.command.js';
 import { SearchRunCommand } from '../../application/cli/command/search/run.command.js';
-import { SearchHybridCommand } from '../../application/cli/command/search/hybrid.command.js';
-import { EntityResolveCommand } from '../../application/cli/command/entity/resolve.command.js';
-import { EntityAutocompleteCommand } from '../../application/cli/command/entity/autocomplete.command.js';
 import { WineSearchRunCommand } from '../../application/cli/command/wine-search/run.command.js';
-import { ApiCallCommand } from '../../application/cli/command/api/call.command.js';
-import { ApiOpenApiCommand } from '../../application/cli/command/api/openapi.command.js';
 
 /**
  * Resolves a leaf command from its `<group> <name>` path. Registration is the
@@ -52,11 +47,6 @@ export function createDefaultRegistry(): CommandRegistry {
   registry.register(new AuthLoginCommand());
   registry.register(new AuthWhoamiCommand());
   registry.register(new SearchRunCommand());
-  registry.register(new SearchHybridCommand());
-  registry.register(new EntityResolveCommand());
-  registry.register(new EntityAutocompleteCommand());
   registry.register(new WineSearchRunCommand());
-  registry.register(new ApiCallCommand());
-  registry.register(new ApiOpenApiCommand());
   return registry;
 }

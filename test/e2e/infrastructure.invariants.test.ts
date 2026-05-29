@@ -15,9 +15,6 @@ import {
   parseErrorResponse,
   parseSearchResponse,
 } from './helpers/http-transport.js';
-import { fetchReplaySnapshot, makeReplaySnapshot } from './helpers/replay-snapshot.js';
-
-const MATCHING_SNAPSHOT = makeReplaySnapshot();
 
 function expectTruthyRequestIdHeader(response: { headers: Record<string, unknown> }) {
   const value = response.headers['x-request-id'];
@@ -37,19 +34,6 @@ function injectSearch(
   return server.app.inject({
     method: 'POST',
     url: '/v1/search',
-    headers,
-    payload: JSON.stringify(payload),
-  });
-}
-
-function injectReplay(
-  server: TestServer,
-  payload: Record<string, unknown>,
-  headers: Record<string, string> = { 'content-type': 'application/json' },
-) {
-  return server.app.inject({
-    method: 'POST',
-    url: '/v1/search/replay',
     headers,
     payload: JSON.stringify(payload),
   });
@@ -203,14 +187,6 @@ describe('Group 2: Request ID Correctness', () => {
     ['200 response', () => injectSearch(pipelineInvariantServer, { query: 'Opus One 2018' }), 200],
     ['400 response', () => injectSearch(pipelineInvariantServer, { query: '' }), 400],
     [
-      '409 response',
-      () => injectReplay(pipelineInvariantServer, {
-        query: 'Opus One 2018',
-        decision_snapshot: { ...MATCHING_SNAPSHOT, policy_rule_version: '9.9.9' },
-      }),
-      409,
-    ],
-    [
       '415 response',
       () => injectSearch(pipelineInvariantServer, { query: 'Opus One' }, { 'content-type': 'text/plain' }),
       415,
@@ -280,18 +256,10 @@ describe('Group 2: Request ID Correctness', () => {
 });
 
 describe('Group 3: Snapshot Determinism', () => {
-  it('same query + matching snapshot replayed twice returns IDENTICAL results', async () => {
-    const matchingSnapshot = await fetchReplaySnapshot(pipelineInvariantServer.app, {
-      query: 'Opus One 2018',
-    });
-    const replayBody = {
-      query: 'Opus One 2018',
-      decision_snapshot: matchingSnapshot,
-    };
-
+  it('same exact-entity query executed twice returns identical top entity ids', async () => {
     const [r1, r2] = await Promise.all([
-      injectReplay(pipelineInvariantServer, replayBody),
-      injectReplay(pipelineInvariantServer, replayBody),
+      injectSearch(pipelineInvariantServer, makeEntitySearchPayload('Opus One 2018')),
+      injectSearch(pipelineInvariantServer, makeEntitySearchPayload('Opus One 2018')),
     ]);
 
     const b1 = expectSuccessSearchEnvelope(r1);
@@ -313,23 +281,6 @@ describe('Group 3: Snapshot Determinism', () => {
     ];
     const nonFailed = statuses.filter((s) => s !== 'failed');
     expect(nonFailed.length).toBeGreaterThan(0);
-  });
-
-  it.each([
-    ['policy_rule_version 9.9.9', '9.9.9'],
-    ['policy_rule_version 99.0.0', '99.0.0'],
-  ])('%s mismatch → 409 SNAPSHOT_MISMATCH with non-retryable error', async (_label, policyRuleVersion) => {
-    const response = await injectReplay(pipelineInvariantServer, {
-      query: 'Opus One 2018',
-      decision_snapshot: { ...MATCHING_SNAPSHOT, policy_rule_version: policyRuleVersion },
-    });
-
-    expectStatusCode(response, 409);
-    const error = parseInjectedErrorResponse(response).error;
-    expect(error.code).toBe('SNAPSHOT_MISMATCH');
-    expect(error.retryable).toBe(false);
-    expect(typeof error.message).toBe('string');
-    expect(error.message.length).toBeGreaterThan(0);
   });
 });
 
