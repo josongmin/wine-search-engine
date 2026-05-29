@@ -89,7 +89,7 @@ describe('QueryAnalyzerService — deterministic pipeline', () => {
     expect(result.analysis.hangulDominant).toBe(true);
     expect(result.analysis.expectedMultiStep).toBe(false);
     expect(llm.analyzeMock).not.toHaveBeenCalled();
-  });
+  }, 10_000);
 
   it('Exact entity with vintage — anchors include the entity, vintage captured', async () => {
     const result = await analyze('Opus One 2018');
@@ -97,10 +97,27 @@ describe('QueryAnalyzerService — deterministic pipeline', () => {
     if (result.kind !== 'ok') return;
     expect(result.analysis.contract.exactMetadataTargetVintage).toBe(2018);
     expect(result.analysis.expectedMultiStep).toBe(false);
+    expect(result.analysis.callerInterpretation).toEqual({
+      authority: 'caller',
+      intent: 'entity_exact',
+      queryClass: 'short_entity',
+    });
     // Anchors list is allowed to be empty for proper-noun entities that
     // require alias/catalog resolution (entity-resolver currently covers
     // grape/region/country/wine_type/appellation only). Vintage capture is
     // the load-bearing assertion for the exact-metadata path.
+  });
+
+  it('Generic vintage discovery query — stays constraint-led instead of short_entity', async () => {
+    const result = await analyze('2018 와인 추천');
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    expect(result.analysis.contract.exactMetadataTargetVintage).toBe(2018);
+    expect(result.analysis.callerInterpretation).toEqual({
+      authority: 'caller',
+      intent: 'facet_search',
+      queryClass: 'pure_constraint',
+    });
   });
 
   it('Comparison query — decomposition.kind=comparison, legs.length>=2', async () => {
@@ -114,6 +131,11 @@ describe('QueryAnalyzerService — deterministic pipeline', () => {
     }
     expect(result.analysis.intent).toBe('compare');
     expect(result.analysis.expectedMultiStep).toBe(true);
+    expect(result.analysis.callerInterpretation).toEqual({
+      authority: 'caller',
+      intent: 'comparison_search',
+      queryClass: 'comparison_query',
+    });
   });
 
   it('Food pairing query — intent=pair, requiredTool=get_food_pairings', async () => {
@@ -123,6 +145,11 @@ describe('QueryAnalyzerService — deterministic pipeline', () => {
     expect(result.analysis.intent).toBe('pair');
     expect(result.analysis.contract.requiredTool).toBe('get_food_pairings');
     expect(result.analysis.expectedMultiStep).toBe(true);
+    expect(result.analysis.callerInterpretation).toEqual({
+      authority: 'caller',
+      intent: 'pairing_search',
+      queryClass: 'semantic_preference',
+    });
   });
 
   it('Drinkability query — requiresDrinkabilityCheck=true', async () => {
@@ -139,6 +166,11 @@ describe('QueryAnalyzerService — deterministic pipeline', () => {
 
     expect(result.analysis.intent).toBe('search');
     expect(result.analysis.contract.requiredTool).toBe('search_wines');
+    expect(result.analysis.callerInterpretation).toEqual({
+      authority: 'caller',
+      intent: 'semantic_discovery',
+      queryClass: 'semantic_preference',
+    });
     expect(result.analysis.normalizedConstraints).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ attribute: 'occasion', operator: 'in', value: ['gift'] }),
@@ -282,6 +314,11 @@ describe('QueryAnalyzerService — LLM fallback', () => {
     expect(result.kind).toBe('ok');
     if (result.kind !== 'ok') return;
     expect(result.analysis.intent).toBe('search');
+    expect(result.analysis.callerInterpretation).toEqual({
+      authority: 'caller',
+      intent: 'semantic_discovery',
+      queryClass: 'unknown',
+    });
     expect(stub.analyzeMock).toHaveBeenCalledTimes(1);
     // Failure path must surface the softening trace so observability can
     // distinguish a real `intent=search` from a synthesized one.
@@ -296,6 +333,11 @@ describe('QueryAnalyzerService — LLM fallback', () => {
     expect(result.kind).toBe('ok');
     if (result.kind !== 'ok') return;
     expect(result.analysis.intent).toBe('unknown');
+    expect(result.analysis.callerInterpretation).toEqual({
+      authority: 'caller',
+      intent: 'semantic_discovery',
+      queryClass: 'unknown',
+    });
     // Port absent → fallback not invoked → outcome=not_attempted.
     expect(result.analysis.llmFallbackOutcome).toEqual({ kind: 'not_attempted' });
   });

@@ -25,6 +25,7 @@ import {
   NormalizedConstraintSchema,
   ParallelSlotSchema,
   RecommendedBudgetSchema,
+  WineSearchCallerInterpretationSchema,
   WINE_SEARCH_MAX_CONSTRAINTS,
   WINE_SEARCH_MAX_QUERY_CHARS,
 } from './wine-search-schemas.js';
@@ -90,6 +91,7 @@ export const SearchUseCaseInputSchema = z.object({
   mode: ExecutionSearchModeSchema.optional(),
   limit: z.number().int().finite().min(1).max(EXECUTION_PLAN_MAX_LIMIT).optional(),
   representativeConcept: RepresentativeConceptSchema.optional(),
+  callerInterpretation: WineSearchCallerInterpretationSchema.optional(),
 }).strict();
 export type SearchUseCaseInput = z.infer<typeof SearchUseCaseInputSchema>;
 
@@ -218,4 +220,3 @@ export type __ExecutionPlanKindParityProof = _ExecutionPlanKindParityCheck;
 // ---------------------------------------------------------------------------
 // Convenience type narrows (callers use these instead of inline `kind ===`)
 // ---------------------------------------------------------------------------
-

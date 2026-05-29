@@ -99,8 +99,7 @@ import { determineRetrievalMode } from '../etl/tag-queries-retrieval-mode.js';
 import { loadConfig } from '../../src/config/env.js';
 import { createPgPool, shouldUsePgPool } from '../../src/infrastructure/db/pg-pool.js';
 import {
-  hasLegacyEvalEntityId,
-  resolveLegacyEvalEntityIds,
+  resolveEvalEntityIds,
   type LegacyEvalEntityIdRef,
 } from '../../src/infrastructure/adapter/eval-expected-entity-id-resolution.js';
 
@@ -721,20 +720,20 @@ async function resolveRuntimeEvalEntityIdsIfNeeded(args: {
   }
 
   const refs = collectLegacyEvalEntityIdRefs(args.queries);
-  if (!hasLegacyEvalEntityId(refs)) {
+  if (refs.length === 0) {
     return args.queries;
   }
 
   const config = loadConfig();
   if (!shouldUsePgPool(config.pg)) {
     throw new Error(
-      'offline eval legacy entity-id resolution requires Postgres config when running against a live runtime snapshot.',
+      'offline eval entity-id resolution requires Postgres config when running against a live runtime snapshot.',
     );
   }
 
   const pool = createPgPool(config.pg);
   try {
-    const resolvedIds = await resolveLegacyEvalEntityIds(pool, args.snapshotId, refs);
+    const resolvedIds = await resolveEvalEntityIds(pool, args.snapshotId, refs);
     return applyResolvedLegacyEntityIdsToGoldenQueries(args.queries, resolvedIds);
   } finally {
     await pool.end();

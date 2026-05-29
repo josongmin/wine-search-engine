@@ -336,6 +336,62 @@ describe('DeterministicRouter — Rule 4: single-search (default)', () => {
     expect(plan.searchInput.limit).toBeGreaterThan(0);
   });
 
+  it('routes exact-metadata + drinkability through the production normalizer path', () => {
+    const router = makeRouter();
+    const plan = router.route(
+      baseAnalysis({
+        intent: 'drinkability',
+        preservedSurface: '지금 마시기 좋은 2010년 오퍼스 원',
+        contract: {
+          requiresDrinkabilityCheck: true,
+          requiresGroundedWineSearch: false,
+          hasEntityMetadataSignal: true,
+          exactMetadataTargetVintage: 2010,
+        },
+        constraints: {
+          hard: [
+            makeConstraint('country', 'United States'),
+            makeConstraint('region', 'Napa Valley'),
+          ],
+          soft: [],
+          inferred: [],
+        },
+      }),
+    );
+    expect(plan.kind).toBe('single-search');
+    if (plan.kind !== 'single-search') return;
+    expect(plan.searchInput.query).toBe('2010년 오퍼스 원');
+    expect(plan.searchInput.limit).toBe(1);
+    expect(plan.searchInput.filters?.find((constraint) => constraint.attribute === 'country')).toBeUndefined();
+    expect(plan.searchInput.filters?.find((constraint) => constraint.attribute === 'region')).toBeUndefined();
+    expect(plan.searchInput.filters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ attribute: 'vintage_year', value: 2010 }),
+      ]),
+    );
+  });
+
+  it('preserves analyzer-authored callerInterpretation on search inputs', () => {
+    const router = makeRouter();
+    const plan = router.route(
+      baseAnalysis({
+        preservedSurface: '스테이크에 어울리는 와인',
+        callerInterpretation: {
+          authority: 'caller',
+          intent: 'pairing_search',
+          queryClass: 'semantic_preference',
+        },
+      }),
+    );
+    expect(plan.kind).toBe('single-search');
+    if (plan.kind !== 'single-search') return;
+    expect(plan.searchInput.callerInterpretation).toEqual({
+      authority: 'caller',
+      intent: 'pairing_search',
+      queryClass: 'semantic_preference',
+    });
+  });
+
   it('requestedResultLimit overrides adaptive retrieval k for explicit top-N queries', () => {
     const router = makeRouter();
     const plan = router.route(

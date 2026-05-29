@@ -74,6 +74,7 @@ import {
   type RecommendedBudget,
   type WineSearchAnalysis,
 } from './wine-search-schemas.js';
+import { buildCallerSearchInterpretation } from './analysis-caller-interpretation.js';
 
 // ---------------------------------------------------------------------------
 // Named constants (CLAUDE.md rule 15)
@@ -371,6 +372,23 @@ export class QueryAnalyzerService {
       recommendedBudget,
       hangulDominant,
       preservedSurface,
+      callerInterpretation: buildCallerSearchInterpretation({
+        intent,
+        anchors: [...anchors],
+        constraints: {
+          hard: [...constraintBundle.hard],
+          soft: [...constraintBundle.soft],
+          inferred: [...constraintBundle.inferred],
+        },
+        normalizedConstraints: [...constraints],
+        ...(requestedResultLimit !== undefined ? { requestedResultLimit } : {}),
+        ...(decomposition !== undefined ? { decomposition } : {}),
+        contract,
+        expectedMultiStep,
+        recommendedBudget,
+        hangulDominant,
+        preservedSurface,
+      }),
     };
 
     // LLM fallback — fully ambiguous query AND a port is available.
@@ -410,7 +428,11 @@ export class QueryAnalyzerService {
         };
       }
     }
-    candidate = { ...candidate, llmFallbackOutcome };
+    candidate = {
+      ...candidate,
+      callerInterpretation: buildCallerSearchInterpretation(candidate),
+      llmFallbackOutcome,
+    };
 
     const parsed = WineSearchAnalysisSchema.safeParse(candidate);
     if (!parsed.success) {

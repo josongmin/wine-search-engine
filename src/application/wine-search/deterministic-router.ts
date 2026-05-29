@@ -18,32 +18,12 @@
  *  3. expectedMultiStep=true (none of the above) → multi-step handoff.
  *  4. fallback → single-search plan (80% happy path).
  *
- * NOTE: this router consumes the **already normalized** constraint set
- * produced by `QueryAnalyzerService`. The full sanitize pipeline in
- * `src/application/agent/agent-tool-execution-policy.ts` (≈1.3kloc) still
- * needs to be ported piece-by-piece; this module only owns the small
- * normalizations that are load-bearing for plan shape (slot expansion,
- * exact-metadata limit, food-pairing tag merge, total-budget split).
- *
- * Sanitize functions still pending port:
- *  - applyParallelSlotInput            → agent-tool-execution-policy.ts:718
- *  - buildSlotSearchInput              → agent-tool-execution-policy.ts:754
- *  - normalizeParallelSlotOccasion     → agent-tool-execution-policy.ts:795
- *  - applyExactMetadataOverConstraint  → agent-tool-execution-policy.ts:108
- *  - applyExactVintageBounds           → agent-tool-execution-policy.ts:183
- *  - mergeStyleArrayDefaults           → agent-tool-execution-policy.ts:507
+ * NOTE: context-dependent input normalization is delegated to
+ * `tool-input-normalizer.ts`, which is now the single owner for exact-metadata
+ * stripping, drinkability query cleanup, default constraint merge, and
+ * per-slot parallel-search sanitization.
  */
 
-import type { NormalizedConstraint } from '@shared/types/index.js';
-import {
-  canonicalizePriceConstraintLike,
-  convertKrwToConstraintUsd,
-  splitCanonicalUsdBudgetAcrossSlots,
-} from '@shared/utils/canonical-price.js';
-import {
-  EXACT_METADATA_SEARCH_LIMIT,
-  PRICE_CONSTRAINT_ATTRIBUTE_NAMES,
-} from '@shared/constants/constraint-attributes.js';
 import {
   EXECUTION_PLAN_KINDS,
   type ExecutionPlan,
@@ -57,20 +37,17 @@ import type {
   WineSearchAnalysis,
 } from './wine-search-schemas.js';
 import {
-  getCanonicalConstraintTierBundle,
   getCanonicalNormalizedConstraints,
 } from './wine-search-schemas.js';
+import { DefaultToolInputNormalizer } from './tool-input-normalizer.js';
 
 // ---------------------------------------------------------------------------
 // Named constants (CLAUDE.md rule 15)
 // ---------------------------------------------------------------------------
 
-// Exact-metadata over-constraint cap and price-attribute set are imported
-// from `@shared/constants/constraint-attributes.js` (SSoT — rule 30). The
-// previous router-local literal value `5` did not match the agent execution
-// policy's `limit: 1` and was silently widening exact-metadata lookups; the
-// SSoT constant `EXACT_METADATA_SEARCH_LIMIT` (= 1) keeps both call sites in
-// agreement.
+// Input-normalization policy now lives in `tool-input-normalizer.ts`. The
+// router owns only plan-shape branching and delegates all context-dependent
+// search-input mutation to that single authority surface.
 
 /**
  * Plan-kind named locals — sourced from the `EXECUTION_PLAN_KINDS` SSoT
@@ -107,6 +84,7 @@ const MULTI_STEP_INITIAL_ACTION_BY_INTENT = new Map<
   ['search', 'search'],
   ['compare', 'compare'],
   ['pair', 'pair'],
+  ['drinkability', 'search'],
   ['unknown', 'search'],
 ]);
 
@@ -141,26 +119,6 @@ function isParallelSlotDecomposition(
   return decomposition !== undefined && decomposition.kind === 'parallel-slot';
 }
 
-function extractPriceBudgetUsd(
-  constraints: readonly NormalizedConstraint[],
-): number | undefined {
-  for (const c of constraints) {
-    if (!PRICE_CONSTRAINT_ATTRIBUTE_NAMES.has(c.attribute)) continue;
-    const canonical = canonicalizePriceConstraintLike(c);
-    const v = canonical.value;
-    if (typeof v === 'number' && Number.isFinite(v) && v > 0) {
-      return v;
-    }
-    if (typeof v === 'object' && !Array.isArray(v)) {
-      const maxVal = (v as { readonly max?: number }).max;
-      if (typeof maxVal === 'number' && Number.isFinite(maxVal) && maxVal > 0) {
-        return maxVal;
-      }
-    }
-  }
-  return undefined;
-}
-
 // ---------------------------------------------------------------------------
 // Local helpers for input construction (rule-15 named consts where applicable)
 // ---------------------------------------------------------------------------
@@ -186,106 +144,34 @@ function extractPriceBudgetUsd(
 function buildSearchInputFromAnalysis(
   analysis: WineSearchAnalysis,
 ): SearchUseCaseInput {
-  const filters = getHardAnalysisConstraints(analysis);
-  const preferences = getSoftAnalysisConstraints(analysis);
-  if (analysis.contract.hasEntityMetadataSignal) {
-    return {
-      query: analysis.preservedSurface,
-      ...(filters.length > 0 ? { filters } : {}),
-      ...(preferences.length > 0 ? { preferences } : {}),
-      limit: EXACT_METADATA_SEARCH_LIMIT,
-      mode: 'entity' as const,
-    };
-  }
   const requestedResultLimit = analysis.requestedResultLimit;
   const adaptiveK = analysis.recommendedBudget.retrievalK;
-  return {
+  const baseInput: SearchUseCaseInput = {
     query: analysis.preservedSurface,
-    ...(filters.length > 0 ? { filters } : {}),
-    ...(preferences.length > 0 ? { preferences } : {}),
+    ...(analysis.contract.hasEntityMetadataSignal ? { mode: 'entity' as const } : {}),
     ...(requestedResultLimit !== undefined
       ? { limit: requestedResultLimit }
       : adaptiveK !== undefined
         ? { limit: adaptiveK }
         : {}),
+    ...(analysis.callerInterpretation !== undefined
+      ? { callerInterpretation: analysis.callerInterpretation }
+      : {}),
   };
-}
-
-function getHardAnalysisConstraints(
-  analysis: WineSearchAnalysis,
-): NormalizedConstraint[] {
-  return [...getCanonicalConstraintTierBundle(analysis).hard];
-}
-
-function getSoftAnalysisConstraints(
-  analysis: WineSearchAnalysis,
-): NormalizedConstraint[] {
-  const bundle = getCanonicalConstraintTierBundle(analysis);
-  return [...bundle.soft, ...bundle.inferred];
+  return DefaultToolInputNormalizer.normalizeSearchInput(baseInput, analysis);
 }
 
 function getAllAnalysisConstraints(
   analysis: WineSearchAnalysis,
-): readonly NormalizedConstraint[] {
+): ReturnType<typeof getCanonicalNormalizedConstraints> {
   return getCanonicalNormalizedConstraints(analysis);
-}
-
-function getRawAnalysisConstraints(
-  analysis: WineSearchAnalysis,
-): readonly NormalizedConstraint[] {
-  if (analysis.constraints !== undefined) {
-    const flattened = [
-      ...analysis.constraints.hard,
-      ...analysis.constraints.soft,
-      ...analysis.constraints.inferred,
-    ];
-    if (flattened.length > 0 || analysis.normalizedConstraints.length === 0) {
-      return flattened;
-    }
-  }
-  return analysis.normalizedConstraints;
-}
-
-/**
- * Split a single total-budget cap across N parallel slots. Returns
- * `undefined` when no budget is set. Uses the same 2-decimal canonical USD
- * precision as the rest of the retrieval stack.
- */
-function splitTotalBudgetAcrossSlots(
-  totalBudgetUsd: number | undefined,
-  slotCount: number,
-): number | undefined {
-  return splitCanonicalUsdBudgetAcrossSlots(totalBudgetUsd, slotCount);
-}
-
-function extractLegacyPriceBudgetKrw(
-  constraints: readonly NormalizedConstraint[],
-): number | undefined {
-  for (const constraint of constraints) {
-    if (
-      constraint.attribute !== 'price_krw'
-      && constraint.attribute !== 'max_price_krw'
-      && constraint.attribute !== 'min_price_krw'
-    ) {
-      continue;
-    }
-    if (typeof constraint.value === 'number' && Number.isFinite(constraint.value) && constraint.value > 0) {
-      return Math.floor(constraint.value);
-    }
-    if (typeof constraint.value === 'object' && !Array.isArray(constraint.value)) {
-      const maxVal = (constraint.value as { readonly max?: number }).max;
-      if (typeof maxVal === 'number' && Number.isFinite(maxVal) && maxVal > 0) {
-        return Math.floor(maxVal);
-      }
-    }
-  }
-  return undefined;
 }
 
 /**
  * Expand a parallel-slot decomposition into N `SearchUseCaseInput` entries.
- * Each slot inherits the analysis filters, adds a `wine_type` filter from
- * the slot, and (if a total budget is present) gets an equal share.
+ * Each slot inherits the normalized base input, then the normalizer rewrites
+ * the query, preserves only per-slot-safe occasion filters, injects the
+ * slot `wine_type`, and splits any total budget from the analysis.
  *
  * see: src/application/agent/agent-tool-execution-policy.ts:754
  * (buildSlotSearchInput) for the full per-slot input pipeline — query
@@ -296,44 +182,18 @@ function expandParallelSlots(
   decomposition: Extract<Decomposition, { kind: 'parallel-slot' }>,
 ): { readonly searches: SearchUseCaseInput[] } {
   const slotCount = decomposition.slots.length;
-  const legacyTotalBudgetKrw = extractLegacyPriceBudgetKrw(getRawAnalysisConstraints(analysis));
-  const perSlotBudgetUsd = legacyTotalBudgetKrw !== undefined
-    ? convertKrwToConstraintUsd(Math.floor(legacyTotalBudgetKrw / slotCount))
-    : splitTotalBudgetAcrossSlots(extractPriceBudgetUsd(getAllAnalysisConstraints(analysis)), slotCount);
-
-  const baseFilters = getHardAnalysisConstraints(analysis).filter(
-    (c) => !PRICE_CONSTRAINT_ATTRIBUTE_NAMES.has(c.attribute),
+  const baseInput = DefaultToolInputNormalizer.normalizeSearchInput(
+    {
+      query: analysis.preservedSurface,
+      ...(analysis.callerInterpretation !== undefined
+        ? { callerInterpretation: analysis.callerInterpretation }
+        : {}),
+    },
+    analysis,
   );
-  const basePreferences = getSoftAnalysisConstraints(analysis);
 
   const searches: SearchUseCaseInput[] = decomposition.slots.map((slot) => {
-    const slotFilters: NormalizedConstraint[] = [
-      ...baseFilters,
-      {
-        attribute: 'wine_type',
-        operator: '=',
-        value: slot.wineType,
-        source_phrase: slot.wineType,
-        confidence: 1.0,
-        soft_promotion_authority: 'allow',
-      },
-      ...(perSlotBudgetUsd !== undefined
-        ? [{
-          attribute: 'price_usd',
-          operator: '<=' as const,
-          value: perSlotBudgetUsd,
-          source_phrase: `price_usd<=${perSlotBudgetUsd} (per slot)`,
-          confidence: 1.0,
-          soft_promotion_authority: 'allow' as const,
-        }]
-        : []),
-    ];
-    return {
-      query: analysis.preservedSurface,
-      filters: slotFilters,
-      ...(basePreferences.length > 0 ? { preferences: [...basePreferences] } : {}),
-      ...(slot.limit !== undefined ? { limit: slot.limit } : {}),
-    };
+    return DefaultToolInputNormalizer.normalizeParallelSlotInput(baseInput, analysis, slot, slotCount);
   });
 
   return { searches };

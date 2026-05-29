@@ -50,6 +50,10 @@ import {
   hasExactEntityLookupKeyword,
   stripExactEntityLookupSuffix,
 } from './exact-entity-metadata-signals.js';
+import {
+  isGenericWineNounToken,
+  isShortEntityLikeSurface as isSharedShortEntityLikeSurface,
+} from './short-entity-surface.js';
 import type { PolicyDecisionRecord, PlannerStage } from '../model/policy-decision-record.js';
 import { buildBundleFromAtoms } from './constraint-reasoner.js';
 import { buildRetrievalPlan } from '../../retrieval/service/retrieval-plan-builder.js';
@@ -102,11 +106,6 @@ const GENERIC_ANCHOR_SOURCE_ATTRIBUTES = new Set([
   'price_usd',
 ]);
 const GENERIC_LOOKUP_VARIANT_SINGLE_SUPPORT_MAX = 1;
-const GENERIC_WINE_NOUN_TOKENS = new Set([
-  'wine',
-  'wines',
-  '와인',
-]);
 const GENERIC_CONSTRAINT_SURFACE_TRUSTED_ALIAS_TYPES: ReadonlySet<
   NonNullable<AnchorCandidate['aliasType']>
 > = new Set([
@@ -333,7 +332,7 @@ export class Planner {
       }
 
       const allVariantsAreGenericWineNouns = lookupVariants.every((variant) =>
-        GENERIC_WINE_NOUN_TOKENS.has(variant),
+        isGenericWineNounToken(variant),
       );
       if (allVariantsAreGenericWineNouns) {
         return false;
@@ -947,7 +946,7 @@ export class Planner {
    *  - entity_fuzzy + anchor present      → entity_resolution
    *  - comparison_search → compare_candidates
    *  - mixed_query + anchor → similar_items
-   *  - pairing_search → recommendation
+   *  - pairing_search → recommendation (food / dish evidence only)
    *  - facet_search/budget_search (no anchor) → constraint_filter
    *  - semantic_discovery/generic anchor search → attribute_search
    *  - entity_exact|mixed_query + strong anchor + "best wines" → producer_browse
@@ -1306,14 +1305,7 @@ export class Planner {
   }
 
   private isShortEntityLikeSurface(normalizedQuery: string): boolean {
-    const tokens = normalizedQuery
-      .trim()
-      .split(/\s+/)
-      .filter((token) => token.length > 0);
-    if (tokens.length === 0 || tokens.length > 2) {
-      return false;
-    }
-    return !tokens.some((token) => GENERIC_WINE_NOUN_TOKENS.has(token));
+    return isSharedShortEntityLikeSurface(normalizedQuery);
   }
 
   private async buildFuzzyFallbackAnchors(

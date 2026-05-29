@@ -1,6 +1,7 @@
 import net from 'node:net';
 import { describe, expect, it } from 'vitest';
 import {
+  READY_HTTP_TIMEOUT_MS,
   assertEmbeddingIsolatedPorts,
   buildEmbeddingIsolatedRuntimeSpecs,
   buildIsolatedEmbeddingRunnerArgs,
@@ -8,6 +9,10 @@ import {
 } from '../../../scripts/eval/run-offline-eval-embedding-sensitive-isolated.js';
 
 describe('embedding-sensitive isolated runner', () => {
+  it('waits longer than the /ready slow-path budget before aborting readiness polls', () => {
+    expect(READY_HTTP_TIMEOUT_MS).toBeGreaterThan(3_000);
+  });
+
   it('fails closed when dense-on and dense-off share the same port', () => {
     expect(() =>
       assertEmbeddingIsolatedPorts({

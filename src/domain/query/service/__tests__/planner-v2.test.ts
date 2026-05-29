@@ -7,8 +7,10 @@ import type { QueryPlanV2 } from '../../model/query-plan.js';
 import type { QueryUnderstandingSnapshot } from '../../model/query-understanding-snapshot.js';
 import type { AmbiguityDictionary } from '../../port/ambiguity-dictionary.port.js';
 import type { AliasMatcher, AliasMatchResult } from '../anchor-extractor.js';
-import type { NLMapper } from '../../../attribute/service/nl-mapper.js';
+import { NLMapper, type NLMapper as NLMapperPort } from '../../../attribute/service/nl-mapper.js';
 import type { ConstraintExtractionTrace } from '../../../attribute/model/constraint-extraction-trace.js';
+import type { MappingTablePort } from '../../../attribute/port/mapping-table.port.js';
+import type { NLMapping } from '../../../attribute/model/nl-mapping.js';
 import type { FuzzyMatcherPort } from '../../port/fuzzy-matcher.port.js';
 import type { ExpansionBundle } from '../../model/constraint-bundle.js';
 import type { QueryIntent } from '../../model/query-intent.js';
@@ -95,15 +97,33 @@ const noAmbiguityDict: AmbiguityDictionary = {
   getAmbiguityInfoBatch: () => Promise.resolve(new Map()),
 };
 
-const noOpNLMapper: NLMapper = {
+class NullMappingTable implements MappingTablePort {
+  async findMapping(_phrase: string): Promise<NLMapping | null> {
+    return null;
+  }
+
+  async findMappingsByAttribute(_attribute: string): Promise<readonly NLMapping[]> {
+    return [];
+  }
+
+  async getCurrentVersion(): Promise<string> {
+    return 'v1.0';
+  }
+}
+
+function makeBuiltinFallbackNlMapper(): NLMapper {
+  return new NLMapper(new NullMappingTable());
+}
+
+const noOpNLMapper: NLMapperPort = {
   mapPhrase: () => Promise.resolve(null),
   mapConstraints: () => Promise.resolve({ constraints: [] }),
-} as unknown as NLMapper;
+} as unknown as NLMapperPort;
 
 function makePlanner(
   entries: Map<string, AliasMatchResult> = new Map(),
   dict: AmbiguityDictionary = noAmbiguityDict,
-  nlMapper: NLMapper = noOpNLMapper,
+  nlMapper: NLMapperPort = noOpNLMapper,
 ): Planner {
   const aliasMatcher = new StubAliasMatcher(entries);
   const anchorExtractor = new AnchorExtractor(aliasMatcher);
@@ -597,6 +617,31 @@ describe('Planner – suggestedRoute matches expected routing', () => {
           operator: 'in',
           value: ['cheese'],
           soft_promotion_authority: 'allow',
+        }),
+      ]),
+    );
+  });
+
+  it('keeps occasion recommendation queries on semantic discovery instead of pairing_search', async () => {
+    const planner = new Planner(
+      noAmbiguityDict,
+      new AnchorExtractor(new ExactAliasMatcher()),
+      new ExpansionBuilder(),
+      makeBuiltinFallbackNlMapper(),
+    );
+
+    const plan = await planner.plan('기념일 선물용 와인 추천');
+
+    expect(plan.intent).toBe('semantic_discovery');
+    expect(plan.suggestedRoute).toBe('hybrid');
+    expect(plan.suggestedRetrievalMode).toBe('attribute_search');
+    expect(plan.queryClass).toBe('semantic_preference');
+    expect(plan.constraints.soft).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          attribute: 'occasion',
+          operator: 'in',
+          value: ['gift'],
         }),
       ]),
     );

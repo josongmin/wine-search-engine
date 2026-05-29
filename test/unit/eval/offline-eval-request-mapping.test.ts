@@ -179,7 +179,7 @@ describe('offline eval legacy entity-id canonicalization', () => {
     const [canonicalized] = applyResolvedLegacyEntityIdsToGoldenQueries([
       makeGoldenQuery({
         retrieval_labels: {
-          relevant: [{ entity_id: 'vivino-123', grade: 3 }],
+          relevant: [{ entity_id: 'w-opus-one-2018', grade: 3 }],
         },
         decision_labels: {
           expected_decision_status: 'resolved',
@@ -188,16 +188,16 @@ describe('offline eval legacy entity-id canonicalization', () => {
           requires_abstain: false,
         },
         leakage_keys: {
-          entity_id: 'vivino-789',
+          entity_id: 'w-almaviva-2019',
           query_template_id: 'template-1',
           generation_run_id: 'run-1',
           alias_cluster_id: 'cluster-1',
         },
       }),
     ], new Map([
-      ['vivino-123', 'wine-ce-123'],
+      ['w-opus-one-2018', 'wine-ce-123'],
       ['vivino-456', 'wine-ce-456'],
-      ['vivino-789', 'wine-ce-789'],
+      ['w-almaviva-2019', 'wine-ce-789'],
     ]));
 
     expect(canonicalized?.retrieval_labels.relevant[0]?.entity_id).toBe('wine-ce-123');

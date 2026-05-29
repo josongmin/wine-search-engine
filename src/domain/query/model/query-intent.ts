@@ -5,7 +5,7 @@
  * - `entity_fuzzy` -- the user asks for an entity by an imprecise or partial name.
  * - `facet_search` -- the user filters by structured facets (region, grape, etc.).
  * - `semantic_discovery` -- the user describes a preference in natural language.
- * - `pairing_search` -- the user asks for wine paired with a food or occasion.
+ * - `pairing_search` -- the user asks for wine paired with a food or dish context.
  * - `budget_search` -- the user constrains primarily by price.
  * - `comparison_search` -- the user compares two or more named entities.
  * - `mixed_query` -- the query contains both an entity anchor and constraints.

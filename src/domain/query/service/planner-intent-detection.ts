@@ -18,38 +18,36 @@ export const ANCHOR_PRESENT_CONFIDENCE = 0.5;
 /** Anchor confidence above which entity_exact intent is assigned. */
 export const EXACT_ANCHOR_CONFIDENCE = 0.85;
 
-/** Price-related keywords for budget search detection.
- *  Korean patterns use bare alternation (no \b) because \b is a word-boundary
- *  for ASCII only — Korean jamo/syllables are not delimited by \b. */
-const PRICE_KEYWORDS: readonly RegExp[] = [
+/** Explicit budget-boundary keywords only.
+ *  Prestige / luxury positioning is modeled separately so "premium wine"
+ *  does not collapse into `budget_search`. Korean patterns use bare
+ *  alternation (no \b) because \b is ASCII-only. */
+const BUDGET_BOUNDARY_KEYWORDS: readonly RegExp[] = [
   /\d+\s*(?:원|만원|dollar|usd|\$|€|£)/iu,
   /(?<!\p{L})(?<!\p{N})(?:under|below|cheaper|budget|affordable)(?!\p{L})(?!\p{N})/iu,
-  /(?:저렴|싼|가성비|비싼|비싸|고급|럭셔리|프리미엄)/u,
+  /(?:저렴|싼|가성비)/u,
   /만원\s*(?:이하|미만|대)/u,
 ] as const;
 
-/** Pairing verbs / generic recommendation verbs only.
+/** Prestige / positioning signals. These shape recommendation semantics but
+ *  MUST NOT promote a query into `budget_search`. */
+const PRESTIGE_KEYWORDS: readonly RegExp[] = [
+  /(?<!\p{L})(?<!\p{N})(?:premium|luxury|high[\s-]?end|fine)(?!\p{L})(?!\p{N})/iu,
+  /(?:비싼|비싸|고급|럭셔리|프리미엄)/u,
+] as const;
+
+/** Pairing verbs only.
  *  Food noun detection MUST come from pairing-extractor.ts so intent routing
  *  and retrieval taxonomy share one authority surface. */
 const PAIRING_KEYWORDS: readonly RegExp[] = [
   /(?<!\p{L})(?<!\p{N})(?:pair|pairing|goes?\s+with|match|accompany)(?!\p{L})(?!\p{N})/iu,
   /(?:^|[^\p{L}\p{N}])(?:어울리|곁들|맞는|페어링)(?=$|[^\p{L}\p{N}])/u,
-  /(?<!\p{L})(?<!\p{N})(?:gift|anniversary|date\s+night|birthday|celebration|party|housewarming|dinner|camping)(?!\p{L})(?!\p{N})/iu,
-  /(?:선물(?:용|할|하려|하고)?|(?:결혼)?기념일|데이트|생일|축하|파티|집들이|디너|캠핑)/u,
 ] as const;
 
-const OCCASION_SUBSTRINGS: readonly string[] = [
-  '선물',
-  '기념일',
-  '생일',
-  '축하',
-  '파티',
-  '집들이',
-  '소개팅',
-  '데이트',
-  '디너',
-  '힐링',
-  '캠핑',
+/** Occasion / gifting cues are recommendation context, not food pairing. */
+const OCCASION_KEYWORDS: readonly RegExp[] = [
+  /(?<!\p{L})(?<!\p{N})(?:gift|anniversary|date\s+night|birthday|celebration|party|housewarming|dinner|camping|romantic|healing)(?!\p{L})(?!\p{N})/iu,
+  /(?:^|[^\p{L}\p{N}])(?:선물(?:용|할|하려|하고)?|(?:결혼)?기념일|데이트|생일|축하|파티|집들이|소개팅|디너|힐링|캠핑)(?=$|[^\p{L}\p{N}])/u,
 ] as const;
 
 /** Constraint keywords indicating structured filtering.
@@ -115,13 +113,19 @@ export function detectQueryIntent(
     relativeQuery !== null &&
     relativeQuery.relativeExpressions.length > 0 &&
     anchors.length > 0;
-  const hasPriceKeyword = PRICE_KEYWORDS.some((re) =>
+  const hasBudgetBoundaryKeyword = BUDGET_BOUNDARY_KEYWORDS.some((re) =>
+    re.test(intentQuerySurface),
+  );
+  const hasPrestigeKeyword = PRESTIGE_KEYWORDS.some((re) =>
     re.test(intentQuerySurface),
   );
   const pairingTags = extractAllPairingConstraints(intentQuerySurface);
-  const hasPairingKeyword = PAIRING_KEYWORDS.some((re) =>
+  const hasFoodPairingSignal = PAIRING_KEYWORDS.some((re) =>
     re.test(intentQuerySurface),
-  ) || pairingTags.length > 0 || OCCASION_SUBSTRINGS.some((token) => intentQuerySurface.includes(token));
+  ) || pairingTags.length > 0;
+  const hasOccasionKeyword = OCCASION_KEYWORDS.some((re) =>
+    re.test(intentQuerySurface),
+  );
   const hasConstraintKeyword = CONSTRAINT_KEYWORDS.some((re) =>
     re.test(intentQuerySurface),
   );
@@ -146,19 +150,23 @@ export function detectQueryIntent(
     return 'mixed_query';
   }
 
-  if (hasPairingKeyword) {
+  if (hasFoodPairingSignal) {
     return 'pairing_search';
+  }
+
+  if (hasOccasionKeyword) {
+    return hasStrongAnchor ? 'mixed_query' : 'semantic_discovery';
   }
 
   if (hasStrongAnchor && hasExactEntityLookupSignal) {
     return hasDirectAttributeEntity || strongAnchorEntityCount <= 1 ? 'entity_exact' : 'facet_search';
   }
 
-  if (hasStrongAnchor && hasConstraintKeyword) {
+  if (hasStrongAnchor && (hasConstraintKeyword || hasPrestigeKeyword)) {
     return 'mixed_query';
   }
 
-  if (hasStrongAnchor && !hasConstraintKeyword && !hasPriceKeyword) {
+  if (hasStrongAnchor && !hasConstraintKeyword && !hasBudgetBoundaryKeyword && !hasPrestigeKeyword) {
     if (hasDirectAttributeEntity) {
       return 'entity_exact';
     }
@@ -179,7 +187,7 @@ export function detectQueryIntent(
     return 'entity_exact';
   }
 
-  if (hasWeakAnchor && !hasConstraintKeyword && !hasPriceKeyword) {
+  if (hasWeakAnchor && !hasConstraintKeyword && !hasBudgetBoundaryKeyword && !hasPrestigeKeyword) {
     return 'entity_fuzzy';
   }
 
@@ -187,19 +195,19 @@ export function detectQueryIntent(
     return 'entity_fuzzy';
   }
 
-  if (hasWeakAnchor && (hasConstraintKeyword || hasPriceKeyword)) {
+  if (hasWeakAnchor && (hasConstraintKeyword || hasBudgetBoundaryKeyword || hasPrestigeKeyword)) {
     return 'mixed_query';
   }
 
-  if (hasAnyAnchor && (hasConstraintKeyword || hasPriceKeyword)) {
+  if (hasAnyAnchor && (hasConstraintKeyword || hasBudgetBoundaryKeyword || hasPrestigeKeyword)) {
     return 'mixed_query';
   }
 
-  // NOTE: a `hasPairingKeyword` branch used to live here, but the early
-  // `if (hasPairingKeyword) { return 'pairing_search'; }` above already
+  // NOTE: a `hasFoodPairingSignal` branch used to live here, but the early
+  // `if (hasFoodPairingSignal) { return 'pairing_search'; }` above already
   // dominates every reachable path — the duplicate was statically dead.
 
-  if (hasPriceKeyword) {
+  if (hasBudgetBoundaryKeyword) {
     return 'budget_search';
   }
 

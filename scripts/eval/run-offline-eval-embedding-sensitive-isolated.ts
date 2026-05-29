@@ -26,6 +26,7 @@ interface IsolatedArgs {
 const DEFAULT_STARTUP_TIMEOUT_MS = 180_000;
 const DEFAULT_POLL_INTERVAL_MS = 500;
 const DEFAULT_RUNNER_TIMEOUT_MS = 8 * 60_000;
+export const READY_HTTP_TIMEOUT_MS = 5_000;
 const LOG_DIR = '/tmp';
 const LOG_TAIL_MAX_CHARS = 8_000;
 
@@ -310,7 +311,10 @@ async function waitForReady(runtime: SpawnedRuntime, args: {
     }
     try {
       const response = await fetch(`${runtime.spec.apiUrl}/ready`, {
-        signal: AbortSignal.timeout(1_000),
+        // /ready fans out into multiple internal probes; its slow-path budget
+        // exceeds 1s, so the wrapper must not self-abort before the route can
+        // return a definitive 200/503 body.
+        signal: AbortSignal.timeout(READY_HTTP_TIMEOUT_MS),
       });
       if (response.ok) {
         const payload = await response.json() as {

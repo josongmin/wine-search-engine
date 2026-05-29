@@ -10,10 +10,12 @@
  *  - it asserts the underlying response is a `SearchResponseV1` (the
  *    runner's port type) and surfaces a typed error otherwise.
  *
- * The only policy at this seam is authority propagation: non-entity/non-mixed
- * agent searches are marked as caller-controlled so the downstream search
- * pipeline executes them as retrieval primitives instead of re-running planner
- * intent/routing.
+ * The only policy at this seam is authority propagation:
+ *  - preserve analyzer-authored `callerInterpretation` when present,
+ *  - otherwise fall back to the legacy generic caller-controlled interpretation
+ *    for non-entity/non-mixed agent searches so the downstream pipeline
+ *    executes them as retrieval primitives instead of re-running planner
+ *    intent/routing.
  */
 
 import type { SearchExecutionOptions } from '../../search/port/search-executor.port.js';
@@ -82,6 +84,14 @@ export class SearchUseCaseAdapter implements SearchUseCasePort {
 export function mapSearchUseCaseInputToSearchRequest(
   input: SearchUseCaseInput,
 ): SearchRequest {
+  const callerInterpretation = input.callerInterpretation
+    ?? (shouldBypassPlanner(input)
+      ? {
+          authority: 'caller' as const,
+          intent: CALLER_CONTROLLED_SEARCH_INTENT,
+          queryClass: CALLER_CONTROLLED_SEARCH_QUERY_CLASS,
+        }
+      : undefined);
   return {
     query: input.query,
     ...(input.filters !== undefined && input.filters.length > 0
@@ -104,14 +114,6 @@ export function mapSearchUseCaseInputToSearchRequest(
     ...(input.representativeConcept !== undefined
       ? { representativeConcept: input.representativeConcept }
       : {}),
-    ...(shouldBypassPlanner(input)
-      ? {
-          callerInterpretation: {
-            authority: 'caller' as const,
-            intent: CALLER_CONTROLLED_SEARCH_INTENT,
-            queryClass: CALLER_CONTROLLED_SEARCH_QUERY_CLASS,
-          },
-        }
-      : {}),
+    ...(callerInterpretation !== undefined ? { callerInterpretation } : {}),
   };
 }

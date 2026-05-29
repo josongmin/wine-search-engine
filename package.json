@@ -115,6 +115,7 @@
     "eval:offline:smoke:assert-baseline": "pnpm run eval:offline:smoke && tsx scripts/eval/assert-baseline-regression.ts --kind offline --current /tmp/offline-eval-smoke-results.json --baseline data/eval-baselines/offline-smoke-v1.json",
     "eval:offline:smoke:with-baseline": "tsx scripts/eval/run-offline-eval-smoke.ts --tier bronze --input data/eval-smoke-queries.jsonl --output /tmp/offline-eval-smoke-results.json --baseline-report data/eval-baselines/offline-smoke-v1.json",
     "eval:offline:smoke:refresh-baseline": "pnpm run eval:offline:smoke:with-baseline && cp /tmp/offline-eval-smoke-results.json data/eval-baselines/offline-smoke-v1.json",
+    "eval:offline:embedding:build-corpus": "tsx scripts/eval/build-embedding-sensitive-human-gold-corpus.ts --output /tmp/embedding-sensitive-human-gold-corpus.jsonl",
     "eval:offline:embedding": "tsx scripts/eval/run-offline-eval-embedding-sensitive.ts",
     "eval:offline:embedding:ablation": "tsx scripts/eval/run-offline-eval-embedding-sensitive.ts --compare-dense-off",
     "eval:offline:embedding:isolated": "tsx scripts/eval/run-offline-eval-embedding-sensitive-isolated.ts",

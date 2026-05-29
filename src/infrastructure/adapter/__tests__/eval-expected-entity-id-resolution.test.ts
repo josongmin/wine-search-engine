@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   hasLegacyEvalEntityId,
   hasLegacyEvalExpectedEntityId,
+  resolveEvalEntityIds,
   resolveLegacyEvalEntityIds,
   resolveLegacyEvalExpectedEntityIds,
 } from '../eval-expected-entity-id-resolution.js';
@@ -31,11 +32,11 @@ describe('eval expected entity id resolution', () => {
     const query = vi.fn().mockResolvedValue({
       rows: [
         {
-          source_record_id: 'vivino-123',
+          requested_id: 'vivino-123',
           entity_id: 'wine-ce-a',
         },
         {
-          source_record_id: 'vivino-456',
+          requested_id: 'vivino-456',
           entity_id: 'wine-ce-b',
         },
       ],
@@ -51,7 +52,7 @@ describe('eval expected entity id resolution', () => {
     );
 
     expect(query).toHaveBeenCalledWith(
-      expect.stringContaining('FROM entities e'),
+      expect.stringContaining('WITH requested AS'),
       ['search-snapshot:v1:test', ['vivino-123', 'vivino-456']],
     );
     expect(resolved.get('vivino-123')).toBe('wine-ce-a');
@@ -62,7 +63,7 @@ describe('eval expected entity id resolution', () => {
     const query = vi.fn().mockResolvedValue({
       rows: [
         {
-          source_record_id: 'vivino-123',
+          requested_id: 'vivino-123',
           entity_id: 'wine-ce-a',
         },
       ],
@@ -79,11 +80,48 @@ describe('eval expected entity id resolution', () => {
     expect(resolved.get('vivino-123')).toBe('wine-ce-a');
   });
 
+  it('resolves runtime public ids, benchmark linkage ids, and source ids through one snapshot query', async () => {
+    const query = vi.fn().mockResolvedValue({
+      rows: [
+        {
+          requested_id: 'wine-ce-runtime-a',
+          entity_id: 'wine-ce-runtime-a',
+        },
+        {
+          requested_id: 'w-opus-one-2018',
+          entity_id: 'wine-ce-opus-runtime',
+        },
+        {
+          requested_id: 'vivino-123',
+          entity_id: 'wine-ce-opus-runtime',
+        },
+      ],
+    });
+
+    const resolved = await resolveEvalEntityIds(
+      { query } as never,
+      'search-snapshot:v1:test',
+      [
+        { caseId: 'case-runtime', entityId: 'wine-ce-runtime-a' },
+        { caseId: 'case-benchmark', entityId: 'w-opus-one-2018' },
+        { caseId: 'case-source', entityId: 'vivino-123' },
+      ],
+    );
+
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining(`e.metadata->>'benchmarkEntityId' = r.requested_id`),
+      ['search-snapshot:v1:test', ['wine-ce-runtime-a', 'w-opus-one-2018', 'vivino-123']],
+    );
+    expect(resolved.get('wine-ce-runtime-a')).toBe('wine-ce-runtime-a');
+    expect(resolved.get('w-opus-one-2018')).toBe('wine-ce-opus-runtime');
+    expect(resolved.get('vivino-123')).toBe('wine-ce-opus-runtime');
+  });
+
   it('fails closed when a legacy source id is unmapped', async () => {
     const query = vi.fn().mockResolvedValue({
       rows: [
         {
-          source_record_id: 'vivino-123',
+          requested_id: 'vivino-123',
           entity_id: 'wine-ce-a',
         },
       ],
@@ -103,11 +141,11 @@ describe('eval expected entity id resolution', () => {
     const query = vi.fn().mockResolvedValue({
       rows: [
         {
-          source_record_id: 'vivino-123',
+          requested_id: 'vivino-123',
           entity_id: 'wine-ce-a',
         },
         {
-          source_record_id: 'vivino-123',
+          requested_id: 'vivino-123',
           entity_id: 'wine-ce-b',
         },
       ],

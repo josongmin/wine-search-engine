@@ -132,10 +132,39 @@ describe('mapSearchUseCaseInputToSearchRequest', () => {
     expect(req.representativeConcept).toEqual({ field: 'country', value: 'France' });
   });
 
-  it('keeps entity-mode requests on the planner path', () => {
-    const input: SearchUseCaseInput = { query: 'Opus One 2018', mode: 'entity' };
+  it('preserves explicit callerInterpretation instead of flattening to generic search intent', () => {
+    const input: SearchUseCaseInput = {
+      query: '스테이크에 어울리는 와인',
+      callerInterpretation: {
+        authority: 'caller',
+        intent: 'pairing_search',
+        queryClass: 'semantic_preference',
+      },
+    };
     const req = mapSearchUseCaseInputToSearchRequest(input);
-    expect(req.callerInterpretation).toBeUndefined();
+    expect(req.callerInterpretation).toEqual({
+      authority: 'caller',
+      intent: 'pairing_search',
+      queryClass: 'semantic_preference',
+    });
+  });
+
+  it('forwards explicit callerInterpretation even on entity-mode requests', () => {
+    const input: SearchUseCaseInput = {
+      query: 'Opus One 2018',
+      mode: 'entity',
+      callerInterpretation: {
+        authority: 'caller',
+        intent: 'entity_exact',
+        queryClass: 'exact_entity',
+      },
+    };
+    const req = mapSearchUseCaseInputToSearchRequest(input);
+    expect(req.callerInterpretation).toEqual({
+      authority: 'caller',
+      intent: 'entity_exact',
+      queryClass: 'exact_entity',
+    });
   });
 });
 
@@ -160,6 +189,26 @@ describe('SearchUseCaseAdapter', () => {
     const opts = call[2] as SearchExecutionOptions | undefined;
     expect(opts?.requestId).toBe(REQUEST_ID);
     expect(opts?.abortSignal).toBe(ctrl.signal);
+  });
+
+  it('preserves non-generic callerInterpretation through execute()', async () => {
+    const stub = makeUseCase();
+    const adapter = new SearchUseCaseAdapter(asUseCase(stub));
+    await adapter.execute({
+      query: '스테이크에 어울리는 와인',
+      callerInterpretation: {
+        authority: 'caller',
+        intent: 'pairing_search',
+        queryClass: 'semantic_preference',
+      },
+    }, REQUEST_ID);
+    expect(stub.executeMock.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+      callerInterpretation: {
+        authority: 'caller',
+        intent: 'pairing_search',
+        queryClass: 'semantic_preference',
+      },
+    }));
   });
 
   it('does not pass abortSignal when caller omits it', async () => {

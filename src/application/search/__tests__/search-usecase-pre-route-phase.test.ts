@@ -114,6 +114,65 @@ describe('runSearchPreRoutePhase – fallback path (plan() only, no planWithComp
     expect(result.compiled.execution.routeSource).toBe('api_override');
   });
 
+  it('maps caller-controlled pairing intent onto recommendation retrieval mode', async () => {
+    const plannerWithoutCompiled = {
+      plan: vi.fn().mockResolvedValue(makeV1Plan()),
+    };
+    const ctx = makeBaseContext({
+      request: {
+        query: '스테이크에 어울리는 와인',
+        callerInterpretation: {
+          authority: 'caller',
+          intent: 'pairing_search',
+          queryClass: 'semantic_preference',
+        },
+      },
+      queryPlanner: plannerWithoutCompiled,
+    });
+
+    const result = await runSearchPreRoutePhase(ctx);
+
+    expect(result.outcome).toBe('continue');
+    if (result.outcome !== 'continue') throw new Error('narrowing guard');
+    expect(plannerWithoutCompiled.plan).not.toHaveBeenCalled();
+    expect(result.plan.intent).toBe('pairing_search');
+    expect(result.compiled.execution.effectiveRetrievalMode).toBe('recommendation');
+  });
+
+  it('maps caller-controlled pure-constraint intent onto constraint_filter retrieval mode', async () => {
+    const plannerWithoutCompiled = {
+      plan: vi.fn().mockResolvedValue(makeV1Plan()),
+    };
+    const ctx = makeBaseContext({
+      request: {
+        query: 'under $30 red wine from napa',
+        filters: [
+          {
+            attribute: 'region',
+            operator: '=',
+            value: 'Napa Valley',
+            source_phrase: 'napa',
+            confidence: 1.0,
+          },
+        ],
+        callerInterpretation: {
+          authority: 'caller',
+          intent: 'facet_search',
+          queryClass: 'pure_constraint',
+        },
+      },
+      queryPlanner: plannerWithoutCompiled,
+    });
+
+    const result = await runSearchPreRoutePhase(ctx);
+
+    expect(result.outcome).toBe('continue');
+    if (result.outcome !== 'continue') throw new Error('narrowing guard');
+    expect(plannerWithoutCompiled.plan).not.toHaveBeenCalled();
+    expect(result.plan.queryClass).toBe('pure_constraint');
+    expect(result.compiled.execution.effectiveRetrievalMode).toBe('constraint_filter');
+  });
+
   it('keeps caller-controlled entity requests on the planner path', async () => {
     const plannerWithoutCompiled = {
       plan: vi.fn().mockResolvedValue(makeV1Plan({

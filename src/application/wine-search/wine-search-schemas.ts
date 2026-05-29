@@ -24,6 +24,8 @@ import {
   NormalizedConstraintSchema,
 
 } from '@shared/types/index.js';
+import { QUERY_INTENTS } from '@domain/query/model/query-intent.js';
+import { QUERY_CLASSES } from '@domain/shared/types/query-class.js';
 import { SOFT_CONSTRAINT_ATTRIBUTES } from '@shared/constants/constraint-attributes.js';
 import { canonicalizePriceConstraintLike } from '@shared/utils/canonical-price.js';
 import {
@@ -169,6 +171,13 @@ export const AnalysisContractSchema = z.object({
 }).strict();
 export type AnalysisContract = z.infer<typeof AnalysisContractSchema>;
 
+export const WineSearchCallerInterpretationSchema = z.object({
+  authority: z.literal('caller'),
+  intent: z.enum(QUERY_INTENTS),
+  queryClass: z.enum(QUERY_CLASSES),
+}).strict();
+export type WineSearchCallerInterpretation = z.infer<typeof WineSearchCallerInterpretationSchema>;
+
 export const RecommendedBudgetSchema = z.object({
   maxSteps: z.number().int()
     .min(WINE_SEARCH_BUDGET_MIN_STEPS)
@@ -253,6 +262,7 @@ export const WineSearchAnalysisSchema = z.object({
   recommendedBudget: RecommendedBudgetSchema,
   hangulDominant: z.boolean(),
   preservedSurface: z.string().max(WINE_SEARCH_MAX_QUERY_CHARS),
+  callerInterpretation: WineSearchCallerInterpretationSchema.optional(),
   /** Observability trace for the optional LLM fallback. See
    *  {@link LlmFallbackOutcomeSchema} for branch semantics. Optional for
    *  backward compatibility with existing fixtures and external callers; the

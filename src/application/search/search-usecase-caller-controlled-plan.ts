@@ -41,14 +41,26 @@ function resolveCallerControlledRoute(mode: NonNullable<SearchRequest['retrieval
 }
 
 function resolveCallerControlledRetrievalMode(
+  request: SearchRequest,
   route: QueryRoute,
 ): RetrievalMode {
+  const callerInterpretation = request.callerInterpretation;
   switch (route) {
     case 'entity':
       return 'entity_lookup';
     case 'mixed':
       return 'similar_items';
     case 'hybrid':
+      if (callerInterpretation?.intent === 'pairing_search') {
+        return 'recommendation';
+      }
+      if (
+        callerInterpretation?.intent === 'facet_search'
+        || callerInterpretation?.intent === 'budget_search'
+        || callerInterpretation?.queryClass === 'pure_constraint'
+      ) {
+        return 'constraint_filter';
+      }
       return 'attribute_search';
     default: {
       const _exhaustive: never = route;
@@ -77,7 +89,7 @@ export function buildCallerControlledPrimitivePlan(
 
   const mode = resolveRequestedMode(request);
   const route = resolveCallerControlledRoute(mode);
-  const retrievalMode = resolveCallerControlledRetrievalMode(route);
+  const retrievalMode = resolveCallerControlledRetrievalMode(request, route);
   const normalizedQueryViews = buildNormalizedQueryViews(sanitizedQuery);
   const constraints = {
     hard: [...(request.filters ?? [])],

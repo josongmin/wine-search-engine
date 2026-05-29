@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
+import { writeEmbeddingSensitiveHumanGoldCorpus } from './build-embedding-sensitive-human-gold-corpus.js';
 import { resolveCliDataPathArg } from './cli-data-path.js';
 
 interface Args {
@@ -138,7 +139,11 @@ export function assertEmbeddingAblationTargets(args: {
   }
 }
 
-function buildRunnerArgs(args: Args, outputPath: string): readonly string[] {
+function buildRunnerArgs(
+  args: Args,
+  outputPath: string,
+  preparedInputPath?: string,
+): readonly string[] {
   const runnerArgs = [
     path.resolve(process.cwd(), 'scripts/eval/run-offline-eval.ts'),
     '--output',
@@ -149,12 +154,16 @@ function buildRunnerArgs(args: Args, outputPath: string): readonly string[] {
     '--embedding-sensitive-only',
   ];
 
-  if (args.input !== undefined) {
-    runnerArgs.push('--input', args.input);
+  if (preparedInputPath !== undefined) {
+    runnerArgs.push('--input', preparedInputPath);
   } else if (args.fixtureCorpus !== undefined) {
     runnerArgs.push('--fixture-corpus', args.fixtureCorpus);
+  } else if (args.input !== undefined) {
+    runnerArgs.push('--input', args.input);
   } else {
-    runnerArgs.push('--fixture-corpus', 'gate');
+    throw new Error(
+      'embedding-sensitive offline eval requires either an explicit input, a fixture corpus, or a generated human-gold corpus.',
+    );
   }
 
   if (args.baselineReport !== undefined) {
@@ -194,6 +203,25 @@ function buildEmbeddingAblationReport(args: {
   };
 }
 
+async function prepareEmbeddingSensitiveInput(args: Args): Promise<string | undefined> {
+  if (args.input !== undefined) {
+    return args.input;
+  }
+  if (args.fixtureCorpus !== undefined) {
+    return undefined;
+  }
+
+  const outputPath = path.join(
+    '/tmp',
+    `embedding-sensitive-human-gold-corpus-${process.pid}.jsonl`,
+  );
+  const queries = await writeEmbeddingSensitiveHumanGoldCorpus({ outputPath });
+  process.stdout.write(
+    `embedding-sensitive corpus: human-gold ${queries.length} queries -> ${outputPath}\n`,
+  );
+  return outputPath;
+}
+
 async function runChild(
   args: readonly string[],
   envOverrides: Readonly<Record<string, string>>,
@@ -222,7 +250,8 @@ async function runChild(
 async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   assertEmbeddingAblationTargets(args);
-  const runnerArgs = buildRunnerArgs(args, args.output);
+  const inputPath = await prepareEmbeddingSensitiveInput(args);
+  const runnerArgs = buildRunnerArgs(args, args.output, inputPath);
   await runChild(runnerArgs, {
     EVAL_RUNTIME_TARGET: 'search_api_http_embedding_sensitive',
     EVAL_EXPECT_DENSE_RETRIEVAL_ENABLED: 'true',
@@ -235,7 +264,7 @@ async function run(): Promise<void> {
     return;
   }
 
-  const denseOffRunnerArgs = buildRunnerArgs(args, args.denseOffOutput);
+  const denseOffRunnerArgs = buildRunnerArgs(args, args.denseOffOutput, inputPath);
   await runChild(denseOffRunnerArgs, {
     EVAL_RUNTIME_TARGET: 'search_api_http_embedding_sensitive_dense_off',
     EVAL_EXPECT_DENSE_RETRIEVAL_ENABLED: 'false',
