@@ -137,28 +137,70 @@ describe('NormalizedConstraintSchema — SSoT in @shared/types', () => {
     expect(NormalizedConstraintSchema.safeParse(pointRange).success).toBe(true);
   });
 
-  it('rejects an inverted range where min > max (empty-set invariant)', () => {
-    // min > max describes the empty set — always an emitter bug, never a
-    // legitimate constraint. The .refine() invariant must fail closed.
+  it('swap-normalizes an inverted range where min > max (graceful, not reject)', () => {
+    // Behavior change (W6 self-audit correction): a reversed range used to be
+    // REJECTED via .refine(). That over-strict gate conflicted with the
+    // downstream SSoT (constraint-to-sparse-filter-tokens.ts / vintage.ts both
+    // swap-normalize via Math.min/Math.max) and, because this schema is reused
+    // at the HTTP boundary and inside the .strict() LLM execution plan, a single
+    // reversed range rejected the ENTIRE request/plan (CLAUDE.md rule 10). The
+    // schema now .transform()-swaps to a non-empty interval instead.
     const invertedRange = {
       ...validInstance(),
       attribute: 'price',
       operator: 'range' as const,
       value: { min: 50, max: 10 },
     };
-    expect(NormalizedConstraintSchema.safeParse(invertedRange).success).toBe(false);
+    const result = NormalizedConstraintSchema.safeParse(invertedRange);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.value).toEqual({ min: 10, max: 50 });
+    }
   });
 
-  it('rejects an inverted range just past the boundary (min one above max)', () => {
-    // Boundary: min === max passes; min === max + 1 is the smallest inverted
-    // range and must be rejected (off-by-one guard on the <= comparison).
+  it('swap-normalizes an inverted range just past the boundary (min one above max)', () => {
+    // Boundary: min === max is left untouched (point range, see above test);
+    // min === max + 1 is the smallest inverted range and must be swapped, not
+    // rejected (off-by-one guard on the <= comparison stays in the transform).
     const justInverted = {
       ...validInstance(),
       attribute: 'vintage',
       operator: 'range' as const,
       value: { min: 2016, max: 2015 },
     };
-    expect(NormalizedConstraintSchema.safeParse(justInverted).success).toBe(false);
+    const result = NormalizedConstraintSchema.safeParse(justInverted);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.value).toEqual({ min: 2015, max: 2016 });
+    }
+  });
+
+  it('leaves a non-inverted range (min < max) untouched by the transform', () => {
+    // Regression: the swap must only fire when min > max. A normal range must
+    // round-trip byte-for-byte (no spurious swap, no key reordering surprises).
+    const normalRange = {
+      ...validInstance(),
+      attribute: 'price',
+      operator: 'range' as const,
+      value: { min: 10, max: 50 },
+    };
+    const result = NormalizedConstraintSchema.safeParse(normalRange);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.value).toEqual({ min: 10, max: 50 });
+    }
+  });
+
+  it('still rejects an inverted range containing NaN (.finite() guards before transform)', () => {
+    // Defence-in-depth: graceful swap MUST NOT mask a NaN bound. The .finite()
+    // check runs before the transform, so NaN still fails closed.
+    const nanInverted = {
+      ...validInstance(),
+      attribute: 'price',
+      operator: 'range' as const,
+      value: { min: Number.NaN, max: 10 },
+    };
+    expect(NormalizedConstraintSchema.safeParse(nanInverted).success).toBe(false);
   });
 });
 

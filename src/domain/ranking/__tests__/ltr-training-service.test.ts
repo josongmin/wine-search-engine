@@ -229,4 +229,71 @@ describe('LTRTrainingService', () => {
     expect(examples).toHaveLength(3);
     expect(examples[0]?.queryClass).toBe('short_entity');
   });
+
+  it('does NOT teach the ranker that an over-resolved candidate is relevant (resolved-while-gold-ambiguous)', () => {
+    // Regression: utility-scorer sets isAvoidableAbstain=true for the over-resolve
+    // case (predictedStatus='resolved' but gold expectedStatus='ambiguous') so the
+    // avoidableAbstainRate metric stays consistent and the exactly-one-flag invariant
+    // holds. But that candidate is a WRONG over-resolution — the ranker must not learn
+    // it as a (weakly) relevant positive. outcomeToLabel must keep over-resolve at
+    // label 0 (no positive anchor), distinct from a genuine abstain (status='ambiguous').
+    const examples = buildTrainingExamples(
+      [
+        makeEvalResult({
+          predictedStatus: 'resolved',
+          isCorrectResolve: false,
+          isWrongResolve: false,
+          isSafeAbstain: false,
+          isAvoidableAbstain: true,
+          topResultScoreComponents: {
+            semantic: 0.8,
+            popularity: 0.7,
+            attributeAlignment: 0.6,
+            preferenceAlignment: 0.5,
+            entityPosterior: 0.93,
+            identityExactnessTier: 'exact',
+            lanePresence: 'corroborated',
+          },
+        }),
+      ],
+      [makeEvalCase({ expectedStatus: 'ambiguous' })],
+    );
+
+    // Label 0 emits no pairwise positive example — the over-resolved candidate is
+    // never used as a relevant anchor.
+    expect(examples).toEqual([]);
+  });
+
+  it('still labels a genuine avoidable abstain (status=ambiguous) as a weak positive', () => {
+    // Counterpart to the over-resolve regression: a true avoidable abstain — the
+    // engine ABSTAINED (status='ambiguous') when gold expected a resolve, but its
+    // top candidate is the right answer. That candidate is legitimately weak-positive
+    // (label 1), so pairwise examples against degraded negatives ARE emitted.
+    const examples = buildTrainingExamples(
+      [
+        makeEvalResult({
+          predictedStatus: 'ambiguous',
+          isCorrectResolve: false,
+          isWrongResolve: false,
+          isSafeAbstain: false,
+          isAvoidableAbstain: true,
+          topResultScoreComponents: {
+            semantic: 0.8,
+            popularity: 0.7,
+            attributeAlignment: 0.6,
+            preferenceAlignment: 0.5,
+            entityPosterior: 0.93,
+            identityExactnessTier: 'exact',
+            lanePresence: 'corroborated',
+          },
+        }),
+      ],
+      [makeEvalCase({ expectedStatus: 'resolved' })],
+    );
+
+    // label 1: only the strongest degradation factor drops below 1 (round(1*0.3)=0),
+    // so exactly one pairwise example (1 vs 0) is emitted.
+    expect(examples.length).toBeGreaterThan(0);
+    expect(examples.every((e) => e.label1 === 1)).toBe(true);
+  });
 });

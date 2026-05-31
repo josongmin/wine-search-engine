@@ -73,6 +73,20 @@ function synthesizeNegativeFeatures(
 
 /**
  * Converts evaluation outcome to relevance label.
+ *
+ * `isAvoidableAbstain` covers TWO distinct outcomes that must NOT share a
+ * training label:
+ *   1. Genuine avoidable abstain — predictedStatus='ambiguous' when gold
+ *      expected a resolve. The top candidate IS the right answer the engine
+ *      failed to commit to → weak positive (label 1).
+ *   2. Over-resolve (resolved-while-gold-ambiguous) — predictedStatus='resolved'
+ *      when gold says 'ambiguous'. utility-scorer sets isAvoidableAbstain=true
+ *      here too (so avoidableAbstainRate + the exactly-one-flag invariant stay
+ *      consistent), but the resolved candidate is a WRONG over-resolution. It
+ *      must NOT be taught as relevant → label 0.
+ *
+ * The two are separated by predictedStatus: only a genuine abstain
+ * (status='ambiguous') earns the weak-positive label.
  */
 function outcomeToLabel(result: EvalResult, evalCase: EvalCase): 0 | 1 | 2 | 3 {
   if (result.isCorrectResolve) {
@@ -81,7 +95,7 @@ function outcomeToLabel(result: EvalResult, evalCase: EvalCase): 0 | 1 | 2 | 3 {
   if (result.isSafeAbstain && evalCase.expectedStatus === 'ambiguous') {
     return 2;
   }
-  if (result.isAvoidableAbstain) {
+  if (result.isAvoidableAbstain && result.predictedStatus === 'ambiguous') {
     return 1;
   }
   return 0;

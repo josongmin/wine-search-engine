@@ -30,14 +30,24 @@ const TRIGRAM_SIZE = 3;
 const SCRIPT_COMPATIBILITY_PARTIAL = 0.5;
 
 /**
- * Weak partial credit when the two sides use fully disjoint scripts and
- * neither is mixed — e.g. a pure-Hangul query ("사시카이아") against a
- * pure-Latin canonical label ("Sassicaia"). This is a legitimate
- * transliteration match path in the Korean wine domain, so it MUST stay
- * strictly above zero (we still want such candidates to surface), but it
- * carries no script overlap and so is a weaker signal than the mixed case.
+ * Partial credit when the two sides use fully disjoint scripts and neither is
+ * mixed — e.g. a pure-Hangul query ("사시카이아") against a pure-Latin canonical
+ * label ("Sassicaia"). This is a legitimate transliteration match path in the
+ * Korean wine domain, so it MUST stay strictly above zero (we still want such
+ * candidates to surface).
+ *
+ * NOTE (train/serve skew): this value is intentionally kept EQUAL to
+ * SCRIPT_COMPATIBILITY_PARTIAL (0.5). `scriptCompatibility` is shipped verbatim
+ * as `script_compatibility` to the external learned-matcher model for inference
+ * (see http-learned-matcher.ts ~L180). The deployed model was trained on the
+ * distribution where mixed and disjoint both emit 0.5; lowering disjoint to a
+ * weaker value (e.g. 0.25) without retraining introduces train/serve skew that
+ * can suppress the core Korean→Latin transliteration recall (사시카이아→Sassicaia).
+ * The named constant is retained so the disjoint branch stays semantically
+ * distinct and can diverge from PARTIAL once (and only once) the model is
+ * retrained on the new feature distribution.
  */
-const SCRIPT_COMPATIBILITY_DISJOINT = 0.25;
+const SCRIPT_COMPATIBILITY_DISJOINT = 0.5;
 
 /**
  * Extracts character n-grams (trigrams) from a lowercased string.
@@ -173,7 +183,9 @@ export function computeMatcherFeatures(
     scriptCompatibility = SCRIPT_COMPATIBILITY_PARTIAL;
   } else {
     // Fully disjoint single scripts (e.g. Hangul query vs Latin label):
-    // a weaker — but non-zero — transliteration signal.
+    // a non-zero transliteration signal. Currently equal to the mixed case to
+    // match the deployed model's training distribution — see
+    // SCRIPT_COMPATIBILITY_DISJOINT for the train/serve-skew rationale.
     scriptCompatibility = SCRIPT_COMPATIBILITY_DISJOINT;
   }
 

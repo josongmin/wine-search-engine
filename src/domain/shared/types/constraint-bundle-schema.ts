@@ -71,15 +71,23 @@ const NormalizedConstraintValueSchema = z.union([
     min: z.number().finite(),
     max: z.number().finite(),
   }).strict()
-    // Invariant: a range must be non-empty — `min` cannot exceed `max`.
-    // An inverted range (min > max) describes the empty set and is always a
-    // bug at the emitter (LLM constraint extraction, JSONB read, etc.), not a
-    // legitimate constraint. `min === max` IS valid (degenerate point range,
-    // e.g. "exactly 2015 vintage"). Fail closed rather than silently passing
-    // an unsatisfiable range to the downstream constraint compiler.
-    .refine((range) => range.min <= range.max, {
-      message: 'range.min must be <= range.max (inverted range describes the empty set)',
-    }),
+    // Normalize, do NOT reject, an inverted range (min > max). A reversed range
+    // is an emitter quirk (LLM constraint extraction, JSONB read, NL parse like
+    // "2020-2015"), not a fatal error. Rejecting it here would fail the WHOLE
+    // parse — and this schema is reused at the HTTP boundary
+    // (primitive-search.schema) and inside the LLM execution plan
+    // (execution-plan-schemas, `.strict()`), so one reversed range would reject
+    // the entire request/plan (CLAUDE.md rule 10: do NOT over-strict LLM input).
+    //
+    // Swap to `{ min: max, max: min }` so the closed interval is non-empty,
+    // staying consistent with the downstream SSoT that already swap-normalizes:
+    //   - constraint-to-sparse-filter-tokens.ts (Math.min/Math.max on price/vintage)
+    //   - retrieval/.../vintage.ts (`lo <= hi ? {min,max} : {min:hi,max:lo}`)
+    // `min === max` is left untouched (degenerate point range, e.g. "exactly
+    // the 2015 vintage").
+    .transform((range) =>
+      range.min <= range.max ? range : { min: range.max, max: range.min },
+    ),
   z.array(z.string().max(NORMALIZED_CONSTRAINT_MAX_STRING_CHARS))
     .max(NORMALIZED_CONSTRAINT_MAX_VALUE_LIST)
     .readonly(),

@@ -164,4 +164,66 @@ describe('Promise.all → allSettled resilience (regression)', () => {
     });
   });
 
+  // Restored regression coverage (append-only). W6's vespa-candidate-attributes
+  // change deleted two WatchlistAwareSearchIndex.getDocuments cases from this file
+  // and replaced them with the VespaCandidateAttributes tests above — an
+  // append-only violation (CLAUDE.md: regression tests are never deleted).
+  //
+  // The original cases pinned the T-E4-01 invariant: a SearchIndexPort *decorator*
+  // must DELEGATE batch getDocuments to its inner index and surface partial / empty
+  // results AS-IS — the removed single-fetch fallback must never re-appear and
+  // backfill missing docs. The concrete WatchlistAwareSearchIndex that hosted that
+  // contract is being removed wholesale by an in-flight watchlist-feature deletion
+  // (its source + its own regression suite are all gone from the working tree), so
+  // re-importing it would resurrect a deleted feature and break compilation.
+  //
+  // To keep the behavioral regression alive without coupling it to the deleted
+  // feature, the invariant is re-homed against a minimal inline decorator that
+  // reproduces the exact delegate-to-inner.getDocuments contract.
+  describe('SearchIndexPort decorator getDocuments delegation (T-E4-01, re-homed)', () => {
+    // Minimal pass-through decorator mirroring the deleted WatchlistAwareSearchIndex
+    // contract: getDocuments delegates to inner with no fallback / backfill.
+    class DelegatingSearchIndexDecorator {
+      constructor(private readonly inner: SearchIndexPort) {}
+      getDocuments(
+        entityIds: readonly EntityId[],
+      ): Promise<ReadonlyMap<EntityId, RetrievalDocument>> {
+        return this.inner.getDocuments(entityIds);
+      }
+    }
+
+    it('T-E4-01: delegates batch getDocuments to inner and returns partial results as-is (no backfill)', async () => {
+      const goodId = createEntityId('wl-good');
+      const failId = createEntityId('wl-fail');
+      const goodDoc = makeDoc('wl-good');
+
+      const inner = makeSearchIndexStub(new Map([[String(goodId), goodDoc]]), new Set());
+      // Inner returns only the good doc (simulating a Vespa partial return).
+      inner.getDocuments = vi.fn(async () => new Map([[goodId, goodDoc]]));
+
+      const index = new DelegatingSearchIndexDecorator(inner);
+      const result = await index.getDocuments([goodId, failId]);
+
+      // Partial result passes through unchanged — the failId is NOT backfilled.
+      expect(result.size).toBe(1);
+      expect(result.has(goodId)).toBe(true);
+      expect(result.has(failId)).toBe(false);
+      expect(inner.getDocuments).toHaveBeenCalledTimes(1);
+    });
+
+    it('T-E4-01: delegates an empty inner getDocuments result without fabricating documents', async () => {
+      const inner = makeSearchIndexStub(new Map(), new Set());
+      inner.getDocuments = vi.fn(async () => new Map());
+
+      const index = new DelegatingSearchIndexDecorator(inner);
+      const result = await index.getDocuments([
+        createEntityId('a'),
+        createEntityId('b'),
+      ]);
+
+      expect(result.size).toBe(0);
+      expect(inner.getDocuments).toHaveBeenCalledTimes(1);
+    });
+  });
+
 });

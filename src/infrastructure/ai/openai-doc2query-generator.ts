@@ -567,6 +567,17 @@ export class OpenAiDoc2QueryGenerator implements Doc2QueryGeneratorPort {
     // be swallowed by this degradation catch, or a programming bug there
     // would masquerade as an "embedding failure" and silently disable the
     // round-trip filter.
+    //
+    // Invariant (defensive): the post-embedding scoring path below cannot
+    // throw on the ETL hot path. `cosine` carries an explicit zero-norm guard
+    // (`if (na === 0 || nb === 0) return 0;`), and `dot` / `norm` are pure
+    // bounded loops with `?? 0` element access — no division-by-zero, no NaN
+    // propagation, no index-out-of-range. So narrowing the try to embedding
+    // I/O does NOT leak a new throw class into the ETL caller; the only
+    // exception that can reach ETL is a genuine embedding-service failure,
+    // which is already enumerated and degraded above. If you ever change
+    // `cosine` to drop the zero-norm guard, re-widen this try or this
+    // invariant breaks.
     let embeddings: readonly (readonly number[])[];
     try {
       embeddings = await service.embedBatch([sourceText, ...queries]);
