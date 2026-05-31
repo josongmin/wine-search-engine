@@ -510,6 +510,73 @@ describe('DecisionEngine', () => {
       expect(output.decisionTrace.rulesApplied).toContain('NUMERIC_GATE_PREFERENCE_MODE_TINY_GAP');
     });
 
+    // Regression lock for the effectiveThresholds spread fix
+    // (decision-engine.ts:294-295: `{ ...thresholds, resolveTau: ... }`).
+    //
+    // When clarificationBias > 0 the engine REGENERATES effectiveThresholds for
+    // the numeric gate. The spread MUST carry `numericGateMode` forward. If the
+    // regeneration drops it (e.g. reverting to a partial object literal that
+    // only copies resolveTau/gapTau), `numericGateMode` falls back to 'strict'
+    // (decision-engine.ts:638) and a semantic_preference query that should take
+    // the preference-mode gate is wrongly routed into the strict Gate 2 →
+    // CONFORMAL_SET_AMBIGUOUS / clarify.
+    //
+    // Scenario: semantic_preference, NON-exploratory (entity_lookup) so that the
+    // ONLY thing keeping it in the preference branch is numericGateMode (an
+    // exploratory mode would stay preference-like via exploratoryListMode and
+    // would NOT detect a dropped numericGateMode — that is why this is
+    // entity_lookup). With clarificationBias=0.10 the spread branch fires
+    // (effective resolveTau = 0.35 + 0.10 = 0.45). C=0.56 ≥ 0.45 clears resolve;
+    // C=0.56 > 0.55 floor ⇒ gapTau=0.01, gap=0.02 ≥ 0.01 clears the gap; but
+    // conformalSetSize=2 (0.40 ≤ 0.56 < 0.70) which would make a STRICT gate
+    // fail Gate 1 and fire Gate 2 (CONFORMAL_SET_AMBIGUOUS). Preserving the
+    // preference mode instead takes NUMERIC_GATE_PREFERENCE_MODE.
+    it('preserves numericGateMode through clarificationBias threshold regeneration (preference gate, not strict Gate 2)', async () => {
+      const output = await engine.decide(
+        makeInput({
+          queryPlan: {
+            ...makeQueryPlan('semantic_preference'),
+            intent: 'semantic_discovery',
+            route: 'entity',
+            retrievalMode: 'entity_lookup',
+            policy: {
+              requireExact: false,
+              allowApproximate: true,
+              requireClarification: false,
+              // Non-zero bias forces the spread branch at decision-engine.ts:295.
+              clarificationBias: 0.1,
+              fallbackMode: 'clarify',
+              policyReasonCodes: [],
+            },
+          },
+          effectiveRoute: 'entity',
+          effectiveRetrievalMode: 'entity_lookup',
+          // C=0.56, gap=0.02: conformalSetSize=2 (strict would be ambiguous),
+          // but gap clears the dynamic semantic_preference gapTau (0.01).
+          resolveResult: makeResolverResultWithRunnerUp(0.56, 0.02, false),
+          evidenceSummary: {
+            identityEvidencePresent: false,
+            constraintEvidencePresent: true,
+            anchorEvidencePresent: false,
+          },
+          policy: makeClarifyPolicy({ clarificationBias: 0.1 }),
+        }),
+        TEST_SNAPSHOT,
+      );
+
+      // The regenerated effectiveThresholds branch was actually taken …
+      expect(output.decisionTrace.rulesApplied).toContain('CLARIFICATION_BIAS_0.10');
+      // … and the loaded profile mode is still 'preference' in the trace.
+      expect(output.decisionTrace.thresholds.numericGateMode).toBe('preference');
+      // Behavioral lock: preference-mode gate, NOT the strict Gate 2 path.
+      // Reverse-logic: dropping numericGateMode in the spread flips these —
+      // NUMERIC_GATE_PREFERENCE_MODE disappears and the strict
+      // CONFORMAL_SET_AMBIGUOUS / NUMERIC_GATE_AMBIGUOUS markers appear.
+      expect(output.decisionTrace.rulesApplied).toContain('NUMERIC_GATE_PREFERENCE_MODE');
+      expect(output.decisionTrace.rulesApplied).not.toContain('NUMERIC_GATE_AMBIGUOUS');
+      expect(output.decisionTrace.rulesApplied).not.toContain('CONFORMAL_SET_AMBIGUOUS');
+    });
+
     it('clarifies short noisy queries that only resolved via fuzzy lookup strategies', async () => {
       const output = await expectDecisionStatus({
         queryPlan: {

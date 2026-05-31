@@ -3,6 +3,7 @@ import { buildNormalizedQueryViews } from './query-normalizer.js';
 import { Transliterator } from '../../alias/service/transliterator.js';
 import { stripAccents } from '../../shared/utils/unicode-normalize.js';
 import { lookupCuratedKoreanToken } from './korean-wine-token-lexicon.js';
+import { compactForLookup } from './phonetic-skeleton.js';
 
 const LATIN_VOWEL_RE = /[aeiouy]/i;
 const ASCII_ACRONYM_RE = /^[A-Z0-9]+$/;
@@ -11,10 +12,6 @@ const HANGUL_RE = /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/u;
 const MIN_LATIN_LEXICAL_CHAR_COUNT = 4;
 /** Uppercase acronym surfaces are bounded to avoid matching long product codes. */
 const MAX_ACRONYM_SURFACE_LENGTH = 6;
-
-function compactForLookup(value: string): string {
-  return value.replace(/[^\p{L}\p{N}]+/gu, '');
-}
 
 function trimDeduped(values: Iterable<string>): readonly string[] {
   const ordered: string[] = [];

@@ -179,25 +179,58 @@ function parseBatchResponse(
 }
 
 /**
+ * Negator stems that precede a domain verdict word. Covers the bare negatives
+ * ("no" / "not" / "without" / "never") plus the auxiliary-verb negations the LLM
+ * routinely emits as free text — "does not", "do not", "is not", "are not", and
+ * their contracted forms ("doesn't", "don't", "isn't", "aren't"). The apostrophe
+ * class accepts both the ASCII (') and typographic (’) glyph.
+ *
+ * Used as a fragment inside NEGATED_CONFLICT_PATTERN and NEGATED_ENTAIL_PATTERN so
+ * both the contradiction stems and the entailment/support stems share one negation
+ * vocabulary (SSoT for the negation half of the verdict normalizer).
+ */
+const NEGATOR = `(?:does\\s*n['’]?t|do\\s*n['’]?t|is\\s*n['’]?t|are\\s*n['’]?t|no|not|without|never)`;
+
+/**
  * Negated forms of the conflict/contradiction stems. An LLM that emits a free-text
  * verdict like "no conflict" / "no conflicting evidence" / "not contradicted" is
  * asserting the ABSENCE of contradiction — the naive substring check
  * `r.includes('conflict')` would otherwise misclassify these as `contradicted`,
  * silently flipping a supported/uncertain claim into a hard contradiction.
  * Stripping the negated stems before the positive check avoids that false positive.
- * ASCII-only stems, so the /g word-boundary form is Unicode-safe here.
+ * ASCII-only stems, so the /u word-boundary form is Unicode-safe here.
  */
-const NEGATED_CONFLICT_PATTERN =
-  /(?:^|[^\p{L}\p{N}])(?:no|not|without|never)\s+(?:conflict\w*|contradict\w*)(?=$|[^\p{L}\p{N}])/gu;
+const NEGATED_CONFLICT_PATTERN = new RegExp(
+  `(?:^|[^\\p{L}\\p{N}])${NEGATOR}\\s+(?:conflict\\w*|contradict\\w*)(?=$|[^\\p{L}\\p{N}])`,
+  'gu',
+);
+
+/**
+ * Negated forms of the entailment/support stems. Symmetric to
+ * NEGATED_CONFLICT_PATTERN: an LLM verdict like "not entailed" / "does not entail" /
+ * "no entailment" / "doesn't support" asserts the ABSENCE of entailment. The
+ * positive branch's `r.includes('entail')` substring check would otherwise flip
+ * these negated phrases into a positive `entailed` verdict — silently turning an
+ * unsupported claim into a supported one. Stripping the negated stems before the
+ * positive check closes that mirror-image false positive (W4 fixed conflict; this
+ * extends the same approach to entail/support).
+ */
+const NEGATED_ENTAIL_PATTERN = new RegExp(
+  `(?:^|[^\\p{L}\\p{N}])${NEGATOR}\\s+(?:entail\\w*|support\\w*)(?=$|[^\\p{L}\\p{N}])`,
+  'gu',
+);
 
 export function normalizeVerdict(raw: string): ClaimVerdict {
   const r = raw.toLowerCase().trim();
   // Remove negated conflict/contradiction phrases so "no conflicting evidence"
   // is not read as a conflict (see NEGATED_CONFLICT_PATTERN).
-  const deNegated = r.replace(NEGATED_CONFLICT_PATTERN, ' ');
-  if (deNegated.includes('contradict') || deNegated.includes('conflict') || r === 'false' || r === 'no') return 'contradicted';
+  const deNegatedConflict = r.replace(NEGATED_CONFLICT_PATTERN, ' ');
+  if (deNegatedConflict.includes('contradict') || deNegatedConflict.includes('conflict') || r === 'false' || r === 'no') return 'contradicted';
   if (r.includes('partial')) return 'partially_entailed';
-  if (r.includes('entail') || r === 'supported' || r === 'true' || r === 'yes' || r === 'support') return 'entailed';
+  // Remove negated entail/support phrases so "not entailed" / "does not entail"
+  // is not read as entailment (see NEGATED_ENTAIL_PATTERN).
+  const deNegatedEntail = r.replace(NEGATED_ENTAIL_PATTERN, ' ');
+  if (deNegatedEntail.includes('entail') || r === 'supported' || r === 'true' || r === 'yes' || r === 'support') return 'entailed';
   return 'not_entailed';
 }
 

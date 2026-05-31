@@ -90,6 +90,29 @@ describe('phonetic-skeleton SSoT — no private duplicates remain', () => {
       expect(src).not.toMatch(/function\s+phoneticCompactForLookup\s*\(/);
     });
   }
+
+  // `alias-lookup-plan.ts` held a byte-identical private copy of the SSoT
+  // `compactForLookup`, called from many alias-lookup hot paths. It MUST now
+  // import the SSoT — a drifted private copy would silently desync the
+  // alias-lookup compaction key from the query/alias phonetic buckets.
+  it('alias-lookup-plan.ts imports compactForLookup from the SSoT, not a private copy', () => {
+    const src = readSrc('domain/query/service/alias-lookup-plan.ts');
+    expect(src).not.toMatch(/function\s+compactForLookup\s*\(/);
+    expect(src).toMatch(/import\s*\{[^}]*\bcompactForLookup\b[^}]*\}\s*from\s*['"][^'"]*phonetic-skeleton\.js['"]/);
+  });
+});
+
+describe('phonetic-skeleton SSoT — alias-lookup compaction equals SSoT', () => {
+  // Behavioral parity: the alias-lookup plan's compact lookup keys must be
+  // produced by the SSoT compaction (Unicode-aware, accent-preserving). If the
+  // private copy were reintroduced with any drift, these keys would diverge.
+  const samples = ['Château-Margaux 2015', '샤또 마고', 'opus one!', 'Pétrus'];
+  for (const sample of samples) {
+    it(`compactForLookup(${JSON.stringify(sample)}) is Unicode-aware and accent-preserving`, () => {
+      // Direct SSoT invariant — alias-lookup-plan now routes through this exact fn.
+      expect(compactForLookup(sample)).toBe(sample.replace(/[^\p{L}\p{N}]+/gu, ''));
+    });
+  }
 });
 
 describe('phonetic-skeleton SSoT — SQL recall chain matches the TS rules', () => {

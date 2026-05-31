@@ -31,6 +31,25 @@ describe('normalizeVerdict', () => {
     });
   });
 
+  describe('negated entail/support phrasing must NOT become entailed (bug repro)', () => {
+    it.each([
+      'not entailed',
+      'does not entail',
+      "doesn't entail",
+      'not entailed by the evidence',
+      'no entailment',
+      'no entail',
+      'not supported',
+      'does not support',
+      "doesn't support",
+      'no support',
+      'never entailed',
+      'without support',
+    ])('%s → not_entailed (no entailment asserted)', (raw) => {
+      expect(normalizeVerdict(raw)).toBe('not_entailed');
+    });
+  });
+
   describe('positive verdicts', () => {
     it.each([
       ['entailed', 'entailed'],
