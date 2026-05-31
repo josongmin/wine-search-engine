@@ -90,6 +90,15 @@ describe('wine CLI (process boundary, offline)', () => {
     expect(payload.requestId).toMatch(/[0-9a-f-]{36}/);
   });
 
+  it('ignores a leading argv sentinel and still executes the command', async () => {
+    const r = await runCli(['--', 'system', 'ping', '--json']);
+    expect(r.code).toBe(0);
+    const payload = JSON.parse(r.stdout) as { ok: boolean; target: string; requestId: string };
+    expect(payload.ok).toBe(true);
+    expect(payload.target).toBe('local');
+    expect(payload.requestId).toMatch(/[0-9a-f-]{36}/);
+  });
+
   it('auth path reports the Codex auth file location (exit 0)', async () => {
     const r = await runCli(['auth', 'path', '--json']);
     expect(r.code).toBe(0);

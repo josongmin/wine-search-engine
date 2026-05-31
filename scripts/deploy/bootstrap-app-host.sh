@@ -11,10 +11,34 @@ if [[ "$(id -u)" -ne 0 ]]; then
   exit 1
 fi
 
+install_aws_cli_v2() {
+  if command -v aws >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local arch=""
+  local tmpdir=""
+  case "$(uname -m)" in
+    x86_64|amd64) arch="x86_64" ;;
+    aarch64|arm64) arch="aarch64" ;;
+    *)
+      echo "Unsupported architecture for AWS CLI: $(uname -m)" >&2
+      exit 1
+      ;;
+  esac
+
+  tmpdir="$(mktemp -d)"
+  curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${arch}.zip" -o "${tmpdir}/awscliv2.zip"
+  unzip -q "${tmpdir}/awscliv2.zip" -d "$tmpdir"
+  "${tmpdir}/aws/install" --update
+  rm -rf "$tmpdir"
+}
+
 if command -v apt-get >/dev/null 2>&1; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -y
-  apt-get install -y ca-certificates curl gnupg docker.io awscli
+  apt-get install -y ca-certificates curl gnupg docker.io unzip
+  install_aws_cli_v2
   systemctl enable --now docker
 elif command -v dnf >/dev/null 2>&1; then
   dnf install -y docker awscli
@@ -28,6 +52,7 @@ else
 fi
 
 mkdir -p /opt/wine-search-engine
+mkdir -p /opt/wine-search-engine/data
 
 if [[ ! -f "$ENV_FILE" ]]; then
   cat > "$ENV_FILE" <<EOF
@@ -53,6 +78,7 @@ Bootstrap complete.
 - docker: $(command -v docker)
 - aws: $(command -v aws)
 - env file: $ENV_FILE
+- data dir: /opt/wine-search-engine/data
 - container name: $CONTAINER_NAME
 - host port: $HOST_PORT
 - app port: $APP_PORT

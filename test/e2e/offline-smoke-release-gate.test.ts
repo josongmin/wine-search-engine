@@ -37,7 +37,7 @@ afterAll(async () => {
 });
 
 async function search(query: string) {
-  const response = await postJson(server.app, '/v1/search', {
+  const response = await postJson(server.app, '/v1/search/hybrid', {
     query,
     options: {
       mode: 'hybrid',

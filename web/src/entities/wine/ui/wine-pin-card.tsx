@@ -4,7 +4,6 @@ import Link from 'next/link';
 import { MapPin, Grape, Calendar, Flame, Sparkles, Wine } from 'lucide-react';
 import { cn, priceBand, wineDetailUrl } from '@/shared/lib';
 import type { ResultItem } from '@/shared/api';
-import { WatchlistButton } from '@/features/watchlist';
 
 interface WinePinCardProps {
   item: ResultItem;
@@ -188,14 +187,6 @@ export function WinePinCard({ item, rank, actions }: WinePinCardProps) {
               {theme.label}
             </span>
           )}
-        </div>
-
-        {/* TOP RIGHT: watchlist */}
-        <div
-          className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
-          onClick={(e) => e.preventDefault()}
-        >
-          <WatchlistButton entityId={entity.entity_id} />
         </div>
 
         {/* BOTTOM: score + price */}

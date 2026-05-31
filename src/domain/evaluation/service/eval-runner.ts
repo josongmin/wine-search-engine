@@ -5,14 +5,14 @@
  * via EvalRunner BEFORE any production cutover. Shadow path:
  *   1. Run new logic alongside existing logic (shadow mode, no user impact)
  *   2. Compare EvalResult[*].utilityScore and EvalMetrics against baseline
- *   3. Only if shadow passes PromotionGate criteria → proceed to E5-U7
+ *   3. Only if shadow passes the promotion acceptance criteria → proceed to E5-U7
  *
  * Direct production cutover (even behind a feature flag) without shadow run
  * is NOT permitted. EvalRunner is the authoritative shadow execution seam.
  *
  * E5-U7: Promotion Acceptance Gate (lock)
  *
- * After shadow run completes, PromotionGate.evaluate() is the single
+ * After shadow run completes, the promotion acceptance pipeline is the single
  * acceptance check. Criteria (from promotion-gate.ts):
  *   - Utility scorer: utilityScore improvement ≥ threshold
  *   - Slice evaluator: no regression on gold-set flagged slices

@@ -1,6 +1,6 @@
 {
   "name": "learned-matcher-timeout",
-  "endpoint": "/v1/search",
+  "endpoint": "/v1/search/hybrid",
   "execution_lane": "runtime_required",
   "request": {
     "query": "오푸스원",

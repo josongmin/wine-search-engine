@@ -39,7 +39,7 @@ describe.skipIf(!HAS_REACHABLE_VESPA)('Vespa E2E — external ML services', () =
   });
 
   it('hybrid search hits embedding and reranker services over real HTTP', async () => {
-    const response = await postJson(server.app, '/v1/search', {
+    const response = await postJson(server.app, '/v1/search/hybrid', {
       query: '샴페인 와인 추천',
       options: {
         mode: 'hybrid',
@@ -73,7 +73,7 @@ describe.skipIf(!HAS_REACHABLE_VESPA)('Vespa E2E — external ML services', () =
   });
 
   it('entity-mode search hits learned matcher over real HTTP once candidates are hydrated', async () => {
-    const response = await postJson(server.app, '/v1/search', {
+    const response = await postJson(server.app, '/v1/search/hybrid', {
       query: '오푸스원',
       options: { mode: 'entity', explain: false, clarification: false },
     });
@@ -105,7 +105,7 @@ describe.skipIf(!HAS_REACHABLE_VESPA)('Vespa E2E — external ML services', () =
   it('hybrid search degrades gracefully when reranker returns 500', async () => {
     fakeMlService.setFailure('/rerank', 500, { error: 'reranker_down' });
 
-    const response = await postJson(server.app, '/v1/search', {
+    const response = await postJson(server.app, '/v1/search/hybrid', {
       query: '샴페인 와인 추천',
       options: {
         mode: 'hybrid',
@@ -123,7 +123,7 @@ describe.skipIf(!HAS_REACHABLE_VESPA)('Vespa E2E — external ML services', () =
   it('entity-mode search degrades gracefully when learned matcher returns 500', async () => {
     fakeMlService.setFailure('/match', 500, { error: 'matcher_down' });
 
-    const response = await postJson(server.app, '/v1/search', {
+    const response = await postJson(server.app, '/v1/search/hybrid', {
       query: '오푸스원',
       options: { mode: 'entity', explain: false, clarification: false },
     });

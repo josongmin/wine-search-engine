@@ -19,6 +19,17 @@ describe('LazyFuzzyMatcher', () => {
     expect(initializeSpy).toHaveBeenCalledTimes(1);
   });
 
+  it('can warm the backing fuzzy index before the first match', () => {
+    const initializeSpy = vi.spyOn(FuzzyMatcher.prototype, 'initialize');
+    const matcher = new LazyFuzzyMatcher(['chateau margaux', 'opus one']);
+
+    matcher.warm();
+    const result = matcher.match('opus one');
+
+    expect(result[0]?.term).toBe('opus one');
+    expect(initializeSpy).toHaveBeenCalledTimes(1);
+  });
+
   it('returns no matches when the fuzzy corpus is empty', () => {
     const matcher = new LazyFuzzyMatcher([]);
     expect(matcher.match('opus one')).toEqual([]);

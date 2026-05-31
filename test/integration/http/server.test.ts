@@ -7,48 +7,21 @@ function createHttpServerDeps(): HttpServerDeps {
     searchUseCase: {
       execute: vi.fn(),
     },
-    decomposedSearchUseCase: {
-      execute: vi.fn(),
-    },
-    watchlistService: {
-      create: vi.fn(),
-      getByIdForUser: vi.fn(),
-      listByUserId: vi.fn(),
-      listByEntityId: vi.fn(),
-      deleteForUser: vi.fn(),
-      listDeliveries: vi.fn(),
-      recordDeliveryLog: vi.fn(),
-    },
     evalRunner: null,
-    feedbackStore: null,
-    feedbackIngestEnabled: false,
   };
 }
 
 describe('HTTP server route registration', () => {
-  it('registers POST /v1/feedback (returns 503 when feedback ingest is disabled)', async () => {
+  it('does not register retired non-core HTTP surfaces', async () => {
     const app = await createServer(createHttpServerDeps(), {
       logLevel: 'silent',
       nodeEnv: 'test',
     });
     try {
       const routes = app.printRoutes();
-      expect(routes).toContain('feedback (POST)');
-
-      const res = await app.inject({
-        method: 'POST',
-        url: '/v1/feedback',
-        headers: { 'content-type': 'application/json' },
-        payload: JSON.stringify({
-          query: 'Opus One',
-          entity_id: 'wine-opus-one',
-          signal_type: 'click',
-          session_id: 'sess-1',
-        }),
-      });
-      expect(res.statusCode).toBe(503);
-      const body = JSON.parse(res.body) as { error?: { code?: string } };
-      expect(body.error?.code).toBe('FEEDBACK_UNAVAILABLE');
+      expect(routes).not.toContain('feedback (POST)');
+      expect(routes).not.toContain('openapi.json (GET)');
+      expect(routes).not.toContain('metrics/agent (GET)');
     } finally {
       await app.close();
     }
@@ -291,86 +264,6 @@ describe('HTTP server route registration', () => {
     }
   });
 
-  it('blocks /metrics/agent when debug secret is not configured', async () => {
-    const app = await createServer(createHttpServerDeps(), {
-      logLevel: 'silent',
-      nodeEnv: 'test',
-    });
-
-    try {
-      await app.ready();
-      const res = await app.inject({
-        method: 'GET',
-        url: '/metrics/agent',
-      });
-
-      expect(res.statusCode).toBe(403);
-      const body = res.json();
-      expect(body.error?.code).toBe('FORBIDDEN');
-    } finally {
-      await app.close();
-    }
-  });
-
-  it('protects /metrics/agent with the dedicated metrics secret, not httpDebugSecret (R6 H11 least-privilege)', async () => {
-    const metricsSecret = 'metrics-debug-secret';
-    const httpDebugOnlySecret = 'http-debug-secret-different';
-    const app = await createServer(createHttpServerDeps(), {
-      logLevel: 'silent',
-      nodeEnv: 'test',
-      metricsDebugSecret: metricsSecret,
-      httpDebugSecret: httpDebugOnlySecret,
-    });
-
-    try {
-      await app.ready();
-      const forbidden = await app.inject({
-        method: 'GET',
-        url: '/metrics/agent',
-      });
-      expect(forbidden.statusCode).toBe(403);
-
-      // Least-privilege: the debug-logging secret MUST NOT unlock metrics.
-      const withHttpDebugKey = await app.inject({
-        method: 'GET',
-        url: '/metrics/agent',
-        headers: { 'x-debug-key': httpDebugOnlySecret },
-      });
-      expect(withHttpDebugKey.statusCode).toBe(403);
-
-      const allowed = await app.inject({
-        method: 'GET',
-        url: '/metrics/agent',
-        headers: { 'x-debug-key': metricsSecret },
-      });
-      expect(allowed.statusCode).toBe(200);
-      expect(allowed.json()).toMatchObject({
-        timestamp: expect.any(String),
-        agent: {
-          runs: expect.any(Number),
-          by_termination_reason: expect.any(Object),
-          fallback_runs: expect.any(Number),
-          fallback_rate: expect.any(Number),
-          fallback_by_layer: expect.any(Object),
-          reasoning_failure_runs: expect.any(Number),
-          total_tool_calls: expect.any(Number),
-          avg_duration_ms: expect.any(Number),
-          tool_outcome_kinds: expect.any(Object),
-          failed_outcome_kinds: expect.any(Object),
-          timeouts: {
-            llm_step: expect.any(Number),
-            tool: expect.any(Number),
-            parallel_batch: expect.any(Number),
-            event_rate_per_run: expect.any(Number),
-          },
-          alerts: expect.any(Array),
-        },
-      });
-    } finally {
-      await app.close();
-    }
-  });
-
   it('refuses startup when eval-on-startup is enabled in production', async () => {
     await expect(createServer(createHttpServerDeps(), {
       logLevel: 'silent',
@@ -473,7 +366,7 @@ describe('HTTP debug mode (X-Debug-Key)', () => {
     }
   });
 
-  it('forwards debugRequest=true into /v1/search use case when X-Debug-Key matches', async () => {
+  it('forwards debugRequest=true into /v1/search/hybrid use case when X-Debug-Key matches', async () => {
     const deps = createHttpServerDeps();
     deps.searchUseCase.execute = vi.fn().mockResolvedValue({
       queryType: 'search',
@@ -504,14 +397,13 @@ describe('HTTP debug mode (X-Debug-Key)', () => {
     try {
       const res = await app.inject({
         method: 'POST',
-        url: '/v1/search',
+        url: '/v1/search/hybrid',
         headers: {
           'content-type': 'application/json',
           'x-debug-key': debugSecret,
         },
         payload: JSON.stringify({
           query: 'Opus One 2018',
-          options: { mode: 'auto', explain: false, clarification: false },
         }),
       });
 
@@ -525,7 +417,7 @@ describe('HTTP debug mode (X-Debug-Key)', () => {
     }
   });
 
-  it('serializes typed abstain reason and audit traces through /v1/search contract', async () => {
+  it('serializes typed abstain reason and audit traces through /v1/search/hybrid contract', async () => {
     const deps = createHttpServerDeps();
     deps.searchUseCase.execute = vi.fn().mockResolvedValue({
       queryType: 'search',
@@ -581,14 +473,13 @@ describe('HTTP debug mode (X-Debug-Key)', () => {
     try {
       const res = await app.inject({
         method: 'POST',
-        url: '/v1/search',
+        url: '/v1/search/hybrid',
         headers: {
           'content-type': 'application/json',
           'x-debug-key': debugSecret,
         },
         payload: JSON.stringify({
           query: '달달한 드라이',
-          options: { mode: 'auto', explain: false, clarification: true },
         }),
       });
 

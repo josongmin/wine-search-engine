@@ -182,17 +182,17 @@ describe('Planner – route determination', () => {
     expect(plan.suggestedRoute).toBe('entity');
   });
 
-  it('direct-resolved appellations stay on entity route even when ambiguity registry knows the short form', async () => {
+  it('competing appellation/category surfaces stay on hybrid discovery even when ambiguity registry knows the short form', async () => {
     const entries = new Map([
       ['barolo', makeMatchResult('Barolo', 0.95, ['entity-barolo-a', 'entity-barolo-b'])],
     ]);
     const planner = makePlanner(entries, baroloAmbiguityDict);
     const plan = await planner.plan('Barolo');
 
-    expect(plan.intent).toBe('entity_exact');
-    expect(plan.queryClass).toBe('short_entity');
-    expect(plan.suggestedRoute).toBe('entity');
-    expect(plan.suggestedRetrievalMode).toBe('entity_lookup');
+    expect(plan.intent).toBe('semantic_discovery');
+    expect(plan.queryClass).toBe('semantic_preference');
+    expect(plan.suggestedRoute).toBe('hybrid');
+    expect(plan.suggestedRetrievalMode).toBe('attribute_search');
   });
 
   it('attribute-heavy query without entity anchors → suggestedRoute is "hybrid"', async () => {

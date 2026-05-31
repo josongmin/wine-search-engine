@@ -203,6 +203,42 @@ describe('runSearchPreRoutePhase – fallback path (plan() only, no planWithComp
     expect(plannerWithoutCompiled.plan).toHaveBeenCalledOnce();
   });
 
+  it('builds a path-authoritative exact lookup plan without invoking the planner for lookup_wine primitives', async () => {
+    const plannerWithoutCompiled = {
+      plan: vi.fn().mockResolvedValue(makeV1Plan({
+        route: 'hybrid',
+        retrievalMode: 'attribute_search',
+        queryClass: 'ambiguous_short_form',
+      })),
+    };
+    const ctx = makeBaseContext({
+      request: {
+        query: 'Opus One',
+        primitiveRoute: 'lookup_wine',
+        retrieval_mode: 'entity',
+        options: {
+          mode: 'auto',
+          explain: false,
+          clarification: false,
+        },
+      },
+      queryPlanner: plannerWithoutCompiled,
+    });
+
+    const result = await runSearchPreRoutePhase(ctx);
+
+    expect(result.outcome).toBe('continue');
+    if (result.outcome !== 'continue') throw new Error('narrowing guard');
+    expect(plannerWithoutCompiled.plan).not.toHaveBeenCalled();
+    expect(result.plan.intent).toBe('entity_exact');
+    expect(result.plan.queryClass).toBe('short_entity');
+    expect(result.plan.retrievalMode).toBe('entity_lookup');
+    expect(result.compiled.execution.effectiveRoute).toBe('entity');
+    expect(result.compiled.execution.effectiveRetrievalMode).toBe('entity_lookup');
+    expect(result.compiled.execution.executionTopology).toBe('entity_only');
+    expect(result.compiled.execution.routeSource).toBe('api_override');
+  });
+
   it('returns outcome=continue with a defined compiled when queryPlanner only has plan()', async () => {
     // Arrange: planner with only plan() — no planWithCompiled property
     const plannerWithoutCompiled = {

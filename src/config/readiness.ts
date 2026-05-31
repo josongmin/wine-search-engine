@@ -3,16 +3,11 @@ import { Agent as UndiciAgent } from 'undici';
 import type { Config } from './env.js';
 import type { RuntimeReadinessSnapshot } from './container-runtime-support.js';
 import type { RuntimeHandles } from './runtime-handles.js';
-import {
-  expectsRedisAtStartup,
-  isWatchlistEnabled,
-} from './watchlist.js';
 import { probeJsonPostEndpoint } from '../infrastructure/health/readiness-probes.js';
 import {
   loadSearchSnapshotRuntimeState,
 } from '../infrastructure/health/search-snapshot-readiness.js';
 import { createSnapshotHealthReader } from '../infrastructure/health/snapshot-health-reader.js';
-import type { WatchlistRuntimePort } from '../infrastructure/watchlist/watchlist-delivery-runtime.js';
 import type { DrinkingWindowPredictorPort } from '../domain/drinking-window/port/drinking-window-predictor.port.js';
 import type { CalibrationStore } from '../domain/resolver/port/calibration-store.port.js';
 import { loadRuntimeLtrModels } from '../infrastructure/adapter/runtime-ltr-model-loader.js';
@@ -314,14 +309,10 @@ async function probeSearchSnapshotRuntimeWithPool(args: {
 export function buildHealthRouteOptions(
   config: Config,
   runtime: RuntimeHandles,
-  watchlistRuntime?: WatchlistRuntimePort | null,
   drinkingWindowPredictor?: DrinkingWindowPredictorPort,
   calibrationStore?: CalibrationStore,
   runtimeReadiness?: RuntimeReadinessSnapshot,
 ): HealthRouteOptions {
-  const expectsRedis = expectsRedisAtStartup(config);
-  const watchlistEnabled = isWatchlistEnabled(config);
-  const redisRequired = expectsRedis;
   const isProduction = config.nodeEnv === 'production';
   const hasPool = runtime.pool !== undefined;
   const runtimeLtrModelsPath = config.runtimeLtrModelsPath;
@@ -368,20 +359,11 @@ export function buildHealthRouteOptions(
             },
           }
         : {}),
-      ...(expectsRedis
+      ...(runtime.redisClient !== undefined
         ? {
             redis: {
-              required: redisRequired,
-              check: (): Promise<ReadinessStatus> => probeRedis(runtime.redisClient),
-            },
-          }
-        : {}),
-      ...(watchlistEnabled
-        ? {
-            watchlist_runtime: {
               required: true,
-              check: (): Promise<ReadinessStatus> =>
-                Promise.resolve(watchlistRuntime?.isRunning() === true ? 'up' : 'down'),
+              check: (): Promise<ReadinessStatus> => probeRedis(runtime.redisClient),
             },
           }
         : {}),

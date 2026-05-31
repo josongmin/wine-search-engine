@@ -21,7 +21,9 @@ import { PipelineDebugStep } from '../../domain/observability/pipeline-debug-ste
 import { planToObservabilitySlice } from '../../domain/query/model/query-observability-vocab.js';
 import { compileFromLegacyPlan } from './search-usecase-compiled-fallback.js';
 import {
+  buildLookupWinePrimitivePlan,
   buildCallerControlledPrimitivePlan,
+  isLookupWinePrimitiveSearchRequest,
   isCallerControlledPrimitiveSearchRequest,
 } from './search-usecase-caller-controlled-plan.js';
 import { buildRetrievalPlan } from '../../domain/retrieval/service/retrieval-plan-builder.js';
@@ -424,8 +426,10 @@ export async function runSearchPreRoutePhase(
   ): Promise<SearchPreRoutePhaseResult> => {
     const callerControlledPrimitiveSearch =
       isCallerControlledPrimitiveSearchRequest(ctx.request);
+    const lookupWinePrimitiveSearch =
+      isLookupWinePrimitiveSearchRequest(ctx.request);
     if (ctx.decomposedSearch) {
-      if (callerControlledPrimitiveSearch) {
+      if (callerControlledPrimitiveSearch || lookupWinePrimitiveSearch) {
         pipelineDebug(
           {
             step: PipelineDebugStep.PRE_ROUTE_DECOMPOSED_COMPARISON,
@@ -560,7 +564,12 @@ export async function runSearchPreRoutePhase(
 
     let plan: QueryPlanV1;
     let compiled: CompiledWineQuery;
-    if (callerControlledPrimitiveSearch) {
+    if (lookupWinePrimitiveSearch) {
+      ({ plan, compiled } = buildLookupWinePrimitivePlan(
+        ctx.request,
+        sanitizedQuery,
+      ));
+    } else if (callerControlledPrimitiveSearch) {
       ({ plan, compiled } = buildCallerControlledPrimitivePlan(
         ctx.request,
         sanitizedQuery,
@@ -619,6 +628,7 @@ export async function runSearchPreRoutePhase(
     let structuredConstraintsMerged = false;
     if (
       !callerControlledPrimitiveSearch
+      && !lookupWinePrimitiveSearch
       && ctx.request.filters !== undefined
       && ctx.request.filters.length > 0
     ) {
@@ -645,6 +655,7 @@ export async function runSearchPreRoutePhase(
 
     if (
       !callerControlledPrimitiveSearch
+      && !lookupWinePrimitiveSearch
       && ctx.request.preferences !== undefined
       && ctx.request.preferences.length > 0
     ) {

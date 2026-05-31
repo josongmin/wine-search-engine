@@ -27,7 +27,7 @@ export function resolveBenchmarkSearchEndpoint(
   apiUrl: string,
   executionLane: BenchmarkExecutionLane,
 ): string {
-  return `${apiUrl}${executionLane === 'trusted_benchmark' ? '/internal/benchmark/search' : '/v1/search'}`;
+  return `${apiUrl}${executionLane === 'trusted_benchmark' ? '/internal/benchmark/search' : '/v1/search/hybrid'}`;
 }
 
 export function buildBenchmarkRequestHeaders(

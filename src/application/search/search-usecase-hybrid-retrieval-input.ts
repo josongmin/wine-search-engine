@@ -15,6 +15,10 @@ import {
   softIntentRetrievalPhrases,
   shouldRunTypedRecommendationDiscoveryForSoftIntent,
 } from '../../domain/query/service/soft-intent-strategy-table.js';
+import {
+  expandPairingFilterSurfaceValueList,
+  expandPairingFilterSurfaceValues,
+} from '../../domain/query/service/pairing-extractor.js';
 import { recipientProfileToRetrievalTerms } from '../../domain/query/service/recipient-situation-profile.js';
 import type { WineTypeValue } from '../../domain/query/model/wine-type-patterns.js';
 
@@ -214,6 +218,20 @@ export function retrievalValueToPhrases(
         ),
       ];
     }
+  }
+
+  if (attribute === 'pairing') {
+    if (typeof value === 'string') {
+      return expandPairingFilterSurfaceValues(value);
+    }
+    if (Array.isArray(value)) {
+      return uniqueStrings(
+        expandPairingFilterSurfaceValueList(
+          value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0),
+        ),
+      );
+    }
+    return [];
   }
 
   const softIntentPhrases = softIntentRetrievalPhrases(attribute, value, wineTypeContext, channel);

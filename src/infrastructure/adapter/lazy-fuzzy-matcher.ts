@@ -6,6 +6,23 @@ export class LazyFuzzyMatcher implements FuzzyMatcherPort {
 
   constructor(private readonly terms: readonly string[]) {}
 
+  warm(): void {
+    if (this.terms.length === 0) {
+      return;
+    }
+    this.ensureInitialized();
+  }
+
+  private ensureInitialized(): void {
+    if (this.matcher !== undefined) {
+      return;
+    }
+
+    const matcher = new FuzzyMatcher();
+    matcher.initialize(this.terms);
+    this.matcher = matcher;
+  }
+
   match(
     query: string,
     maxEditDistance?: number,
@@ -18,12 +35,8 @@ export class LazyFuzzyMatcher implements FuzzyMatcherPort {
       return [];
     }
 
-    if (this.matcher === undefined) {
-      const matcher = new FuzzyMatcher();
-      matcher.initialize(this.terms);
-      this.matcher = matcher;
-    }
+    this.ensureInitialized();
 
-    return this.matcher.match(query, maxEditDistance);
+    return this.matcher!.match(query, maxEditDistance);
   }
 }

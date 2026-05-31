@@ -40,7 +40,7 @@ describe('search replay fixtures', () => {
   for (const { file, fixture } of fixtures) {
     it(`fixture ${file} has v2 fixture contract`, () => {
       expect(typeof fixture.name).toBe('string');
-      expect(fixture.endpoint).toBe('/v1/search');
+      expect(fixture.endpoint).toBe('/v1/search/hybrid');
       expect(fixture.request).toBeDefined();
       if ('error_code' in fixture.expected) {
         expect(typeof fixture.expected.error_code).toBe('string');
@@ -75,10 +75,10 @@ describe('search replay fixtures', () => {
     });
   }
 
-  it('returns the canonical /v1/search payload without replay-only overlays', () => {
+  it('returns the canonical /v1/search/hybrid payload without replay-only overlays', () => {
     const payload = buildSearchFixturePayload({
       name: 'search-only',
-      endpoint: '/v1/search',
+      endpoint: '/v1/search/hybrid',
       execution_lane: 'self_contained',
       request: {
         query: 'Opus One 2018',

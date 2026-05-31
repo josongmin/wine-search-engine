@@ -42,7 +42,7 @@ describe('Header', () => {
     currentPathname = '/';
     renderWithProviders(<Header />);
     expect(screen.getByText('탐색')).toBeInTheDocument();
-    expect(screen.getByText('위시리스트')).toBeInTheDocument();
+    expect(screen.queryByText('위시리스트')).not.toBeInTheDocument();
     expect(screen.getByText('와인 검색 랩')).toBeInTheDocument();
   });
 

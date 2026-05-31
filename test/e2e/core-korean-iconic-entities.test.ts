@@ -25,12 +25,9 @@ afterAll(async () => {
 
 describe('Core Korean Iconic Entities', () => {
   it.each(CORE_KOREAN_ICON_QUERY_CASES)(
-    'resolves $query to $expectedEntityId through POST /v1/search',
+    'resolves $query to $expectedEntityId through POST /v1/lookup/wine',
     async ({ query, expectedEntityId }) => {
-      const response = await postJson(server.app, '/v1/search', {
-        query,
-        options: { mode: 'entity', explain: false, clarification: true },
-      });
+      const response = await postJson(server.app, '/v1/lookup/wine', { query });
 
       expect(response.statusCode).toBe(200);
 

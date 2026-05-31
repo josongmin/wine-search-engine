@@ -343,14 +343,14 @@ describe('hardConstraintsToSparseFilterTokens — grape_primary dual-field (grap
     expect(tokens).toContain('tannin_max:0.4');
   });
 
-  it('soft pairing tags with promotion authority emit pairing_in token', () => {
+  it('soft pairing tags with promotion authority emit a pairing-family expansion token', () => {
     const tokens = softConstraintsToOptionalFilterTokens([
       {
-        ...makeConstraint('pairing', 'in', ['cheese', 'salmon']),
+        ...makeConstraint('pairing', 'in', ['beef']),
         soft_promotion_authority: 'allow',
       },
     ]);
-    expect(tokens).toContain('pairing_in:cheese|salmon');
+    expect(tokens).toContain('pairing_in:beef|steak|wagyu beef|braised beef');
   });
 });
 

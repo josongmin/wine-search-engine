@@ -1,0 +1,133 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { describe, expect, it } from 'vitest';
+
+const workspaceRoot = process.cwd();
+const deletedCurrentDocs = [
+  'docs/test-reinforcement-roadmap.md',
+  'docs/test-reinforcement-p0-tickets.md',
+  'docs/test-reinforcement-parallel-board.md',
+] as const;
+const deletedFeatureCatalogEntries = [
+  'tools/feature-catalog/features/agent/feedback-and-learning.yaml',
+  'tools/feature-catalog/features/infra/watchlist-stack.yaml',
+  'tools/feature-catalog/features/observability/openapi-export.yaml',
+  'tools/feature-catalog/features/observability/retrieval-degradation-metrics.yaml',
+  'tools/feature-catalog/features/tools/feedback.yaml',
+  'tools/feature-catalog/features/tools/watchlist.yaml',
+  'tools/feature-catalog/features/tools/web-feedback-widget.yaml',
+  'tools/feature-catalog/features/tools/web-watchlist-ui.yaml',
+] as const;
+const removedSurfacePatterns = [
+  /\/v1\/search(?!(?:\/(?:hybrid|semantic|lexical)\b|\/\{hybrid,semantic,lexical\}))/,
+  /\/v1\/search\/lookup/,
+  /\/v1\/search\/replay/,
+  /\/v1\/search\/interpret/,
+  /\/v1\/feedback/,
+  /\/v1\/watchlist/,
+  /\/openapi\.json/,
+  /\/metrics\/agent/,
+  /\/metrics\/retrieval-degradation/,
+] as const;
+
+function readWorkspaceFile(relativePath: string): string {
+  return fs.readFileSync(path.join(workspaceRoot, relativePath), 'utf8');
+}
+
+function listFeatureCatalogFiles(relativeDir: string): string[] {
+  const directory = path.join(workspaceRoot, relativeDir);
+  const entries = fs.readdirSync(directory, { withFileTypes: true });
+  const out: string[] = [];
+
+  for (const entry of entries) {
+    const relativePath = path.join(relativeDir, entry.name);
+    if (entry.isDirectory()) {
+      out.push(...listFeatureCatalogFiles(relativePath));
+      continue;
+    }
+    if (entry.isFile()) {
+      out.push(relativePath);
+    }
+  }
+
+  return out.sort();
+}
+
+describe('current HTTP surface docs parity', () => {
+  const readme = readWorkspaceFile('README.md');
+  const contractSurface = readWorkspaceFile('docs/http-contract-surface.md');
+  const abbreviationRunbook = readWorkspaceFile('docs/runbook-abbreviation-aliases.md');
+  const calibrationRunbook = readWorkspaceFile('docs/runbook-calibration-nightly.md');
+  const deployRunbook = readWorkspaceFile('docs/runbook-github-actions-aws-deploy.md');
+  const agenticOverview = readWorkspaceFile('docs/system-overview/agentic-process.md');
+  const doc2queryIntegration = readWorkspaceFile('docs/system-overview/doc2query-cohere-integration.md');
+  const justfile = readWorkspaceFile('justfile');
+  const featureCatalogFiles = listFeatureCatalogFiles('tools/feature-catalog/features');
+
+  it('README does not advertise removed e2e suites or retired HTTP surfaces', () => {
+    expect(readme).toContain('search-api.search.test.ts');
+    expect(readme).toContain('wine-search-api.test.ts');
+    expect(readme).not.toContain('search-api.secondary.test.ts');
+    expect(readme).not.toContain('batch-search-api.test.ts');
+    expect(readme).not.toContain('claude-tools-api.test.ts');
+    expect(readme).not.toContain('`/v1/search/lookup`');
+  });
+
+  it('current runbooks point entity lookup and deploy examples at canonical paths', () => {
+    expect(abbreviationRunbook).toContain('/v1/lookup/wine');
+    expect(abbreviationRunbook).not.toContain('/v1/search/lookup');
+
+    expect(calibrationRunbook).toContain('/v1/lookup/wine');
+    expect(calibrationRunbook).not.toContain('/v1/search/lookup');
+
+    expect(deployRunbook).toContain('https://asommguide.shop:9011/v1/search/hybrid');
+    expect(deployRunbook).not.toContain('https://asommguide.shop:9011/v1/search\n');
+  });
+
+  it('system overview advertises only the canonical current search and agent surfaces', () => {
+    expect(agenticOverview).toContain('`POST /v1/search/hybrid`');
+    expect(agenticOverview).toContain('`POST /v1/search/semantic`');
+    expect(agenticOverview).toContain('`POST /v1/search/lexical`');
+    expect(agenticOverview).toContain('`POST /v1/lookup/wine`');
+    expect(agenticOverview).toContain('`POST /v1/agent`');
+    expect(agenticOverview).not.toContain('| `POST /v1/search` |');
+    expect(agenticOverview).not.toContain('| `POST /v1/search/interpret` |');
+    expect(agenticOverview).not.toContain('| `POST /v2/search` |');
+  });
+
+  it('doc2query runtime notes point only at the current primitive search seam', () => {
+    expect(doc2queryIntegration).toContain('/v1/search/{hybrid,semantic,lexical}');
+    expect(doc2queryIntegration).not.toContain('HTTP /v1/search 또는');
+  });
+
+  it('HTTP contract surface doc no longer references removed OpenAPI bridge or replay routes', () => {
+    expect(contractSurface).toContain('pnpm run contracts:http -- data/http-contract-manifest.json');
+    expect(contractSurface).not.toContain('contracts:http:openapi-bridge');
+    expect(contractSurface).not.toContain('export-http-openapi-bridge.ts');
+    expect(contractSurface).not.toContain('http-route-contract-openapi.ts');
+    expect(contractSurface).not.toContain('/v1/search/replay');
+  });
+
+  it('developer smoke commands point at the canonical hybrid path', () => {
+    expect(justfile).toContain('http://localhost:4000/v1/search/hybrid');
+    expect(justfile).not.toContain('http://localhost:4000/v1/search \\');
+  });
+
+  it('stale current docs and removed feature catalog entries are physically absent', () => {
+    for (const relativePath of deletedCurrentDocs) {
+      expect(fs.existsSync(path.join(workspaceRoot, relativePath))).toBe(false);
+    }
+    for (const relativePath of deletedFeatureCatalogEntries) {
+      expect(fs.existsSync(path.join(workspaceRoot, relativePath))).toBe(false);
+    }
+  });
+
+  it('current feature catalog does not advertise removed HTTP surfaces', () => {
+    for (const relativePath of featureCatalogFiles) {
+      const content = readWorkspaceFile(relativePath);
+      for (const pattern of removedSurfacePatterns) {
+        expect(content).not.toMatch(pattern);
+      }
+    }
+  });
+});

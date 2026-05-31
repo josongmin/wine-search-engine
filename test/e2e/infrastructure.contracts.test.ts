@@ -9,6 +9,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createTestServer, closeTestServer, type TestServer } from './helpers/test-server.js';
 import {
   getSearchDecision,
+  getSearchDecisionSnapshot,
   getSearchMeta,
   parseSearchResponse,
 } from './helpers/http-transport.js';
@@ -20,7 +21,7 @@ function injectSearch(
 ) {
   return server.app.inject({
     method: 'POST',
-    url: '/v1/search',
+    url: '/v1/search/hybrid',
     headers,
     payload: JSON.stringify(payload),
   });
@@ -91,7 +92,7 @@ beforeAll(async () => {
     }),
     staticContractServer.app.inject({
       method: 'POST',
-      url: '/v1/search',
+      url: '/v1/search/hybrid',
       payload: JSON.stringify({ query: 'Opus One' }),
     }),
     injectSearch(staticContractServer, { query: 'Opus One 2018' }),

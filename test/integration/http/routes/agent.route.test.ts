@@ -88,6 +88,27 @@ describe('agent session routes', () => {
     await harness.app.close();
   });
 
+  it('accepts the legacy single-query body on /v1/agent and canonicalizes it to one user message', async () => {
+    const response = await harness.app.inject({
+      method: 'POST',
+      url: '/v1/agent',
+      headers: { 'content-type': 'application/json' },
+      payload: {
+        query: '오푸스 원 알려줘',
+        options: { max_steps: 3 },
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(harness.orchestrator.execute).toHaveBeenCalledTimes(1);
+    expect(harness.orchestrator.execute.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        messages: [{ role: 'user', content: '오푸스 원 알려줘' }],
+        options: expect.objectContaining({ maxSteps: 3 }),
+      }),
+    );
+  });
+
   it('creates a session and replays the same session for the same client_session_id', async () => {
     const first = await harness.app.inject({
       method: 'POST',

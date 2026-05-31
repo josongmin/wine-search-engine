@@ -11,16 +11,13 @@ const REFUSAL_THRESHOLD_TTL_MAX_SECONDS =
 
 /**
  * Feature-area settings that do not belong to a single infrastructure
- * provider: startup-eval toggle, drinking-window model policy, watchlist
- * webhooks, and the hallucination-refusal threshold.
+ * provider: startup-eval toggle, drinking-window model policy, and the
+ * hallucination-refusal threshold.
  *
  * EVAL_RUN_AT_STARTUP lives here (rather than a dedicated eval domain)
  * because it is the only eval-runtime env var today and its companions
- * (drinking window, watchlist) are similarly single-flag feature gates.
+ * are similarly singleton feature flags.
  */
-
-/** Webhook HMAC secret minimum length (watchlist delivery signing). */
-const ENV_WEBHOOK_SECRET_MIN_LEN = 16;
 
 /**
  * Default confidence-refusal threshold (Epic 17.3 AURC-calibrated operating
@@ -48,13 +45,6 @@ export const FeaturesEnvSchema = z.object({
 
   /** Optional ONNX override directory containing `window_start.onnx` and `window_end.onnx`. */
   DRINKING_WINDOW_MODEL_DIR: z.string().min(1).optional(),
-
-  // Watchlist webhook signing secret (Epic 17.1)
-  WATCHLIST_ENABLED: z
-    .enum(['true', 'false'])
-    .transform((v) => v === 'true')
-    .optional(),
-  WEBHOOK_SECRET: z.string().min(ENV_WEBHOOK_SECRET_MIN_LEN).optional(),
 
   /** Confidence refusal threshold for hallucination prevention (Epic 17.3).
    * The AdmissionGate refuses resolved decisions whose calibrated

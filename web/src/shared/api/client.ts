@@ -2,11 +2,6 @@ import type {
   SearchRequest,
   SearchResponse,
   EntityResolveResponse,
-  FeedbackRequest,
-  FeedbackResponse,
-  WatchlistCreateRequest,
-  WatchlistEntry,
-  WatchlistListResponse,
   WineSearchRequest,
   WineSearchResponse,
   AgentSessionCreateRequest,
@@ -14,7 +9,6 @@ import type {
   AgentSessionTurnRequest,
   AgentSessionTurnResponse,
 } from './types';
-import { getSubjectId } from '@/shared/lib/subject';
 
 // Direct backend URL — set NEXT_PUBLIC_API_URL in .env.local
 // Default: http://localhost:4000 (Fastify dev server)
@@ -39,7 +33,7 @@ export class ApiError extends Error {
   }
 }
 
-type RequestOptions = RequestInit & { subject?: boolean; externalSignal?: AbortSignal };
+type RequestOptions = RequestInit & { externalSignal?: AbortSignal };
 
 async function request<T>(
   path: string,
@@ -50,7 +44,7 @@ async function request<T>(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-  const { subject, externalSignal, ...fetchInit } = options;
+  const { externalSignal, ...fetchInit } = options;
 
   // Compose external signal (e.g., React Query's queryFn signal) with the
   // local timeout controller. Either one aborting cancels the fetch.
@@ -69,9 +63,6 @@ async function request<T>(
     'Content-Type': 'application/json',
     ...(fetchInit.headers as Record<string, string> | undefined),
   };
-  if (subject) {
-    headers['X-Authenticated-Subject'] = getSubjectId();
-  }
 
   try {
     const res = await fetch(url, { ...fetchInit, signal: controller.signal, headers });
@@ -155,14 +146,6 @@ export const api = {
     } satisfies EntityResolveResponse;
   },
 
-  submitFeedback(body: FeedbackRequest, opts: ApiCallOptions = {}) {
-    return request<FeedbackResponse>('/v1/feedback', {
-      method: 'POST',
-      body: JSON.stringify(body),
-      externalSignal: opts.signal,
-    });
-  },
-
   health: {
     check(opts: ApiCallOptions = {}) {
       return request<{ status: string; timestamp: string; uptime: number }>(
@@ -220,36 +203,6 @@ export const api = {
           WINE_SEARCH_EXECUTE_TIMEOUT_MS,
         );
       },
-    },
-  },
-
-  watchlist: {
-    list(opts: ApiCallOptions = {}) {
-      return request<WatchlistListResponse>('/v1/watchlist', {
-        subject: true,
-        externalSignal: opts.signal,
-      });
-    },
-    get(id: string, opts: ApiCallOptions = {}) {
-      return request<WatchlistEntry>(`/v1/watchlist/${encodeURIComponent(id)}`, {
-        subject: true,
-        externalSignal: opts.signal,
-      });
-    },
-    create(body: WatchlistCreateRequest, opts: ApiCallOptions = {}) {
-      return request<WatchlistEntry>('/v1/watchlist', {
-        method: 'POST',
-        body: JSON.stringify(body),
-        subject: true,
-        externalSignal: opts.signal,
-      });
-    },
-    delete(id: string, opts: ApiCallOptions = {}) {
-      return request<void>(`/v1/watchlist/${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-        subject: true,
-        externalSignal: opts.signal,
-      });
     },
   },
 } as const;

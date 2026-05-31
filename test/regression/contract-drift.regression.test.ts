@@ -12,10 +12,7 @@
 import { describe, it, expect } from 'vitest';
 import { SearchRequestSchema } from '../../src/interface/http/schemas/search-request.schema.js';
 import { BatchSearchRequestSchema } from '../../src/interface/http/schemas/batch-search.schema.js';
-import { PostFeedbackRequestSchema } from '../../src/interface/http/schemas/feedback.schema.js';
 import { SearchResponseSchema } from '../../src/interface/http/schemas/search-response.schema.js';
-import { mapSignal } from '../../src/interface/http/routes/feedback.route.js';
-import { FEEDBACK_TYPES } from '../../src/domain/learning/model/feedback-signal.js';
 
 
 describe('Contract drift: QueryBudget — request schema must include max_dense_calls', () => {
@@ -74,40 +71,6 @@ describe('Contract drift: QueryBudget — request schema must include max_dense_
       },
     });
     expect(parsed.queryBudget?.maxDenseCalls).toBe(7);
-  });
-});
-
-describe('Contract drift: Feedback signal_type ↔ FeedbackType mapping', () => {
-  // Derive valid domain types from the canonical FEEDBACK_TYPES tuple so the
-  // test cannot drift from the union definition.
-  const VALID_DOMAIN_TYPES: ReadonlySet<string> = new Set(FEEDBACK_TYPES);
-
-  it('every schema enum value passes through the REAL mapSignal to a valid FeedbackType', () => {
-    // Derive enum values from the schema (no hardcoding) and run them through
-    // the IMPORTED mapSignal (no hardcoded copy). This catches drift in either
-    // direction: schema additions, mapSignal omissions, or domain union changes.
-    const def = (PostFeedbackRequestSchema as unknown as {
-      shape: { signal_type: { _def: { values?: readonly string[]; entries?: Record<string, unknown> } } };
-    }).shape.signal_type._def;
-    const enumValues: readonly string[] = def.values
-      ?? (def.entries ? Object.keys(def.entries) : []);
-
-    expect(enumValues.length).toBeGreaterThan(0);
-    for (const httpValue of enumValues) {
-      // Cast is safe: we just verified the value is in the schema enum
-      const mapped = mapSignal(httpValue as 'click' | 'purchase' | 'dismiss');
-      expect(VALID_DOMAIN_TYPES.has(mapped.type)).toBe(true);
-    }
-  });
-
-  it('feedback schema rejects unknown signal_type values', () => {
-    const result = PostFeedbackRequestSchema.safeParse({
-      query: 'test',
-      entity_id: 'wine-1',
-      signal_type: 'invalid_type',
-      session_id: 'sess-1',
-    });
-    expect(result.success).toBe(false);
   });
 });
 

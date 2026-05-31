@@ -26,7 +26,7 @@ last_reviewed: 2026-05-21
 owner: core
 
 surfaces:
-  - "HTTP: POST /v1/search (internal)"
+  - "HTTP: POST /v1/search/{hybrid,semantic,lexical} (internal primitive seam)"
 
 key_files:
   - src/domain/retrieval/service/retrieval-plan-builder.ts

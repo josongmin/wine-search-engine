@@ -5,7 +5,7 @@ import {
   getRegisteredHttpRouteContracts,
   registerContractRoute,
 } from '../register-contract-route.js';
-import { SearchRouteContract } from '../route-contracts.js';
+import { HybridSearchRouteContract } from '../route-contracts.js';
 
 describe('registerContractRoute', () => {
   const apps: Array<ReturnType<typeof Fastify>> = [];
@@ -25,8 +25,8 @@ describe('registerContractRoute', () => {
 
       registerContractRoute(appA, {
         method: 'POST',
-        url: '/v1/search',
-        contract: SearchRouteContract,
+        url: '/v1/search/hybrid',
+        contract: HybridSearchRouteContract,
         handler: async () => ({ ok: true }),
       });
 
@@ -41,8 +41,8 @@ describe('registerContractRoute', () => {
 
     registerContractRoute(app, {
       method: 'POST',
-      url: '/v1/search',
-      contract: SearchRouteContract,
+      url: '/v1/search/hybrid',
+      contract: HybridSearchRouteContract,
       handler: async () => ({ ok: true }),
     });
 
@@ -60,8 +60,8 @@ describe('registerContractRoute', () => {
 
     registerContractRoute(app, {
       method: 'POST',
-      url: '/v1/search',
-      contract: SearchRouteContract,
+      url: '/v1/search/hybrid',
+      contract: HybridSearchRouteContract,
       handler: async () => ({ ok: true }),
     });
     registerContractRoute(app, {
@@ -79,7 +79,7 @@ describe('registerContractRoute', () => {
     expect(manifest.version).toBe(1);
     expect(manifest.routes.map((route) => route.operationId)).toEqual([
       'system.health',
-      'search.execute',
+      'search.hybrid',
     ]);
     expect(manifest.routes).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -90,7 +90,7 @@ describe('registerContractRoute', () => {
         errorStatusCodes: [],
       }),
       expect.objectContaining({
-        operationId: 'search.execute',
+        operationId: 'search.hybrid',
         hasBody: true,
         hasParams: false,
         successStatusCodes: [200],

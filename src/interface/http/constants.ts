@@ -33,29 +33,8 @@ export const MAX_ERROR_ENVELOPE_MESSAGE_CHARS = 4096;
 /** RFC-014 error envelope: nullable failure_reason string. */
 export const MAX_ERROR_ENVELOPE_FAILURE_REASON_CHARS = 1024;
 
-/** Max HTTPS callback URL length (watchlist webhooks; browser URL practical limit). */
-export const MAX_HTTPS_CALLBACK_URL_CHARS = 2048;
-
-/** Watchlist entity_id string bound (stable external id + index key). */
-export const MAX_WATCHLIST_ENTITY_ID_CHARS = 256;
-
-/** Max trigger conditions per watchlist (UI + delivery fan-out bound). */
-export const MAX_WATCHLIST_TRIGGER_CONDITIONS = 10;
-
-/** Max rows returned for list-watchlist / list-deliveries. */
-export const MAX_WATCHLIST_LIST_PAGE_ITEMS = 1000;
-
-/** Price-drop / critic-score triggers use 0–100 percentage scale. */
-export const MAX_PERCENT_SCALE = 100;
-
-/** Min inclusive for HTTP status codes in delivery logs (RFC 9110). */
-export const MIN_HTTP_STATUS_CODE = 100;
-
-/** Max inclusive for HTTP status codes in delivery logs. */
-export const MAX_HTTP_STATUS_CODE = 599;
-
-/** Webhook delivery attempts stored per log entry (retry cap). */
-export const MAX_WEBHOOK_DELIVERY_ATTEMPT = 4;
+/** Generic external identifier length bound used by HTTP request schemas. */
+export const MAX_ENTITY_ID_CHARS = 256;
 
 /** Evidence / constraint list caps in search responses (telemetry-safe). */
 export const MAX_SEARCH_CONSTRAINT_STRING_LIST = 100;

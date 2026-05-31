@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CoreAdapterServices } from '../container-adapters.js';
-import { buildQueryPlanner } from '../container-core-builders.js';
+import { buildEntityResolver, buildQueryPlanner } from '../container-core-builders.js';
+import type { Config } from '../env.js';
 import type { AliasMatcher } from '../../domain/query/service/anchor-extractor.js';
 import type { MappingTablePort } from '../../domain/attribute/port/mapping-table.port.js';
 import type { NLMapping } from '../../domain/attribute/model/nl-mapping.js';
+import { LazyFuzzyMatcher } from '../../infrastructure/adapter/lazy-fuzzy-matcher.js';
 import {
   FallbackAmbiguityDictionary,
   StaticAmbiguityDictionary,
@@ -43,6 +45,21 @@ function makeAdapters(overrides: Partial<CoreAdapterServices> = {}): CoreAdapter
   } as unknown as CoreAdapterServices;
 }
 
+function makeConfig(overrides: Partial<Config> = {}): Config {
+  return {
+    nodeEnv: 'production',
+    calibration: { ttlDays: 14 },
+    killSwitch: {
+      learning: false,
+      aliasOverlay: false,
+      denseRetrieval: false,
+      injectionJudge: false,
+      queryCache: false,
+    },
+    ...overrides,
+  } as Config;
+}
+
 describe('buildQueryPlanner', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -55,5 +72,27 @@ describe('buildQueryPlanner', () => {
     await buildQueryPlanner(makeAdapters({ fuzzyMatcher }), pool);
 
     expect(pool.query).not.toHaveBeenCalled();
+  });
+
+  it('warms the startup-built fuzzy matcher before returning the planner', async () => {
+    const warmSpy = vi.spyOn(LazyFuzzyMatcher.prototype, 'warm');
+    const pool = {
+      query: vi.fn().mockResolvedValue({
+        rows: [{ surface_form: 'opus one' }],
+      }),
+    } as never;
+
+    await buildQueryPlanner(makeAdapters(), pool, undefined, undefined, undefined, undefined, 'search-snapshot:v1:test');
+
+    expect(warmSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('buildEntityResolver', () => {
+  it('does not hard-fail production requests when calibration params are missing', () => {
+    const resolver = buildEntityResolver(makeAdapters(), makeConfig());
+    const calibrator = (resolver as unknown as { calibrator: { options: { requireTrainedParams?: boolean } } }).calibrator;
+
+    expect(calibrator.options.requireTrainedParams).toBe(false);
   });
 });

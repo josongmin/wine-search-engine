@@ -298,7 +298,7 @@ describe('runSearchPostRoutePhase', () => {
         plannerVersion: '1.0.0',
       } as never,
       compiled: makeTestCompiled(),
-      // Forced by toLookupRequest for /v1/search/lookup callers.
+      // Forced by toLookupWineRequest for /v1/lookup/wine callers.
       request: { query: 'chateau margaux 2016', options: { mode: 'auto', explain: false, clarification: false } },
       requestId: 'req-lookup-bypass',
       startTime: Date.now(),
@@ -898,6 +898,195 @@ describe('runSearchPostRoutePhase', () => {
       routeDegradation: {
         executionMode: 'degraded',
         degradationReasons: ['mixed_constraint_guided_hybrid_fallback'],
+      },
+      decisionEngine: { decide } as never,
+      responseBuilder: {
+        build: vi.fn().mockReturnValue(response),
+      } as never,
+    });
+
+    expect(decide).toHaveBeenCalledTimes(1);
+    expect(decide.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ routeHealthy: true, executionMode: 'degraded' }),
+    );
+  });
+
+  it('keeps routeHealthy=true when recovered mixed fallback carries both pre-fallback and guided-hybrid degradation reasons', async () => {
+    const evaluate = vi.fn().mockReturnValue(false);
+    const decide = vi.fn().mockResolvedValue({
+      decisionStatus: 'resolved',
+      nextAction: 'return_result',
+      decisionConfidence: 0.74,
+      confidenceSemantics: 'calibrated_decision_confidence',
+      selectedEntity: {
+        entityId: 'wine-1',
+        canonicalLabel: 'Fallback White',
+        identity_signature: 'sig',
+        snapshot_ref: 'snap',
+      },
+      chosenEntityId: 'wine-1',
+      candidates: [{
+        entityId: 'wine-1',
+        canonicalLabel: 'Fallback White',
+        calibratedScore: 0.74,
+        rank: 1,
+        evidenceRefs: ['wine_type'],
+      }],
+      signalSet: {
+        entity_integrity_score: 1,
+        hard_constraint_pass: 1,
+        soft_constraint_score: 0.2,
+        semantic_relevance_score: 0.7,
+        preference_alignment_score: 0.2,
+        popularity_score: 0,
+        availability_score: 0,
+        uncertainty_penalty: 0,
+      },
+      evidenceItems: [],
+      decisionTraceRef: 'trace',
+      decisionSnapshot: {
+        model_versions: {},
+        index_versions: {},
+        policy_rule_version: '1.0.0',
+        threshold_profile_id: 'default',
+        planner_version: '1.0.0',
+        feature_flags: {},
+      },
+      decisionTrace: {
+        decisionStatus: 'resolved',
+        nextAction: 'return_result',
+        inputs: {
+          queryClass: 'pure_constraint',
+          effectiveRoute: 'hybrid',
+          policy: {
+            requireExact: false,
+            allowApproximate: true,
+            requireClarification: false,
+            fallbackMode: 'clarify',
+          },
+        },
+        signals: {
+          decisionConfidence: 0.74,
+          calibratedGap: 0.2,
+          ambiguity: false,
+        },
+        thresholds: {
+          resolveThreshold: 0.5,
+          gapThreshold: 0.1,
+        },
+        versions: {
+          plannerVersion: '1.0.0',
+          policyRuleVersion: '1.0.0',
+          thresholdProfileId: 'default',
+        },
+        rulesApplied: [],
+        finalReason: 'ok',
+      },
+    });
+    const response: SearchResponseV1 = {
+      queryType: 'search',
+      engineDecision: {
+        decisionStatus: 'resolved',
+        nextAction: 'return_result',
+        route: 'hybrid',
+        decisionConfidence: 0.74,
+        confidenceSemantics: 'calibrated_decision_confidence',
+        decisionTraceRef: 'trace',
+        decisionSnapshot: {
+          model_versions: {},
+          index_versions: {},
+          policy_rule_version: '1.0.0',
+          threshold_profile_id: 'default',
+          planner_version: '1.0.0',
+          feature_flags: {},
+        },
+      },
+      results: [],
+      meta: {
+        requestId: 'req-mixed-fallback-combo-health',
+        queryTimeMs: 1,
+        route: 'hybrid',
+        version: '1.0.0',
+      },
+    };
+
+    await runSearchPostRoutePhase({
+      plan: {
+        rawQuery: 'white dessert wine',
+        normalizedQuery: 'white dessert wine',
+        intent: 'facet_search',
+        queryClass: 'pure_constraint',
+        policy: {
+          requireExact: false,
+          allowApproximate: true,
+          requireClarification: false,
+          fallbackMode: 'clarify',
+          policyReasonCodes: [],
+        },
+        anchors: [],
+        uncertainty: { terms: [], confidence: 0 },
+        route: 'hybrid',
+        retrievalMode: 'constraint_filter',
+        constraints: { hard: [], soft: [], inferred: [] },
+        expansions: { lexical: [], semantic: [] },
+        policyRuleVersion: '1.0.0',
+        thresholdProfileId: 'default',
+        plannerVersion: '1.0.0',
+      } as never,
+      compiled: makeTestCompiled(),
+      request: { query: '클라우디베이 말고 다른 화이트' },
+      requestId: 'req-mixed-fallback-combo-health',
+      startTime: Date.now(),
+      resolveResult: {
+        ...minimalResolveResult,
+        status: 'resolved',
+        candidates: [{
+          entityId: 'wine-1',
+          canonicalLabel: 'Fallback White',
+          calibratedScore: 0.74,
+          rank: 1,
+          evidenceRefs: ['wine_type'],
+        }],
+      },
+      identityResolveResult: null,
+      rankedResults: [{
+        entityId: 'wine-1',
+        canonicalLabel: 'Fallback White',
+        finalScore: 0.74,
+        rank: 1,
+        componentScores: {
+          entityIntegrity: 1,
+          semantic: 0.74,
+          hardConstraintPass: true,
+          softConstraint: 0.2,
+          attributeAlignment: 0.2,
+          preferenceAlignment: 0.2,
+          popularity: 0,
+          availability: 0,
+          uncertaintyPenalty: 0,
+        },
+        matchedConstraints: [],
+        unmetConstraints: [],
+        inferredConstraints: [],
+        evidenceItems: [],
+      }] as RankedResult[],
+      effectiveRoute: 'hybrid',
+      laneArtifacts: EMPTY_LANE_ARTIFACTS,
+      ...GENERIC_HYBRID_EXECUTION_FACTS,
+      plannerSuggestedMode: 'constraint_filter',
+      retrievalModeSource: 'planner',
+      abstainPolicy: { shouldAbstain: vi.fn(), evaluate } as never,
+      snapshotVersions: {
+        modelVersions: {},
+        indexVersions: {},
+        featureFlags: {},
+      },
+      routeDegradation: {
+        executionMode: 'degraded',
+        degradationReasons: [
+          'mixed_similar_retrieval_fallback',
+          'mixed_constraint_guided_hybrid_fallback',
+        ],
       },
       decisionEngine: { decide } as never,
       responseBuilder: {

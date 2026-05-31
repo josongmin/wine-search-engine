@@ -1,4 +1,5 @@
 import { OntologyNormalizer } from './ontology-normalizer.js';
+import { normalizePairingComparableValue } from '../../query/service/pairing-extractor.js';
 
 const COMBINING_MARKS_RE = /[\u0300-\u036f]/g;
 
@@ -38,6 +39,12 @@ export function normalizeConstraintComparableString(
   attribute: string,
   value: string,
 ): string {
+  if (attribute === 'pairing') {
+    const canonicalPairing = normalizePairingComparableValue(value);
+    if (canonicalPairing !== undefined) {
+      return canonicalPairing;
+    }
+  }
   if (isOntologyComparableAttribute(attribute)) {
     const normalized = normalizeOntologyComparableValue(value);
     if (normalized !== null && normalized.axis === ONTOLOGY_AXES_BY_ATTRIBUTE[attribute]) {

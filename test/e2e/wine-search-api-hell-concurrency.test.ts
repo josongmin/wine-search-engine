@@ -41,7 +41,7 @@
  *    the LLM mock does NOT grow without bound (we track distinct identities).
  *  - Process memory after 1000 fast requests stays within a generous bound
  *    (statistical — the per-request closure footprint is bounded by GC).
- *  - `/v1/search` and `/v1/agent` interleaved: both surfaces retain
+ *  - `/v1/search/hybrid` and `/v1/agent` interleaved: both surfaces retain
  *    their own state (no cross-surface corruption).
  *
  * SCOPE — ADDITIVE ONLY:

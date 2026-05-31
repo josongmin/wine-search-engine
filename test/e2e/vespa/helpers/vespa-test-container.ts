@@ -47,7 +47,6 @@ import { InterpretUseCase } from '../../../../src/application/search/interpret.u
 import { ResolveUseCase } from '../../../../src/application/search/resolve.usecase.js';
 import { AutocompleteUseCase } from '../../../../src/application/search/autocomplete.usecase.js';
 import { HybridUseCase } from '../../../../src/application/search/hybrid.usecase.js';
-import { WatchlistService } from '../../../../src/application/watchlist/watchlist.service.js';
 import type { Container } from '../../../../src/config/container.js';
 import type { SnapshotVersions } from '../../../../src/application/search/search.usecase.js';
 import { VespaClient } from '../../../../src/infrastructure/vespa/vespa-client.js';
@@ -66,7 +65,6 @@ import {
   FallbackAmbiguityDictionary,
   StaticAmbiguityDictionary,
 } from '../../../../src/domain/query/service/static-ambiguity-dictionary.js';
-import { InMemoryWatchlistStore } from '../../../../src/infrastructure/watchlist/in-memory-watchlist-store.js';
 import type { QueryClassWeights } from '../../../../src/domain/ranking/index.js';
 import {
   InMemoryAmbiguityDictionary,
@@ -105,8 +103,6 @@ async function applyMigrations(pool: Pool): Promise<void> {
 async function resetPgFixtures(pool: Pool): Promise<void> {
   await pool.query(`
     TRUNCATE TABLE
-      watchlist_delivery_logs,
-      watchlists,
       threshold_profiles,
       calibration_params,
       ambiguity_registry,
@@ -355,18 +351,7 @@ export async function createVespaTestContainer(
     decomposedSearch: decomposedSearchUseCase,
   });
   const batchSearchUseCase = new BatchSearchUseCase(searchUseCase);
-  const watchlistService = new WatchlistService({
-    storage: new InMemoryWatchlistStore(),
-  });
-
   const container = {
-    feedbackStore: null,
-    proposalStore: null,
-    feedbackProcessor: null,
-    aliasProposer: null,
-    feedbackTtlEnforcer: null,
-    promotionGate: null,
-    feedbackIngestEnabled: false,
     queryPlanner,
     entityResolver,
     candidatePool,
@@ -383,10 +368,9 @@ export async function createVespaTestContainer(
     drinkingWindowUseCase,
     drinkingWindowPredictor,
     batchSearchUseCase,
-    watchlistService,
-    watchlistRuntime: null,
     evalRunner: null,
     calibrationStore,
+    runtimeReadiness: {} as never,
   } satisfies Container;
 
   return {

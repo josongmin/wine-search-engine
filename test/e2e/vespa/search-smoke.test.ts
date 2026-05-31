@@ -43,7 +43,7 @@ describe.skipIf(!HAS_REACHABLE_VESPA)('Vespa E2E — smoke lane', () => {
   });
 
   it('hybrid search returns results through the Vespa-backed HTTP stack', async () => {
-    const response = await postJson(server.app, '/v1/search', {
+    const response = await postJson(server.app, '/v1/search/hybrid', {
       query: '샴페인 와인 추천',
       options: { mode: 'hybrid', explain: false, clarification: false },
     });
@@ -57,7 +57,7 @@ describe.skipIf(!HAS_REACHABLE_VESPA)('Vespa E2E — smoke lane', () => {
   });
 
   it('entity-mode search stays wired to the learned matcher over HTTP', async () => {
-    const response = await postJson(server.app, '/v1/search', {
+    const response = await postJson(server.app, '/v1/search/hybrid', {
       query: '오푸스원',
       options: { mode: 'entity', explain: false, clarification: false },
     });

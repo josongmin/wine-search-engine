@@ -13,22 +13,16 @@ describe('isOpsRoute — request logging cardinality (R6 H7)', () => {
     expect(isOpsRoute('/ready')).toBe(true);
   });
 
-  it('classifies any /metrics/* route as an ops route (prefix match)', () => {
-    expect(isOpsRoute('/metrics/agent')).toBe(true);
-    expect(isOpsRoute('/metrics/retrieval-degradation')).toBe(true);
-  });
-
   it('does NOT classify business routes as ops routes', () => {
-    expect(isOpsRoute('/v1/search')).toBe(false);
+    expect(isOpsRoute('/v1/search/hybrid')).toBe(false);
     expect(isOpsRoute('/v1/agent')).toBe(false);
-    expect(isOpsRoute('/v1/watchlist/:id')).toBe(false);
+    expect(isOpsRoute('/v1/lookup/wine')).toBe(false);
   });
 
   it('does not false-positive on routes that merely contain a probe substring', () => {
-    // "/healthcheck" is not "/health"; "/v1/metrics-report" is not under "/metrics/".
+    // "/healthcheck" is not "/health".
     expect(isOpsRoute('/healthcheck')).toBe(false);
-    expect(isOpsRoute('/v1/metrics-report')).toBe(false);
-    expect(isOpsRoute('/metrics')).toBe(false); // no trailing slash → not the /metrics/ prefix
+    expect(isOpsRoute('/metrics/agent')).toBe(false);
   });
 
   it('handles empty / root path without throwing', () => {

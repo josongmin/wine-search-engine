@@ -42,7 +42,7 @@ async function createProtocolServer(options?: {
 
 describe('OPTIONS preflight', () => {
   it('responds with 204 and CORS headers for preflight requests', async () => {
-    const res = await optionsRequest(testServer.app, '/v1/search', {
+    const res = await optionsRequest(testServer.app, '/v1/search/hybrid', {
       origin: 'http://localhost:3000',
       'access-control-request-method': 'POST',
       'access-control-request-headers': 'content-type',

@@ -6,20 +6,12 @@ import {
   AgentSessionTurnRouteContract,
 } from './agent.contract.js';
 import {
-  AgentMetricsRouteContract,
   HealthRouteContract,
   HybridSearchRouteContract,
   LexicalSearchRouteContract,
   LookupWineRouteContract,
   ReadyRouteContract,
-  RetrievalDegradationMetricsRouteContract,
   SemanticSearchRouteContract,
-  WatchlistListRouteContract,
-  WatchlistCreateRouteContract,
-  WatchlistDeleteRouteContract,
-  WatchlistDeliveriesRouteContract,
-  WatchlistGetRouteContract,
-  FeedbackSubmitRouteContract,
 } from './route-contracts.js';
 import type { HttpRouteContractManifest, RegisteredHttpRouteContract } from './register-contract-route.js';
 import { toFiniteInteger } from '../../../domain/shared/utils/safe-number.js';
@@ -53,7 +45,7 @@ interface DeclaredHttpRouteContract {
  *
  * History:
  *   1.0.0 — initial pinned surface (2026-05-21). 26 declared routes,
- *           OpenAPI 3 export + verify:http-contracts CI gate.
+ *           contract-manifest export + regression gate.
  *   2.0.0 — remove /v2/search, /v2/search/hybrid, /v2/search/interpret
  *           catalog entries (2026-05-23). These were never wired into
  *           server.ts; V2 served via content-negotiation on /v1/* with
@@ -64,11 +56,8 @@ interface DeclaredHttpRouteContract {
  *           Removed redundant or non-product legacy seams. Remaining: 13.
  *   4.1.0 — T-IR-01: add path-authoritative primitive surface
  *           (`POST /v1/search/{hybrid,semantic,lexical}` and
- *           `POST /v1/lookup/wine`) alongside the legacy mode-monolith
- *           routes (2026-05-29). MINOR bump — additive only.
- *           Legacy `/v1/search` and `/v1/search/lookup` are kept until
- *           T-IR-07 removes them, at which point this bumps to 5.0.0.
- *           Remaining: 17.
+ *           `POST /v1/lookup/wine`) while the legacy monolith still existed
+ *           during the cutover window (2026-05-29). Remaining: 17.
  *   5.0.0 — break the legacy monolith surfaces (2026-05-30):
  *           remove `POST /v1/search` and `POST /v1/search/lookup` from the
  *           declared public catalog. Public retrieval is now only
@@ -82,24 +71,19 @@ interface DeclaredHttpRouteContract {
  *           `POST /v1/agent/sessions` and
  *           `POST /v1/agent/sessions/:sessionId/turns`.
  *           Remaining: 17.
+ *   7.0.0 — retire non-core public/admin surfaces (2026-06-01):
+ *           remaining runtime contract is the minimal
+ *           search + agent + liveness/readiness set. Remaining: 9.
  */
-export const HTTP_CONTRACT_CATALOG_VERSION = '6.0.0';
+export const HTTP_CONTRACT_CATALOG_VERSION = '7.0.0';
 
 export const DeclaredHttpRouteContractCatalog: readonly DeclaredHttpRouteContract[] = [
   { method: 'GET', url: '/health', contract: HealthRouteContract },
   { method: 'GET', url: '/ready', contract: ReadyRouteContract },
-  { method: 'GET', url: '/metrics/agent', contract: AgentMetricsRouteContract },
-  { method: 'GET', url: '/metrics/retrieval-degradation', contract: RetrievalDegradationMetricsRouteContract },
   { method: 'POST', url: '/v1/search/hybrid', contract: HybridSearchRouteContract },
   { method: 'POST', url: '/v1/search/semantic', contract: SemanticSearchRouteContract },
   { method: 'POST', url: '/v1/search/lexical', contract: LexicalSearchRouteContract },
   { method: 'POST', url: '/v1/lookup/wine', contract: LookupWineRouteContract },
-  { method: 'GET', url: '/v1/watchlist', contract: WatchlistListRouteContract },
-  { method: 'POST', url: '/v1/watchlist', contract: WatchlistCreateRouteContract },
-  { method: 'GET', url: '/v1/watchlist/:id', contract: WatchlistGetRouteContract },
-  { method: 'DELETE', url: '/v1/watchlist/:id', contract: WatchlistDeleteRouteContract },
-  { method: 'GET', url: '/v1/watchlist/:id/deliveries', contract: WatchlistDeliveriesRouteContract },
-  { method: 'POST', url: '/v1/feedback', contract: FeedbackSubmitRouteContract },
   { method: 'POST', url: '/v1/agent', contract: AgentRunRouteContract },
   { method: 'POST', url: '/v1/agent/sessions', contract: AgentSessionCreateRouteContract },
   { method: 'POST', url: '/v1/agent/sessions/:sessionId/turns', contract: AgentSessionTurnRouteContract },
@@ -118,8 +102,8 @@ function compareContracts(
  * Canonical structural surface of a single declared contract — the subset
  * of the contract that is observable to clients (method, URL, operationId,
  * body/params presence, status codes). Schema *shapes* are intentionally
- * excluded: that level of detail is owned by the OpenAPI parity test
- * (verify:http-contracts), which runs on prepush. The catalog fingerprint
+ * excluded: that level of detail is owned by the contract schema tests.
+ * The catalog fingerprint
  * is the *first* line of defense — fast, deterministic, no schema
  * traversal.
  */
@@ -208,7 +192,7 @@ export function computeHttpContractCatalogFingerprint(
  * failing test.
  */
 export const HTTP_CONTRACT_CATALOG_FINGERPRINT =
-  '2770fa94d973e6b4e1d372f3e456677763bb5c14d11651fa150f844e246b0afb';
+  'b72c3bdb47de19cf845ff597f4abdbeb373e848f28547d2c7e3db872a51a9818';
 
 export function buildDeclaredHttpRouteContractManifest(): HttpRouteContractManifest {
   const routes: RegisteredHttpRouteContract[] = DeclaredHttpRouteContractCatalog.map((entry) => {

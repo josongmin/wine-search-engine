@@ -2,11 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 import { createServer } from '../../src/interface/http/server.js';
 import { DeclaredHttpRouteContractCatalog } from '../../src/interface/http/routes/http-route-contract-catalog.js';
 import type { HttpServerDeps } from '../../src/interface/http/routes/route-deps.js';
+import type { WineSearchOrchestratorContract } from '../../src/application/wine-search/wine-search-orchestrator.js';
 import {
   computeAgentSessionExpiry,
   createProcessLocalAgentSessionStore,
 } from '../../src/config/agent-session-store.js';
 import { AgentSessionService } from '../../src/application/wine-search/agent-session-service.js';
+import { AgentUseCase } from '../../src/application/wine-search/agent-usecase.js';
 
 /**
  * Regression test (2026-05-23): every URL declared in
@@ -29,30 +31,24 @@ import { AgentSessionService } from '../../src/application/wine-search/agent-ses
 
 function createStubDeps(): HttpServerDeps {
   const noopExecute = { execute: vi.fn() };
+  const orchestrator = { execute: vi.fn() } as unknown as WineSearchOrchestratorContract;
+  const agentSessionService = new AgentSessionService({
+    store: createProcessLocalAgentSessionStore(),
+    orchestrator,
+    computeExpiry: (now) => computeAgentSessionExpiry(now),
+  });
   return {
     searchUseCase: noopExecute,
-    decomposedSearchUseCase: noopExecute,
-    watchlistService: {
-      create: vi.fn(),
-      getByIdForUser: vi.fn(),
-      listByUserId: vi.fn(),
-      listByEntityId: vi.fn(),
-      deleteForUser: vi.fn(),
-      listDeliveries: vi.fn(),
-      recordDeliveryLog: vi.fn(),
-    },
     wineSearch: {
-      wineSearchOrchestrator: { execute: vi.fn() },
-      agentSessionService: new AgentSessionService({
-        store: createProcessLocalAgentSessionStore(),
-        orchestrator: { execute: vi.fn() },
-        computeExpiry: (now) => computeAgentSessionExpiry(now),
+      wineSearchOrchestrator: orchestrator,
+      agentUseCase: new AgentUseCase({
+        orchestrator,
+        sessionService: agentSessionService,
       }),
+      agentSessionService,
     },
     evalRunner: null,
-    feedbackStore: null,
-    feedbackIngestEnabled: false,
-  } as HttpServerDeps;
+  };
 }
 
 describe('observability.http-contract-catalog — server.register parity', () => {

@@ -91,20 +91,6 @@ describe('api client', () => {
     });
   });
 
-  describe('submitFeedback', () => {
-    it('sends POST to /v1/feedback', async () => {
-      mockFetch({ ok: true, status: 201 }, { signal_id: 'sig-1', accepted: true });
-
-      const result = await api.submitFeedback({
-        query: 'wine',
-        entity_id: 'wine:1',
-        signal_type: 'click',
-        session_id: 'sess-1',
-      });
-      expect(result.accepted).toBe(true);
-    });
-  });
-
   describe('wineSearch', () => {
     it('execute sends POST to /v1/agent with body', async () => {
       mockFetch(
@@ -264,25 +250,6 @@ describe('api client', () => {
         messages: [{ role: 'user', content: '레드 와인' }],
         expected_session_version: 0,
       });
-    });
-  });
-
-  describe('watchlist', () => {
-    it('delete returns void on 204', async () => {
-      mockFetch({ ok: true, status: 204 });
-
-      const result = await api.watchlist.delete('wl-1');
-      expect(result).toBeUndefined();
-    });
-
-    it('injects X-Authenticated-Subject header', async () => {
-      mockFetch({ ok: true, status: 200 }, { entries: [], total: 0 });
-
-      await api.watchlist.list();
-
-      const [, options] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
-      expect(options.headers['X-Authenticated-Subject']).toBeDefined();
-      expect(typeof options.headers['X-Authenticated-Subject']).toBe('string');
     });
   });
 

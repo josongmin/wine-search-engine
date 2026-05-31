@@ -216,7 +216,7 @@ describe.skipIf(!HAS_REACHABLE_VESPA)('Vespa E2E — replay full-runtime fixture
       });
 
       expect(mode).toBe(classifySearchFixtureMode(fixture));
-      expect(assertionSummary.endpoint).toBe('/v1/search');
+      expect(assertionSummary.endpoint).toBe('/v1/search/hybrid');
       expect(assertionSummary.runtimeMode).toBe('full_runtime');
       expect(assertionSummary.usedLiveSnapshot).toBe(false);
       expect(assertionSummary.skipped).toBe(false);

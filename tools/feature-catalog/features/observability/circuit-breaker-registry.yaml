@@ -43,7 +43,7 @@ known_limitations:
   - "State persistence 없음 (restart 시 초기화) — 의도된 in-process 디자인"
 
 next_steps:
-  - "Wire `getRegistrySnapshot()` into `/metrics/degradation` Prom gauge exporter"
+  - "Wire `getRegistrySnapshot()` into the internal Prom gauge exporter"
   - "Optional: Redis-backed state persistence for warm restarts"
 
 tags:

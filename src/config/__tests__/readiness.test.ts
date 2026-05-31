@@ -4,7 +4,7 @@ import { parseEnv } from '../env.js';
 import { globalSilentSkipCounter } from '../../domain/observability/silent-skip-counters.js';
 
 describe('buildHealthRouteOptions', () => {
-  it('marks redis as required when startup features need it, even without watchlist delivery', () => {
+  it('does not register redis readiness from config alone when no runtime client is attached', () => {
     const config = parseEnv({
       NODE_ENV: 'test',
       REDIS_URL: 'redis://localhost:6379',
@@ -14,46 +14,26 @@ describe('buildHealthRouteOptions', () => {
 
     const health = buildHealthRouteOptions(config, {});
 
-    expect(health.readiness?.redis).toBeDefined();
-    expect(health.readiness?.redis?.required).toBe(true);
-    expect(health.readiness?.watchlist_runtime).toBeUndefined();
+    expect(health.readiness?.redis).toBeUndefined();
   });
 
-  it('marks redis as required for the default OpenAI injection judge cache when configured', () => {
+  it('marks redis as required when a runtime redis client is attached', () => {
     const config = parseEnv({
       NODE_ENV: 'test',
       REDIS_URL: 'redis://localhost:6379',
-      KILL_SWITCH_QUERY_CACHE: 'true',
-      KILL_SWITCH_INJECTION_JUDGE: 'false',
-      OPENAI_API_KEY: 'sk-test',
+      KILL_SWITCH_QUERY_CACHE: 'false',
+      KILL_SWITCH_INJECTION_JUDGE: 'true',
     });
 
-    const health = buildHealthRouteOptions(config, {});
-
-    expect(config.queryEntrySecurity.injectionProvider).toBe('openai');
-    expect(health.readiness?.redis).toBeDefined();
-    expect(health.readiness?.redis?.required).toBe(true);
-    expect(health.readiness?.watchlist_runtime).toBeUndefined();
-  });
-
-  it('marks redis as required when watchlist delivery is enabled', () => {
-    const config = parseEnv({
-      NODE_ENV: 'test',
-      REDIS_URL: 'redis://localhost:6379',
-      WATCHLIST_ENABLED: 'true',
-      WEBHOOK_SECRET: 'watchlist-secret-1234',
-    });
-
-    const health = buildHealthRouteOptions(config, {}, {
-      isRunning: () => true,
-      start: async () => {},
-      stop: async () => {},
+    const health = buildHealthRouteOptions(config, {
+      redisClient: {
+        isOpen: true,
+        ping: async () => 'PONG',
+      } as never,
     });
 
     expect(health.readiness?.redis).toBeDefined();
     expect(health.readiness?.redis?.required).toBe(true);
-    expect(health.readiness?.watchlist_runtime).toBeDefined();
-    expect(health.readiness?.watchlist_runtime?.required).toBe(true);
   });
 
   it('does not register a redis readiness check when no redis-backed features are enabled', () => {
@@ -66,7 +46,6 @@ describe('buildHealthRouteOptions', () => {
     const health = buildHealthRouteOptions(config, {});
 
     expect(health.readiness?.redis).toBeUndefined();
-    expect(health.readiness?.watchlist_runtime).toBeUndefined();
   });
 
   it('registers learned matcher readiness when the service is configured', () => {
@@ -86,7 +65,7 @@ describe('buildHealthRouteOptions', () => {
       NODE_ENV: 'test',
     });
 
-    const health = buildHealthRouteOptions(config, {}, undefined, {
+    const health = buildHealthRouteOptions(config, {}, {
       modelVersion: 'deterministic:structural-slot-v2',
       predict: () => ({
         drinkingWindowStart: 2020,
@@ -125,7 +104,6 @@ describe('buildHealthRouteOptions', () => {
     const health = buildHealthRouteOptions(
       config,
       {},
-      undefined,
       undefined,
       undefined,
       {
@@ -185,22 +163,6 @@ describe('buildHealthRouteOptions', () => {
     globalSilentSkipCounter.increment('blocker_zero_candidates');
     expect(health.readiness?.blocking_zero_candidates?.check()).toBe('down');
     globalSilentSkipCounter.reset();
-  });
-
-  it('marks watchlist runtime down when delivery is enabled but the runtime is not running', async () => {
-    const config = parseEnv({
-      NODE_ENV: 'test',
-      WATCHLIST_ENABLED: 'true',
-      WEBHOOK_SECRET: 'watchlist-secret-1234',
-    });
-
-    const health = buildHealthRouteOptions(config, {}, {
-      isRunning: () => false,
-      start: async () => {},
-      stop: async () => {},
-    });
-
-    await expect(health.readiness?.watchlist_runtime?.check?.()).resolves.toBe('down');
   });
 
   it('marks postgres down when the pool health query throws', async () => {

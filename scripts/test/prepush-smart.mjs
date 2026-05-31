@@ -84,20 +84,6 @@ console.log(
 
 npmRun('check:smart', changedFiles);
 
-const httpContractPatterns = [
-  /^src\/interface\/http\//,
-  /^test\/unit\/interface\/http\//,
-  /^src\/interface\/http\/routes\/__tests__\//,
-  /^scripts\/export-http-contract-manifest\.ts$/,
-  /^scripts\/export-http-openapi-bridge\.ts$/,
-  /^config\/vitest\/meta\.config\.ts$/,
-];
-
-if (changedFiles.some((file) => matches(file, httpContractPatterns))) {
-  console.log('[git:prepush:smart] HTTP contract-sensitive changes detected; running verify:http-contracts.');
-  npmRun('verify:http-contracts');
-}
-
 if (changedFiles.some((file) => matches(file, heavyPatterns))) {
   console.log('[git:prepush:smart] Search-pipeline-sensitive changes detected; running test:heavy.');
   npmRun('test:heavy');

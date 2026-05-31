@@ -722,7 +722,7 @@ async function executeSearch(goldenQuery: GoldenQuery, timeoutMs: number): Promi
   const requestBody = buildEvalSearchRequestBody(goldenQuery);
 
   try {
-    const response = await fetch(`${apiUrl}/v1/search`, {
+    const response = await fetch(`${apiUrl}/v1/search/hybrid`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestBody),

@@ -32,7 +32,7 @@ pnpm run dev                      # http://localhost:3000 — GET /health 참고
 pnpm run lint && pnpm run typecheck && pnpm run test   # 푸시 전
 ```
 
-`pnpm run bootstrap:smoke`는 임시로 `.env.example`을 `.env`로 복사해 `typecheck` → `build` → `verify:http-contracts` → 선택적 `migrate`까지 점검합니다. 마이그레이션은 **`.env.example`에 유효한 DB가 없으면 실패**하므로, 로컬에서는 `SKIP_MIGRATE=1`을 쓰거나 예시에 맞는 `DATABASE_URL`을 넣습니다. CI에서는 `SKIP_MIGRATE=1`로 DB 없이 실행합니다.
+`pnpm run bootstrap:smoke`는 임시로 `.env.example`을 `.env`로 복사해 `typecheck` → `build` → 선택적 `migrate`까지 점검합니다. 마이그레이션은 **`.env.example`에 유효한 DB가 없으면 실패**하므로, 로컬에서는 `SKIP_MIGRATE=1`을 쓰거나 예시에 맞는 `DATABASE_URL`을 넣습니다. CI에서는 `SKIP_MIGRATE=1`로 DB 없이 실행합니다.
 
 현재 레포에는 `ingest` / `kill-switch` 전용 CLI 진입점이 없습니다. 문서와 `package.json`에서도 제거해 “있는 척” 하지 않도록 맞췄고, ETL/운영 작업은 개별 `scripts/etl/*.ts` 또는 기존 HTTP/설정 경로를 사용합니다.
 
@@ -45,7 +45,7 @@ pnpm run lint && pnpm run typecheck && pnpm run test   # 푸시 전
 | 런타임 | **Node.js ≥ 22**, **ESM** (`"type": "module"`) |
 | 언어 | **TypeScript** — `strict`, `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess` |
 | HTTP | **Fastify 5**, **Zod**(스키마·라우트 계약), **Pino** 로깅 |
-| API 문서 | 계약 카탈로그 → **`GET /openapi.json`** (Zod 계약에서 OpenAPI 브리지) |
+| API 문서 | 계약 카탈로그 기반 HTTP surface (`src/interface/http/routes/http-route-contract-catalog.ts`) |
 | DB | **`pg`** — 엔터티, 별칭, 피드백, 제안, 워치리스트(해당 시) |
 | 캐시 / pub-sub | **`redis`** (공식 클라이언트, ioredis 아님) |
 | 검색 엔진 | **Vespa 8** — ANN + sparse; 앱 패키지는 **`vespa/app/`** |
@@ -66,7 +66,7 @@ pnpm run lint && pnpm run typecheck && pnpm run test   # 푸시 전
 | 레이어 | 책임 |
 |--------|------|
 | **Interface** (`src/interface/`) | Fastify 라우트, Zod 계약, 미들웨어, Claude 도구, CLI 진입점 |
-| **Application** (`src/application/`) | 유스케이스 오케스트레이션: 검색 파이프라인 단계, 워치리스트, 음주 가능 기간 파사드 |
+| **Application** (`src/application/`) | 유스케이스 오케스트레이션: 검색 파이프라인 단계, 음주 가능 기간 파사드, 에이전트 실행 |
 | **Domain** (`src/domain/`) | 순수 로직, 엔티티, 정책, **포트**(인터페이스) — 직접 I/O 없음 |
 | **Infrastructure** (`src/infrastructure/`) | **어댑터**: Postgres, Redis, Vespa 클라이언트, HTTP ML 클라이언트, ONNX, 텔레메트리 |
 
@@ -78,10 +78,7 @@ pnpm run lint && pnpm run typecheck && pnpm run test   # 푸시 전
 
 1. **`buildCoreContainerServices`** (`container-core.ts` / `container-core-builders.ts`) — 쿼리 플래너, 엔터티 리졸버(+ 캘리브레이터, 학습형 매처 HTTP), 후보 풀·퓨전, 랭커, 의사결정 엔진, 응답 빌더, mixed 솔버, Vespa 검색 인덱스, 임베딩·리랭커 HTTP, 음주 가능 기간 예측기 등.
 2. **`buildFeatureContainerServices`** (`container-features.ts` + `container-usecases.ts`) — search / hybrid / resolve / interpret / replay / batch / 분해 검색, 음주 가능 기간 유스케이스, 적응형 Claude 도구 실행기, 선택적 eval 러너.
-3. **`buildWatchlistContainerServices`** — 워치리스트 서비스 + 선택적 Redis 전달 런타임.
-4. **`buildLearningContainerServices`** (`container-learning.ts`) — `PgFeedbackStore`, `PgProposalStore`, `FeedbackProcessor`, `AliasProposer`(PG 사용 시 **`aliases`** 대비 별칭 중복 검사).
-
-`main.ts`는 **런타임 핸들**(Postgres 풀, Redis 클라이언트, 워치리스트 팩토리)을 만든 뒤 **`createContainer(config, runtime)`**, 그다음 **`buildHealthRouteOptions`**의 준비 상태 옵션으로 **`createServer(container)`**를 호출합니다.
+`main.ts`는 **런타임 핸들**(Postgres 풀, Redis 클라이언트)을 만든 뒤 **`createContainer(config, runtime)`**, 그다음 **`buildHealthRouteOptions`**의 준비 상태 옵션으로 **`createServer(container)`**를 호출합니다.
 
 ---
 
@@ -95,18 +92,15 @@ pnpm run lint && pnpm run typecheck && pnpm run test   # 푸시 전
 |--------|------|------------|
 | GET | `/health` | 생존(liveness) |
 | GET | `/ready` | 준비 상태 프로브 |
-| GET | `/openapi.json` | 생성된 API 설명 |
-| POST | `/v1/search` | 기본 검색(비교로 분해될 수 있음) |
-| POST | `/v1/batch-search` | 배치 검색 |
-| POST | `/v1/search/replay` | 고정 스냅샷 리플레이(불일치 시 409) |
-| POST | `/v1/search/interpret` | **쿼리 플랜만** — 검색 없음 |
-| POST | `/v1/entity/resolve` | 엔터티 해소만 |
 | POST | `/v1/search/hybrid` | 하이브리드 검색 경로 강제 |
-| GET/POST | `/v1/claude-tools` | 에이전트 도구 나열·실행 |
-| POST/GET/DELETE | `/v1/watchlist`, `/v1/watchlist/:id`, … | 워치리스트 |
-| POST | `/v1/feedback` | 학습 루프 피드백(비활성 시 503 가능) |
+| POST | `/v1/search/semantic` | dense-only 검색 경로 강제 |
+| POST | `/v1/search/lexical` | sparse/BM25-only 검색 경로 강제 |
+| POST | `/v1/lookup/wine` | 단일 와인 엔터티 해소 |
+| POST | `/v1/agent` | single-shot agent 실행 |
+| POST | `/v1/agent/sessions` | 서버 보관형 agent 세션 생성 |
+| POST | `/v1/agent/sessions/:sessionId/turns` | agent 세션 turn 추가 |
 
-### 일반 흐름: `POST /v1/search`
+### 일반 흐름: `POST /v1/search/hybrid`
 
 상위 단계(`search.usecase.ts`의 **`SearchUseCase.execute`** 참고):
 
@@ -120,7 +114,7 @@ pnpm run lint && pnpm run typecheck && pnpm run test   # 푸시 전
 
 ```mermaid
 flowchart TD
-  A[POST /v1/search] --> B[Pre-route: security + plan]
+  A[POST /v1/search/hybrid] --> B[Pre-route: security + plan]
   B --> C{Route}
   C -->|entity| D[Resolver]
   C -->|hybrid| E[CandidatePool + Ranker]
@@ -132,10 +126,10 @@ flowchart TD
 
 ### 보조 진입점
 
-- **`/v1/search/interpret`** — 플래너만; Vespa 없이 플랜 디버깅에 유용.
-- **`/v1/entity/resolve`** — 전체 검색 응답 조립 없이 리졸버 경로만.
 - **`/v1/search/hybrid`** — 검색과 동일 오케스트레이션이나 **하이브리드만** 강제 실행.
-- **`/v1/feedback`** — Postgres + 수집이 켜져 있을 때 **`FeedbackSignal`** 저장.
+- **`/v1/search/semantic`** — dense-only 경로를 강제해 lexical 후보군을 배제.
+- **`/v1/search/lexical`** — sparse/BM25-only 경로를 강제해 임베딩 후보군을 배제.
+- **`/v1/lookup/wine`** — discovery 대신 단일 canonical wine 해소만 수행.
 
 ---
 
@@ -271,13 +265,13 @@ flowchart TD
 | 설정 | `pnpm run …` | 실행 내용 |
 |------|-------------|-----------|
 | `config/vitest/unit.config.ts` | `test`, `test:unit` | `test/unit/**/*.test.ts` + `src/**/__tests__/**/*.test.ts` + 선택 `src/__tests__` |
-| `config/vitest/integration.config.ts` | `test:integration` | 명시 목록: HTTP 서버, 에러 핸들러, 공개 쿼리 보안, resolve 라우트, 계약 레지스트리, interpret 스키마 등 |
-| `config/vitest/e2e.config.ts` | `test:e2e:fast`, `test:e2e`, `test:e2e:inmemory` | 핵심 인메모리 E2E 회귀군: search-api search/secondary/ops, watchlist, infrastructure invariants/contracts, edge/hard scenario, mixed-search 등 |
-| `config/vitest/e2e.runtime.config.ts` | `test:e2e:runtime` | 런타임/품질 성격이 강한 `user-journeys`, `golden-set`, `specialized-modes-quality` |
-| `config/vitest/e2e.smoke.config.ts` | `test:e2e:contract`, `test:e2e:smoke` | **초소형** PR 스모크: `search-api.search`, `search-api.secondary`, `search-api.ops`, `schema-contract`, `batch-search-api`, `server-protocol`만 |
+| `config/vitest/integration.config.ts` | `test:integration` | `test/integration/**/*.test.ts` + 선택 `src/**/integration` 레일 |
+| `config/vitest/e2e.config.ts` | `test:e2e:fast`, `test:e2e`, `test:e2e:inmemory` | 핵심 인메모리 E2E 회귀군: primitive search, ops/protocol, edge/hard scenario, mixed-search, canonical `/v1/agent` happy-path |
+| `config/vitest/e2e.runtime.config.ts` | `test:e2e:runtime` | 런타임/품질 성격이 강한 `user-journeys`, `golden-set`, `query-family-release-gate`, `specialized-modes-quality` |
+| `config/vitest/e2e.smoke.config.ts` | `test:e2e:contract`, `test:e2e:smoke` | **초소형** PR 스모크: `search-api.search`, `search-api.ops`, `schema-contract`, `server-protocol`, `cli-process` |
+| `config/vitest/e2e.wine-search.config.ts` | 직접 `vitest run --config ...` | `/v1/agent` 전용 hell/concurrency/perf E2E 묶음 |
 | `config/vitest/e2e.vespa.config.ts` | `test:e2e:vespa` (`scripts/run-vespa-e2e.sh`) | 전체 `test/e2e/vespa/**/*.test.ts`; `VESPA_URL` 설정(기본 `http://localhost:18080`) |
-| `config/vitest/watchlist.config.ts` | `test:watchlist` | 워치리스트 도메인 + HTTP + Redis/웹훅 + 계약 매니페스트 겹침 |
-| `config/vitest/quality.config.ts` | `test:quality` | 골든 세트, 사용자 여정, specialized quality, 의사결정 유틸, 학습 플라이휠, eval 단위 테스트 등 |
+| `config/vitest/quality.config.ts` | `test:quality` | 골든 세트, 사용자 여정, specialized quality, decision utility, eval 단위 테스트 |
 
 ### 인메모리 E2E (`test/e2e/*.test.ts`, `test:e2e:fast`)
 
@@ -285,18 +279,18 @@ flowchart TD
 
 | 스위트 파일 | 시나리오(요약) |
 |-------------|----------------|
-| **`search-api.search.test.ts`** + **`search-api.secondary.test.ts`** | RFC-014 **핵심 검색 계약**: `POST /v1/search` 본체와 `interpret`/`resolve`/`replay`/`hybrid` |
+| **`search-api.search.test.ts`** | primitive search + lookup 계약: `POST /v1/search/{hybrid,semantic,lexical}` + `POST /v1/lookup/wine` |
 | **`search-api.ops.test.ts`** | `/health`, `/ready` ops endpoint 계약 |
-| **`batch-search-api.test.ts`** | 배치 검색 요청·응답 형태, 부분 실패 |
+| **`wine-search-api.test.ts`** | canonical `/v1/agent` single-shot 계약: happy path, validation, abort, 응답 봉투 |
 | **`schema-contract.test.ts`** | 요청·응답 **Zod** 형태 vs 픽스처 |
+| **`cli-process.test.ts`** | CLI 프로세스 표면 smoke |
 | **`server-protocol.test.ts`** | 전역 프로토콜(CORS 훅, content-type 등) |
 | **`golden-set.test.ts`** | **검색 품질** — 지명 와인에 대해 top-k에 기대 `entity_id`(EN/KO), 순서는 완화 |
-| **`user-journeys.test.ts`** | **엔드투엔드 여정**: 다국어 동일 엔터티, 악센트 변형, 모호성, mixed 경로, 리플레이, 실패 처리 |
+| **`user-journeys.test.ts`** | **엔드투엔드 여정**: 다국어 동일 엔터티, 악센트 변형, 모호성, mixed 경로, 실패 처리 |
 | **`mixed-search.test.ts`** | mixed 경로 **크래시 없음**; 시드 하네스에서 비어 있지 않은 결과 |
 | **`realistic-scenarios.test.ts`**, **`edge-cases.input.test.ts`**, **`edge-cases.protocol.test.ts`**, **`hard-scenarios.test.ts`** | 넓은 쿼리 형태·엣지 |
 | **`response-invariants.test.ts`** | 응답 필드·불변식 |
-| **`claude-tools-api.test.ts`** | Claude 도구 나열/실행 HTTP |
-| **`watchlist-api.test.ts`** | 워치리스트 CRUD / 전달 |
+| **`wine-search-api-hell-*.test.ts`** | `/v1/agent` adversarial, HTTP boundary, concurrency, combo, perf |
 | **`infrastructure.invariants.test.ts`** | rate-limit, request-id, replay determinism, concurrent isolation |
 | **`infrastructure.contracts.test.ts`** | content-type, success envelope, RFC-014 / RFC-015 error contract |
 
@@ -346,7 +340,6 @@ flowchart TD
 | 전체 인메모리 e2e | `pnpm run test:e2e:fast` |
 | 런타임/품질 e2e | `pnpm run test:e2e:runtime` |
 | 최소 계약 스모크 | `pnpm run test:e2e:contract` |
-| 워치리스트 슬라이스 | `pnpm run test:watchlist` |
 | 품질 + eval 단위 | `pnpm run test:quality` |
 | 커버리지 리포트 | `pnpm run test:coverage` |
 | Vespa(Docker 기동) | `pnpm run test:e2e:vespa` |
@@ -374,21 +367,18 @@ flowchart TD
 - **쿼리 새니타이제이션**, **쿼리 진입 보안**(인젝션·남용 휴리스틱, 선택적 LLM 판정 경로).
 - **속도 제한** (`@fastify/rate-limit`), 구조화된 **에러 계약**(RFC-014 스타일), snake_case 응답 훅.
 
-### 데이터·학습(Postgres 사용 시)
+### 데이터·ETL(Postgres 사용 시)
 
-- **피드백 수집** — `POST /v1/feedback`이 학습 루프용 시그널을 저장; **`KILL_SWITCH_LEARNING`** 또는 DB 불가 시 비활성 (`feedback.route.ts`, `PgFeedbackStore`).
-- **학습 서비스** — 피드백 프로세서, 별칭 제안자, 제안/피드백 스토어 (`domain/learning/`, `container-learning.ts`). **별칭 중복 검사**는 풀이 있으면 live `aliases` 테이블 사용.
 - **ETL** — Silver/NDJSON 파이프라인, 별칭 생성, **규칙 기반 KO 음역** 배치 작업 (`scripts/etl/generate-transliteration-aliases.ts`, `Transliterator`), Vespa 인덱싱 헬퍼 (`scripts/etl/index-to-vespa.ts`, …).
 
 ### 통합
 
-- **워치리스트** — 도메인 + HTTP CRUD + 설정 시 Redis 전달 런타임 (`application/watchlist/`, `infrastructure/watchlist/`).
 - **Claude 도구** — 에이전트 주도 검색용 도구 실행기 + HTTP (`interface/claude-tools/`).
 - **Eval·품질** — 오프라인 eval, 노이즈 엔터티 eval, 베이스라인 회귀 스크립트 (`scripts/eval/`), 스플릿 검증; CI는 스모크 + 베이스라인 검사.
 
 ### 인프라 어댑터(일부)
 
-- Postgres 레포지토리(별칭, 블로킹, 피드백, 제안, 워치리스트 저장 등).
+- Postgres 레포지토리(별칭, 블로킹, 캘리브레이션, 임계값 저장 등).
 - Vespa 클라이언트, 임베딩 HTTP 클라이언트, 리랭커 HTTP 클라이언트, 학습형 매처 HTTP 어댑터.
 - 기동 시 eval을 위한 선택적 eval 러너 배선 (`infrastructure/eval/`).
 
@@ -420,15 +410,15 @@ flowchart TD
 | 경로 | 책임 |
 |------|------|
 | `src/main.ts` | 프로세스 진입; 설정, 런타임 핸들, 컨테이너, HTTP 서버 로드 |
-| `src/config/` | `env.ts`, **구성 루트** (`container.ts`, `container-core.ts`, `container-features.ts`, `container-learning.ts`, `container-watchlist.ts`, …), 준비 상태 |
-| `src/domain/` | 바운디드 컨텍스트: **query**, **resolver**, **alias**, **retrieval**, **ranking**, **decision**, **response**, **mixed**, **security**, **watchlist**, **learning**, **entity**, **ingestion**, **evaluation**, **performance**, **drinking-window**, **attribute**, **shared**(타입, 에러, 유틸) |
-| `src/application/` | **Search**(오케스트레이션 + 분할 헬퍼), **resolve**, **hybrid**, **batch**, **replay**, **interpret**, **drinking-window**, **watchlist** 유스케이스 |
-| `src/infrastructure/` | **어댑터**(Postgres, HTTP ML), **db** + 마이그레이션, **vespa/**, **ml/**(ONNX 음주 가능 기간), 공유 클라이언트 **redis**, **watchlist**, **telemetry**, **eval** |
+| `src/config/` | `env.ts`, **구성 루트** (`container.ts`, `container-core.ts`, `container-features.ts`, …), 준비 상태 |
+| `src/domain/` | 바운디드 컨텍스트: **query**, **resolver**, **alias**, **retrieval**, **ranking**, **decision**, **response**, **mixed**, **security**, **entity**, **ingestion**, **evaluation**, **performance**, **drinking-window**, **attribute**, **shared**(타입, 에러, 유틸) |
+| `src/application/` | **Search**(오케스트레이션 + 분할 헬퍼), **resolve**, **hybrid**, **batch**, **replay**, **interpret**, **drinking-window**, **wine-search/agent** 유스케이스 |
+| `src/infrastructure/` | **어댑터**(Postgres, HTTP ML), **db** + 마이그레이션, **vespa/**, **ml/**(ONNX 음주 가능 기간), 공유 클라이언트 **redis**, **telemetry**, **eval** |
 | `src/interface/` | **http/** 라우트, 스키마, 미들웨어, 에러; **claude-tools/**; **cli/** |
 
 ### HTTP 라우트(개념)
 
-**`src/interface/http/routes/http-route-contract-catalog.ts`**에 선언(`route-contracts.ts`와 함께 근원). search, batch, interpret, resolve, hybrid, replay, watchlist, **feedback**, Claude 도구, health, OpenAPI JSON 포함.
+**`src/interface/http/routes/http-route-contract-catalog.ts`**에 선언(`route-contracts.ts`와 함께 근원). health/ready, primitive search 4종, agent surface만 현재 공개 HTTP surface에 포함됩니다.
 
 ### 테스트
 
@@ -440,7 +430,7 @@ Vitest 레인, 커버리지 범위, 파일별 E2E 의도는 위 **테스트·커
 | `test/unit/` | 집중 단위 스위트 |
 | `test/integration/` | 서버, HTTP 계약, 스키마, 선택 정책 테스트 |
 | `test/e2e/` | 인메모리 HTTP e2e(`inject`) + 라이브 검색용 `vespa/` |
-| `config/vitest/*.config.ts` | 분리 설정: 단위, 통합, e2e, 스모크, Vespa, 워치리스트, 품질 |
+| `config/vitest/*.config.ts` | 분리 설정: 단위, 통합, e2e, 스모크, Vespa, 품질 |
 
 ---
 
@@ -483,7 +473,6 @@ cp .env.example .env
 | ML HTTP | `EMBEDDING_SERVICE_URL`, 선택 `COHERE_API_KEY`/`COHERE_RERANK_MODEL`, `RERANK_BLEND_SCALE`, 선택 `LEARNED_MATCHER_SERVICE_URL` |
 | Anthropic | `ANTHROPIC_API_KEY`(선택 기능) |
 | 음주 가능 기간 | 기본 deterministic runtime, 선택 `DRINKING_WINDOW_MODEL_DIR`(ONNX override) |
-| 워치리스트 | `WATCHLIST_ENABLED`, `WEBHOOK_SECRET` |
 | 킬 스위치 | `KILL_SWITCH_ALIAS_OVERLAY`, `KILL_SWITCH_LEARNING`, `KILL_SWITCH_DENSE_RETRIEVAL`, `KILL_SWITCH_INJECTION_JUDGE`, `KILL_SWITCH_QUERY_CACHE` |
 | 테스트 | `PG_TEST_URL` — 테스트 Compose에서는 `postgresql://wine:wine_test@localhost:5433/wine_engine_test` 등 |
 
@@ -561,8 +550,8 @@ pnpm run migrate
 
 | 영역 | 명령 |
 |------|------|
-| 품질 | `pnpm run lint`, `pnpm run typecheck`, `pnpm run test`, `test:coverage`, `test:unit`, `test:integration`, `test:watchlist`, `test:e2e:*`, `test:quality*`, `test:verification:noisy`, `test:verification:core`, `test:verification:vespa` |
-| HTTP 계약 | `pnpm run contracts:http`, `contracts:http:openapi-bridge` |
+| 품질 | `pnpm run lint`, `pnpm run typecheck`, `pnpm run test`, `test:coverage`, `test:unit`, `test:integration`, `test:e2e:*`, `test:quality*`, `test:verification:noisy`, `test:verification:core`, `test:verification:vespa` |
+| HTTP 계약 | `pnpm run contracts:http` |
 | Eval | `pnpm run eval`, `eval:offline:*`, `eval:noisy*`, `eval:sota:parallel` |
 | ETL | `pnpm run etl:transliteration`, 추가 `scripts/etl/*.ts`(별칭, index-to-vespa, validate-silver, …) |
 | 운영 | `pnpm run bootstrap:smoke`, `pnpm run migrate` (`.env` DB), `pnpm run migrate:local-docker` (Docker PG), `verify:drinking-window-model`, `vivino:bronze`, `finetuning:prepare` |
@@ -573,18 +562,18 @@ pnpm run migrate
 
 <h2 id="ci-github-actions">CI (GitHub Actions)</h2>
 
-잡에 **lint**, **typecheck**, **unit**, **integration**, **watchlist**, **e2e fast**, **verification-core** (`test:verification:noisy`: gate 1회 + 베이스라인 assert만), **verify-splits**, 이후 **build** + **Docker 이미지 빌드** 포함. 공통 단계는 **`.github/actions/setup-node-ci`**(checkout + Node 22 + `pnpm install --frozen-lockfile`). **수동 실행:** Actions에서 `workflow_dispatch`. 노이즈 스모크 JSON은 로컬 `eval:noisy:smoke`. **`.github/workflows/ci.yml`** 참고.
+잡에 **lint**, **typecheck**, **unit**, **integration**, **e2e fast**, **verification-core** (`test:verification:noisy`: gate 1회 + 베이스라인 assert만), **verify-splits**, 이후 **build** + **Docker 이미지 빌드** 포함. 공통 단계는 **`.github/actions/setup-node-ci`**(checkout + Node 22 + `pnpm install --frozen-lockfile`). **수동 실행:** Actions에서 `workflow_dispatch`. 노이즈 스모크 JSON은 로컬 `eval:noisy:smoke`. **`.github/workflows/ci.yml`** 참고.
 
 ---
 
 <h2 id="http-surface-quick-reference">HTTP 표면(빠른 참고)</h2>
 
-**전체 라우트 목록**(메서드·경로 전부): [HTTP API: 진입점·요청 흐름](#http-api-entry-points--request-flow). **`GET /openapi.json`** — 생성된 계약 브리지.
+**전체 라우트 목록**(메서드·경로 전부): [HTTP API: 진입점·요청 흐름](#http-api-entry-points--request-flow).
 
 | 주제 | 비고 |
 |------|------|
 | 준비 상태 | `GET /ready` — `src/config/readiness.ts`의 의존성 프로브 |
-| 피드백 | `POST /v1/feedback` — 수집 비활성, Postgres 없음, 또는 **`KILL_SWITCH_LEARNING`** 시 **503** |
+| agent | `/v1/agent`, `/v1/agent/sessions`, `/v1/agent/sessions/:sessionId/turns` |
 | 음주 가능 기간 | ONNX 번들: **`docs/drinking-window-model-bundle.md`** |
 
 ---

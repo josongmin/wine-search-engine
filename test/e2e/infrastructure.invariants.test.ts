@@ -33,7 +33,7 @@ function injectSearch(
 ) {
   return server.app.inject({
     method: 'POST',
-    url: '/v1/search',
+    url: '/v1/search/hybrid',
     headers,
     payload: JSON.stringify(payload),
   });

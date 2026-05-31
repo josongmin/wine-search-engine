@@ -171,12 +171,6 @@ describe('parseEnv invariants', () => {
     expect('model' in config.embedding).toBe(false);
   });
 
-  it('WATCHLIST_ENABLED=true without WEBHOOK_SECRET throws', () => {
-    expect(() => parseEnv({ WATCHLIST_ENABLED: 'true' })).toThrowError(
-      /WATCHLIST_ENABLED requires WEBHOOK_SECRET/,
-    );
-  });
-
   it('defaults SEARCH_SNAPSHOT_REQUIRE_ACTIVE_LTR_FOR_RUNTIME to true', () => {
     const config = parseEnv({});
     expect(config.searchSnapshot.requireActiveLtrForRuntime).toBe(true);

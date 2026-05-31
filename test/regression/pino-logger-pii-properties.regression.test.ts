@@ -93,7 +93,6 @@ async function buildTestLogger(): Promise<{ logger: pino.Logger; sink: MemorySin
           'config.openai.apiKeys',
           'config.anthropic.apiKey',
           'config.cohere.apiKey',
-          'config.watchlist.webhookSecret',
           'config.http.debugSecret',
           '*.password',
           '*.apiKey',

@@ -68,6 +68,17 @@ export interface SearchRequest {
    * (architecture-decision §2.2 — primitive selector is path, not body).
    */
   readonly retrievalLane?: 'hybrid' | 'semantic_only' | 'lexical_only' | undefined;
+  /**
+   * Internal primitive-route authority marker set only by dedicated entry
+   * surfaces whose URL path semantically fixes the execution contract.
+   *
+   * Current use:
+   * - `lookup_wine` → `/v1/lookup/wine` exact canonical-entity surface
+   *
+   * NEVER populate from a request body. This is an application-internal
+   * dispatch signal owned by the front-door adapter.
+   */
+  readonly primitiveRoute?: 'lookup_wine' | undefined;
   /** Maximum number of result items to return (batch / caller-specified cap). */
   readonly limit?: number | undefined;
   /**

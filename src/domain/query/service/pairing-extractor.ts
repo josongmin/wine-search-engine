@@ -221,6 +221,56 @@ export const PAIRING_PATTERNS: Record<PairingTag, RegExp[]> = {
   ],
 };
 
+const PAIRING_CANONICAL_SPECIFICITY: readonly PairingTag[] = [
+  'hard_cheese',
+  'soft_cheese',
+  'white_fish',
+  ...PAIRING_TAXONOMY.filter((tag) =>
+    tag !== 'hard_cheese'
+    && tag !== 'soft_cheese'
+    && tag !== 'white_fish',
+  ),
+];
+
+const PAIRING_FILTER_SURFACE_VARIANTS: Readonly<Record<PairingTag, readonly string[]>> = {
+  beef: ['beef', 'steak', 'wagyu beef', 'braised beef'],
+  lamb: ['lamb'],
+  pork: ['pork', 'charcuterie', 'prosciutto', 'salami'],
+  chicken: ['chicken'],
+  duck: ['duck'],
+  game: ['game', 'wild boar', 'venison', 'braised meat'],
+  salmon: ['salmon'],
+  tuna: ['tuna'],
+  shellfish: ['shellfish', 'seafood', 'oyster', 'oysters', 'shrimp', 'prawn', 'lobster', 'crab', 'mussel', 'clam', 'scallop'],
+  white_fish: ['white fish', 'sushi', 'sashimi', 'raw fish'],
+  spicy_food: ['spicy food'],
+  mushroom: ['mushroom'],
+  truffle: ['truffle'],
+  cheese: ['cheese'],
+  hard_cheese: ['hard cheese', 'aged cheese', 'aged parmesan', 'parmesan', 'cheddar', 'gruyere', 'manchego'],
+  soft_cheese: ['soft cheese', 'goat cheese', 'brie', 'camembert', 'chevre', 'mozzarella'],
+  pasta: ['pasta'],
+  risotto: ['risotto'],
+  grilled_vegetables: ['grilled vegetables'],
+  aperitif: ['aperitif', 'light appetizers'],
+  dessert: ['dessert', 'fruit desserts'],
+  solo_drinking: ['solo drinking'],
+};
+
+function uniquePairingValues(values: readonly string[]): readonly string[] {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (trimmed.length === 0 || seen.has(trimmed)) {
+      continue;
+    }
+    seen.add(trimmed);
+    unique.push(trimmed);
+  }
+  return unique;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Negation / exclusion scope detection
 // ─────────────────────────────────────────────────────────────────────────────
@@ -367,4 +417,30 @@ export function extractPairingConstraintsWithExclusions(query: string): PairingE
  */
 export function extractAllPairingConstraints(query: string): PairingTag[] {
   return extractPairingConstraintsWithExclusions(query).included;
+}
+
+export function normalizePairingComparableValue(value: string): PairingTag | undefined {
+  const tags = extractAllPairingConstraints(value);
+  if (tags.length === 0) {
+    return undefined;
+  }
+  if (tags.length === 1) {
+    return tags[0];
+  }
+  return PAIRING_CANONICAL_SPECIFICITY.find((tag) => tags.includes(tag)) ?? tags[0];
+}
+
+export function expandPairingFilterSurfaceValues(value: string): readonly string[] {
+  const canonical = normalizePairingComparableValue(value);
+  if (canonical === undefined) {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? [trimmed] : [];
+  }
+  return PAIRING_FILTER_SURFACE_VARIANTS[canonical] ?? [canonical];
+}
+
+export function expandPairingFilterSurfaceValueList(values: readonly string[]): readonly string[] {
+  return uniquePairingValues(
+    values.flatMap((value) => expandPairingFilterSurfaceValues(value)),
+  );
 }

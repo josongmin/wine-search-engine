@@ -2,6 +2,7 @@
 set -euo pipefail
 
 PUBLIC_PORT="${PUBLIC_PORT:-9011}"
+UPSTREAM_HOST="${UPSTREAM_HOST:-127.0.0.1}"
 UPSTREAM_PORT="${UPSTREAM_PORT:-4000}"
 SERVER_NAMES="${SERVER_NAMES:-asommguide.shop shop.asommguide.com}"
 CERT_BASE="${CERT_BASE:-/etc/letsencrypt/live/asommguide.shop}"
@@ -32,7 +33,7 @@ server {
     error_log /var/log/nginx/wine-search-engine-error.log;
 
     location / {
-        proxy_pass http://127.0.0.1:${UPSTREAM_PORT};
+        proxy_pass http://${UPSTREAM_HOST}:${UPSTREAM_PORT};
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -53,7 +54,7 @@ cat <<EOF
 Provisioned nginx public route.
 
 - public port: ${PUBLIC_PORT}
-- upstream: 127.0.0.1:${UPSTREAM_PORT}
+- upstream: ${UPSTREAM_HOST}:${UPSTREAM_PORT}
 - server names: ${SERVER_NAMES}
 - config: ${CONF_PATH}
 EOF

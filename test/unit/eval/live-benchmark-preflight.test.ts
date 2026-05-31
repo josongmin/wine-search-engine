@@ -8,9 +8,9 @@ import {
 
 describe('live-benchmark-preflight pure helpers', () => {
   describe('resolveBenchmarkSearchEndpoint', () => {
-    it('public lane resolves to /v1/search', () => {
+    it('public lane resolves to /v1/search/hybrid', () => {
       expect(resolveBenchmarkSearchEndpoint('http://localhost:3000', 'public')).toBe(
-        'http://localhost:3000/v1/search',
+        'http://localhost:3000/v1/search/hybrid',
       );
     });
 

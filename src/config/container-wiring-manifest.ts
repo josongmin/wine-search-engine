@@ -30,8 +30,6 @@ export type SubContainerId =
   | 'usecases'
   | 'aux-features'
   | 'features'
-  | 'watchlist'
-  | 'learning'
   | 'container';
 
 /** Ports surfaced on the root `Container` type. Keep alphabetised. */
@@ -48,7 +46,6 @@ export type ContainerPortId =
   | 'entityLookup'
   | 'entityResolver'
   | 'evalRunner'
-  | 'feedbackIngestEnabled'
   | 'hybridUseCase'
   | 'interpretUseCase'
   | 'mixedSolver'
@@ -57,9 +54,7 @@ export type ContainerPortId =
   | 'resolveUseCase'
   | 'responseBuilder'
   | 'runtimeReadiness'
-  | 'searchUseCase'
-  | 'watchlistRuntime'
-  | 'watchlistService';
+  | 'searchUseCase';
 
 interface SubContainerSpec {
   readonly id: SubContainerId;
@@ -129,23 +124,10 @@ export const WIRING_MANIFEST: readonly SubContainerSpec[] = [
     dependsOn: ['core', 'usecases', 'aux-features'],
     produces: [],
   },
-
-  // Watchlist + learning are independent slices wired directly into the root.
-  {
-    id: 'watchlist',
-    dependsOn: [],
-    produces: ['watchlistService', 'watchlistRuntime'],
-  },
-  {
-    id: 'learning',
-    dependsOn: [],
-    produces: ['feedbackIngestEnabled'],
-  },
-
   // Root composition.
   {
     id: 'container',
-    dependsOn: ['core', 'features', 'watchlist', 'learning'],
+    dependsOn: ['core', 'features'],
     produces: [],
   },
 ] as const;

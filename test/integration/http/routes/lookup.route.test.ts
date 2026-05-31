@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { errorHandler } from '../../../../src/interface/http/middleware/error-handler.js';
 import { registerRequestContext } from '../../../../src/interface/http/middleware/request-context.js';
-import { registerLookupRoute } from '../../../../src/interface/http/routes/lookup.route.js';
+import { registerLookupWineRoute } from '../../../../src/interface/http/routes/primitive-search.route.js';
 import type { SearchRouteDeps } from '../../../../src/interface/http/routes/route-deps.js';
 import type { SearchResponseV1 } from '../../../../src/domain/response/model/search-response.js';
 import type { ComparisonSearchResponse } from '../../../../src/domain/response/model/comparison-response.js';
@@ -77,9 +77,6 @@ function makeDeps(executeMock = vi.fn().mockResolvedValue(buildEmptyLookupRespon
     searchUseCase: {
       execute: executeMock,
     },
-    decomposedSearchUseCase: {
-      execute: vi.fn(),
-    },
   };
 }
 
@@ -92,7 +89,7 @@ async function post(app: FastifyInstance, url: string, payload: unknown) {
   });
 }
 
-describe('POST /v1/search/lookup', () => {
+describe('POST /v1/lookup/wine', () => {
   let app: FastifyInstance;
   let deps: SearchRouteDeps;
 
@@ -101,7 +98,7 @@ describe('POST /v1/search/lookup', () => {
     registerRequestContext(app);
     app.setErrorHandler(errorHandler);
     deps = makeDeps();
-    registerLookupRoute(app, deps);
+    registerLookupWineRoute(app, deps);
     await app.ready();
   });
 
@@ -109,11 +106,17 @@ describe('POST /v1/search/lookup', () => {
     await app.close();
   });
 
-  it('forces retrieval_mode to "entity" regardless of caller-provided fields', async () => {
+  it('forces retrieval_mode to "entity" regardless of caller-provided legacy fields', async () => {
     // The lookup endpoint is entity-only. The route mapper drops any caller
     // attempt to set retrieval_mode and always injects 'entity'. This is the
     // single most important invariant of this endpoint.
-    const response = await post(app, '/v1/search/lookup', { query: 'Opus One 2018' });
+    const response = await post(app, '/v1/lookup/wine', {
+      query: 'Opus One 2018',
+      options: {
+        mode: 'hybrid',
+        explain: true,
+      },
+    });
 
     expect(response.statusCode).toBe(200);
     expect(deps.searchUseCase.execute).toHaveBeenCalledTimes(1);
@@ -128,6 +131,19 @@ describe('POST /v1/search/lookup', () => {
     });
   });
 
+  it('forwards the same observability execution options shape as the discovery primitives', async () => {
+    const response = await post(app, '/v1/lookup/wine', { query: 'Opus One 2018' });
+
+    expect(response.statusCode).toBe(200);
+    expect(deps.searchUseCase.execute).toHaveBeenCalledTimes(1);
+    const args = (deps.searchUseCase.execute as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(args?.[2]).toMatchObject({
+      abortSignal: expect.any(AbortSignal),
+      stageTimer: expect.any(Object),
+    });
+    expect(args?.[2]).toHaveProperty('debugRequest');
+  });
+
   it('returns 200 with empty results when the entity is not found (not 404)', async () => {
     // Lookup never returns 404 — a miss surfaces as the SearchResponseV1
     // empty-result + failure_reason envelope. Callers detect "not found" via
@@ -136,7 +152,7 @@ describe('POST /v1/search/lookup', () => {
       .fn()
       .mockResolvedValue(buildEmptyLookupResponse({ failureReason: 'NO_RESULTS' }));
 
-    const response = await post(app, '/v1/search/lookup', { query: 'this-wine-does-not-exist-9999' });
+    const response = await post(app, '/v1/lookup/wine', { query: 'this-wine-does-not-exist-9999' });
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
@@ -149,7 +165,7 @@ describe('POST /v1/search/lookup', () => {
     // them on the way to the use case (entity alias resolution happens
     // downstream of HTTP).
     const koreanQuery = `${SHA_NFC} 2016`;
-    const response = await post(app, '/v1/search/lookup', { query: koreanQuery });
+    const response = await post(app, '/v1/lookup/wine', { query: koreanQuery });
 
     expect(response.statusCode).toBe(200);
     const args = (deps.searchUseCase.execute as ReturnType<typeof vi.fn>).mock.calls[0];
@@ -168,8 +184,8 @@ describe('POST /v1/search/lookup', () => {
     // Both collapse to the same NFC form.
     expect(SHA_NFD.normalize('NFC')).toBe(SHA_NFC);
 
-    await post(app, '/v1/search/lookup', { query: SHA_NFC });
-    await post(app, '/v1/search/lookup', { query: SHA_NFD });
+    await post(app, '/v1/lookup/wine', { query: SHA_NFC });
+    await post(app, '/v1/lookup/wine', { query: SHA_NFD });
 
     const calls = (deps.searchUseCase.execute as ReturnType<typeof vi.fn>).mock.calls;
     expect(calls).toHaveLength(2);
@@ -181,7 +197,7 @@ describe('POST /v1/search/lookup', () => {
   });
 
   it('rejects missing query field with 400 + RFC-014 VALIDATION_ERROR envelope', async () => {
-    const response = await post(app, '/v1/search/lookup', {});
+    const response = await post(app, '/v1/lookup/wine', {});
 
     expect(response.statusCode).toBe(400);
     const body = response.json();
@@ -193,7 +209,7 @@ describe('POST /v1/search/lookup', () => {
   });
 
   it('rejects empty-string query with 400 + RFC-014 VALIDATION_ERROR envelope', async () => {
-    const response = await post(app, '/v1/search/lookup', { query: '' });
+    const response = await post(app, '/v1/lookup/wine', { query: '' });
 
     expect(response.statusCode).toBe(400);
     const body = response.json();
@@ -205,7 +221,7 @@ describe('POST /v1/search/lookup', () => {
   it('rejects oversized query (> MAX_QUERY_LENGTH chars) with 400 + RFC-014 envelope', async () => {
     const oversized = 'a'.repeat(MAX_QUERY_LENGTH + 1);
 
-    const response = await post(app, '/v1/search/lookup', { query: oversized });
+    const response = await post(app, '/v1/lookup/wine', { query: oversized });
 
     expect(response.statusCode).toBe(400);
     const body = response.json();
@@ -220,7 +236,7 @@ describe('POST /v1/search/lookup', () => {
     // outside, covered by the oversized test above.
     const boundary = 'a'.repeat(MAX_QUERY_LENGTH);
 
-    const response = await post(app, '/v1/search/lookup', { query: boundary });
+    const response = await post(app, '/v1/lookup/wine', { query: boundary });
 
     expect(response.statusCode).toBe(200);
     expect(deps.searchUseCase.execute).toHaveBeenCalledTimes(1);
@@ -249,7 +265,7 @@ describe('POST /v1/search/lookup', () => {
 
     deps.searchUseCase.execute = vi.fn().mockResolvedValue(comparison);
 
-    const response = await post(app, '/v1/search/lookup', { query: 'Opus One vs Caymus' });
+    const response = await post(app, '/v1/lookup/wine', { query: 'Opus One vs Caymus' });
 
     expect(response.statusCode).toBe(400);
     const body = response.json();
@@ -269,7 +285,7 @@ describe('POST /v1/search/lookup', () => {
         };
       });
 
-    const response = await post(app, '/v1/search/lookup', { query: 'Opus One 2018' });
+    const response = await post(app, '/v1/lookup/wine', { query: 'Opus One 2018' });
 
     expect(response.statusCode).toBe(200);
     const args = (deps.searchUseCase.execute as ReturnType<typeof vi.fn>).mock.calls[0];
@@ -285,7 +301,7 @@ describe('POST /v1/search/lookup', () => {
     // need no encoding. The route must not strip or escape them.
     const query = "Chateau d'Yquem -- 2010 (Sauternes) <>&\"";
 
-    const response = await post(app, '/v1/search/lookup', { query });
+    const response = await post(app, '/v1/lookup/wine', { query });
 
     expect(response.statusCode).toBe(200);
     const args = (deps.searchUseCase.execute as ReturnType<typeof vi.fn>).mock.calls[0];
@@ -303,7 +319,7 @@ describe('POST /v1/search/lookup', () => {
       },
     );
 
-    const response = await post(app, '/v1/search/lookup', { query: 'Opus One' });
+    const response = await post(app, '/v1/lookup/wine', { query: 'Opus One' });
 
     expect(response.statusCode).toBe(200);
     expect(capturedSignal).toBeInstanceOf(AbortSignal);

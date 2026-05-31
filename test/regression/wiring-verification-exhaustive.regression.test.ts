@@ -67,11 +67,6 @@ const CRITICAL_PORT_VERIFICATIONS: Record<
     mechanism: 'readiness-probe',
     source: 'src/config/readiness.ts',
   },
-  // Watchlist — covered by dedicated regression test.
-  watchlistService: {
-    mechanism: 'regression-test',
-    source: 'test/regression/di-composition-root.regression.test.ts',
-  },
 };
 
 interface PackageJson {
@@ -170,7 +165,6 @@ describe('wiring-verification exhaustive regression', () => {
         (n) =>
           n.startsWith('verify:')
           && n !== 'verify:all'
-          && n !== 'verify:http-contracts'
           && n !== 'verify:security-local',
       );
       for (const name of siblings) {

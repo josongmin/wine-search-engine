@@ -25,7 +25,7 @@ owner: core
 
 surfaces:
   - "Agent tool: compare_wines"
-  - "HTTP: POST /v1/search (decomposed)"
+  - "Internal: decomposed retrieval leg behind compare_wines / comparison UI"
 
 key_files:
   - src/domain/retrieval/service/compare-retriever.ts

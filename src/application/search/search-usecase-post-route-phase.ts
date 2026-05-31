@@ -935,9 +935,15 @@ function toAdmissionHonestyContract(
     };
   }
 
+  const admissionRelevantReasons = routeDegradation.degradationReasons.includes(
+    'mixed_constraint_guided_hybrid_fallback',
+  )
+    ? routeDegradation.degradationReasons.filter((reason) => reason !== 'mixed_similar_retrieval_fallback')
+    : routeDegradation.degradationReasons;
+
   return {
     executionMode: routeDegradation.executionMode,
-    routeHealthy: routeDegradation.degradationReasons.every((reason) =>
+    routeHealthy: admissionRelevantReasons.every((reason) =>
       ADMISSION_HEALTHY_DEGRADATION_REASONS.has(reason),
     ),
   };
@@ -1379,7 +1385,7 @@ export async function runSearchPostRoutePhase(
   let response: SearchResponseV1;
 
   // entity_lookup contract: when the caller passes options.clarification=false
-  // (forced by toLookupRequest for /v1/search/lookup), suppress the
+  // (forced by toLookupWineRequest for /v1/lookup/wine), suppress the
   // entropy-abstain deflection branch and route through the normal ranked
   // decision path. The abstain decision is still emitted in auditExtension
   // so the trace is honest, but the response carries top-1 + appropriate

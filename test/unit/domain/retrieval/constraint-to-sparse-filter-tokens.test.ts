@@ -50,7 +50,10 @@ describe('hardConstraintsToSparseFilterTokens', () => {
       c({ attribute: 'pairing', operator: '=', value: 'beef' }),
       c({ attribute: 'occasion', operator: 'in', value: ['gift', 'celebration'] }),
     ]);
-    expect(tokens).toEqual(['pairing:beef', 'occasion_in:gift|celebration']);
+    expect(tokens).toEqual([
+      'pairing_in:beef|steak|wagyu beef|braised beef',
+      'occasion_in:gift|celebration',
+    ]);
   });
 
   it('ignores truly unmapped attributes like free-text notes', () => {

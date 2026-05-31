@@ -1,5 +1,5 @@
 /**
- * Property-based regression suite: `tools.lookup` (POST /v1/search/lookup)
+ * Property-based regression suite: `tools.lookup` (POST /v1/lookup/wine)
  * agent/detail-fetch ENDPOINT contract.
  *
  * Scope (per directive): this file pins the LOOKUP HTTP-tool boundary
@@ -49,7 +49,7 @@ import fc from 'fast-check';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { errorHandler } from '../../src/interface/http/middleware/error-handler.js';
 import { registerRequestContext } from '../../src/interface/http/middleware/request-context.js';
-import { registerLookupRoute } from '../../src/interface/http/routes/lookup.route.js';
+import { registerLookupWineRoute } from '../../src/interface/http/routes/primitive-search.route.js';
 import type { SearchRouteDeps } from '../../src/interface/http/routes/route-deps.js';
 import type { SearchResponseV1 } from '../../src/domain/response/model/search-response.js';
 import type { ComparisonSearchResponse } from '../../src/domain/response/model/comparison-response.js';
@@ -182,7 +182,7 @@ function makeApp(deps: SearchRouteDeps): Promise<FastifyInstance> {
   const app = Fastify();
   registerRequestContext(app);
   app.setErrorHandler(errorHandler);
-  registerLookupRoute(app, deps);
+  registerLookupWineRoute(app, deps);
   return app.ready().then(() => app);
 }
 
@@ -191,14 +191,13 @@ function makeDeps(
 ): SearchRouteDeps {
   return {
     searchUseCase: { execute },
-    decomposedSearchUseCase: { execute: vi.fn() },
   };
 }
 
 async function post(app: FastifyInstance, payload: unknown) {
   return app.inject({
     method: 'POST',
-    url: '/v1/search/lookup',
+    url: '/v1/lookup/wine',
     headers: { 'content-type': 'application/json' },
     payload,
   });
@@ -256,14 +255,12 @@ describe('lookup properties — determinism + forced entity routing', () => {
       fc.asyncProperty(
         labelArb,
         fc.constantFrom('hybrid', 'mixed', 'auto', 'entity'),
-        fc.boolean(),
-        async (query, mode, explain) => {
+        async (query, mode) => {
           execute.mockClear();
-          // retrieval_mode / options.mode / options.clarification are NOT in the
-          // lookup schema; strict() would reject mode/clarification, so only the
-          // schema-allowed `explain` is sent here (override of routing is tested
-          // by the strict-rejection property below).
-          const res = await post(app, { query, options: { explain } });
+          // retrieval_mode / options.mode / options.clarification / options.explain
+          // are not part of the primitive lookup schema. The route must
+          // synthesize its own decisive options regardless of caller intent.
+          const res = await post(app, { query });
           expect(res.statusCode).toBe(HTTP_OK);
           const req = execute.mock.calls[0]?.[0] as {
             retrieval_mode: string;
@@ -272,7 +269,7 @@ describe('lookup properties — determinism + forced entity routing', () => {
           expect(req.retrieval_mode).toBe('entity');
           expect(req.options.clarification).toBe(false);
           expect(req.options.mode).toBe('auto');
-          expect(req.options.explain).toBe(explain);
+          expect(req.options.explain).toBe(false);
           // `mode` is unused on purpose: lookup ignores caller routing intent.
           void mode;
         },

@@ -41,10 +41,8 @@ import { InterpretUseCase } from '../../../src/application/search/interpret.usec
 import { ResolveUseCase } from '../../../src/application/search/resolve.usecase.js';
 import { AutocompleteUseCase } from '../../../src/application/search/autocomplete.usecase.js';
 import { HybridUseCase } from '../../../src/application/search/hybrid.usecase.js';
-import { WatchlistService } from '../../../src/application/watchlist/watchlist.service.js';
 import type { Container } from '../../../src/config/container.js';
 import type { SnapshotVersions } from '../../../src/application/search/search.usecase.js';
-import { InMemoryWatchlistStore } from '../../../src/infrastructure/watchlist/in-memory-watchlist-store.js';
 import {
   InMemoryAmbiguityDictionary,
   InMemoryBlockingAdapter,
@@ -125,7 +123,6 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
   const anchorResolver = new InMemoryAnchorResolver();
   const similarRetrieval = new InMemorySimilarRetrieval();
   const candidateAttributes = new InMemoryCandidateAttributes();
-  const watchlistStore = new InMemoryWatchlistStore();
 
   // Default to curated ∪ deterministic initialism derivations.
   // The InMemoryAliasMatcher propagates provenance through
@@ -360,17 +357,7 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
     decomposedSearch: decomposedSearchUseCase,
   });
 
-  const watchlistService = new WatchlistService({
-    storage: watchlistStore,
-  });
   const container = {
-    feedbackStore: null,
-    proposalStore: null,
-    feedbackProcessor: null,
-    aliasProposer: null,
-    feedbackTtlEnforcer: null,
-    promotionGate: null,
-    feedbackIngestEnabled: false,
     queryPlanner,
     entityResolver,
     candidatePool,
@@ -387,10 +374,9 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
     drinkingWindowUseCase,
     drinkingWindowPredictor,
     batchSearchUseCase,
-    watchlistService,
-    watchlistRuntime: null,
     evalRunner: null,
     calibrationStore,
+    runtimeReadiness: {} as never,
   } satisfies Container;
 
   return {

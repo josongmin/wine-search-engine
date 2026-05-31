@@ -8,8 +8,6 @@ import {
   EvidenceSummary,
   ConstraintTags,
 } from '@/entities/wine';
-import { WatchlistButton } from '@/features/watchlist';
-import { FeedbackButtons } from '@/features/feedback';
 
 /** WineDetailPanel accepts either a full ResultItem or a lighter EntityResolveResponse. */
 type WineDetailSource =
@@ -18,14 +16,13 @@ type WineDetailSource =
 
 interface WineDetailPanelProps {
   source: WineDetailSource;
-  query?: string;
 }
 
 function extractEntity(source: WineDetailSource): EntitySummary {
   return source.kind === 'result' ? source.item.entity : source.data.entity;
 }
 
-export function WineDetailPanel({ source, query }: WineDetailPanelProps) {
+export function WineDetailPanel({ source }: WineDetailPanelProps) {
   const entity = extractEntity(source);
   const item = source.kind === 'result' ? source.item : null;
 
@@ -64,12 +61,6 @@ export function WineDetailPanel({ source, query }: WineDetailPanelProps) {
           )}
         </div>
 
-        <div className="mt-4 flex items-center gap-2">
-          <WatchlistButton entityId={entity.entity_id} />
-          {query && (
-            <FeedbackButtons query={query} entityId={entity.entity_id} />
-          )}
-        </div>
       </div>
 
       {/* Score components — only for full ResultItem */}

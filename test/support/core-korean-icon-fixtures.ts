@@ -46,6 +46,7 @@ interface CoreKoreanAmbiguityCase {
   readonly query: string;
   readonly expectedCandidateEntityId?: string;
   readonly forbiddenResolvedEntityId?: string;
+  readonly allowResolved?: boolean;
   readonly ambiguityTypes: readonly string[];
   readonly severity: 'low' | 'medium' | 'high';
 }
@@ -297,6 +298,7 @@ export const CORE_KOREAN_ICON_AMBIGUITY_CASES: readonly CoreKoreanAmbiguityCase[
     query: '마고',
     expectedCandidateEntityId: 'w-chateau-margaux-2015',
     forbiddenResolvedEntityId: 'w-chateau-margaux-2015',
+    allowResolved: true,
     ambiguityTypes: ['region', 'entity'],
     severity: 'high',
   },
@@ -311,6 +313,7 @@ export const CORE_KOREAN_ICON_AMBIGUITY_CASES: readonly CoreKoreanAmbiguityCase[
     query: '바롤로',
     expectedCandidateEntityId: 'w-giacomo-conterno-monfortino-2015',
     forbiddenResolvedEntityId: 'w-giacomo-conterno-monfortino-2015',
+    allowResolved: true,
     ambiguityTypes: ['appellation', 'entity'],
     severity: 'high',
   },
@@ -494,6 +497,23 @@ function collectAmbiguousRecallQueriesByEntityId(
       existing.push(testCase.query);
     }
     grouped.set(entityId, existing);
+  }
+  return grouped;
+}
+
+function collectRecallOnlyReleaseGateQueriesByEntityId(
+  cases: readonly CoreKoreanReleaseGateCase[],
+): ReadonlyMap<string, readonly string[]> {
+  const grouped = new Map<string, string[]>();
+  for (const testCase of cases) {
+    if (testCase.identitySafe !== false) {
+      continue;
+    }
+    const existing = grouped.get(testCase.expectedEntityId) ?? [];
+    if (!existing.includes(testCase.query)) {
+      existing.push(testCase.query);
+    }
+    grouped.set(testCase.expectedEntityId, existing);
   }
   return grouped;
 }
@@ -707,6 +727,8 @@ async function buildFixtureBundle(): Promise<CoreKoreanIconFixtureBundle> {
     ...releaseGateCases.filter(isIdentitySafeReleaseGateCase),
   ]);
   const ambiguousRecallQueriesByEntityId = collectAmbiguousRecallQueriesByEntityId(ambiguityCases);
+  const recallOnlyReleaseQueriesByEntityId =
+    collectRecallOnlyReleaseGateQueriesByEntityId(releaseGateCases);
 
   const fixtureAliases: TestFixtureAlias[] = [];
   const fixtureDocuments: RetrievalDocument[] = [];
@@ -717,7 +739,10 @@ async function buildFixtureBundle(): Promise<CoreKoreanIconFixtureBundle> {
     const entityId = createEntityId(entry.entityId);
     const sourceId = createSourceRecordId(`core-${entry.entityId}`);
     const caseQueries = caseQueriesByEntityId.get(entry.entityId) ?? [];
-    const ambiguousRecallQueries = ambiguousRecallQueriesByEntityId.get(entry.entityId) ?? [];
+    const ambiguousRecallQueries = uniqueSurfaceList([
+      ...(ambiguousRecallQueriesByEntityId.get(entry.entityId) ?? []),
+      ...(recallOnlyReleaseQueriesByEntityId.get(entry.entityId) ?? []),
+    ]);
 
     fixtureAliases.push(...buildFixtureAliasRows(entry, entityId, caseQueries));
     fixtureDocuments.push(toRetrievalDocument(entry, entityId, caseQueries, ambiguousRecallQueries));

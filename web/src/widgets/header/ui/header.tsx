@@ -2,13 +2,12 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Compass, Heart, Sparkles } from 'lucide-react';
+import { Compass, Sparkles } from 'lucide-react';
 import { cn } from '@/shared/lib';
 import { ThemeToggle } from '@/features/theme';
 
 const NAV = [
   { href: '/explore', label: '탐색', icon: Compass },
-  { href: '/watchlist', label: '위시리스트', icon: Heart },
   { href: '/wine-search-lab', label: '와인 검색 랩', icon: Sparkles },
 ] as const;
 

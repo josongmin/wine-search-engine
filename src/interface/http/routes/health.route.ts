@@ -1,50 +1,17 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import {
   sendRouteContractResponse,
 } from './contract-response.js';
 import { registerContractRoute } from './register-contract-route.js';
 import {
-  AgentMetricsRouteContract,
   HealthRouteContract,
   ReadyRouteContract,
-  RetrievalDegradationMetricsRouteContract,
 } from './route-contracts.js';
 import {
-  HTTP_STATUS_FORBIDDEN,
   HTTP_STATUS_OK,
   HTTP_STATUS_SERVICE_UNAVAILABLE,
 } from '../constants.js';
-import { getAgentExecutionMetricsCollector } from '../../../infrastructure/observability/agent-execution-metrics.js';
-import { getRetrievalDegradationCollector } from '../../../infrastructure/observability/retrieval-degradation-metrics.js';
-import { globalSilentSkipCounter } from '../../../domain/observability/silent-skip-counters.js';
-import { globalCircuitBreakerRegistry } from '../../../domain/observability/circuit-breaker-registry.js';
-import { getRequestId } from '../request-id.js';
-import { buildSearchErrorResponse } from '../errors/error-response.js';
-import { headerKeysEqualConstantTime } from '../middleware/http-debug-mode.js';
 import { bootstrapLogger } from '../../../domain/shared/bootstrap-logger.js';
-
-/**
- * Extracts the `X-Debug-Key` header (handling Fastify's `string | string[]`
- * type) and compares it against the configured secret with constant-time
- * equality. Returns `true` only when the secret is configured AND the header
- * matches; returns `false` otherwise so callers can fall through to a
- * generic 403 response without leaking which condition failed.
- *
- * Both `expectedSecret` validity and the comparison itself must avoid
- * length-leaking branches. We early-return on missing/empty secret because
- * those represent "feature disabled" rather than "wrong key" — they are
- * already covered by `isValidMetricsSecret` upstream.
- */
-function isMetricsHeaderAuthorized(
-  rawDebugKey: string | string[] | undefined,
-  expectedSecret: string,
-): boolean {
-  const providedDebugKey = Array.isArray(rawDebugKey) ? rawDebugKey[0] : rawDebugKey;
-  if (typeof providedDebugKey !== 'string' || providedDebugKey.length === 0) {
-    return false;
-  }
-  return headerKeysEqualConstantTime(providedDebugKey, expectedSecret);
-}
 
 /**
  * Tracks the last time the event loop was responsive.
@@ -93,16 +60,6 @@ export interface ReadinessCheck {
 
 export interface HealthRouteOptions {
   readonly readiness?: Readonly<Record<string, ReadinessCheck>>;
-  /**
-   * Dedicated secret to gate /metrics/* endpoints (expects matching X-Debug-Key).
-   *
-   * Fail-closed (R6 H11, least-privilege): when this secret is unset or empty
-   * the /metrics/* endpoints are DISABLED — every request gets 403. There is no
-   * fallback to HTTP_DEBUG_SECRET, so a single shared secret cannot unlock both
-   * debug logging and operational metrics. To expose metrics, configure a
-   * distinct METRICS_DEBUG_SECRET and send it via the X-Debug-Key header.
-   */
-  readonly metricsDebugSecret?: string | undefined;
   /**
    * Runtime plane composite-PK migration (016): optional reader that returns
    * the `snapshot_health` block for /ready. Must not be required so tests and
@@ -231,22 +188,6 @@ async function readSnapshotHealthWithTimeout(
   }
 }
 
-function isValidMetricsSecret(secret: string | undefined): secret is string {
-  return typeof secret === 'string' && secret.length > 0;
-}
-
-function denyMetricsAccess(
-  request: FastifyRequest,
-): ReturnType<typeof buildSearchErrorResponse> {
-  return buildSearchErrorResponse(
-    getRequestId(request),
-    'FORBIDDEN',
-    'Metrics endpoint requires a valid X-Debug-Key and an enabled metrics secret.',
-    null,
-    false,
-  );
-}
-
 /**
  * Registers GET /health and GET /ready endpoints.
  *
@@ -257,12 +198,6 @@ export function registerHealthRoutes(
   app: FastifyInstance,
   options?: HealthRouteOptions,
 ): void {
-  if (!isValidMetricsSecret(options?.metricsDebugSecret)) {
-    bootstrapLogger.warn(
-      'METRICS_DEBUG_SECRET is unset or empty — /metrics/* endpoints are disabled until a debug secret is configured.',
-    );
-  }
-
   registerContractRoute(app, {
     method: 'GET',
     url: '/health',
@@ -365,98 +300,6 @@ export function registerHealthRoutes(
         ReadyRouteContract,
         ready ? HTTP_STATUS_OK : HTTP_STATUS_SERVICE_UNAVAILABLE,
         body,
-      );
-    },
-  });
-
-  registerContractRoute(app, {
-    method: 'GET',
-    url: '/metrics/agent',
-    contract: AgentMetricsRouteContract,
-    handler: async (request, reply) => {
-      const expectedSecret = options?.metricsDebugSecret;
-      if (!isValidMetricsSecret(expectedSecret) || !isMetricsHeaderAuthorized(request.headers['x-debug-key'], expectedSecret)) {
-        sendRouteContractResponse(
-          request,
-          reply,
-          AgentMetricsRouteContract,
-          HTTP_STATUS_FORBIDDEN,
-          denyMetricsAccess(request),
-        );
-        return;
-      }
-      const metrics = getAgentExecutionMetricsCollector().getMetrics();
-      sendRouteContractResponse(
-        request,
-        reply,
-        AgentMetricsRouteContract,
-        HTTP_STATUS_OK,
-        {
-          timestamp: new Date().toISOString(),
-          agent: {
-            runs: metrics.runs,
-            by_termination_reason: metrics.byTerminationReason,
-            fallback_runs: metrics.fallbackRuns,
-            fallback_rate: metrics.fallbackRate,
-            fallback_by_layer: metrics.fallbackByLayer,
-            reasoning_failure_runs: metrics.reasoningFailureRuns,
-            total_tool_calls: metrics.totalToolCalls,
-            avg_duration_ms: metrics.avgDurationMs,
-            tool_outcome_kinds: metrics.toolOutcomeKinds,
-            failed_outcome_kinds: metrics.failedOutcomeKinds,
-            timeouts: {
-              llm_step: metrics.timeouts.llmStep,
-              tool: metrics.timeouts.tool,
-              parallel_batch: metrics.timeouts.parallelBatch,
-              event_rate_per_run: metrics.timeouts.eventRatePerRun,
-            },
-            alerts: metrics.alerts,
-          },
-        },
-      );
-    },
-  });
-
-  registerContractRoute(app, {
-    method: 'GET',
-    url: '/metrics/retrieval-degradation',
-    contract: RetrievalDegradationMetricsRouteContract,
-    handler: async (request, reply) => {
-      const expectedSecret = options?.metricsDebugSecret;
-      if (!isValidMetricsSecret(expectedSecret) || !isMetricsHeaderAuthorized(request.headers['x-debug-key'], expectedSecret)) {
-        sendRouteContractResponse(
-          request,
-          reply,
-          RetrievalDegradationMetricsRouteContract,
-          HTTP_STATUS_FORBIDDEN,
-          denyMetricsAccess(request),
-        );
-        return;
-      }
-      const metrics = getRetrievalDegradationCollector().getMetrics();
-      const silentSkips = globalSilentSkipCounter.snapshot();
-      const breakers = globalCircuitBreakerRegistry.snapshot().map((b) => ({
-        name: b.name,
-        state: b.state,
-        failure_count: b.metrics.failureCount,
-        open_count: b.metrics.openCount,
-      }));
-      sendRouteContractResponse(
-        request,
-        reply,
-        RetrievalDegradationMetricsRouteContract,
-        HTTP_STATUS_OK,
-        {
-          timestamp: new Date().toISOString(),
-          retrieval: {
-            total_retrievals: metrics.totalRetrievals,
-            degradations: metrics.degradations,
-            degradation_rate: metrics.degradationRate,
-            alerts: metrics.alerts,
-          },
-          silent_skips: silentSkips,
-          circuit_breakers: breakers,
-        },
       );
     },
   });

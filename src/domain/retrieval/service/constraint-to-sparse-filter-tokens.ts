@@ -1,5 +1,9 @@
 import type { NormalizedConstraint } from '../../shared/types/index.js';
 import { normalizeConstraintComparableString } from '../../attribute/service/constraint-ontology-normalization.js';
+import {
+  expandPairingFilterSurfaceValueList,
+  expandPairingFilterSurfaceValues,
+} from '../../query/service/pairing-extractor.js';
 
 /**
  * P1.A — Soft→hard confidence-gated promotion.
@@ -119,6 +123,14 @@ function expandGrapeFilterValueList(values: readonly string[]): readonly string[
     expanded.push(...expandGrapeFilterValues(value));
   }
   return dedupeNonEmptyFilterValues(expanded);
+}
+
+function expandPairingFilterValue(value: string): readonly string[] {
+  return dedupeNonEmptyFilterValues(expandPairingFilterSurfaceValues(value));
+}
+
+function expandPairingFilterValueList(values: readonly string[]): readonly string[] {
+  return dedupeNonEmptyFilterValues(expandPairingFilterSurfaceValueList(values));
 }
 
 /**
@@ -273,6 +285,52 @@ function constraintToSparseFilterTokens(
     return [];
   };
 
+  const stringEqExpanded = (
+    key: string,
+    expandSingle: (value: string) => readonly string[],
+    expandList: (values: readonly string[]) => readonly string[],
+  ): readonly string[] => {
+    if (operator === '=' && typeof value === 'string' && value.length > 0) {
+      const expanded = expandSingle(value);
+      if (expanded.length === 1) return [`${key}:${expanded[0]}`];
+      if (expanded.length > 1) return [`${key}_in:${expanded.join('|')}`];
+      return [];
+    }
+    if (operator === 'in' && Array.isArray(value)) {
+      const expanded = expandList(
+        value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0),
+      );
+      if (expanded.length === 1) return [`${key}:${expanded[0]}`];
+      if (expanded.length > 1) return [`${key}_in:${expanded.join('|')}`];
+      return [];
+    }
+    if (operator === 'exclude') {
+      if (typeof value === 'string' && value.length > 0) {
+        const expanded = expandSingle(value);
+        if (expanded.length === 1) return [`${key}_not:${expanded[0]}`];
+        if (expanded.length > 1) return [`${key}_not_in:${expanded.join('|')}`];
+        return [];
+      }
+      if (Array.isArray(value)) {
+        const expanded = expandList(
+          value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0),
+        );
+        if (expanded.length === 1) return [`${key}_not:${expanded[0]}`];
+        if (expanded.length > 1) return [`${key}_not_in:${expanded.join('|')}`];
+        return [];
+      }
+    }
+    if (operator === 'not_in' && Array.isArray(value)) {
+      const expanded = expandList(
+        value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0),
+      );
+      if (expanded.length === 1) return [`${key}_not:${expanded[0]}`];
+      if (expanded.length > 1) return [`${key}_not_in:${expanded.join('|')}`];
+      return [];
+    }
+    return [];
+  };
+
   switch (attribute) {
     case 'wine_type':
       return stringEq('wine_type');
@@ -283,7 +341,7 @@ function constraintToSparseFilterTokens(
     case 'appellation':
       return stringEq('appellation');
     case 'pairing':
-      return stringEq('pairing');
+      return stringEqExpanded('pairing', expandPairingFilterValue, expandPairingFilterValueList);
     case 'occasion':
       return stringEq('occasion');
     case 'grape_primary':
@@ -656,7 +714,9 @@ function softConstraintToPromotionTokens(
     ) {
       const normalized = c.attribute === 'grape_primary'
         ? expandGrapeFilterValues(value)
-        : dedupeNonEmptyFilterValues([value]);
+        : c.attribute === 'pairing'
+          ? expandPairingFilterValue(value)
+          : dedupeNonEmptyFilterValues([value]);
       if (normalized.length === 1) {
         out.push(`${spec.stringKey}:${normalized[0]}`);
       } else if (normalized.length > 1) {
@@ -698,6 +758,10 @@ function softConstraintToPromotionTokens(
       ? expandGrapeFilterValueList(
           value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0),
         )
+      : c.attribute === 'pairing'
+        ? expandPairingFilterValueList(
+            value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0),
+          )
       : dedupeNonEmptyFilterValues(
           value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0),
         );

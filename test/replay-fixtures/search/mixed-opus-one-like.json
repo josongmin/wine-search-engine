@@ -1,6 +1,6 @@
 {
   "name": "mixed-opus-one-like",
-  "endpoint": "/v1/search",
+  "endpoint": "/v1/search/hybrid",
   "execution_lane": "self_contained",
   "request": {
     "query": "오푸스원 같은 와인",

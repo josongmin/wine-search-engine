@@ -8,7 +8,7 @@ import '../fastify-augmentations.js';
  * 3. Logs request start/end with latency
  */
 /**
- * Returns the route template (e.g. `/v1/watchlist/:id`) when available, or
+ * Returns the route template (e.g. `/v1/agent/sessions/:sessionId/turns`) when available, or
  * the URL path WITHOUT query string. We never log raw `request.url` because
  * it can carry user PII (search params, tokens) into structured logs.
  *
@@ -21,8 +21,8 @@ import '../fastify-augmentations.js';
  * silently leaking IDs into observability and inflating log cardinality.
  */
 /**
- * Operational probe routes that are polled at high frequency by load balancers,
- * orchestrators (k8s liveness/readiness), and metrics scrapers. Logging two
+ * Operational probe routes that are polled at high frequency by load balancers
+ * and orchestrators (k8s liveness/readiness). Logging two
  * `info` lines (request_start + request_end) per poll floods structured logs
  * and inflates log-volume cost without observability value (R6 H7). For these
  * routes we drop the routine start/end lines to `debug`; genuine failures
@@ -32,21 +32,12 @@ import '../fastify-augmentations.js';
  * stable across Fastify versions and never depends on raw user input.
  */
 const OPS_ROUTE_EXACT: ReadonlySet<string> = new Set(['/health', '/ready']);
-const OPS_ROUTE_PREFIXES: readonly string[] = ['/metrics/'];
 
 /** HTTP status at/above which a response is treated as a server-side failure. */
 const SERVER_ERROR_STATUS_THRESHOLD = 500;
 
 export function isOpsRoute(route: string): boolean {
-  if (OPS_ROUTE_EXACT.has(route)) {
-    return true;
-  }
-  for (const prefix of OPS_ROUTE_PREFIXES) {
-    if (route.startsWith(prefix)) {
-      return true;
-    }
-  }
-  return false;
+  return OPS_ROUTE_EXACT.has(route);
 }
 
 function safeRoutePath(request: {

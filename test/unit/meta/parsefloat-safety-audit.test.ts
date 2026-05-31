@@ -31,8 +31,6 @@ const ALLOWLIST: readonly string[] = [
   'schemas/search-response-v2.schema.ts',
   'schemas/search-request.schema.ts',
   'schemas/batch-search.schema.ts',
-  'schemas/watchlist.schema.ts',
-  'schemas/feedback.schema.ts',
   'schemas/search-shared.schema.ts',
   // Test helpers
   '__tests__',
@@ -48,11 +46,8 @@ const ALLOWLIST: readonly string[] = [
   'domain/resolver/service/resolver.ts',
   'interface/http/response-builders/machine-response-builder-v2.ts',
   'infrastructure/adapter/pg-gold-set-store.ts',
-  'infrastructure/watchlist/webhook-delivery.ts',
   'interface/http/routes/http-route-contract-catalog.ts',
-  'interface/http/routes/http-route-contract-openapi.ts',
   'interface/http/routes/register-contract-route.ts',
-  'interface/http/routes/watchlist.route.ts',
   // Guards present but more than 2 lines away from the call (scanner false positives):
   // evidence-auditor.ts: parseFloat() is followed by Number.isFinite() inside the reduce callback
   'domain/evaluation/service/evidence-auditor.ts',

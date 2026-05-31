@@ -63,21 +63,6 @@ vi.mock('../container-features.js', () => ({
   })),
 }));
 
-vi.mock('../container-watchlist.js', () => ({
-  buildWatchlistContainerServices: vi.fn(() => ({
-    watchlistService: {} as never,
-    watchlistRuntime: null,
-  })),
-}));
-
-vi.mock('../container-learning.js', () => ({
-  buildLearningContainerServices: vi.fn(() => ({
-    feedbackStore: null,
-    feedbackProcessor: undefined,
-    feedbackIngestUseCase: undefined,
-  })),
-}));
-
 describe('createContainer — wine-agent-loop tool bundle wiring', () => {
   const originalEnv = { ...process.env };
 

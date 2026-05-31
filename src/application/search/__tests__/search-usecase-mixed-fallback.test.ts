@@ -117,6 +117,43 @@ describe('mixed fallback helpers', () => {
     expect(fallback.compiled.execution.effectiveRetrievalMode).toBe('constraint_filter');
   });
 
+  it('expands anchored white fallback constraints to the white-family filter set', () => {
+    const plan = makePlan({
+      rawQuery: '클라우디베이 말고 다른 화이트',
+      normalizedQuery: '클라우디베이 말고 다른 화이트',
+      constraints: {
+        hard: [{
+          attribute: 'wine_type',
+          operator: '=',
+          value: 'white',
+          source_phrase: '화이트',
+          confidence: 0.95,
+          mapping_version: 'test',
+        }],
+        soft: [],
+        inferred: [],
+      },
+    });
+    const compiled = makeCompiled(plan);
+
+    const fallback = buildMixedConstraintFallbackExecution(plan, compiled);
+
+    expect(fallback.plan.constraints.hard).toEqual([
+      expect.objectContaining({
+        attribute: 'wine_type',
+        operator: 'in',
+        value: ['white', 'dessert'],
+      }),
+    ]);
+    expect(fallback.compiled.query.constraints.hard).toEqual([
+      expect.objectContaining({
+        attribute: 'wine_type',
+        operator: 'in',
+        value: ['white', 'dessert'],
+      }),
+    ]);
+  });
+
   it('keeps the executed fallback plan authoritative when mixed route recovers via hybrid fallback', () => {
     const fallbackPlan = makePlan({
       intent: 'facet_search',

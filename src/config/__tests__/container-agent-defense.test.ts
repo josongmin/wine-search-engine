@@ -54,15 +54,6 @@ vi.mock('../container-features.js', () => ({
   })),
 }));
 
-vi.mock('../container-aux-features.js', () => ({
-  buildWatchlistContainerServices: vi.fn(() => ({})),
-  buildLearningContainerServices: vi.fn(() => ({
-    feedbackStore: null,
-    feedbackProcessor: undefined,
-    feedbackIngestUseCase: undefined,
-  })),
-}));
-
 describe('createContainer defense-in-depth', () => {
   beforeEach(() => {
     vi.clearAllMocks();

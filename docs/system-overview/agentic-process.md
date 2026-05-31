@@ -35,12 +35,16 @@ HTTP 계약은 `src/interface/http/routes/http-route-contract-catalog.ts`에 등
 
 | 라우트 | Operation ID | 특징 |
 |--------|-------------|------|
-| `POST /v1/search` | `search.execute` | 기본 검색. 캐시, 보안, 플래너, SAT 게이트 전부 활성 |
-| `POST /v1/search/hybrid` | `search.hybrid` | `forced_hybrid_retrieval` 캐퍼빌리티 추가 |
-| `POST /v1/search/interpret` | `search.interpret` | 제약 파싱만, 실제 검색 없음 |
-| `POST /v2/search` | `search.v2.execute` | 동일 `SearchUseCase` 파이프라인; 응답은 `SearchResponseV2Human` 계약(사람이 읽기 쉬운 V2 봉투) |
-| `POST /v2/search/hybrid` | `search.v2.hybrid` | V2 응답 계약 + `forced_hybrid_retrieval` |
-| `POST /v2/search/interpret` | `search.v2.interpret` | V2 interpret 응답 계약, 플래너 전용 |
+| `POST /v1/search/hybrid` | `search.hybrid` | canonical hybrid 검색. 캐시, 보안, 플래너, SAT 게이트 전부 활성 |
+| `POST /v1/search/semantic` | `search.semantic` | dense-only retrieval 강제 |
+| `POST /v1/search/lexical` | `search.lexical` | sparse/BM25-only retrieval 강제 |
+| `POST /v1/lookup/wine` | `lookup.wine` | 단일 와인 엔터티 해소 전용 |
+| `POST /v1/agent` | `agent.run` | caller-managed single-shot agent 실행 |
+| `POST /v1/agent/sessions` | `agent.session.create` | 서버 보관형 agent 세션 생성 |
+| `POST /v1/agent/sessions/:sessionId/turns` | `agent.session.turn` | 서버 보관형 대화 turn 추가 |
+
+사람 친화 응답(`SearchResponseV2Human`)은 별도 `/v2/*` 라우트가 아니라
+search primitive에 대한 `Accept` 기반 content negotiation으로 투영됩니다.
 
 ### 검증 흐름
 
@@ -1370,7 +1374,7 @@ HTTP 200 SearchResponseV1
 | R10 (9차 검증) | 2026-04-11 | a24b348 | §2 Pre-Route `runSearchPreRoutePhase()` 전체 파일, `planner-intent-detection.ts` 전체 파일 직접 확인 | **E26**: §2 Pre-Route 5번 단계 누락 — 에이전트 필터 머지 후 SAT 검사 전에 `logSearchEvent(query_observability, decomposition_strategy)` 호출; 단계 5→6→7 재번호 / **E27**: §3 Priority 3 변수명 — `hasKoreanMixedQueryMarker`(단수 오기) → `hasKoreanMixed`(지역변수명, `hasKoreanMixedQueryMarkers()` 반환값) 명시 |
 | R11 (10차 검증) | 2026-04-11 | a24b348 | `agent-orchestrator.ts` 전체, `search-usecase-post-route-phase.ts` 전체 | **E28**: §9 루프 구조 전면 재작성 — (1) 빈 쿼리 즉시 반환 누락 (2) 보안 pre-check(querySanitizer) 누락 (3) 토큰 예산 pre-flight 체크(LLM 호출 전)와 post-hoc 체크 모두 있음, 문서에는 post-hoc만 (4) isLastStep: remainingSteps=1 OR (=2 && hasToolHistory) 두 조건 (5) MAX_TOOLS_PER_BATCH=4, MAX_UNKNOWN_TOOL_ATTEMPTS=2 값 추가 (6) zero-results 후 constraint-relaxation hint 주입 누락 / **E29**: §9 합성 레이어 완전히 잘못됨 — "Layer 1-4" 설명이 코드와 불일치; 실제는 관찰 기반 LLM 합성(2회 시도, 512/256토큰) → Layer 2(fallback search, 도구 관찰 없을 때만) → Layer 3(observation slice 300자) → policyBlocked 템플릿 → Layer 4(빈 폴백) / **E30**: §9 `fallback` 종료 이유 설명 오기 / **E31**: §2 Post-Route abstain counterfactuals 조건 비대칭 누락 — abstain은 `=== true` strict, non-abstain은 `!== false`(기본 포함) / **E32**: §2 Post-Route `logSearchEvent` 호출 구조 — non-abstain은 `runRankedRouteDecisionPhase()` 내부 + 공유 블록 총 2회, abstain은 공유 블록 1회 |
 | R12 (11차 검증) | 2026-04-11 | f8a2932 | §2·§7·§9·§10·§14, 동기화 이력 정리 | **E33**: R11 **E31** 보완 — non-abstain counterfactual에 `EXPLANATION_OBLIGATION_MAP.requiresCounterfactual` OR 조건 반영 / **E34**: §7 `Ranker.rank()` 서술 순서를 코드와 일치(가중치 선계산 → 후보루프 → Step 6b LTR) / **E35**: §9 Abort — LLM 직전 `abortSignal.aborted` short-circuit은 `error` 가능, `AbortError`는 `aborted` / **E36**: §10 non-abstain counterfactual 한 줄을 §2와 동일하게 수정 / **E37**: 상수표 `MAX_TOOLS_PER_BATCH` 라인·`maxOutputTokens` 설명 정리 |
-| R13 (12차 검증) | 2026-04-11 | f8a2932 | §1 라우트 URL·V2 operationId, §2 hybrid 설명, §3 라인 주석, §9 agent URL, §14 상수 위치 | **E38**: `POST /search` 등 구 URL → `/v1/search`…; V2 `v2.search.*` → `search.v2.*`; V2 하이브리드·interpret 행 추가 / **E39**: `inferTargetEntityType` 라인 범위 648–700 → 662–712 / **E40**: `UNCERTAINTY_PARSER_CONFIDENCE_FLOOR` 잘못된 `planner.ts:522` 참조 제거 / **E41**: 상수표 경로를 `src/...` 기준으로 정리, Conformal·RRF·IPS 파일 위치 정정 |
+| R13 (12차 검증) | 2026-04-11 | f8a2932 | §1 라우트 URL·V2 operationId, §2 hybrid 설명, §3 라인 주석, §9 agent URL, §14 상수 위치 | **E38**: 구 search URL 표기를 canonical V1 search URL set으로 정리; V2 `v2.search.*` → `search.v2.*`; V2 하이브리드·interpret 행 추가 / **E39**: `inferTargetEntityType` 라인 범위 648–700 → 662–712 / **E40**: `UNCERTAINTY_PARSER_CONFIDENCE_FLOOR` 잘못된 `planner.ts:522` 참조 제거 / **E41**: 상수표 경로를 `src/...` 기준으로 정리, Conformal·RRF·IPS 파일 위치 정정 |
 | R14 (코드 동기화) | 2026-04-13 | 018f4ac | f8a2932→018f4ac (24커밋, 283파일, +15.8K/-2.8K줄) 전체 갭 분석 및 반영 | **E42**: §2 Pre-Route benchmark 보안 바이패스 추가 (`executionPrincipal==='benchmark_trusted'`) / **E43**: §2 Route Dispatch에 Entity Route TA3 Corrective Retry (2-pass + TA5 calibration) 전체 추가 / **E44**: §2 Route Dispatch에 Blocker 통합(TA2-4) 추가 / **E45**: §2 Post-Route에 TypedAbstainDecision (AbstainReason·RecoveryAction·ClarifyKind) 반영 / **E46**: §2 Post-Route에 AuditExtension 빌드(deriveAuditExtension) 단계 추가 (10개 게이팅 필드) / **E47**: §4에 ConstraintReasoner(E2-T2) 섹션 추가 (6가지 관계 타입) / **E48**: §6 하드 제약 필터에 drop log + protected recall 정책 추가, Vespa regex escape + fusion trace 전파 경로 추가 / **E49**: §7 Ranking에 Rerank Safety(E5-T2, 3규칙) + Score Decomposition + Evidence/Lexical Tier 다단계 정렬(5-stage) + mode weight overlay 추가 / **E50**: §9에 Typed Tool Outcome(E7) + 선언적 배치 정책(TOOL_BATCH_POLICY) + 도구 입력 변경(style/cert→soft hint, price floor, query length 통일) 추가 / **E51**: §10에 AuditExtension 필드 표 + 상수 추가 / **E52**: §14 상수표에 13개 신규 상수 추가 (rerank safety, relaxation, TA5, audit, agent tools) / **E53**: retriever-pipeline.md §5에 fusion trace/drop log 전파 + TA4 fuzzy hypothesis + CB error 구분 추가, §6에 constraint relaxation ladder 상세 추가 |
 
 ### 검증 현황

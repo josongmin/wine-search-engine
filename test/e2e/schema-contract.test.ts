@@ -38,7 +38,7 @@ async function searchPost(body: unknown): Promise<{
   json: unknown;
   headers: Record<string, string>;
 }> {
-  const response = await postJson(server.app, '/v1/search', body);
+  const response = await postJson(server.app, '/v1/search/hybrid', body);
   return {
     statusCode: response.statusCode,
     json: response.json(),
@@ -91,7 +91,7 @@ describe('SearchResponseV1 Schema Contract', () => {
   });
 
   it('engineDecision.decisionStatus is one of the valid statuses', async () => {
-    const res = await postJson(server.app, '/v1/search', { query: 'Château Margaux 2015' });
+    const res = await postJson(server.app, '/v1/search/hybrid', { query: 'Château Margaux 2015' });
 
     expect(res.statusCode).toBe(200);
     expect(getSearchDecision(parseSearchResponse(res)).decision_status).toMatch(
@@ -100,7 +100,7 @@ describe('SearchResponseV1 Schema Contract', () => {
   });
 
   it('meta.requestId is truthy in all successful responses', async () => {
-    const res = await postJson(server.app, '/v1/search', { query: 'Opus One 2018' });
+    const res = await postJson(server.app, '/v1/search/hybrid', { query: 'Opus One 2018' });
 
     expect(res.statusCode).toBe(200);
     const requestId = getSearchRequestId(parseSearchResponse(res));
@@ -119,7 +119,7 @@ describe('SearchResponseV1 Schema Contract', () => {
   });
 
   it('every result has at least one evidenceItem with real (non-synthetic) evidence', async () => {
-    const response = await postJson(server.app, '/v1/search', {
+    const response = await postJson(server.app, '/v1/search/hybrid', {
       query: '풀바디 레드 와인',
       options: { mode: 'hybrid', explain: false, clarification: false },
     });
@@ -138,7 +138,7 @@ describe('SearchResponseV1 Schema Contract', () => {
   });
 
   it('decisionSnapshot in engineDecision has all required fields', async () => {
-    const res = await postJson(server.app, '/v1/search', { query: 'Opus One 2018' });
+    const res = await postJson(server.app, '/v1/search/hybrid', { query: 'Opus One 2018' });
 
     expect(res.statusCode).toBe(200);
     const snapshot = getSearchDecisionSnapshot(parseSearchResponse(res));
@@ -152,7 +152,7 @@ describe('SearchResponseV1 Schema Contract', () => {
   });
 
   it('confidenceSemantics truthfully reflects calibration trust', async () => {
-    const res = await postJson(server.app, '/v1/search', {
+    const res = await postJson(server.app, '/v1/search/hybrid', {
       query: '풀바디 레드 와인',
       options: { mode: 'hybrid', explain: false, clarification: false },
     });
@@ -170,7 +170,7 @@ describe('SearchResponseV1 Schema Contract', () => {
 
 describe('Error Response Schema Contract (RFC-014 §5)', () => {
   it('error response matches RFC-014 error contract', async () => {
-    const response = await postJson(server.app, '/v1/search', {});
+    const response = await postJson(server.app, '/v1/search/hybrid', {});
 
     expect(response.statusCode).toBe(400);
     const result = ErrorResponseSchema.safeParse(response.json());
@@ -181,20 +181,20 @@ describe('Error Response Schema Contract (RFC-014 §5)', () => {
   });
 
   it('error.code is truthy in all error responses', async () => {
-    const response = await postJson(server.app, '/v1/search', { query: '' });
+    const response = await postJson(server.app, '/v1/search/hybrid', { query: '' });
 
     expect(response.statusCode).toBe(400);
     expect(parseErrorResponse(response).error.code).toBeTruthy();
   });
 
   it('error.request_id is truthy in all error responses', async () => {
-    const response = await postJson(server.app, '/v1/search', { query: '' });
+    const response = await postJson(server.app, '/v1/search/hybrid', { query: '' });
 
     expect(parseErrorResponse(response).error.request_id).toBeTruthy();
   });
 
   it('error.failure_reason is null or string', async () => {
-    const response = await postJson(server.app, '/v1/search', {});
+    const response = await postJson(server.app, '/v1/search/hybrid', {});
 
     const error = parseErrorResponse(response).error;
     expect(error.failure_reason === null || typeof error.failure_reason === 'string').toBe(true);

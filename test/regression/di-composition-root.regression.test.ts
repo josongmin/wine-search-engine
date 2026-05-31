@@ -14,44 +14,18 @@
  *  2. Topological build order exists (graph is acyclic).
  *  3. Every dependency edge in the manifest references a declared sub-container
  *     (no dangling references).
- *  4. Each sub-container factory is callable in isolation and returns a record
- *     when given the documented inputs.
- *  5. `buildWatchlistContainerServices` honours the runtime override for the
- *     watchlist storage adapter (test-injection hook).
- *  6. `buildLearningContainerServices` returns null services when no PG pool
- *     is provided (idempotent, no shared mutable state across two calls).
- *  7. `buildWatchlistContainerServices` raises a clear error in production
- *     when persistent storage is required but unavailable. The error message
- *     is preserved verbatim (NFC, Latin — Korean would also be preserved
- *     because the throw goes through `new Error(...)` without sanitisation).
+ *  4. Every non-root manifest node still has a matching src/config/container-*.ts file.
  *
  * Append-only: never delete this file. Add new invariants below.
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   getWiringManifest,
   topologicalBuildOrder,
   WIRING_MANIFEST,
   type SubContainerId,
 } from '../../src/config/container-wiring-manifest.js';
-import { buildWatchlistContainerServices } from '../../src/config/container-watchlist.js';
-import { buildLearningContainerServices } from '../../src/config/container-learning.js';
-import { parseEnv } from '../../src/config/env.js';
-import type { WatchlistStoragePort } from '../../src/domain/watchlist/port/watchlist-repository.port.js';
-
-function makeStorage(): WatchlistStoragePort {
-  return {
-    save: vi.fn(async () => {}),
-    findById: vi.fn(async () => null),
-    findByUserId: vi.fn(async () => []),
-    findByEntityId: vi.fn(async () => []),
-    delete: vi.fn(async () => false),
-    listByWatchlistId: vi.fn(async () => []),
-    append: vi.fn(async () => {}),
-    clear: vi.fn(async () => {}),
-  };
-}
 
 describe('di-composition-root regression', () => {
   describe('wiring manifest', () => {
@@ -76,7 +50,6 @@ describe('di-composition-root regression', () => {
         'mixedSolver',
         'drinkingWindowPredictor',
         'calibrationStore',
-        'watchlistService',
       ] as const;
       for (const port of required) {
         expect(manifest.ports).toContain(port);
@@ -158,81 +131,6 @@ describe('di-composition-root regression', () => {
     });
   });
 
-  describe('sub-container factories', () => {
-    it('buildLearningContainerServices returns nulls without a PG pool', () => {
-      const services = buildLearningContainerServices({});
-      expect(services.feedbackStore).toBeNull();
-      expect(services.proposalStore).toBeNull();
-      expect(services.feedbackProcessor).toBeNull();
-      expect(services.aliasProposer).toBeNull();
-      expect(services.feedbackTtlEnforcer).toBeNull();
-      expect(services.promotionGate).toBeNull();
-    });
-
-    it('buildLearningContainerServices is idempotent (no shared mutable state)', () => {
-      const a = buildLearningContainerServices({});
-      const b = buildLearningContainerServices({});
-      // Two factories called in the same process must produce independent
-      // records (regression guard against accidentally promoting a closure
-      // variable to module scope).
-      expect(a).not.toBe(b);
-      expect(Object.keys(a).sort()).toEqual(Object.keys(b).sort());
-    });
-
-    it('buildWatchlistContainerServices honours the test-override hook', async () => {
-      const storage = makeStorage();
-      const config = parseEnv({
-        NODE_ENV: 'test',
-        WATCHLIST_ENABLED: 'false',
-        WEBHOOK_SECRET: 'watchlist-secret-1234',
-      });
-
-      const container = buildWatchlistContainerServices(config, {
-        createWatchlistStore: () => storage,
-      });
-
-      expect(container.watchlistService).toBeDefined();
-      expect(container.watchlistRuntime).toBeNull();
-
-      await container.watchlistService.create({
-        userId: 'user-di-root',
-        entityId: 'entity-di-root',
-        triggerConditions: [],
-        callbackUrl: 'https://example.com/webhook',
-        expiresAt: null,
-      });
-      expect(storage.save).toHaveBeenCalledTimes(1);
-    });
-
-    it('preserves the watchlist persistence error message verbatim', () => {
-      const config = parseEnv({
-        NODE_ENV: 'production',
-        WATCHLIST_ENABLED: 'true',
-        WATCHLIST_DELIVERY_ENABLED: 'true',
-        WEBHOOK_SECRET: 'watchlist-secret-1234',
-        // Production env validation requires either an LLM provider or an
-        // explicit kill-switch for the Layer 2 injection judge. We're not
-        // exercising that path here, so flip the kill-switch to isolate the
-        // watchlist-storage assertion.
-        KILL_SWITCH_INJECTION_JUDGE: 'true',
-      });
-      // No PG pool, no override → must throw a specific, NFC-normalised
-      // message (any future i18n that introduces Korean characters MUST
-      // also preserve NFC by going through `new Error(...)` directly, not
-      // through a transformer that strips combining marks).
-      let caught: unknown;
-      try {
-        buildWatchlistContainerServices(config, {});
-      } catch (err) {
-        caught = err;
-      }
-      expect(caught).toBeInstanceOf(Error);
-      const message = (caught as Error).message;
-      expect(message).toMatch(/Watchlist delivery requires PostgreSQL/);
-      expect(message.normalize('NFC')).toBe(message);
-    });
-  });
-
   describe('manifest <-> source-file alignment', () => {
     it('every non-root sub-container has a matching src/config/container-*.ts file (smoke check)', async () => {
       // Pure manifest-to-filesystem sanity. If a sub-container is renamed on
@@ -254,8 +152,6 @@ describe('di-composition-root regression', () => {
         usecases: 'container-usecases.ts',
         'aux-features': 'container-aux-features.ts',
         features: 'container-features.ts',
-        watchlist: 'container-watchlist.ts',
-        learning: 'container-learning.ts',
         container: 'container.ts',
       };
       for (const spec of WIRING_MANIFEST) {

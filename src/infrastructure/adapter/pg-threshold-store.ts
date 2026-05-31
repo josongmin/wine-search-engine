@@ -2,10 +2,10 @@
  * E5-U7: Promotion Acceptance Gate — Persistence Layer
  *
  * pg-threshold-store is the persistence layer for promotion thresholds;
- * PromotionGate reads from this store to evaluate whether a candidate model
- * or weight set meets the bar for promotion to production traffic.
+ * the offline promotion pipeline reads from this store to evaluate whether a
+ * candidate model or weight set meets the bar for production traffic.
  *
- * Threshold updates MUST go through PromotionGate.evaluate(); direct store
+ * Threshold updates MUST go through the promotion evaluation pipeline; direct store
  * writes are forbidden outside of initial seeding.
  */
 

@@ -129,10 +129,15 @@ export function registerLookupWineRoute(app: FastifyInstance, deps: SearchRouteD
       const parsed = parseContractBody(request, LookupWineRouteContract);
       const searchRequest = toLookupWineRequest(parsed);
       const requestId = getRequestId(request);
+      const stageTimer = createStageTimer();
       const abortSignal = abortSignalFromFastifyRequest(request, reply);
 
       const response = await raceWithRequestAbort(
-        deps.searchUseCase.execute(searchRequest, requestId, { abortSignal }),
+        deps.searchUseCase.execute(searchRequest, requestId, {
+          abortSignal,
+          debugRequest: request.debugRequest,
+          stageTimer,
+        }),
         abortSignal,
         'Lookup request aborted',
       );

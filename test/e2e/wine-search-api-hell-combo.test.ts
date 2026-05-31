@@ -1,10 +1,10 @@
 /**
  * Hell-COMBO e2e tests for POST /v1/agent.
  *
- * Companion to the three existing hell suites:
+ * Companion to the existing hell suites:
  *   - `wine-search-api-hell-http.test.ts`          — HTTP boundary
- *   - `wine-search-api-hell-pipeline.test.ts`     — 6-phase failure cascade
  *   - `wine-search-api-hell-adversarial.test.ts`  — single-vector adversarial
+ *   - `wine-search-api-hell-concurrency.test.ts`  — concurrent / cross-request paths
  *
  * Each of those proves invariants for ONE attack vector at a time. This file
  * COMBINES 2-3 vectors per case to expose NON-LINEAR interactions where an
@@ -738,16 +738,16 @@ describe('Hell-Combo C6: Cross-surface paths', () => {
   let harness: WineSearchTestHarness;
   afterEach(async () => { if (harness !== undefined) await harness.cleanup(); });
 
-  it('C6-01: Interleaved POST /v1/agent + POST /v1/search → no shared mutable state', async () => {
+  it('C6-01: Interleaved POST /v1/agent + POST /v1/search/hybrid → no shared mutable state', async () => {
     harness = await buildBenignHarness();
-    // Interleave 5 requests against /v1/agent and 5 against /v1/search.
+    // Interleave 5 requests against /v1/agent and 5 against /v1/search/hybrid.
     const wineSearch = Array.from({ length: 5 }, () =>
       postWineSearch(harness, { query: '와인 추천' }),
     );
     const search = Array.from({ length: 5 }, () =>
       harness.app.inject({
         method: 'POST',
-        url: '/v1/search',
+        url: '/v1/search/hybrid',
         headers: { 'content-type': 'application/json' },
         payload: JSON.stringify({ query: 'wine' }),
       }),

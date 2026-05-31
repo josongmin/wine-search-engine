@@ -2,8 +2,8 @@ id: tools.web-comparison-widget
 name: Web Wine Comparison Widget
 category: tools
 summary: |
-  두 wine 비교 UI. 양 side 후보 + attribute 비교 테이블. /v1/search 또는 agent
-  compare_wines 호출.
+  두 wine 비교 UI. 양 side 후보 + attribute 비교 테이블. primitive search routes
+  또는 agent compare_wines 호출.
 
 maturity: 3
 maturity_rationale: |

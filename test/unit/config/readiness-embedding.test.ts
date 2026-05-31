@@ -24,11 +24,6 @@ vi.mock('../../../src/domain/shared/bootstrap-logger.js', () => ({
   },
 }));
 
-vi.mock('../../../src/config/watchlist.js', () => ({
-  expectsRedisAtStartup: () => false,
-  isWatchlistEnabled: () => false,
-}));
-
 function makeMinimalConfig(overrides: Partial<Config['embedding']> = {}): Config {
   return {
     nodeEnv: 'test',
@@ -54,7 +49,6 @@ function makeMinimalConfig(overrides: Partial<Config['embedding']> = {}): Config
     killSwitch: { denseRetrieval: false },
     redis: {},
     postgres: { host: 'localhost', port: 5432, database: 'test', user: 'test', password: 'test' },
-    watchlist: { enabled: false },
     rateLimiting: {},
     auth: {},
     telemetry: {},

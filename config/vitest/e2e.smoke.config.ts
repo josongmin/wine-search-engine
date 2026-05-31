@@ -11,7 +11,6 @@ export default defineConfig({
       'test/e2e/search-api.ops.test.ts',
       'test/e2e/schema-contract.test.ts',
       'test/e2e/server-protocol.test.ts',
-      'test/e2e/openapi-feedback-api.test.ts',
       'test/e2e/cli-process.test.ts',
     ],
     testTimeout: 30_000,

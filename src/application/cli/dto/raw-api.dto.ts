@@ -24,8 +24,3 @@ export interface RawApiCallResult {
   readonly body: unknown;
   readonly rawText?: string | undefined;
 }
-
-export interface OpenApiDocumentResult {
-  readonly path: '/openapi.json';
-  readonly document: unknown;
-}

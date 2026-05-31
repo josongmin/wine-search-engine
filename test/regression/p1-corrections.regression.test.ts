@@ -3,13 +3,12 @@
  *
  * These tests lock in the fail-loud + typed degradation + decision
  * integrity contracts that came out of the P1 critique (cache typed
- * union, PG-backed DLQ, /ready structured outcome, C2 reason codes,
- * calibrator hardcoded defaults, ambiguity classifier sourceSignals,
+ * union, /ready structured outcome, C2 reason codes, calibrator
+ * hardcoded defaults, ambiguity classifier sourceSignals,
  * ETL ack docs).
  */
 import { describe, expect, it, vi } from 'vitest';
 import { Calibrator } from '../../src/domain/resolver/service/calibrator.js';
-import { PgWatchlistPoisonStore } from '../../src/infrastructure/watchlist/pg-watchlist-poison-store.js';
 import { RedisQueryCache } from '../../src/infrastructure/cache/redis-query-cache.js';
 import type { CalibrationStore } from '../../src/domain/resolver/port/calibration-store.port.js';
 
@@ -173,71 +172,6 @@ describe('Fix 1 / Wave 2: QueryCachePort.getWithDiagnostics', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Fix 2 / PG-backed WatchlistPoisonStore
-// ---------------------------------------------------------------------------
-
-describe('Fix 2 / H12: PG-backed Watchlist DLQ', () => {
-  it('PgWatchlistPoisonStore INSERTs a poison record', async () => {
-    const query = vi.fn().mockResolvedValue({ rows: [], rowCount: 1 });
-    const pool = { query } as never;
-    const store = new PgWatchlistPoisonStore(pool);
-    await store.push({
-      entityId: 'e1',
-      rawPayload: '{"x":1}',
-      attempts: 4,
-      lastError: 'boom',
-      firstSeenAt: new Date('2026-04-14T00:00:00Z'),
-      poisonedAt: new Date('2026-04-14T00:00:05Z'),
-    });
-    expect(query).toHaveBeenCalledTimes(1);
-    const [sql, params] = query.mock.calls[0] ?? [];
-    expect(sql).toMatch(/INSERT INTO watchlist_poison_dlq/);
-    expect(params).toBeDefined();
-    expect(params).toContain('e1');
-    expect(params).toContain('{"x":1}');
-    expect(params).toContain(4);
-    expect(params).toContain('boom');
-  });
-
-  it('PgWatchlistPoisonStore.size queries COUNT(*)', async () => {
-    const query = vi.fn().mockResolvedValue({ rows: [{ count: '42' }], rowCount: 1 });
-    const pool = { query } as never;
-    const store = new PgWatchlistPoisonStore(pool);
-    const size = await store.size();
-    expect(size).toBe(42);
-    expect(query).toHaveBeenCalledTimes(1);
-    const [sql] = query.mock.calls[0] ?? [];
-    expect(sql).toMatch(/COUNT\(\*\)/);
-    expect(sql).toMatch(/FROM watchlist_poison_dlq/);
-  });
-
-  it('migration 015 exists and creates the DLQ table', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { fileURLToPath } = await import('node:url');
-    const src = readFileSync(
-      fileURLToPath(new URL('../../src/infrastructure/db/migrations/015_watchlist_poison_dlq.sql', import.meta.url)),
-      'utf-8',
-    );
-    expect(src).toMatch(/CREATE TABLE IF NOT EXISTS watchlist_poison_dlq/);
-    expect(src).toMatch(/entity_id\s+TEXT\s+NOT NULL/);
-    expect(src).toMatch(/raw_payload\s+TEXT\s+NOT NULL/);
-    expect(src).toMatch(/attempts\s+INTEGER\s+NOT NULL/);
-    expect(src).toMatch(/CHECK \(attempts >= 1\)/);
-  });
-
-  it('container-watchlist.ts wires PgWatchlistPoisonStore when runtime.pool is available', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { fileURLToPath } = await import('node:url');
-    const src = readFileSync(
-      fileURLToPath(new URL('../../src/config/container-watchlist.ts', import.meta.url)),
-      'utf-8',
-    );
-    expect(src).toMatch(/new PgWatchlistPoisonStore\(runtime\.pool\)/);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // Fix 6 / Calibrator fail-loud on missing Platt params
 // ---------------------------------------------------------------------------
 

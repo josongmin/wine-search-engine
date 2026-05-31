@@ -124,7 +124,7 @@ sudo PUBLIC_PORT=9011 \
 
 ```text
 https://asommguide.shop:9011/ready
-https://asommguide.shop:9011/v1/search
+https://asommguide.shop:9011/v1/search/hybrid
 ```
 
 이 방식의 장점:
@@ -145,3 +145,5 @@ https://asommguide.shop:9011/v1/search
 - GitHub environment protection 추가
 - deploy 이후 `/ready` 외에 smoke query 한두 개까지 붙이기
 - app host를 전용 EC2로 분리하기
+
+전용 app host 분리 절차와 shared ingress 전환형 토폴로지는 `docs/runbook-dedicated-app-host-deploy.md`를 본다.

@@ -70,7 +70,7 @@ async function search(
     clarification?: boolean;
   } = {},
 ): Promise<SearchResult> {
-  const response = await postJson(app, '/v1/search', {
+  const response = await postJson(app, '/v1/search/hybrid', {
     query,
     options: {
       mode: options.mode ?? 'auto',
@@ -101,7 +101,7 @@ function expectNoWrongResolve(
   }
 
   // Entity-route search can safely resolve from resolver evidence without
-  // materializing ranked result rows in the /v1/search payload.
+  // materializing ranked result rows in the /v1/search/hybrid payload.
   expect(body.engine_decision.route).toBe('entity');
 }
 

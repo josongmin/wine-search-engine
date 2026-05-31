@@ -111,7 +111,9 @@ export async function buildQueryPlanner(
       );
       const terms = rows.map((r) => r.surface_form);
       if (terms.length > 0) {
-        fuzzyMatcher = new LazyFuzzyMatcher(terms);
+        const matcher = new LazyFuzzyMatcher(terms);
+        matcher.warm();
+        fuzzyMatcher = matcher;
       }
     } catch (err: unknown) {
       const code = (err as { code?: string } | undefined)?.code;
@@ -200,7 +202,14 @@ export function buildEntityResolver(adapters: CoreAdapterServices, config: Confi
     new CandidateScorer(),
     new AmbiguityClassifier(),
     new Calibrator(adapters.calibrationStore, {
-      requireTrainedParams: config.nodeEnv === 'production',
+      // The resolver / decision stack already carries an explicit
+      // `calibrationTrusted=false` degradation path for missing or stale
+      // params. Hard-failing production requests here turns an untrusted score
+      // into a 500 and, on agent paths, can escalate into process-killing
+      // unhandled rejections. Keep the runtime on the designed fail-closed
+      // path: serve with untrusted calibration and let downstream gates refuse
+      // binding decisions when exact evidence is absent.
+      requireTrainedParams: false,
       // P0.1: surface the env-driven TTL so AdmissionGate trust is gated on
       // nightly-pipeline freshness rather than the legacy `trained_at`
       // back-fill timestamp.

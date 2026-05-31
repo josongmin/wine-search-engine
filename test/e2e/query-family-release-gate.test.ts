@@ -34,7 +34,7 @@ function relevance(entries: readonly [string, number][]): RelevanceMap {
 }
 
 async function search(caseDef: FamilyCase) {
-  const response = await postJson(server.app, '/v1/search', {
+  const response = await postJson(server.app, '/v1/search/hybrid', {
     query: caseDef.query,
     options: {
       mode: caseDef.mode ?? 'auto',

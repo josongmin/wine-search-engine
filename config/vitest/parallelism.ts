@@ -65,7 +65,7 @@ export function cpuBoundThreads(): number {
 }
 
 /**
- * Thread cap for IO-bound lanes (integration/watchlist). These share a single
+ * Thread cap for IO-bound lanes. These share a single
  * RDS instance and a self-hosted Vespa node; fanning out past a handful of
  * workers exhausts connection pools and surfaces as flaky timeouts. Override per
  * machine with VITEST_MAX_THREADS when the shared infra can take more.

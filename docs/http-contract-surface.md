@@ -1,7 +1,8 @@
 # HTTP Contract Surface
 
-The repo's current HTTP contract source of truth is the route contract catalog,
-not OpenAPI.
+The repo's current HTTP contract source of truth is the route contract catalog.
+The OpenAPI bridge and replay-specific public contract docs were retired with the
+non-core HTTP surface cleanup.
 
 ## Sources of Truth
 
@@ -18,7 +19,6 @@ Use:
 
 ```bash
 pnpm run contracts:http -- data/http-contract-manifest.json
-pnpm run contracts:http:openapi-bridge -- data/http-openapi-bridge.json
 ```
 
 The script writes a stable JSON manifest of declared methods, URLs,
@@ -34,34 +34,23 @@ That file is lightweight enough to diff in PRs when the public route surface cha
 
 Implementation:
 - [`scripts/export-http-contract-manifest.ts`](/Users/songmin/wine-search-engine/scripts/export-http-contract-manifest.ts)
-- [`scripts/export-http-openapi-bridge.ts`](/Users/songmin/wine-search-engine/scripts/export-http-openapi-bridge.ts)
-- [`src/interface/http/routes/http-route-contract-openapi.ts`](/Users/songmin/wine-search-engine/src/interface/http/routes/http-route-contract-openapi.ts)
 
 ## Validation
 
 - Runtime registry check:
   [`test/integration/http/routes/route-contract-registry.test.ts`](/Users/songmin/wine-search-engine/test/integration/http/routes/route-contract-registry.test.ts)
+- Catalog-to-server parity:
+  [`test/regression/http-route-catalog-server-parity.regression.test.ts`](/Users/songmin/wine-search-engine/test/regression/http-route-catalog-server-parity.regression.test.ts)
 - Declared manifest export check:
-  [`test/integration/http/routes/http-contract-manifest-script.test.ts`](/Users/songmin/wine-search-engine/test/integration/http/routes/http-contract-manifest-script.test.ts)
-- OpenAPI bridge export check:
-  [`test/integration/http/routes/http-contract-openapi-bridge.test.ts`](/Users/songmin/wine-search-engine/test/integration/http/routes/http-contract-openapi-bridge.test.ts)
+  [`src/interface/http/routes/__tests__/http-contract-manifest-script.test.ts`](/Users/songmin/wine-search-engine/src/interface/http/routes/__tests__/http-contract-manifest-script.test.ts)
 - Public query 403 contract check:
   [`test/integration/http/routes/public-query-contracts.test.ts`](/Users/songmin/wine-search-engine/test/integration/http/routes/public-query-contracts.test.ts)
 
 ## Current Limitation
 
-The OpenAPI bridge is generated from route contracts and projects Zod schemas
-into a conservative JSON-schema-like form. It is useful for contract drift
-detection and tooling bootstrap, but it is not yet a full Swagger UI stack or
-a richly annotated hand-authored API spec.
-
-## Replay Contract Note
-
-`POST /v1/search/replay` now accepts an optional
-`preflight_honesty_contract` request field. This is a replay-only extension
-used by live-snapshot fixture lanes so replay cannot surface a more optimistic
-`execution_mode` / `degradation_reasons` contract than the preflight
-`/v1/search` response that produced the snapshot.
+The committed manifest is intentionally small: methods, URLs, operation IDs,
+and status-code envelopes. It is a drift-detection artifact, not a full
+hand-authored API reference.
 
 ## `GET /ready` Snapshot Health Block
 

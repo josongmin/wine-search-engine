@@ -171,7 +171,6 @@ export const bootstrapLogger = pino({
       'config.openai.apiKeys',
       'config.anthropic.apiKey',
       'config.cohere.apiKey',
-      'config.watchlist.webhookSecret',
       'config.http.debugSecret',
       // Wildcards for nested logger contexts
       '*.password',

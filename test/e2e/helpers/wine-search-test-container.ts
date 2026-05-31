@@ -16,7 +16,7 @@
  *         composition root does it)
  *   - `SynthesisRunner` (calls the mock structured LLM)
  *   - `WineSearchOrchestrator` (top-level)
- *   - `registerWineSearchRoute` (the actual Fastify route)
+ *   - `AgentUseCase` + canonical `POST /v1/agent` Fastify route
  *
  * This is the deploy-confidence test — it catches wiring drift across the
  * 11 internal components without requiring network or real LLM credentials.
@@ -35,6 +35,7 @@ import { ExecutionRunner } from '../../../src/application/wine-search/execution-
 import { WineAgentLoopRunner } from '../../../src/application/wine-search/wine-agent-loop.js';
 import { SynthesisRunner } from '../../../src/application/wine-search/synthesis-runner.js';
 import { SearchUseCaseAdapter } from '../../../src/application/wine-search/adapters/search-use-case-adapter.js';
+import { AgentUseCase } from '../../../src/application/wine-search/agent-usecase.js';
 import { WineSearchOrchestrator } from '../../../src/application/wine-search/wine-search-orchestrator.js';
 import type { OrchestratorWineAgentLoopToolBundle } from '../../../src/application/wine-search/wine-search-orchestrator.js';
 import type { QueryAnalyzerService } from '../../../src/application/wine-search/query-analyzer.js';
@@ -182,10 +183,13 @@ export async function buildWineSearchTestContainer(
   //    `/v1/agent` route has its own self-contained surface. We do
   //    use `createServer` so any drift in CORS/helmet/etc. layering is
   //    caught (the route registration path is what we care about).
+  const agentUseCase = new AgentUseCase({
+    orchestrator: wineSearchOrchestrator,
+  });
   const fullServer = await createServer(
     {
       ...container,
-      wineSearch: { wineSearchOrchestrator },
+      wineSearch: { wineSearchOrchestrator, agentUseCase },
     },
     { logLevel: 'silent', nodeEnv: 'test', enableTelemetry: false, rateLimitMax: 0 },
   );
@@ -204,7 +208,7 @@ export async function buildWineSearchTestContainer(
 // ---------------------------------------------------------------------------
 
 /**
- * Build a Fastify server WITHOUT the wine-search route registered. Used by
+ * Build a Fastify server WITHOUT the agent route slice registered. Used by
  * the feature-flag-off test which only needs to assert a 404. We do NOT go
  * through `createTestServer` for this — it always registers all routes the
  * container exposes, and we want the simplest possible negative-path server.
@@ -215,12 +219,12 @@ export async function buildAppWithoutWineSearch(): Promise<{
 }> {
   // We hand-build a Fastify app that mirrors the production "wineSearch
   // slice not present" path — the production `createServer` does
-  // `if (deps.wineSearch !== undefined) registerWineSearchRoute(...)`. We
-  // reproduce that branch by simply not calling `registerWineSearchRoute`.
+  // `if (deps.wineSearch !== undefined) registerAgent*Route(...)`. We
+  // reproduce that branch by simply not wiring the `wineSearch` slice.
   const app = Fastify({ logger: false });
   registerRequestContext(app);
   app.setErrorHandler(errorHandler);
-  // Intentionally NO `registerWineSearchRoute` call — that is the SUT.
+  // Intentionally no `wineSearch` slice wiring — that is the SUT.
   await app.ready();
   return {
     app,

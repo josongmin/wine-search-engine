@@ -1,6 +1,6 @@
 {
   "name": "transliteration-ko-en",
-  "endpoint": "/v1/search",
+  "endpoint": "/v1/search/hybrid",
   "execution_lane": "self_contained",
   "request": {
     "query": "오푸스 원 2018",

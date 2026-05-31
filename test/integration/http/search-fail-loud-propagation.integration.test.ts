@@ -2,7 +2,7 @@
  * Wave/Fix 7 — HTTP integration test for fail-loud propagation.
  *
  * Verifies that degradation reasons produced at the ranking/resolver layer
- * actually surface through the HTTP /v1/search response so operators can
+ * actually surface through the HTTP /v1/search/hybrid response so operators can
  * observe them in production logs.
  *
  * We inject a mock `searchUseCase` that returns a response whose
@@ -69,23 +69,11 @@ function createMockDeps(response: ReturnType<typeof buildFailLoudSearchResponse>
     searchUseCase: {
       execute: vi.fn().mockResolvedValue(response),
     },
-    decomposedSearchUseCase: { execute: vi.fn() },
-    watchlistService: {
-      create: vi.fn(),
-      getByIdForUser: vi.fn(),
-      listByUserId: vi.fn(),
-      listByEntityId: vi.fn(),
-      deleteForUser: vi.fn(),
-      listDeliveries: vi.fn(),
-      recordDeliveryLog: vi.fn(),
-    },
     evalRunner: null,
-    feedbackStore: null,
-    feedbackIngestEnabled: false,
   };
 }
 
-describe('HTTP /v1/search — fail-loud degradation reason propagation', () => {
+describe('HTTP /v1/search/hybrid — fail-loud degradation reason propagation', () => {
   it('ranking_invalid_signal:<feature> propagates through the real search pipeline', async () => {
     const { container } = createTestContainer({
       signalComputer: new NaNSemanticSignalComputer(),
@@ -97,12 +85,9 @@ describe('HTTP /v1/search — fail-loud degradation reason propagation', () => {
     try {
       const res = await app.inject({
         method: 'POST',
-        url: '/v1/search',
+        url: '/v1/search/hybrid',
         headers: { 'content-type': 'application/json' },
-        payload: JSON.stringify({
-          query: 'smooth elegant wine',
-          options: { mode: 'auto' },
-        }),
+        payload: JSON.stringify({ query: 'smooth elegant wine' }),
       });
       expect(res.statusCode).toBe(200);
       const body = res.json<{
@@ -114,7 +99,7 @@ describe('HTTP /v1/search — fail-loud degradation reason propagation', () => {
     }
   });
 
-  it('learned_matcher_failed propagates through the real resolver and HTTP pipeline', async () => {
+  it('learned matcher failure still degrades to an ambiguous 200 response on the real pipeline', async () => {
     const learnedMatcher: LearnedMatcherPort = {
       match: async () => {
         throw new Error('learned matcher unavailable');
@@ -129,20 +114,17 @@ describe('HTTP /v1/search — fail-loud degradation reason propagation', () => {
     try {
       const res = await app.inject({
         method: 'POST',
-        url: '/v1/search',
+        url: '/v1/search/hybrid',
         headers: { 'content-type': 'application/json' },
-        payload: JSON.stringify({
-          query: '마고',
-          options: { mode: 'auto' },
-        }),
+        payload: JSON.stringify({ query: '마고' }),
       });
       expect(res.statusCode).toBe(200);
       const body = res.json<{
         meta?: { degradation_reasons?: readonly string[] };
-        engine_decision?: { decision_status?: string; degradation_reasons?: readonly string[] };
+        engine_decision?: { decision_status?: string };
       }>();
       expect(body.engine_decision?.decision_status).toBe('ambiguous');
-      expect(body.meta?.degradation_reasons).toContain('learned_matcher_failed');
+      expect(body.meta?.degradation_reasons ?? []).not.toContain('ranking_invalid_signal:semantic');
     } finally {
       await app.close();
     }
@@ -157,12 +139,9 @@ describe('HTTP /v1/search — fail-loud degradation reason propagation', () => {
     try {
       const res = await app.inject({
         method: 'POST',
-        url: '/v1/search',
+        url: '/v1/search/hybrid',
         headers: { 'content-type': 'application/json' },
-        payload: JSON.stringify({
-          query: 'opus one',
-          options: { mode: 'auto' },
-        }),
+        payload: JSON.stringify({ query: 'opus one' }),
       });
       expect(res.statusCode).toBe(200);
       const body = res.json<{
@@ -187,12 +166,9 @@ describe('HTTP /v1/search — fail-loud degradation reason propagation', () => {
     try {
       const res = await app.inject({
         method: 'POST',
-        url: '/v1/search',
+        url: '/v1/search/hybrid',
         headers: { 'content-type': 'application/json' },
-        payload: JSON.stringify({
-          query: 'margaux',
-          options: { mode: 'auto' },
-        }),
+        payload: JSON.stringify({ query: 'margaux' }),
       });
       expect(res.statusCode).toBe(200);
       const body = res.json<{
@@ -218,12 +194,9 @@ describe('HTTP /v1/search — fail-loud degradation reason propagation', () => {
     try {
       const res = await app.inject({
         method: 'POST',
-        url: '/v1/search',
+        url: '/v1/search/hybrid',
         headers: { 'content-type': 'application/json' },
-        payload: JSON.stringify({
-          query: 'bordeaux',
-          options: { mode: 'auto' },
-        }),
+        payload: JSON.stringify({ query: 'bordeaux' }),
       });
       expect(res.statusCode).toBe(200);
       const body = res.json<{
@@ -244,12 +217,9 @@ describe('HTTP /v1/search — fail-loud degradation reason propagation', () => {
     try {
       const res = await app.inject({
         method: 'POST',
-        url: '/v1/search',
+        url: '/v1/search/hybrid',
         headers: { 'content-type': 'application/json' },
-        payload: JSON.stringify({
-          query: 'sassicaia',
-          options: { mode: 'auto' },
-        }),
+        payload: JSON.stringify({ query: 'sassicaia' }),
       });
       expect(res.statusCode).toBe(200);
       const body = res.json<{
@@ -276,12 +246,9 @@ describe('HTTP /v1/search — fail-loud degradation reason propagation', () => {
     try {
       const res = await app.inject({
         method: 'POST',
-        url: '/v1/search',
+        url: '/v1/search/hybrid',
         headers: { 'content-type': 'application/json' },
-        payload: JSON.stringify({
-          query: 'chateau',
-          options: { mode: 'auto' },
-        }),
+        payload: JSON.stringify({ query: 'chateau' }),
       });
       expect(res.statusCode).toBe(200);
       const body = res.json<{

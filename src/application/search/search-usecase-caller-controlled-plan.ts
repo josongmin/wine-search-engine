@@ -15,11 +15,15 @@ import type { SearchRequest } from './search-request.dto.js';
 const CALLER_CONTROLLED_PLANNER_VERSION = 'caller-controlled-v1';
 const CALLER_CONTROLLED_POLICY_RULE_VERSION = 'caller-controlled-v1';
 const CALLER_CONTROLLED_REASON_CODE = 'CALLER_CONTROLLED_PRIMITIVE_SEARCH';
+const LOOKUP_WINE_PLANNER_VERSION = 'lookup-wine-path-v1';
+const LOOKUP_WINE_POLICY_RULE_VERSION = 'lookup-wine-path-v1';
+const LOOKUP_WINE_REASON_CODE = 'LOOKUP_WINE_PATH_AUTHORITY';
 const DEFAULT_CALLER_CONTROLLED_MODE = 'auto';
 /** The hybrid lane is the only route this builder ever emits — entity/mixed
  *  modes have their own caller-bypassing paths upstream and are explicitly
  *  rejected by {@link isCallerControlledPrimitiveSearchRequest}. */
 const CALLER_CONTROLLED_ROUTE: QueryRoute = 'hybrid';
+const LOOKUP_WINE_ROUTE: QueryRoute = 'entity';
 const executionCompiler = new ExecutionCompiler();
 
 /**
@@ -59,6 +63,52 @@ function resolveCallerControlledRetrievalMode(request: SearchRequest): Retrieval
   return 'attribute_search';
 }
 
+function buildPrimitiveConstraints(request: SearchRequest) {
+  return {
+    hard: [...(request.filters ?? [])],
+    soft: [...(request.preferences ?? [])],
+    inferred: [],
+  } as const;
+}
+
+function buildPrimitiveQueryScaffold(
+  request: SearchRequest,
+  sanitizedQuery: string,
+) {
+  const constraints = buildPrimitiveConstraints(request);
+  const normalizedQueryViews = buildNormalizedQueryViews(sanitizedQuery);
+  const normalizedQuery = normalizeQueryStrict(sanitizedQuery);
+  return {
+    constraints,
+    normalizedQuery,
+    normalizedQueryViews,
+    planV2Base: {
+      rawQuery: sanitizedQuery,
+      normalizedQuery,
+      normalizedQueryViews,
+      anchors: [],
+      constraints,
+      expansions: {
+        lexical: [],
+        semantic: [],
+      },
+      uncertainty: {
+        overall: 0,
+        ambiguityDetected: false,
+        ambiguityTypes: [],
+        ambiguitySeverity: 'low' as const,
+        decisionEffect: 'trace_only' as const,
+        parserConfidence: 1,
+        anchorConfidence: 1,
+        constraintConfidence: 1,
+      },
+      ...(request.queryBudget !== undefined ? { queryBudget: request.queryBudget } : {}),
+      retrievalPlan: buildRetrievalPlan(constraints),
+      retrievalObjective: buildRetrievalObjective(constraints),
+    },
+  };
+}
+
 export function isCallerControlledPrimitiveSearchRequest(
   request: SearchRequest,
 ): boolean {
@@ -91,12 +141,7 @@ export function buildCallerControlledPrimitivePlan(
 
   const route = CALLER_CONTROLLED_ROUTE;
   const retrievalMode = resolveCallerControlledRetrievalMode(request);
-  const normalizedQueryViews = buildNormalizedQueryViews(sanitizedQuery);
-  const constraints = {
-    hard: [...(request.filters ?? [])],
-    soft: [...(request.preferences ?? [])],
-    inferred: [],
-  } as const;
+  const { constraints, planV2Base } = buildPrimitiveQueryScaffold(request, sanitizedQuery);
   // Hybrid-only fast-path: identity-seal and anchor evidence requirements are
   // structural to entity/mixed routes, which this builder explicitly does not
   // admit. The constraint-evidence flag still fires when the caller injected
@@ -107,33 +152,12 @@ export function buildCallerControlledPrimitivePlan(
     requires_anchor_evidence: false,
   } as const;
   const planV2: QueryPlanV2 = {
-    rawQuery: sanitizedQuery,
-    normalizedQuery: normalizeQueryStrict(sanitizedQuery),
-    normalizedQueryViews,
+    ...planV2Base,
     intent: request.callerInterpretation.intent,
     queryClass: request.callerInterpretation.queryClass,
-    anchors: [],
-    constraints,
-    expansions: {
-      lexical: [],
-      semantic: [],
-    },
-    uncertainty: {
-      overall: 0,
-      ambiguityDetected: false,
-      ambiguityTypes: [],
-      ambiguitySeverity: 'low',
-      decisionEffect: 'trace_only',
-      parserConfidence: 1,
-      anchorConfidence: 1,
-      constraintConfidence: 1,
-    },
     plannerVersion: CALLER_CONTROLLED_PLANNER_VERSION,
     policyRuleVersion: CALLER_CONTROLLED_POLICY_RULE_VERSION,
     thresholdProfileId: DEFAULT_THRESHOLD_PROFILE.id,
-    ...(request.queryBudget !== undefined ? { queryBudget: request.queryBudget } : {}),
-    retrievalPlan: buildRetrievalPlan(constraints),
-    retrievalObjective: buildRetrievalObjective(constraints),
     admission_context: admissionContext,
     suggestedRoute: route,
     suggestedRetrievalMode: retrievalMode,
@@ -157,6 +181,76 @@ export function buildCallerControlledPrimitivePlan(
       clarificationBias: 0,
       fallbackMode: 'hybrid',
       policyReasonCodes: [CALLER_CONTROLLED_REASON_CODE],
+    },
+    uncertainty: planV2.uncertainty,
+    plannerVersion: planV2.plannerVersion,
+    policyRuleVersion: planV2.policyRuleVersion,
+    thresholdProfileId: planV2.thresholdProfileId,
+    ...(planV2.admission_context !== undefined ? { admission_context: planV2.admission_context } : {}),
+    ...(planV2.queryBudget !== undefined ? { queryBudget: planV2.queryBudget } : {}),
+  };
+
+  const compiled = executionCompiler.compile({
+    plan: planV2,
+    apiRouteOverride: route,
+    maxCandidatesOverride: request.queryBudget?.maxCandidates,
+  });
+
+  return { plan, compiled };
+}
+
+export function isLookupWinePrimitiveSearchRequest(
+  request: SearchRequest,
+): boolean {
+  return request.primitiveRoute === 'lookup_wine';
+}
+
+export function buildLookupWinePrimitivePlan(
+  request: SearchRequest,
+  sanitizedQuery: string,
+): { readonly plan: QueryPlanV1; readonly compiled: CompiledWineQuery } {
+  if (!isLookupWinePrimitiveSearchRequest(request)) {
+    throw new Error('Lookup-wine primitive plan requires primitiveRoute=lookup_wine');
+  }
+
+  const route = LOOKUP_WINE_ROUTE;
+  const retrievalMode: RetrievalMode = 'entity_lookup';
+  const { constraints, planV2Base } = buildPrimitiveQueryScaffold(request, sanitizedQuery);
+  const admissionContext = {
+    requires_identity_seal: true,
+    requires_constraint_evidence: constraints.hard.length > 0,
+    requires_anchor_evidence: false,
+  } as const;
+  const planV2: QueryPlanV2 = {
+    ...planV2Base,
+    intent: 'entity_exact',
+    queryClass: 'short_entity',
+    plannerVersion: LOOKUP_WINE_PLANNER_VERSION,
+    policyRuleVersion: LOOKUP_WINE_POLICY_RULE_VERSION,
+    thresholdProfileId: DEFAULT_THRESHOLD_PROFILE.id,
+    admission_context: admissionContext,
+    suggestedRoute: route,
+    suggestedRetrievalMode: retrievalMode,
+  };
+
+  const plan: QueryPlanV1 = {
+    rawQuery: planV2.rawQuery,
+    normalizedQuery: planV2.normalizedQuery,
+    normalizedQueryViews: planV2.normalizedQueryViews,
+    intent: planV2.intent,
+    route,
+    retrievalMode,
+    queryClass: planV2.queryClass,
+    anchors: planV2.anchors,
+    constraints: planV2.constraints,
+    expansions: planV2.expansions,
+    policy: {
+      requireExact: false,
+      allowApproximate: true,
+      requireClarification: false,
+      clarificationBias: 0,
+      fallbackMode: 'hybrid',
+      policyReasonCodes: [LOOKUP_WINE_REASON_CODE],
     },
     uncertainty: planV2.uncertainty,
     plannerVersion: planV2.plannerVersion,

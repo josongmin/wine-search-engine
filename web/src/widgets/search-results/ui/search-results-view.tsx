@@ -7,7 +7,6 @@ import { useSearch } from '@/features/search-bar';
 import { WinePinCard, WineCardSkeleton } from '@/entities/wine';
 import { ClarificationCard } from '@/features/clarification';
 import { ComparisonTable } from '@/features/comparison';
-import { FeedbackButtons } from '@/features/feedback';
 import { FloatingSearchBar } from './floating-search-bar';
 
 function MetaBar({ resultCount, decisionStatus, ambiguousLabel, executionMode, queryMs }: {
@@ -146,9 +145,6 @@ function ResultsContent() {
                 decisionStatus={data.engine_decision.decision_status}
                 rank={i + 1}
                 query={query}
-                actions={
-                  <FeedbackButtons query={query} entityId={item.entity.entity_id} />
-                }
               />
             </div>
           ))}

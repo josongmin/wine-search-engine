@@ -6,9 +6,9 @@ import {
   MAX_QUERY_BUDGET_LATENCY_MS,
   MAX_QUERY_BUDGET_RERANK_LIMIT,
   MAX_SEARCH_RESULTS_PER_RESPONSE,
+  MAX_ENTITY_ID_CHARS,
   MAX_SESSION_ENTITY_ID_CHARS,
   MAX_SESSION_PREVIOUS_ENTITIES,
-  MAX_WATCHLIST_ENTITY_ID_CHARS,
   MIN_BATCH_SEARCH_ITEM_TIMEOUT_MS,
 } from '../constants.js';
 import {
@@ -55,7 +55,7 @@ const BatchQueryBudgetSnakeSchema = z.object({
 export const BatchSearchRequestItemSchema = z.object({
   id: z.string()
     .min(1, 'id must be a non-empty string')
-    .max(MAX_WATCHLIST_ENTITY_ID_CHARS, `id must not exceed ${String(MAX_WATCHLIST_ENTITY_ID_CHARS)} characters`),
+    .max(MAX_ENTITY_ID_CHARS, `id must not exceed ${String(MAX_ENTITY_ID_CHARS)} characters`),
   query: QueryStringSchema,
   limit: z.number().int().positive().max(MAX_SEARCH_RESULTS_PER_RESPONSE).optional(),
   retrieval_mode: SearchModeSchema.optional(),
@@ -141,8 +141,8 @@ export const BatchSearchRequestSchema = z.object({
   batch_id: z.string()
     .min(1, 'batch_id must be a non-empty string')
     .max(
-      MAX_WATCHLIST_ENTITY_ID_CHARS,
-      `batch_id must not exceed ${String(MAX_WATCHLIST_ENTITY_ID_CHARS)} characters`,
+      MAX_ENTITY_ID_CHARS,
+      `batch_id must not exceed ${String(MAX_ENTITY_ID_CHARS)} characters`,
     )
     .optional(),
 }).strict().superRefine((value, ctx) => {

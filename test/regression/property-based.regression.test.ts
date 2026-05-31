@@ -13,7 +13,6 @@ import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
 import { escapeLikePattern } from '../../src/infrastructure/adapter/pg-blocking-adapter.js';
 import { camelToSnake } from '../../src/interface/http/middleware/snake-case-hook.js';
-import { CreateWatchlistRequestSchema } from '../../src/interface/http/schemas/watchlist.schema.js';
 import { ConfidenceRefusalPolicy } from '../../src/domain/decision/service/confidence-refusal.js';
 import { EmbeddingCacheKeyBuilder } from '../../src/domain/performance/model/cache-key.js';
 
@@ -115,74 +114,6 @@ describe('Property: camelToSnake', () => {
         return out === out.toLowerCase();
       }),
       { numRuns: 500 },
-    );
-  });
-});
-
-describe('Property: isPrivateOrReservedHost (via watchlist schema)', () => {
-  it('legitimate domains starting with fc/fd/fe never blocked', () => {
-    // Generate hostnames that start with fc/fd/fe but are clearly TLD domains
-    fc.assert(
-      fc.property(
-        fc.tuple(
-          fc.constantFrom('fc', 'fd', 'fe', 'fcm', 'fdb', 'fed', 'feb', 'fea'),
-          fc.stringMatching(/^[a-z]{2,8}$/),
-          fc.constantFrom('com', 'org', 'net', 'io'),
-        ),
-        ([prefix, mid, tld]) => {
-          const domain = `${prefix}${mid}.${tld}`;
-          const result = CreateWatchlistRequestSchema.safeParse({
-            entity_id: 'wine-1',
-            trigger_conditions: [{ type: 'critic_score_above', threshold: 90 }],
-            callback_url: `https://${domain}/webhook`,
-          });
-          // These are all legitimate FQDNs and must NOT be rejected
-          return result.success;
-        },
-      ),
-      { numRuns: 100 },
-    );
-  });
-
-  it('any IPv4 in 127.0.0.0/8 is always blocked', () => {
-    fc.assert(
-      fc.property(
-        fc.tuple(
-          fc.integer({ min: 0, max: 255 }),
-          fc.integer({ min: 0, max: 255 }),
-          fc.integer({ min: 0, max: 255 }),
-        ),
-        ([b, c, d]) => {
-          const result = CreateWatchlistRequestSchema.safeParse({
-            entity_id: 'wine-1',
-            trigger_conditions: [{ type: 'critic_score_above', threshold: 90 }],
-            callback_url: `https://127.${b}.${c}.${d}/webhook`,
-          });
-          return !result.success;
-        },
-      ),
-      { numRuns: 100 },
-    );
-  });
-
-  it('any IPv4 in 10.0.0.0/8 is always blocked', () => {
-    fc.assert(
-      fc.property(
-        fc.tuple(
-          fc.integer({ min: 0, max: 255 }),
-          fc.integer({ min: 0, max: 255 }),
-          fc.integer({ min: 0, max: 255 }),
-        ),
-        ([b, c, d]) => {
-          const result = CreateWatchlistRequestSchema.safeParse({
-            entity_id: 'wine-1',
-            trigger_conditions: [{ type: 'critic_score_above', threshold: 90 }],
-            callback_url: `https://10.${b}.${c}.${d}/webhook`,
-          });
-          return !result.success;
-        },
-      ),
-      { numRuns: 100 },
     );
   });
 });

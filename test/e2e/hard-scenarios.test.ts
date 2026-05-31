@@ -47,7 +47,7 @@ async function post(path: string, body: unknown): Promise<InjectResponse> {
 
 describe('Korean entity resolution', () => {
   it("'오푸스원' entity mode → 200 with resolved or ambiguous (pre-registered alias, not failed)", async () => {
-    const res = await post('/v1/search', {
+    const res = await post('/v1/search/hybrid', {
       query: '오푸스원',
       options: { mode: 'entity', explain: false, clarification: false },
     });
@@ -59,7 +59,7 @@ describe('Korean entity resolution', () => {
   });
 
   it("'샤토 마고' entity mode → 200", async () => {
-    const res = await post('/v1/search', {
+    const res = await post('/v1/search/hybrid', {
       query: '샤토 마고',
       options: { mode: 'entity', explain: false, clarification: false },
     });
@@ -68,7 +68,7 @@ describe('Korean entity resolution', () => {
   });
 
   it("'마고' entity mode with clarification=true → 200 and 'clarification' key present", async () => {
-    const res = await post('/v1/search', {
+    const res = await post('/v1/search/hybrid', {
       query: '마고',
       options: { mode: 'entity', explain: false, clarification: true },
     });
@@ -79,7 +79,7 @@ describe('Korean entity resolution', () => {
   });
 
   it("'Chateau Margaux' (no accent) entity mode → resolves (decisionStatus not 'failed')", async () => {
-    const res = await post('/v1/search', {
+    const res = await post('/v1/search/hybrid', {
       query: 'Chateau Margaux',
       options: { mode: 'entity', explain: false, clarification: false },
     });
@@ -96,7 +96,7 @@ describe('Korean entity resolution', () => {
 
 describe('Semantic / hybrid mode queries', () => {
   it("'풀바디 레드 와인' hybrid → results array is non-empty", async () => {
-    const res = await post('/v1/search', {
+    const res = await post('/v1/search/hybrid', {
       query: '풀바디 레드 와인',
       options: { mode: 'hybrid', explain: false, clarification: false },
     });
@@ -109,7 +109,7 @@ describe('Semantic / hybrid mode queries', () => {
   });
 
   it("'스파클링 와인' hybrid → results non-empty", async () => {
-    const res = await post('/v1/search', {
+    const res = await post('/v1/search/hybrid', {
       query: '스파클링 와인',
       options: { mode: 'hybrid', explain: false, clarification: false },
     });
@@ -122,7 +122,7 @@ describe('Semantic / hybrid mode queries', () => {
   });
 
   it("'달달한 와인' hybrid → results non-empty", async () => {
-    const res = await post('/v1/search', {
+    const res = await post('/v1/search/hybrid', {
       query: '달달한 와인',
       options: { mode: 'hybrid', explain: false, clarification: false },
     });
@@ -141,7 +141,7 @@ describe('Semantic / hybrid mode queries', () => {
 
 describe('Mixed-mode / natural-language queries', () => {
   it("'오푸스원 같은 와인' auto mode → 200", async () => {
-    const res = await post('/v1/search', {
+    const res = await post('/v1/search/hybrid', {
       query: '오푸스원 같은 와인',
       options: { mode: 'auto', explain: false, clarification: false },
     });
@@ -150,7 +150,7 @@ describe('Mixed-mode / natural-language queries', () => {
   });
 
   it("'클라우디베이 말고 다른 화이트' auto mode → 200", async () => {
-    const res = await post('/v1/search', {
+    const res = await post('/v1/search/hybrid', {
       query: '클라우디베이 말고 다른 화이트',
       options: { mode: 'auto', explain: false, clarification: false },
     });
@@ -167,7 +167,7 @@ describe('Content-Type enforcement', () => {
   it('POST with content-type: application/json; charset=utf-8 → 200', async () => {
     const response = await server.app.inject({
       method: 'POST',
-      url: '/v1/search',
+      url: '/v1/search/hybrid',
       headers: { 'content-type': 'application/json; charset=utf-8' },
       payload: JSON.stringify({ query: 'Opus One' }),
     });
@@ -182,7 +182,7 @@ describe('Content-Type enforcement', () => {
 
 describe('Malformed input', () => {
   it('query=null body → 400', async () => {
-    const res = await post('/v1/search', { query: null });
+    const res = await post('/v1/search/hybrid', { query: null });
 
     expect(res.statusCode).toBe(400);
   });
@@ -190,7 +190,7 @@ describe('Malformed input', () => {
   it('array body [] → 400', async () => {
     const response = await server.app.inject({
       method: 'POST',
-      url: '/v1/search',
+      url: '/v1/search/hybrid',
       headers: { 'content-type': 'application/json' },
       payload: JSON.stringify([]),
     });
@@ -201,7 +201,7 @@ describe('Malformed input', () => {
   it('integer body 42 → 400', async () => {
     const response = await server.app.inject({
       method: 'POST',
-      url: '/v1/search',
+      url: '/v1/search/hybrid',
       headers: { 'content-type': 'application/json' },
       payload: JSON.stringify(42),
     });
@@ -210,7 +210,7 @@ describe('Malformed input', () => {
   });
 
   it('query with 500 chars → 200 (no max-length in schema)', async () => {
-    const res = await post('/v1/search', { query: 'a'.repeat(500) });
+    const res = await post('/v1/search/hybrid', { query: 'a'.repeat(500) });
 
     // Schema only has min(1), no max — long queries should pass validation
     expect(res.statusCode).toBe(200);

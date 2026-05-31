@@ -10,9 +10,6 @@
 
 import type { Pool } from 'pg';
 import type { NodeSDK } from '@opentelemetry/sdk-node';
-import type { WatchlistStoragePort } from '../domain/watchlist/port/watchlist-repository.port.js';
-import type { WatchlistPublisherPort } from '../infrastructure/watchlist/redis-watchlist-publisher.js';
-import type { WatchlistSubscriberPort } from '../infrastructure/watchlist/redis-watchlist-subscriber.js';
 import type { SearchSnapshotFieldAvailability } from '../domain/shared/types/search-field-availability.js';
 import { closePgPool } from '../infrastructure/db/pg-pool.js';
 import { closeRedisClient, type RedisClient } from '../infrastructure/db/redis-client.js';
@@ -21,9 +18,6 @@ import { loadSearchSnapshotRuntimeState } from '../infrastructure/health/search-
 export interface RuntimeHandles {
   readonly pool?: Pool;
   readonly redisClient?: RedisClient;
-  readonly createWatchlistStore?: () => WatchlistStoragePort;
-  readonly createWatchlistPublisher?: () => WatchlistPublisherPort;
-  readonly createWatchlistSubscriber?: () => WatchlistSubscriberPort;
   /**
    * Optional non-live snapshot binding for eval / shadow workflows.
    *

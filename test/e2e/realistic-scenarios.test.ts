@@ -28,7 +28,7 @@ afterAll(async () => {
 });
 
 async function search(body: unknown) {
-  const response = await postJson(server.app, '/v1/search', body);
+  const response = await postJson(server.app, '/v1/search/hybrid', body);
   expect(response.statusCode).toBe(200);
   return parseSearchResponse(response);
 }

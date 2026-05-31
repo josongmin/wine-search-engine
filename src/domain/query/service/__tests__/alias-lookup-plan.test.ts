@@ -88,4 +88,10 @@ describe('buildAliasLookupPlan — Korean ↔ Latin transliteration tokenization
     expect(plan.tokenList).not.toContain('cheese for wine');
     expect(plan.tokenList).not.toContain('for wine cheese');
   });
+
+  it('surface lookup plan keeps reordered whole-query variants for short Hangul entity surfaces', () => {
+    const plan = buildAliasSurfaceLookupPlan('마고 샤또');
+
+    expect(plan.tokenList).toContain('샤또 마고');
+  });
 });

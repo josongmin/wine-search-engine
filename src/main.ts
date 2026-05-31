@@ -1,7 +1,6 @@
 import { loadConfig } from './config/env.js';
 import { createContainer } from './config/container.js';
 import { buildHealthRouteOptions } from './config/readiness.js';
-import { expectsRedisAtStartup, isWatchlistEnabled } from './config/watchlist.js';
 import {
   bindLiveSearchSnapshotRuntimeHandles,
   createManagedRuntimeHandles,
@@ -11,8 +10,6 @@ import { createServer } from './interface/http/server.js';
 import { createPgPool, shouldUsePgPool } from './infrastructure/db/pg-pool.js';
 import { connectRedisClient } from './infrastructure/db/redis-client.js';
 import { getTracer, initTelemetry } from './infrastructure/telemetry/tracer.js';
-import { RedisWatchlistPublisher } from './infrastructure/watchlist/redis-watchlist-publisher.js';
-import { RedisWatchlistSubscriber } from './infrastructure/watchlist/redis-watchlist-subscriber.js';
 import { bootstrapLogger } from './domain/shared/bootstrap-logger.js';
 import { logKillSwitchPolicyAtStartup } from './config/kill-switch-policy.js';
 
@@ -84,15 +81,10 @@ async function main(): Promise<void> {
   // Pool is required for production: PG adapters, evaluation, LTR model loading
   const pool = shouldUsePgPool(config.pg) ? createPgPool(config.pg) : undefined;
   let redisClient: RuntimeHandles['redisClient'] | null = null;
-  if (expectsRedisAtStartup(config)) {
+  if ((config.redis.url ?? '').length > 0) {
     try {
       redisClient = await connectRedisClient(config.redis);
     } catch (err) {
-      if (isWatchlistEnabled(config)) {
-        throw new Error(
-          `Watchlist delivery requires Redis at startup: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
       bootstrapLogger.warn(
         { err },
         '[Main] Redis unavailable during startup; continuing without Redis-backed features',
@@ -102,18 +94,12 @@ async function main(): Promise<void> {
   const runtimeHandles = await bindLiveSearchSnapshotRuntimeHandles({
     ...(pool ? { pool } : {}),
     ...(redisClient ? { redisClient } : {}),
-    createWatchlistPublisher: () =>
-      new RedisWatchlistPublisher({
-        ...(redisClient ? { client: redisClient } : { redisConfig: config.redis }),
-      }),
-    createWatchlistSubscriber: () => new RedisWatchlistSubscriber(config.redis),
   } satisfies RuntimeHandles);
   const managedRuntime = createManagedRuntimeHandles(runtimeHandles, { telemetrySdk });
   const container = await createContainer(config, managedRuntime);
   const healthOptions = buildHealthRouteOptions(
     config,
     managedRuntime,
-    container.watchlistRuntime,
     container.drinkingWindowPredictor,
     container.calibrationStore,
     container.runtimeReadiness,
@@ -135,15 +121,8 @@ async function main(): Promise<void> {
   });
 
   let shuttingDown = false;
-  let startedWatchlistRuntime = false;
 
   try {
-    if (container.watchlistRuntime !== null) {
-      await container.watchlistRuntime.start();
-      startedWatchlistRuntime = true;
-      server.log.info('Watchlist delivery runtime started');
-    }
-
     // Step 4: Start listening
     const address = await server.listen({
       port: config.port,
@@ -152,9 +131,6 @@ async function main(): Promise<void> {
 
     server.log.info(`Wine Intelligence Engine listening on ${address}`);
   } catch (err) {
-    if (startedWatchlistRuntime && container.watchlistRuntime?.isRunning() === true) {
-      await container.watchlistRuntime.stop();
-    }
     await server.close();
     await managedRuntime.close();
     throw err;
@@ -180,9 +156,6 @@ async function main(): Promise<void> {
     hardTimer.unref();
 
     try {
-      if (startedWatchlistRuntime && container.watchlistRuntime?.isRunning() === true) {
-        await container.watchlistRuntime.stop();
-      }
       await server.close();
       await managedRuntime.close();
       server.log.info('Server closed successfully.');

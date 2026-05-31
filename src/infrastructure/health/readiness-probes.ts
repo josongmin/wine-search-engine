@@ -88,7 +88,6 @@ export const PROBE_CRITICALITY = {
   embedding: 'critical',
   calibration_store: 'critical',
   benchmark_persistence: 'critical',
-  watchlist_runtime: 'critical',
   runtime_ltr_artifact: 'critical',
   runtime_ltr_effective: 'critical',
   reranker: 'non_critical',

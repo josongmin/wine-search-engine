@@ -58,9 +58,12 @@ function withRequestAliases<T extends z.ZodRawShape>(shape: T) {
 }
 
 /**
- * Slimmer alias wrapper for lookup — no sessionContext (entity route ignores it).
+ * Slimmer alias wrapper for retained generic entity-lookup payloads —
+ * no sessionContext (entity lookup ignores it).
  * Both camelCase (queryBudget) and snake_case (query_budget) aliases are supported
- * for budget control. Callers that need session affinity should use POST /v1/search.
+ * for budget control. The live public HTTP lookup surface is
+ * `POST /v1/lookup/wine`; this retained schema is for internal tooling and
+ * replay/fixture validation.
  */
 function withLookupAliases<T extends z.ZodRawShape>(shape: T) {
   return z.object({
@@ -84,6 +87,9 @@ function withLookupAliases<T extends z.ZodRawShape>(shape: T) {
   });
 }
 
+/** Retained generic search payload schema for internal tooling / fixture
+ * validation. Live public search HTTP uses `PrimitiveSearchRequestSchema`
+ * through the path-authoritative primitive routes. */
 export const SearchRequestSchema = withRequestAliases({
   query: QueryStringSchema,
   context: SearchContextSchema.optional(),
@@ -94,10 +100,11 @@ export const SearchRequestSchema = withRequestAliases({
 export type SearchRequestBody = z.infer<typeof SearchRequestSchema>;
 
 /**
- * POST /v1/search/lookup — entity-only (exact match) search.
+ * Retained generic entity-lookup payload schema for internal tooling.
  *
  * Stripped-down schema: no retrieval_mode override (always entity),
- * no options.mode (routing is not negotiable for lookup).
+ * no options.mode (routing is not negotiable for lookup). The live public HTTP
+ * surface is `POST /v1/lookup/wine`.
  */
 const LookupOptionsSchema = z.object({
   explain: z.boolean().default(false),

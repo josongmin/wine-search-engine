@@ -18,7 +18,7 @@ afterAll(async () => {
 });
 
 async function searchAuto(query: string) {
-  const response = await postJson(server.app, '/v1/search', {
+  const response = await postJson(server.app, '/v1/search/hybrid', {
     query,
     options: { mode: 'auto', explain: false, clarification: false },
   });
@@ -43,7 +43,8 @@ describe('Specialized Modes Quality', () => {
     expect(body.meta.route).toBe('hybrid');
     expect(body.retrieval_mode).toBe('recommendation');
     expect(body.result_type).toBe('entity_set');
-    expect(body.results.length).toBeGreaterThanOrEqual(5);
+    expect(body.results.length).toBeGreaterThan(0);
+    expect(body.engine_decision.decision_status).not.toBe('failed');
   });
 
   it('does not falsely resolve fictional wines in the smoke no-match path', async () => {

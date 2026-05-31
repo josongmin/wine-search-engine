@@ -151,7 +151,7 @@ const SearchReplayFixtureMetadataSchema = z.object({
 
 const SearchReplayFixtureCommonFieldsSchema = z.object({
   name: z.string().min(1),
-  endpoint: z.literal('/v1/search'),
+  endpoint: z.literal('/v1/search/hybrid'),
   execution_lane: z.enum(['self_contained', 'runtime_required']),
   response_family: z.enum(['search', 'comparison']).optional(),
   expected: z.union([
@@ -198,7 +198,7 @@ function addExecutionLaneInvariant(
 }
 
 const SearchFixtureSchema = SearchReplayFixtureCommonFieldsSchema.extend({
-  endpoint: z.literal('/v1/search'),
+  endpoint: z.literal('/v1/search/hybrid'),
   request: SearchRequestSchema,
 }).strict();
 
@@ -331,7 +331,7 @@ export async function runSearchFixture(
   readonly response?: SearchResponseBody | ComparisonSearchResponseBody;
   readonly error?: ErrorResponseBody;
   readonly assertionSummary: {
-    readonly endpoint: '/v1/search';
+    readonly endpoint: '/v1/search/hybrid';
     readonly responseFamily: 'search' | 'comparison';
     readonly runtimeMode?: 'inmemory' | 'full_runtime' | undefined;
     readonly usedLiveSnapshot: boolean;

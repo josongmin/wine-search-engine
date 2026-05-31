@@ -19,8 +19,6 @@ import * as searchResponseV2Schemas from '../../../src/interface/http/schemas/se
 import * as searchRequestSchemas from '../../../src/interface/http/schemas/search-request.schema.js';
 import * as searchSharedSchemas from '../../../src/interface/http/schemas/search-shared.schema.js';
 import * as batchSearchSchemas from '../../../src/interface/http/schemas/batch-search.schema.js';
-import * as feedbackSchemas from '../../../src/interface/http/schemas/feedback.schema.js';
-import * as watchlistSchemas from '../../../src/interface/http/schemas/watchlist.schema.js';
 
 // ---------------------------------------------------------------------------
 // Schema walker
@@ -160,8 +158,6 @@ const ALL_SCHEMAS = collectSchemas({
   searchRequest: searchRequestSchemas,
   searchShared: searchSharedSchemas,
   batchSearch: batchSearchSchemas,
-  feedback: feedbackSchemas,
-  watchlist: watchlistSchemas,
 });
 
 // ---------------------------------------------------------------------------

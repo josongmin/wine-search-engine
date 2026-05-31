@@ -4,9 +4,11 @@
  * Path-authoritative selectors: each primitive endpoint owns a dedicated path
  * (`/v1/search/hybrid`, `/v1/search/semantic`, `/v1/search/lexical`,
  * `/v1/lookup/wine`) and the request body deliberately CANNOT override the
- * retrieval lane. There is no `mode`, no `retrieval_mode`, no
- * `sessionContext`, no `clarification` — those were monolith-era control
- * surfaces that this revamp removes (architecture-decision §2.2).
+ * retrieval lane. `retrieval_mode`, `sessionContext`, and other monolith-era
+ * control surfaces are gone. A narrow legacy `options` envelope is still
+ * accepted as a no-op compatibility shim so stale callers do not hard-fail
+ * during the primitive-route cutover; the path remains the sole authority on
+ * the executed lane (architecture-decision §2.2).
  *
  * Schema shape is shared across all four primitives — the only thing that
  * differs at the public boundary is the URL. The route handler is what
@@ -28,6 +30,7 @@ import {
   QueryBudgetSchema,
   QueryStringSchema,
   SearchContextSchema,
+  SearchModeSchema,
 } from './search-shared.schema.js';
 import { NormalizedConstraintSchema } from '@shared/types/index.js';
 import { WINE_SEARCH_MAX_CONSTRAINTS } from '@app/wine-search/wine-search-schemas.js';
@@ -52,6 +55,12 @@ const QueryBudgetSnakeSchema = z.object({
   },
 }));
 
+const LegacyPrimitiveOptionsSchema = z.object({
+  mode: SearchModeSchema.optional(),
+  explain: z.boolean().optional(),
+  clarification: z.boolean().optional(),
+}).strict();
+
 /**
  * Canonical body shape for every primitive search/lookup route. The four
  * endpoints differ in URL path only — the body MUST be primitive-agnostic so
@@ -71,6 +80,8 @@ export const PrimitiveSearchRequestSchema = z.object({
   /** Per-request result-count cap. Bounded by `MAX_SEARCH_RESULTS_PER_RESPONSE`
    *  so a single caller cannot exhaust the response budget. */
   limit: z.number().int().finite().min(1).max(MAX_SEARCH_RESULTS_PER_RESPONSE).optional(),
+  /** Legacy no-op compatibility envelope. Parsed, then dropped. */
+  options: LegacyPrimitiveOptionsSchema.optional(),
   /** Per-request budget — camelCase form. */
   queryBudget: QueryBudgetSchema.optional(),
   /** Per-request budget — snake_case form (auto-normalized to `queryBudget`). */
@@ -84,7 +95,8 @@ export const PrimitiveSearchRequestSchema = z.object({
     });
   }
 }).transform((value) => {
-  const { queryBudget, query_budget, ...rest } = value;
+  const { options, queryBudget, query_budget, ...rest } = value;
+  void options;
   return {
     ...rest,
     ...(queryBudget !== undefined ? { queryBudget } : query_budget ?? {}),

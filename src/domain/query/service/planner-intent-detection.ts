@@ -2,8 +2,6 @@ import type { QueryIntent } from '../model/query-intent.js';
 import type { AnchorCandidate } from '../model/anchor-candidate.js';
 import type { AnchorConditionedQuery } from '../model/relative-query.js';
 import { WINE_TYPE_DETECTION_PATTERNS } from '../model/wine-type-patterns.js';
-import { parseSpans } from '../../attribute/service/span-parser.js';
-import { isDirectEntityResolution, resolveEntity } from '../../attribute/service/entity-resolver.js';
 import { extractAllPairingConstraints } from './pairing-extractor.js';
 import type { AnchorExtractor } from './anchor-extractor.js';
 import {
@@ -100,10 +98,6 @@ export function detectQueryIntent(
   const intentQuerySurface = hasExactEntityLookupSignal
     ? stripExactEntityLookupSuffix(normalizedQuery)
     : normalizedQuery;
-  const hasDirectAttributeEntity = parseSpans(intentQuerySurface).some((span) => {
-    const resolved = resolveEntity(span.text, { preferEntityOverStyle: true });
-    return isDirectEntityResolution(resolved) && resolved.entityType !== 'wine_type';
-  });
   const hasStrongAnchor = anchors.some(
     (a) => a.confidence >= EXACT_ANCHOR_CONFIDENCE,
   );
@@ -165,7 +159,7 @@ export function detectQueryIntent(
   }
 
   if (hasStrongAnchor && hasExactEntityLookupSignal) {
-    return hasDirectAttributeEntity || strongAnchorEntityCount <= 1 ? 'entity_exact' : 'facet_search';
+    return strongAnchorEntityCount <= 1 ? 'entity_exact' : 'facet_search';
   }
 
   if (hasStrongAnchor && (hasConstraintKeyword || hasPrestigeKeyword)) {
@@ -173,9 +167,6 @@ export function detectQueryIntent(
   }
 
   if (hasStrongAnchor && !hasConstraintKeyword && !hasBudgetBoundaryKeyword && !hasPrestigeKeyword) {
-    if (hasDirectAttributeEntity) {
-      return 'entity_exact';
-    }
     // A single strong anchor pointing to exactly ONE entity → genuine
     // entity lookup. But if anchors span MULTIPLE distinct entities (e.g.
     // "Barolo" matching 2+ wines from different producers), the query is a

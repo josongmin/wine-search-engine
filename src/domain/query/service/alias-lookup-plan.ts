@@ -4,6 +4,7 @@ import { Transliterator } from '../../alias/service/transliterator.js';
 import { stripAccents } from '../../shared/utils/unicode-normalize.js';
 import { lookupCuratedKoreanToken } from './korean-wine-token-lexicon.js';
 import { compactForLookup } from './phonetic-skeleton.js';
+import { isShortEntityLikeSurface } from './short-entity-surface.js';
 
 const LATIN_VOWEL_RE = /[aeiouy]/i;
 const ASCII_ACRONYM_RE = /^[A-Z0-9]+$/;
@@ -157,8 +158,18 @@ function addCuratedWholeSurfaceRomanizations(
 
 function buildSafeFullSurfaceVariants(views: NormalizedQueryViews): readonly string[] {
   const reorderedVariants = new Set(views.reordered ?? []);
+  const baseVariants = views.lookupVariants.filter((value) => !reorderedVariants.has(value));
+  if (
+    HANGUL_RE.test(views.punctuationStripped)
+    && isShortEntityLikeSurface(views.punctuationStripped)
+  ) {
+    return trimDeduped([
+      ...baseVariants,
+      ...(views.reordered ?? []),
+    ]);
+  }
   return trimDeduped(
-    views.lookupVariants.filter((value) => !reorderedVariants.has(value)),
+    baseVariants,
   );
 }
 

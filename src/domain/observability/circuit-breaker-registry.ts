@@ -1,8 +1,8 @@
 /**
  * Process-wide circuit breaker registry.
  *
- * Each adapter that creates a CircuitBreaker registers it here so the
- * /metrics/degradation endpoint can expose all breaker states in a single
+ * Each adapter that creates a CircuitBreaker registers it here so internal
+ * exporters/debug surfaces can expose all breaker states in a single
  * snapshot. The registry is intentionally a module-scope singleton —
  * one process has one set of breakers.
  */
@@ -73,7 +73,7 @@ class CircuitBreakerRegistry {
   }
 
   /**
-   * Prometheus-friendly snapshot for the `/metrics` exporter and dashboards.
+   * Prometheus-friendly snapshot for internal exporters and dashboards.
    *
    * Each entry is a flat object whose keys correspond directly to gauge
    * labels/values; the consumer only has to fan out one entry per breaker.

@@ -1,6 +1,6 @@
 {
   "name": "reranker-timeout",
-  "endpoint": "/v1/search",
+  "endpoint": "/v1/search/hybrid",
   "execution_lane": "runtime_required",
   "request": {
     "query": "샴페인 와인 추천",

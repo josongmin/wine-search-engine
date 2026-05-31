@@ -86,6 +86,7 @@ import type { SearchSnapshotFieldAvailability } from '../../domain/shared/types/
 export type { SearchRequest } from './search-request.dto.js';
 
 const MIXED_EMPTY_RESULTS_FALLBACK_REASON = 'mixed_constraint_guided_hybrid_fallback';
+const MIXED_WHITE_FALLBACK_WINE_TYPES = ['white', 'dessert'] as const;
 
 /**
  * Version info injected into the SearchUseCase for snapshot population.
@@ -374,8 +375,8 @@ export class SearchUseCase {
       ...(stageTimer !== undefined ? { stageTimer } : {}),
       // T-IR-01: forward the path-authoritative retrieval lane (set by the
       // `/v1/search/{hybrid,semantic,lexical}` route mappers) into the
-      // retrieval layer. Absent for the legacy `/v1/search` monolith and the
-      // entity lookup route, which run the full channel mix.
+      // retrieval layer. Absent for `/v1/lookup/wine` and non-primitive
+      // internal callers, which run the default channel mix.
       ...(request.retrievalLane !== undefined ? { retrievalLane: request.retrievalLane } : {}),
       requestId,
       requestStartTimeMs: startTime,
@@ -864,8 +865,9 @@ export class SearchUseCase {
   /**
    * Hybrid route: delegates to the shared pipeline used by HybridUseCase.
    *
-   * `/v1/search` auto mode promotes planner-selected hybrid execution onto the
-   * dual-lane topology, while explicit hybrid surfaces stay general-only.
+   * Primitive search callers can force retrieval lane selection at the HTTP
+   * edge, while non-primitive/internal callers still arrive here with the
+   * planner-selected hybrid topology.
    *
    * The resolveEntity callback uses resolveEntityRouteForPlan (single-pass, no
    * TA3 retry loop) because hybrid anchor resolution only needs the pivot
@@ -1003,7 +1005,14 @@ export function buildMixedConstraintFallbackExecution(
   plan: QueryPlanV1,
   compiled: CompiledWineQuery,
 ): { readonly plan: QueryPlanV1; readonly compiled: CompiledWineQuery } {
-  const fallbackQuery = buildMixedConstraintFallbackQuery(plan);
+  const fallbackConstraints = {
+    ...plan.constraints,
+    hard: plan.constraints.hard.map(expandMixedFallbackHardConstraint),
+  };
+  const fallbackQuery = buildMixedConstraintFallbackQuery({
+    ...plan,
+    constraints: fallbackConstraints,
+  });
   const fallbackQueryViews = buildNormalizedQueryViews(fallbackQuery);
   const fallbackPlan: QueryPlanV1 = {
     ...plan,
@@ -1015,9 +1024,10 @@ export function buildMixedConstraintFallbackExecution(
     retrievalMode: 'constraint_filter',
     queryClass: 'pure_constraint',
     anchors: [],
+    constraints: fallbackConstraints,
     admission_context: {
       requires_identity_seal: false,
-      requires_constraint_evidence: plan.constraints.hard.length > 0,
+      requires_constraint_evidence: fallbackConstraints.hard.length > 0,
       requires_anchor_evidence: false,
     },
   };
@@ -1036,9 +1046,9 @@ export function buildMixedConstraintFallbackExecution(
         intent: fallbackPlan.intent,
         anchors: [],
         queryClass: fallbackPlan.queryClass,
-        constraints: fallbackPlan.constraints,
-        retrievalPlan: buildRetrievalPlan(fallbackPlan.constraints),
-        retrievalObjective: buildRetrievalObjective(fallbackPlan.constraints),
+        constraints: fallbackConstraints,
+        retrievalPlan: buildRetrievalPlan(fallbackConstraints),
+        retrievalObjective: buildRetrievalObjective(fallbackConstraints),
       },
       execution: {
         ...compiled.execution,
@@ -1053,6 +1063,36 @@ export function buildMixedConstraintFallbackExecution(
       },
     },
   };
+}
+
+function expandMixedFallbackHardConstraint(
+  constraint: QueryPlanV1['constraints']['hard'][number],
+): QueryPlanV1['constraints']['hard'][number] {
+  if (constraint.attribute !== 'wine_type') {
+    return constraint;
+  }
+
+  if (constraint.operator === '=' && constraint.value === 'white') {
+    return {
+      ...constraint,
+      operator: 'in',
+      value: [...MIXED_WHITE_FALLBACK_WINE_TYPES],
+    };
+  }
+
+  if (
+    constraint.operator === 'in'
+    && Array.isArray(constraint.value)
+    && constraint.value.length === 1
+    && constraint.value[0] === 'white'
+  ) {
+    return {
+      ...constraint,
+      value: [...MIXED_WHITE_FALLBACK_WINE_TYPES],
+    };
+  }
+
+  return constraint;
 }
 
 function buildMixedConstraintFallbackQuery(plan: QueryPlanV1): string {
@@ -1077,6 +1117,13 @@ function buildMixedConstraintFallbackQuery(plan: QueryPlanV1): string {
 }
 
 function toConstraintFallbackPhrase(attribute: string, value: unknown): string | undefined {
+  if (attribute === 'wine_type' && Array.isArray(value)) {
+    const wineTypes = value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0);
+    if (wineTypes.length > 0) {
+      return `${wineTypes.join(' ')} wine`;
+    }
+  }
+
   if (typeof value !== 'string') {
     return undefined;
   }

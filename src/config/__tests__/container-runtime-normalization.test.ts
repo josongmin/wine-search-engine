@@ -4,8 +4,6 @@ import { parseEnv } from '../env.js';
 const builderCalls = vi.hoisted(() => ({
   core: vi.fn(),
   features: vi.fn(),
-  watchlist: vi.fn(),
-  learning: vi.fn(),
 }));
 
 const mockCore = {
@@ -48,30 +46,6 @@ vi.mock('../container-features.js', () => ({
   }),
 }));
 
-vi.mock('../container-watchlist.js', () => ({
-  buildWatchlistContainerServices: vi.fn((_config, runtime) => {
-    builderCalls.watchlist(runtime);
-    return {
-      watchlistService: {} as never,
-      watchlistRuntime: null,
-    };
-  }),
-}));
-
-vi.mock('../container-learning.js', () => ({
-  buildLearningContainerServices: vi.fn((runtime) => {
-    builderCalls.learning(runtime);
-    return {
-      feedbackStore: null,
-      proposalStore: null,
-      feedbackProcessor: null,
-      aliasProposer: null,
-      feedbackTtlEnforcer: null,
-      promotionGate: null,
-    };
-  }),
-}));
-
 describe('createContainer runtime normalization', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -86,7 +60,5 @@ describe('createContainer runtime normalization', () => {
 
     expect(builderCalls.core).toHaveBeenCalledWith({ pool });
     expect(builderCalls.features).toHaveBeenCalledWith({ pool });
-    expect(builderCalls.watchlist).toHaveBeenCalledWith({ pool });
-    expect(builderCalls.learning).toHaveBeenCalledWith({ pool });
   });
 });

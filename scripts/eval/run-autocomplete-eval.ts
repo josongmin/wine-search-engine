@@ -669,7 +669,7 @@ export async function fetchLiveAutocompleteRankings(
   timeoutMs: number,
   concurrency: number,
 ): Promise<Map<string, RankedPrediction>> {
-  const endpoint = new URL('/v1/search/lookup', apiUrl).toString();
+  const endpoint = new URL('/v1/lookup/wine', apiUrl).toString();
   const mappings = await mapPool(
     cases,
     concurrency,

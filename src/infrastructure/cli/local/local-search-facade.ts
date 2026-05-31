@@ -29,6 +29,7 @@ function toSearchRequest(input: PrimitiveSearchInput, kind: PrimitiveKind): Sear
       : {}),
     ...(kind === 'lookupWine'
       ? {
+          primitiveRoute: 'lookup_wine' as const,
           retrieval_mode: 'entity' as const,
           options: { mode: 'auto' as const, explain: false, clarification: false },
         }

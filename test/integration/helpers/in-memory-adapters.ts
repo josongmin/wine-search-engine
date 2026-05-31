@@ -32,13 +32,10 @@ import type { SimilarityCandidate } from '../../../src/domain/mixed/service/simi
 import { FUZZY_IDENTITY_TRUST_MIN_SIMILARITY } from '../../../src/domain/resolver/model/fuzzy-identity-trust.js';
 import type { AnchorProfile } from '../../../src/domain/mixed/model/anchor-profile.js';
 import type { HybridCandidate } from '../../../src/domain/retrieval/model/hybrid-candidate.js';
-import type { FeedbackStore, FeedbackFilter, AggregatedFeedbackStats } from '../../../src/domain/learning/port/feedback-store.port.js';
-import type { FeedbackSignal } from '../../../src/domain/learning/model/feedback-signal.js';
 import type { GoldSetStore, GoldSetFilter } from '../../../src/domain/evaluation/port/gold-set-store.port.js';
 import type { EvalCase } from '../../../src/domain/evaluation/model/eval-case.js';
 import type { EvalResultStore, EvalResultFilter } from '../../../src/domain/evaluation/port/eval-result-store.port.js';
 import type { EvalResult } from '../../../src/domain/evaluation/model/eval-result.js';
-import type { FeedbackType } from '../../../src/domain/learning/model/feedback-signal.js';
 import { Transliterator } from '../../../src/domain/alias/service/transliterator.js';
 import {
   buildAliasPrefixTerms,
@@ -1274,67 +1271,6 @@ export class InMemoryCandidateAttributes implements CandidateAttributePort {
 
   async loadSimilarityCandidate(entityId: EntityId): Promise<SimilarityCandidate | undefined> {
     return this.similarities.get(entityId);
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// InMemoryFeedbackStore
-// ─────────────────────────────────────────────────────────────────────────────
-
-export class InMemoryFeedbackStore implements FeedbackStore {
-  private readonly signals: FeedbackSignal[] = [];
-
-  async saveFeedback(signal: FeedbackSignal): Promise<void> {
-    this.signals.push(signal);
-  }
-
-  async getFeedback(filter?: FeedbackFilter): Promise<readonly FeedbackSignal[]> {
-    let result = this.signals.slice();
-    if (filter?.since) {
-      const since = filter.since;
-      result = result.filter((s) => s.timestamp >= since);
-    }
-    if (filter?.queryClass) {
-      const qc = filter.queryClass;
-      result = result.filter((s) => s.queryClass === qc);
-    }
-    if (filter?.entityId) {
-      const eid = filter.entityId;
-      result = result.filter((s) => s.entityId === eid);
-    }
-    result.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-    return result;
-  }
-
-  async getAggregatedStats(entityId: EntityId): Promise<AggregatedFeedbackStats> {
-    const entitySignals = this.signals.filter((s) => s.entityId === entityId);
-    return {
-      clicks: entitySignals.filter((s) => s.type === 'click').length,
-      purchases: entitySignals.filter((s) => s.type === 'purchase').length,
-      sessionSuccesses: entitySignals.filter((s) => s.type === 'session_success').length,
-    };
-  }
-
-  async pruneExpiredFeedback(
-    olderThan: Date,
-    signalTypes?: readonly FeedbackType[],
-  ): Promise<number> {
-    const before = this.signals.length;
-    const typeFilter = signalTypes ? new Set(signalTypes) : null;
-    this.signals.splice(
-      0,
-      this.signals.length,
-      ...this.signals.filter((signal) => {
-        const older = signal.timestamp < olderThan;
-        const typeAllowed = typeFilter ? typeFilter.has(signal.type) : true;
-        return !(older && typeAllowed);
-      }),
-    );
-    return before - this.signals.length;
-  }
-
-  getAll(): readonly FeedbackSignal[] {
-    return this.signals.slice();
   }
 }
 

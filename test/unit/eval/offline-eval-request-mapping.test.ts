@@ -42,7 +42,7 @@ function makeGoldenQuery(
 }
 
 describe('buildEvalSearchRequestBody', () => {
-  it('builds canonical /v1/search payload with deterministic retrieval routing', () => {
+  it('builds canonical /v1/search/hybrid payload with deterministic retrieval routing', () => {
     const body = buildEvalSearchRequestBody(makeGoldenQuery({
       qid: 'custom-qid',
       query: 'Bodega Norton',

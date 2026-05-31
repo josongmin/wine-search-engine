@@ -8,8 +8,8 @@
  * wired into the production request path. It is imported by:
  *   - scripts/eval/calibration-report.ts (calibration benchmark runner)
  *
- * The production decision-confidence path uses src/domain/learning/service/
- * threshold-optimizer.ts (wired via container-learning.ts). This calibration-
+ * The production decision-confidence path uses the request-path threshold
+ * optimizer. This calibration-
  * domain variant provides richer offline metrics (AURC, ECE, Platt, conformal)
  * that are too expensive for the request path but valuable for eval dashboards.
  *

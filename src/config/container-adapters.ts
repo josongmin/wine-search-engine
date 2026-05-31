@@ -28,11 +28,8 @@ import { CachedReranker } from '../infrastructure/ai/cached-reranker.js';
 import { VespaAnchorResolver } from '../infrastructure/vespa/vespa-anchor-resolver.js';
 import { VespaSimilarRetrieval } from '../infrastructure/vespa/vespa-similar-retrieval.js';
 import { VespaCandidateAttributes } from '../infrastructure/vespa/vespa-candidate-attributes.js';
-import { RedisWatchlistPublisher } from '../infrastructure/watchlist/redis-watchlist-publisher.js';
-import { WatchlistAwareSearchIndex } from '../infrastructure/watchlist/watchlist-aware-search-index.js';
 import type { Config } from './env.js';
 import type { RuntimeHandles } from './runtime-handles.js';
-import { isWatchlistEnabled } from './watchlist.js';
 import { bootstrapLogger } from '../domain/shared/bootstrap-logger.js';
 import type { AmbiguityDictionary } from '../domain/query/port/ambiguity-dictionary.port.js';
 import type { BlockingPort } from '../domain/resolver/port/blocking.port.js';
@@ -152,23 +149,12 @@ export async function buildCoreAdapterServices(
     vespaMtls,
   );
   const baseSearchIndex: SearchIndexPort = new VespaSearchIndex(vespaClient);
-  const watchlistAwareSearchIndex: SearchIndexPort = isWatchlistEnabled(config)
-    ? new WatchlistAwareSearchIndex({
-        inner: baseSearchIndex,
-        publisher: runtimeHandles.createWatchlistPublisher?.()
-          ?? new RedisWatchlistPublisher({
-            ...(runtimeHandles.redisClient
-              ? { client: runtimeHandles.redisClient }
-              : { redisConfig: config.redis }),
-          }),
-      })
-    : baseSearchIndex;
   const searchIndex: SearchIndexPort = runtimeHandles.searchSnapshotId !== undefined
     ? new SnapshotScopedSearchIndex({
-        inner: watchlistAwareSearchIndex,
+        inner: baseSearchIndex,
         snapshotId: runtimeHandles.searchSnapshotId,
       })
-    : watchlistAwareSearchIndex;
+    : baseSearchIndex;
   const failFastSearchIndex: SearchIndexPort = new UnavailableFastFailSearchIndex(searchIndex);
 
   const embeddingService: EmbeddingServicePort = (() => {
@@ -240,7 +226,15 @@ export async function buildCoreAdapterServices(
       : new StubDoc2QueryGenerator();
   const fuzzyMatcher: FuzzyMatcherPort | undefined =
     inMemoryAliasMatcher !== undefined
-      ? new LazyFuzzyMatcher(inMemoryAliasMatcher.getSurfaceForms())
+      ? (() => {
+          const matcher = new LazyFuzzyMatcher(inMemoryAliasMatcher.getSurfaceForms());
+          // Cold-starting the BK-tree on the first user query caused the
+          // initial hybrid request after deploy to spend tens of seconds in
+          // planner pre-route. Warm the in-memory fuzzy index during startup
+          // so the cost is paid before the server serves traffic.
+          matcher.warm();
+          return matcher;
+        })()
       : undefined;
 
   return {

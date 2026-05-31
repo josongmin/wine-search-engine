@@ -6,7 +6,7 @@
  * - getOrEmbedBatch empty-array truthy guard
  * - extractRegionBrowseSeed runtime type guard (no `as` cast)
  * - summaryToHybridCandidateFields runtime shape safety
- * - PgFeedbackStore DecisionSnapshot JSONB validation
+ * - DecisionSnapshot JSONB validation
  *
  * Append-only.
  */

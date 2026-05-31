@@ -25,14 +25,11 @@ import {
   startEventLoopHeartbeat,
   type HealthRouteOptions,
 } from './routes/health.route.js';
-import { registerWatchlistRoute } from './routes/watchlist.route.js';
-import { registerFeedbackRoute } from './routes/feedback.route.js';
 import {
   registerAgentRunRoute,
   registerAgentSessionCreateRoute,
   registerAgentSessionTurnRoute,
 } from './routes/agent.route.js';
-import { registerOpenApiRoute } from './routes/openapi.route.js';
 import type { HttpServerDeps } from './routes/route-deps.js';
 import { getRequestId, resolveIncomingRequestId } from './request-id.js';
 import { getAuthenticatedSubject, configureAuthenticatedSubjectTrust } from './authenticated-subject.js';
@@ -82,16 +79,6 @@ export interface ServerOptions {
    * @see registerHttpDebugMode
    */
   readonly httpDebugSecret?: string | undefined;
-  /**
-   * Dedicated secret gating the operational `/metrics/*` endpoints
-   * (`X-Debug-Key` must match). Kept SEPARATE from `httpDebugSecret`
-   * (least-privilege, R6 H11): a single shared secret must NOT simultaneously
-   * unlock debug logging, operational metrics, and replay traces. When omitted,
-   * `createServer` reads `METRICS_DEBUG_SECRET` directly; if that env var is also
-   * unset/empty the metrics endpoints stay DISABLED (fail-closed). There is no
-   * fallback to `httpDebugSecret`.
-   */
-  readonly metricsDebugSecret?: string | undefined;
   /**
    * Maximum time (ms) to wait for a TCP connection to be established before closing it.
    * @default 10000
@@ -372,27 +359,13 @@ export async function createServer(
 
   // Register routes
   //
-  // Least-privilege (R6 H11): the operational /metrics/* endpoints are gated by
-  // their OWN secret (METRICS_DEBUG_SECRET), never by httpDebugSecret. A single
-  // shared secret must not unlock debug logging + metrics + replay traces at
-  // once. Resolution order: explicit option → METRICS_DEBUG_SECRET env →
-  // (none) leaves metrics DISABLED/fail-closed. No fallback to httpDebugSecret.
-  const resolvedMetricsDebugSecret =
-    options?.metricsDebugSecret ?? process.env['METRICS_DEBUG_SECRET']?.trim();
-  registerHealthRoutes(app, {
-    ...(options?.health ?? {}),
-    ...(resolvedMetricsDebugSecret !== undefined && resolvedMetricsDebugSecret.length > 0
-      ? { metricsDebugSecret: resolvedMetricsDebugSecret }
-      : {}),
-  });
+  registerHealthRoutes(app, options?.health);
   // Path-authoritative primitive search surface. Public search is no longer a
   // mode-monolith — callers pick the retrieval primitive by URL.
   registerHybridSearchRoute(app, deps);
   registerSemanticSearchRoute(app, deps);
   registerLexicalSearchRoute(app, deps);
   registerLookupWineRoute(app, deps);
-  registerWatchlistRoute(app, deps);
-  registerFeedbackRoute(app, deps);
   if (deps.wineSearch !== undefined) {
     // Canonical agent surface — `POST /v1/agent` for caller-managed history,
     // plus `POST /v1/agent/sessions*` for server-managed history custody.
@@ -401,7 +374,6 @@ export async function createServer(
     registerAgentSessionCreateRoute(app, agentRouteDeps);
     registerAgentSessionTurnRoute(app, agentRouteDeps);
   }
-  registerOpenApiRoute(app);
 
   // Epic 3: Optional evaluation run at startup (fire-and-forget)
   // Runs when env var EVAL_RUN_AT_STARTUP=true (requires Postgres)

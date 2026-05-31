@@ -92,13 +92,13 @@ describe('detectQueryIntent', () => {
     expect(detectQueryIntent('dry red wine from burgundy', [], noopExtractor)).toBe('facet_search');
   });
 
-  it('keeps direct-resolved top-level appellations on entity_exact even when anchor candidates fan out', () => {
+  it('routes top-level appellation/category anchors with competing entities to facet_search', () => {
     expect(
       detectQueryIntent('barolo', [multiEntityAnchor(EXACT_ANCHOR_CONFIDENCE + 0.05)], noopExtractor),
-    ).toBe('entity_exact');
+    ).toBe('facet_search');
     expect(
       detectQueryIntent('bordeaux', [multiEntityAnchor(EXACT_ANCHOR_CONFIDENCE + 0.05)], noopExtractor),
-    ).toBe('entity_exact');
+    ).toBe('facet_search');
   });
 
   it('returns semantic_discovery when empty query and no anchors', () => {

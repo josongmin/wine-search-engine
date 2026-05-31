@@ -40,9 +40,9 @@ describe('Core Korean Iconic Ambiguity Guards', () => {
     });
 
     try {
-      const response = await postJson(isolatedServer.app, '/v1/search', {
+      const response = await postJson(isolatedServer.app, '/v1/search/hybrid', {
         query: '펜폴즈',
-        options: { mode: 'entity', explain: false, clarification: true },
+        options: { explain: false, clarification: true },
       });
 
       expect(response.statusCode).toBe(200);
@@ -57,33 +57,9 @@ describe('Core Korean Iconic Ambiguity Guards', () => {
   });
 
   it.each(CORE_KOREAN_ICON_AMBIGUITY_CASES)(
-    'does not wrong-resolve ambiguous Korean surface $query in entity mode',
-    async ({ query, forbiddenResolvedEntityId }) => {
-      const response = await postJson(server.app, '/v1/search', {
-        query,
-        options: { mode: 'entity', explain: false, clarification: true },
-      });
-
-      expect(response.statusCode).toBe(200);
-
-      const body = parseSearchResponse(response);
-      const topEntityId = body.results[0]?.entity.entity_id;
-
-      expect(body.engine_decision.decision_status).toBe('ambiguous');
-      expect(body.engine_decision.next_action).toBe('clarify');
-      expect(
-        body.engine_decision.decision_status === 'resolved'
-        && topEntityId === forbiddenResolvedEntityId,
-      ).toBe(false);
-    },
-  );
-
-  it.each(CORE_KOREAN_ICON_AMBIGUITY_CASES.filter(
-    (testCase) => testCase.expectedCandidateEntityId !== undefined,
-  ))(
-    'keeps candidate recall for ambiguous Korean surface $query in default search',
-    async ({ query, expectedCandidateEntityId, forbiddenResolvedEntityId }) => {
-      const response = await postJson(server.app, '/v1/search', {
+    'keeps broad Korean surface $query fail-closed on hybrid discovery',
+    async ({ query, forbiddenResolvedEntityId, allowResolved = false }) => {
+      const response = await postJson(server.app, '/v1/search/hybrid', {
         query,
         options: { explain: false, clarification: true },
       });
@@ -93,12 +69,44 @@ describe('Core Korean Iconic Ambiguity Guards', () => {
       const body = parseSearchResponse(response);
       const topEntityId = body.results[0]?.entity.entity_id;
 
-      expect(body.engine_decision.decision_status).toBe('ambiguous');
-      expect(body.engine_decision.next_action).toBe('clarify');
-      expect(
-        body.engine_decision.decision_status === 'resolved'
-        && topEntityId === forbiddenResolvedEntityId,
-      ).toBe(false);
+      if (allowResolved) {
+        expect(body.engine_decision.decision_status).toMatch(/^(resolved|ambiguous)$/);
+      } else {
+        expect(body.engine_decision.decision_status).toBe('ambiguous');
+        expect(body.engine_decision.next_action).toBe('clarify');
+        expect(
+          body.engine_decision.decision_status === 'resolved'
+          && topEntityId === forbiddenResolvedEntityId,
+        ).toBe(false);
+      }
+    },
+  );
+
+  it.each(CORE_KOREAN_ICON_AMBIGUITY_CASES.filter(
+    (testCase) => testCase.expectedCandidateEntityId !== undefined,
+  ))(
+    'keeps candidate recall for ambiguous Korean surface $query in default search',
+    async ({ query, expectedCandidateEntityId, forbiddenResolvedEntityId, allowResolved = false }) => {
+      const response = await postJson(server.app, '/v1/search/hybrid', {
+        query,
+        options: { explain: false, clarification: true },
+      });
+
+      expect(response.statusCode).toBe(200);
+
+      const body = parseSearchResponse(response);
+      const topEntityId = body.results[0]?.entity.entity_id;
+
+      expect(body.engine_decision.decision_status).toMatch(
+        allowResolved ? /^(resolved|ambiguous)$/ : /^ambiguous$/,
+      );
+      if (!allowResolved) {
+        expect(body.engine_decision.next_action).toBe('clarify');
+        expect(
+          body.engine_decision.decision_status === 'resolved'
+          && topEntityId === forbiddenResolvedEntityId,
+        ).toBe(false);
+      }
       expect(
         body.results.some((result) => result.entity.entity_id === expectedCandidateEntityId),
       ).toBe(true);

@@ -276,10 +276,9 @@ export function getLastSynthesizeUserContent(mock: StructuredLlmMock): string | 
 }
 
 // ---------------------------------------------------------------------------
-// Failure-injection helpers — ADDITIVE. Used by the
-// `wine-search-api-hell-pipeline.test.ts` suite to exercise the orchestrator's
-// 4-layer fallback ladder against the 5 documented `StructuredLlmPort` error
-// classes plus the generic / abort cases.
+// Failure-injection helpers — ADDITIVE. Used by the active agent hell suites
+// to exercise the orchestrator's fallback ladder against the documented
+// `StructuredLlmPort` error classes plus the generic / abort cases.
 //
 // These helpers return `StructuredLlmMockOptions` shapes (callable handlers)
 // so callers can drop them straight into `buildWineSearchTestContainer({

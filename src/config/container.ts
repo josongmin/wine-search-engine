@@ -8,9 +8,6 @@ import {
 } from './wine-search-feature-flags.js';
 import { buildCoreContainerServices } from './container-core.js';
 import { buildFeatureContainerServices } from './container-features.js';
-import { buildWatchlistContainerServices } from './container-watchlist.js';
-import { buildLearningContainerServices } from './container-learning.js';
-import type { LearningContainerServices } from './container-learning.js';
 import type { RuntimeHandles } from './runtime-handles.js';
 import type { RuntimeReadinessSnapshot } from './container-runtime-support.js';
 import type { DrinkingWindowUseCasePort } from '../application/drinking-window/port/drinking-window-usecase.port.js';
@@ -24,8 +21,6 @@ import type {
   InterpretUseCasePort,
   ResolveUseCasePort,
 } from '../application/search/port/search-route-usecases.port.js';
-import type { WatchlistServicePort } from '../application/watchlist/watchlist.service.js';
-import type { WatchlistRuntimePort } from '../infrastructure/watchlist/watchlist-delivery-runtime.js';
 import type {
   CandidatePoolPort,
   DecisionEnginePort,
@@ -69,7 +64,7 @@ import { createSqliteAgentSessionStore } from '../infrastructure/db/agent-sessio
 import { AgentSessionService } from '../application/wine-search/agent-session-service.js';
 import { AgentUseCase } from '../application/wine-search/agent-usecase.js';
 import type { AgentUseCasePort } from '../application/wine-search/port/agent-usecase.port.js';
-export interface Container extends LearningContainerServices {
+export interface Container {
   /** Chat LLM when an OpenAI credential pool or Codex ChatGPT login token is available. */
   readonly chatLlm?: ChatLlmPort;
   readonly queryPlanner: QueryPlannerPort;
@@ -89,11 +84,7 @@ export interface Container extends LearningContainerServices {
   readonly drinkingWindowUseCase: DrinkingWindowUseCasePort;
   readonly drinkingWindowPredictor: DrinkingWindowPredictorPort;
   readonly batchSearchUseCase: BatchSearchUseCasePort;
-  readonly watchlistService: WatchlistServicePort;
-  readonly watchlistRuntime: WatchlistRuntimePort | null;
   readonly evalRunner: EvalRunnerContract | null;
-  /** True when Postgres feedback store is wired and learning kill-switch is off. */
-  readonly feedbackIngestEnabled: boolean;
   readonly calibrationStore: CalibrationStore;
   readonly runtimeReadiness: RuntimeReadinessSnapshot;
   /**
@@ -328,8 +319,6 @@ export async function createContainer(
   })();
 
   const features = buildFeatureContainerServices(config, core, runtimeHandles, useCaseExtensions);
-  const watchlist = buildWatchlistContainerServices(config, runtimeHandles);
-  const learning = buildLearningContainerServices(runtimeHandles);
   // Defense-in-depth: env validation already throws when AGENT_ENABLED=true
   // and no OpenAI credential is set (see config/env.ts). If we somehow reach here
   // without a chatLlm, fail loudly rather than silently 404 the agent route.
@@ -338,9 +327,6 @@ export async function createContainer(
       'AGENT_ENABLED=true but no ChatLlm was constructed — check OPENAI_API_KEY/OPENAI_API_KEYS, Codex ChatGPT login token, and chatLlm wiring',
     );
   }
-
-  const feedbackIngestEnabled =
-    !config.killSwitch.learning && learning.feedbackStore !== null;
 
   // Plan-then-Execute wine-search slice. Returns `undefined` when the
   // `WINE_SEARCH_ENABLED` flag is off — the `/v1/agent` route is
@@ -353,8 +339,6 @@ export async function createContainer(
   );
 
   return {
-    ...learning,
-    feedbackIngestEnabled,
     ...(core.chatLlm !== undefined ? { chatLlm: core.chatLlm } : {}),
     queryPlanner: core.queryPlanner,
     entityResolver: core.entityResolver,
@@ -368,7 +352,6 @@ export async function createContainer(
     drinkingWindowPredictor: core.drinkingWindowPredictor,
     calibrationStore: core.calibrationStore,
     runtimeReadiness: core.runtimeReadiness,
-    ...watchlist,
     ...(wineSearch !== undefined ? { wineSearch } : {}),
   };
 }

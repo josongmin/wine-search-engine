@@ -139,5 +139,5 @@ The pipeline is correct when, after each nightly run:
    last 24h.
 3. The integration test `post-fit-trust.integration.test.ts` passes.
 4. `select calibrationTrusted ...` on a sample lookup query returns
-   `true` (visible via the `decisionTrace` in the `/v1/search/lookup`
+   `true` (visible via the `decisionTrace` in the `/v1/lookup/wine`
    debug payload — see `.ai/debug-mode.md`).

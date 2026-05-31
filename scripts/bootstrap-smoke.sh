@@ -21,7 +21,6 @@ cp -f .env.example .env
 pnpm install --frozen-lockfile
 pnpm run typecheck
 pnpm run build
-pnpm run verify:http-contracts
 # Fixture lane contract:
 # - executable subset is selected by execution_lane='self_contained'
 # - self-contained fixtures must not declare requires_runtime_capability

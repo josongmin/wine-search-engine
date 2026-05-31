@@ -127,10 +127,8 @@ function matches(file, patterns) {
 
 const metaPatterns = [
   /^test\/unit\/replay-fixtures\/.+\.test\.ts$/,
-  /^test\/unit\/interface\/http\/http-route-catalog-openapi-parity\.test\.ts$/,
   /^src\/interface\/http\/schemas\/__tests__\/search-response-v2\.schema\.test\.ts$/,
   /^src\/interface\/http\/routes\/__tests__\/http-contract-manifest-script\.test\.ts$/,
-  /^src\/interface\/http\/routes\/__tests__\/http-contract-openapi-bridge\.test\.ts$/,
   /^test\/meta\/vespa-hit-summary-readraw-parity\.test\.ts$/,
 ];
 
@@ -139,7 +137,6 @@ const metaSourcePatterns = [
   /^src\/interface\/http\/schemas\//,
   /^src\/interface\/http\/routes\/(?!__tests__)/,
   /^scripts\/export-http-contract-manifest\.ts$/,
-  /^scripts\/export-http-openapi-bridge\.ts$/,
   /^vespa\/app\/schemas\//,
   /^src\/infrastructure\/vespa\/vespa-schema\.sd$/,
   /^src\/infrastructure\/vespa\/mapping\.ts$/,
@@ -148,11 +145,6 @@ const metaSourcePatterns = [
 
 const evalPatterns = [
   /^test\/unit\/eval\/.+\.test\.ts$/,
-];
-
-const watchlistPatterns = [
-  /^test\/integration\/watchlist\/.+\.test\.ts$/,
-  /^src\/__tests__\/watchlist.+\.test\.ts$/,
 ];
 
 const integrationPatterns = [
@@ -263,13 +255,11 @@ const broadFallback = changedFiles.some(isConfigish);
 
 const heavyFiles = changedFiles.filter((file) => matches(file, heavyPatterns));
 const e2eFiles = changedFiles.filter((file) => matches(file, e2ePatterns) && !matches(file, heavyPatterns));
-const watchlistFiles = changedFiles.filter((file) => matches(file, watchlistPatterns));
 const evalFiles = changedFiles.filter((file) => matches(file, evalPatterns));
 const metaFiles = changedFiles.filter((file) => matches(file, metaPatterns));
 const integrationFiles = changedFiles.filter(
   (file) => matches(file, integrationPatterns) &&
-    !matches(file, heavyPatterns) &&
-    !matches(file, watchlistPatterns),
+    !matches(file, heavyPatterns),
 );
 const devTestFiles = changedFiles.filter(
   (file) => matches(file, devTestPatterns) &&
@@ -282,7 +272,6 @@ const devTestFiles = changedFiles.filter(
 const claimed = new Set([
   ...heavyFiles,
   ...e2eFiles,
-  ...watchlistFiles,
   ...evalFiles,
   ...metaFiles,
   ...integrationFiles,
@@ -350,11 +339,6 @@ if (integrationFiles.length > 0) {
   npmRun('test:integration:file', integrationFiles);
 }
 
-if (watchlistFiles.length > 0) {
-  console.log(`[${label}] Watchlist lane: ${watchlistFiles.join(', ')}`);
-  npmRun('test:watchlist:file', watchlistFiles);
-}
-
 if (e2eFiles.length > 0) {
   console.log(`[${label}] E2E lane: ${e2eFiles.join(', ')}`);
   npmRun('test:e2e:file', e2eFiles);
@@ -392,7 +376,6 @@ if (
   metaFiles.length === 0 &&
   devTestFiles.length === 0 &&
   integrationFiles.length === 0 &&
-  watchlistFiles.length === 0 &&
   e2eFiles.length === 0 &&
   heavyFiles.length === 0 &&
   relatedInputs.length === 0
