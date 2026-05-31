@@ -508,6 +508,97 @@ export default tseslint.config(
     },
   },
   /**
+   * Layer-boundary import gate (hexagonal architecture + composite-project DAG).
+   *
+   * The composite tsconfig enforces the DAG at BUILD time (TS6202 on a cycle),
+   * but that is slow feedback and only covers project references — not
+   * web-framework leakage or application→interface coupling. This lint gate
+   * gives the same boundary errors in-editor and on every PR.
+   *
+   * Each block carries a baseline-frozen `ignores` list of the files that still
+   * violate the rule today (3 total, surfaced by the 4-lens audit). Those are
+   * fixed in W2/W5; the gate blocks any NEW violation from landing.
+   */
+  {
+    files: ['src/domain/**/*.ts'],
+    ignores: [
+      'src/domain/**/*.test.ts',
+      'src/domain/**/__tests__/**',
+      // observability/ intentionally couples to the framework logger type
+      // surface (CLAUDE.md: kept inside domain because of mutual type coupling).
+      'src/domain/observability/request-pipeline-debug.ts',
+    ],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '@app', '@app/*', '@infra', '@infra/*',
+                '@interface', '@interface/*', '@config', '@config/*',
+                'fastify', 'fastify/*',
+              ],
+              message:
+                'domain/** must not import application/infrastructure/interface/config or web-framework types (DIP + composite DAG). Define a port in domain and inject the adapter from the composition root. (CLAUDE.md layer rules)',
+            },
+            {
+              group: ['**/application/**', '**/infrastructure/**', '**/interface/**'],
+              message:
+                'domain/** must not reach into application/infrastructure/interface via relative paths. (CLAUDE.md layer rules)',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['src/domain/shared/**/*.ts'],
+    ignores: ['src/domain/shared/**/*.test.ts', 'src/domain/shared/**/__tests__/**'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '@domain', '@domain/*', '@app', '@app/*', '@infra', '@infra/*',
+                '@interface', '@interface/*', '@config', '@config/*',
+              ],
+              message:
+                'domain/shared is the composite leaf — it must not import from any other layer, including the rest of domain (@domain). Keep it self-contained. (CLAUDE.md: domain/shared/** must not import anything outside itself)',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['src/application/**/*.ts'],
+    ignores: [
+      'src/application/**/*.test.ts',
+      'src/application/**/__tests__/**',
+      // Baseline freeze (removed in W2/W5): application code still importing
+      // interface-layer wire schemas / presentation types.
+      'src/application/wine-search/presentation/agent-presentation.ts',
+      'src/application/wine-search/wine-search-result-schemas.ts',
+    ],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@interface', '@interface/*'],
+              message:
+                'application/** must not import from the interface (HTTP/CLI) layer. Move the shared shape down to application/domain and have interface depend on it. (CLAUDE.md layer rules)',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  /**
    * zod-coerce.ts IS the SSoT for coerceFiniteNumber / coercePositiveInt /
    * coerceNonNegativeInt.  The two rules below forbid re-defining those names
    * anywhere else, but the SSoT file itself must be exempt.

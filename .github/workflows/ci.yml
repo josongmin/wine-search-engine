@@ -27,6 +27,13 @@ jobs:
             ${{ runner.os }}-eslint-
       - run: pnpm run lint
 
+  deadcode:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.github/actions/setup-node-ci
+      - name: Dead-code ratchet (knip count must not exceed frozen baseline)
+        run: pnpm run deadcode:ratchet
+
   typecheck:
     runs-on: ubuntu-latest
     steps:
@@ -162,7 +169,7 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
-    needs: [lint, typecheck, test-unit, test-integration, test-watchlist, test-e2e-contract, test-e2e-runtime, test-ingest-contract, security-semgrep, verification-core, verify-http-contracts, verify-splits, quality, offline-eval-regression]
+    needs: [lint, deadcode, typecheck, test-unit, test-integration, test-watchlist, test-e2e-contract, test-e2e-runtime, test-ingest-contract, security-semgrep, verification-core, verify-http-contracts, verify-splits, quality, offline-eval-regression]
     steps:
       - uses: ./.github/actions/setup-node-ci
       - name: Cache TypeScript build incremental
