@@ -49,10 +49,15 @@ import {
 } from './search-usecase-graph-executor.js';
 import {
   BundleSelectorImpl,
+  type BundleSelector,
   type BundleCellPricer,
   type BundleCellScorer,
 } from '../../domain/retrieval/service/bundle-selector.js';
-import { InMemoryBudgetLedger } from '../../domain/retrieval/service/budget-ledger.js';
+import {
+  InMemoryBudgetLedger,
+  type BudgetLedger,
+  type BudgetLedgerOptions,
+} from '../../domain/retrieval/service/budget-ledger.js';
 import { KRW_PER_USD_APPROXIMATE } from '../../domain/shared/constants.js';
 import { createQueryRewriter } from '../../domain/retrieval/service/query-rewriter.js';
 import type { ChatLlmPort } from '../../domain/ai/port/chat-llm.port.js';
@@ -287,8 +292,44 @@ async function maybeExpandSemanticQueriesForFanout(
   };
 }
 
+/**
+ * DIP seam: factory for the bundle selector used by `executeGraphAware`.
+ * Default constructs a production `BundleSelectorImpl` (byte-identical to
+ * the previous direct `new BundleSelectorImpl()`), so existing call sites
+ * are unaffected. Tests may inject a stub selector via this factory.
+ */
+export type BundleSelectorFactory = () => BundleSelector;
+
+/**
+ * DIP seam: factory for the per-request budget ledger threaded through
+ * `executeGraphAware`. Default constructs a production
+ * `InMemoryBudgetLedger` with the supplied options (byte-identical to the
+ * previous direct `new InMemoryBudgetLedger(options)`), so existing call
+ * sites are unaffected. Tests may inject a recording/stub ledger.
+ */
+export type BudgetLedgerFactory = (options: BudgetLedgerOptions) => BudgetLedger;
+
+const defaultBundleSelectorFactory: BundleSelectorFactory = () => new BundleSelectorImpl();
+
+const defaultBudgetLedgerFactory: BudgetLedgerFactory = (options) =>
+  new InMemoryBudgetLedger(options);
+
 export interface HybridCandidateRetrievalPorts {
   readonly candidatePool: CandidatePoolPort;
+  /**
+   * DIP seam (optional): override the bundle-selector constructor used in
+   * the graph-aware retrieval paths. When omitted, a production
+   * `BundleSelectorImpl` is constructed per use — identical to the prior
+   * direct `new`. See {@link BundleSelectorFactory}.
+   */
+  readonly bundleSelectorFactory?: BundleSelectorFactory | undefined;
+  /**
+   * DIP seam (optional): override the budget-ledger constructor used in
+   * the graph-aware retrieval paths. When omitted, a production
+   * `InMemoryBudgetLedger` is constructed per use — identical to the prior
+   * direct `new`. See {@link BudgetLedgerFactory}.
+   */
+  readonly budgetLedgerFactory?: BudgetLedgerFactory | undefined;
   readonly browseRetriever?: BrowseRetrieverPort | undefined;
   readonly compareRetriever?: CompareRetrieverPort | undefined;
   /**
@@ -626,10 +667,10 @@ async function retrieveAmbiguousEntityBranchCandidates(
           compiled.constraintGraph,
           {
             candidatePool: ports.candidatePool,
-            bundleSelector: new BundleSelectorImpl(),
+            bundleSelector: (ports.bundleSelectorFactory ?? defaultBundleSelectorFactory)(),
             subqueryRetriever: buildProductionSubqueryRetriever(ports.candidatePool),
             queryRewriter,
-            budgetLedger: new InMemoryBudgetLedger(
+            budgetLedger: (ports.budgetLedgerFactory ?? defaultBudgetLedgerFactory)(
               deriveBudgetLedgerOptionsFromCompiled(compiled),
             ),
           },
@@ -718,10 +759,10 @@ async function retrieveTypedRecommendationCandidates(
           compiled.constraintGraph,
           {
             candidatePool: ports.candidatePool,
-            bundleSelector: new BundleSelectorImpl(),
+            bundleSelector: (ports.bundleSelectorFactory ?? defaultBundleSelectorFactory)(),
             subqueryRetriever: buildProductionSubqueryRetriever(ports.candidatePool),
             queryRewriter,
-            budgetLedger: new InMemoryBudgetLedger(
+            budgetLedger: (ports.budgetLedgerFactory ?? defaultBudgetLedgerFactory)(
               deriveBudgetLedgerOptionsFromCompiled(compiled),
             ),
           },
@@ -1350,7 +1391,7 @@ export async function retrieveHybridCandidatesForPlan(
   // invocation) so there is no cross-request race window; the
   // reservation state dies with the request. The optional KRW ceiling
   // is read from the compiled graph's global budget when present.
-  const budgetLedger = new InMemoryBudgetLedger(
+  const budgetLedger = (ports.budgetLedgerFactory ?? defaultBudgetLedgerFactory)(
     deriveBudgetLedgerOptionsFromCompiled(compiled),
   );
   const graphResult = await executeGraphAware(
@@ -1358,7 +1399,7 @@ export async function retrieveHybridCandidatesForPlan(
     compiled.constraintGraph,
     {
       candidatePool: ports.candidatePool,
-      bundleSelector: new BundleSelectorImpl(),
+      bundleSelector: (ports.bundleSelectorFactory ?? defaultBundleSelectorFactory)(),
       subqueryRetriever: buildProductionSubqueryRetriever(ports.candidatePool),
       queryRewriter,
       budgetLedger,

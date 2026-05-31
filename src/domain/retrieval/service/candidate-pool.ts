@@ -35,6 +35,12 @@ import {
 } from './per-class-fusion-config.js';
 import { CascadeRouter, type RetrievalPhase } from './cascade-router.js';
 import { ConstraintFilter } from './constraint-filter.js';
+import type {
+  RetrievalProfilePort,
+  CascadeRouterPort,
+  ConstraintFilterPort,
+  CandidateAssemblerPort,
+} from '../port/candidate-pool-collaborators.port.js';
 import {
   hardConstraintsToSparseFilterTokens,
   softConstraintsToOptionalFilterTokens,
@@ -157,10 +163,10 @@ const ANCHOR_FIRST_BLOCKED_MODES: ReadonlySet<string> = new Set([
 ]);
 
 export class CandidatePoolService implements RetrievalExecutorV2Port {
-  private readonly profileService: RetrievalProfileService;
-  private readonly cascadeRouter: CascadeRouter;
-  private readonly constraintFilter: ConstraintFilter;
-  private readonly candidateAssembler: CandidateAssembler;
+  private readonly profileService: RetrievalProfilePort;
+  private readonly cascadeRouter: CascadeRouterPort;
+  private readonly constraintFilter: ConstraintFilterPort;
+  private readonly candidateAssembler: CandidateAssemblerPort;
   /** Authoritative request-scoped retrieval result; replaces mutable getLast* state. */
   private _lastExecutionResult: RetrievalExecutionResult | undefined = undefined;
 
@@ -182,11 +188,21 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
      * falls back).
      */
     private readonly killSwitchDenseRetrieval: boolean = false,
+    /**
+     * DIP seam (behavior-preserving): the four collaborators default to the
+     * same concrete implementations that were previously hard-`new`-ed here,
+     * so existing callers (which pass none of these) get byte-identical
+     * runtime behavior. Tests may inject mocks via these optional params.
+     */
+    profileService: RetrievalProfilePort = new RetrievalProfileService(),
+    cascadeRouter: CascadeRouterPort = new CascadeRouter(),
+    constraintFilter: ConstraintFilterPort = new ConstraintFilter(),
+    candidateAssembler: CandidateAssemblerPort = new CandidateAssembler(),
   ) {
-    this.profileService = new RetrievalProfileService();
-    this.cascadeRouter = new CascadeRouter();
-    this.constraintFilter = new ConstraintFilter();
-    this.candidateAssembler = new CandidateAssembler();
+    this.profileService = profileService;
+    this.cascadeRouter = cascadeRouter;
+    this.constraintFilter = constraintFilter;
+    this.candidateAssembler = candidateAssembler;
   }
 
   /**

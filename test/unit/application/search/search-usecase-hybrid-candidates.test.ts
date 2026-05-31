@@ -1925,4 +1925,80 @@ describe('retrieveHybridCandidatesForPlan', () => {
       }
     }
   });
+
+  // DIP seam: the generic hybrid path constructs a per-request budget
+  // ledger and a bundle selector internally. These were previously direct
+  // `new` calls (untestable). The optional `budgetLedgerFactory` /
+  // `bundleSelectorFactory` ports let a test substitute the constructors
+  // while leaving every existing call site (which omits them) on the
+  // byte-identical production defaults.
+  it('invokes injected budgetLedgerFactory and bundleSelectorFactory on the generic hybrid path', async () => {
+    const plan = minimalPlan({ rawQuery: 'crisp white', normalizedQuery: 'crisp white' });
+    const compiled = buildCompiled(plan, { effectiveRetrievalMode: 'attribute_search' });
+    const candidatePool = {
+      execute: vi.fn(async () => []),
+      getLastDegradationCodes: vi.fn(() => []),
+      getLastDegradationSignals: vi.fn(() => []),
+    };
+
+    // Minimal stubs honoring the BudgetLedger / BundleSelector port shapes.
+    const budgetLedgerStub = {
+      reserve: vi.fn(),
+      release: vi.fn(),
+      snapshot: vi.fn(() => ({
+        priceTotalKrw: 0,
+        candidateCount: 0,
+        reservations: new Map(),
+      })),
+      remainingPriceKrw: vi.fn(() => undefined),
+    };
+    const bundleSelectorStub = {
+      chooseAssignment: vi.fn(() => ({
+        assignments: new Map(),
+        degradationReasons: [],
+      })),
+    };
+    const budgetLedgerFactory = vi.fn(() => budgetLedgerStub as never);
+    const bundleSelectorFactory = vi.fn(() => bundleSelectorStub as never);
+
+    const result = await retrieveHybridCandidatesForPlan(
+      plan,
+      {
+        candidatePool: candidatePool as never,
+        budgetLedgerFactory,
+        bundleSelectorFactory,
+      },
+      async () => failedResolveResult(),
+      compiled,
+    );
+
+    // The seam ran: the injected factories were used instead of the defaults.
+    expect(budgetLedgerFactory).toHaveBeenCalledOnce();
+    expect(bundleSelectorFactory).toHaveBeenCalledOnce();
+    // Behavior unchanged: still the generic hybrid path through candidatePool.
+    expect(candidatePool.execute).toHaveBeenCalledOnce();
+    expect(result.retrievalKind).toBe('generic_hybrid');
+  });
+
+  // Default-preservation guard: omitting the factories must keep the
+  // generic hybrid path working exactly as before (production defaults).
+  it('uses production defaults when no factory ports are injected', async () => {
+    const plan = minimalPlan({ rawQuery: 'crisp white', normalizedQuery: 'crisp white' });
+    const compiled = buildCompiled(plan, { effectiveRetrievalMode: 'attribute_search' });
+    const candidatePool = {
+      execute: vi.fn(async () => []),
+      getLastDegradationCodes: vi.fn(() => []),
+      getLastDegradationSignals: vi.fn(() => []),
+    };
+
+    const result = await retrieveHybridCandidatesForPlan(
+      plan,
+      { candidatePool: candidatePool as never },
+      async () => failedResolveResult(),
+      compiled,
+    );
+
+    expect(candidatePool.execute).toHaveBeenCalledOnce();
+    expect(result.retrievalKind).toBe('generic_hybrid');
+  });
 });
