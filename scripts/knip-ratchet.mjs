@@ -25,6 +25,10 @@ const BASELINE_PATH = fileURLToPath(new URL('../knip-baseline.json', import.meta
 
 // Knip JSON `issues[]` entries carry per-file arrays/objects for each category.
 // Counting every category keeps the ratchet honest across all dead-code kinds.
+// Keys MUST match knip's actual JSON reporter output — `nsExports`/`nsTypes`/
+// `classMembers` are NOT emitted (they count 0 forever, a false sense of
+// coverage); the real namespace/catalog keys are `namespaceMembers`/`catalog`.
+// (self-audit R3: verified against `knip --reporter json` key enumeration.)
 const CATS = [
   'files',
   'dependencies',
@@ -34,12 +38,11 @@ const CATS = [
   'binaries',
   'unresolved',
   'exports',
-  'nsExports',
+  'namespaceMembers',
   'types',
-  'nsTypes',
   'duplicates',
   'enumMembers',
-  'classMembers',
+  'catalog',
 ];
 
 function runKnip() {
