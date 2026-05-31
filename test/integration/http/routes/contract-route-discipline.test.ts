@@ -6,12 +6,11 @@ import { fileURLToPath } from 'node:url';
 const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(TEST_DIR, '../../../..');
 const CONTRACT_ROUTE_FILES = [
-  'src/interface/http/routes/search.route.ts',
   'src/interface/http/routes/lookup.route.ts',
   'src/interface/http/routes/watchlist.route.ts',
   'src/interface/http/routes/health.route.ts',
   'src/interface/http/routes/feedback.route.ts',
-  'src/interface/http/routes/wine-search.route.ts',
+  'src/interface/http/routes/agent.route.ts',
 ] as const;
 
 function readRouteFile(routePath: string): string {

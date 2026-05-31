@@ -38,19 +38,6 @@ function buildSearchToolPriceClauses(input: {
   return clauses;
 }
 
-export function appendStructuredQueryClauses(
-  baseQuery: string,
-  clauses: readonly string[],
-): string {
-  if (clauses.length === 0) {
-    return baseQuery;
-  }
-  if (baseQuery.length === 0) {
-    return clauses.join(', ');
-  }
-  return `${baseQuery}, ${clauses.join(', ')}`;
-}
-
 export function buildSearchToolSoftClauses(
   input: SearchToolSoftClauseInput,
 ): readonly string[] {

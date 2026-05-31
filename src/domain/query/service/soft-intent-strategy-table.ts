@@ -219,10 +219,6 @@ export function isSemanticSoftIntentAttribute(attribute: string): boolean {
   return resolveSoftIntentStrategy(attribute)?.semanticExpansion ?? false;
 }
 
-export function isSoftIntentCandidateShapingAttribute(attribute: string): boolean {
-  return resolveSoftIntentStrategy(attribute)?.candidateShaping ?? false;
-}
-
 export function shouldRunTypedRecommendationDiscoveryForSoftIntent(
   attribute: string,
   value: unknown,
