@@ -78,14 +78,19 @@ export class UtilityScorer {
         };
       }
 
-      // Gold says ambiguous — resolving to any entity is not a "wrong entity" wrong-resolve.
+      // Gold says ambiguous — resolving to any entity is not a "wrong entity"
+      // wrong-resolve (no single ground-truth entity to be wrong against), but
+      // it IS an over-resolution that the engine should have abstained on. It
+      // carries the AVOIDABLE_ABSTAIN penalty, so the matching flag MUST be set
+      // true: otherwise this case is invisible in avoidableAbstainRate and the
+      // exactly-one-flag invariant (one category per non-failed outcome) breaks.
       if (evalCase.expectedStatus === 'ambiguous') {
         return {
           utilityScore: UTILITY_WEIGHTS.AVOIDABLE_ABSTAIN,
           isCorrectResolve: false,
           isWrongResolve: false,
           isSafeAbstain: false,
-          isAvoidableAbstain: false,
+          isAvoidableAbstain: true,
         };
       }
 

@@ -9,12 +9,12 @@
 import { describe, it, expect, vi } from 'vitest';
 import { buildResolverCandidatesFromGenerator } from '../../src/application/search/search-usecase-resolver-candidates.js';
 import { VespaCandidateAttributes } from '../../src/infrastructure/vespa/vespa-candidate-attributes.js';
-import { WatchlistAwareSearchIndex } from '../../src/infrastructure/watchlist/watchlist-aware-search-index.js';
 import type { EntityId } from '../../src/domain/shared/types/index.js';
 import { createEntityId } from '../../src/domain/shared/types/index.js';
 import type { RetrievalDocument } from '../../src/domain/retrieval/model/retrieval-document.js';
 import type { SearchIndexPort } from '../../src/domain/retrieval/port/search-index.port.js';
 import type { EntityCandidateGeneratorInput } from '../../src/domain/resolver/model/entity-candidate-generator-input.js';
+import { createSilentSkipCounter } from '../../src/domain/observability/silent-skip-counters.js';
 
 // ── helpers ──────────────────────────────────────────────────────────────
 
@@ -113,46 +113,55 @@ describe('Promise.all → allSettled resilience (regression)', () => {
       expect(result.has(goodId)).toBe(true);
       expect(result.has(failId)).toBe(false);
     });
-  });
 
-  describe('WatchlistAwareSearchIndex.getDocuments (fallback path)', () => {
-    it('T-E4-01: delegates batch getDocuments to inner when partial results (fallback removed)', async () => {
-      // T-E4-01: getDocuments is now required on SearchIndexPort; the single-fetch
-      // fallback has been removed. This test verifies that WatchlistAwareSearchIndex
-      // delegates to inner.getDocuments and returns partial results as-is.
-      const goodId = createEntityId('wl-good');
-      const failId = createEntityId('wl-fail');
-      const goodDoc = makeDoc('wl-good');
+    it('prefers the non-deprecated getDocumentsReport over getDocuments when the index exposes it', async () => {
+      const goodId = createEntityId('good-1');
+      const goodDoc = makeDoc('good-1');
 
-      const inner = makeSearchIndexStub(new Map([[String(goodId), goodDoc]]), new Set());
-      // Override getDocuments to return only the good doc (simulating Vespa partial return)
-      inner.getDocuments = vi.fn(async () => new Map([[goodId, goodDoc]]));
+      const index = makeSearchIndexStub(new Map(), new Set());
+      const legacyGetDocuments = vi.fn(async () => new Map([[goodId, goodDoc]]));
+      index.getDocuments = legacyGetDocuments;
+      const reportFn = vi.fn(async () => ({
+        docs: new Map([[goodId, goodDoc]]),
+        missingIds: [] as EntityId[],
+        parseFailures: 0,
+        batchFailures: 0,
+      }));
+      (index as unknown as { getDocumentsReport: typeof reportFn }).getDocumentsReport = reportFn;
 
-      const publisher = { publishUpdate: vi.fn() };
-      const index = new WatchlistAwareSearchIndex({ inner, publisher });
+      const attrs = new VespaCandidateAttributes(index);
+      const result = await attrs.loadAttributes([goodId]);
 
-      const result = await index.getDocuments([goodId, failId]);
-
-      expect(result.size).toBe(1);
+      expect(reportFn).toHaveBeenCalledTimes(1);
+      expect(legacyGetDocuments).not.toHaveBeenCalled();
       expect(result.has(goodId)).toBe(true);
-      expect(result.has(failId)).toBe(false);
     });
 
-    it('T-E4-01: returns empty map when inner getDocuments returns empty', async () => {
-      // T-E4-01: getDocuments is now required on SearchIndexPort.
-      // Verify that WatchlistAwareSearchIndex delegates empty results correctly.
-      const inner = makeSearchIndexStub(new Map(), new Set());
-      inner.getDocuments = vi.fn(async () => new Map());
+    it('surfaces partial-hydration diagnostics via the silent-skip counter when using getDocumentsReport', async () => {
+      const goodId = createEntityId('good-1');
+      const missingId = createEntityId('missing-1');
+      const goodDoc = makeDoc('good-1');
 
-      const publisher = { publishUpdate: vi.fn() };
-      const index = new WatchlistAwareSearchIndex({ inner, publisher });
+      const counter = createSilentSkipCounter();
+      const index = makeSearchIndexStub(new Map(), new Set());
+      const reportFn = vi.fn(async () => ({
+        docs: new Map([[goodId, goodDoc]]),
+        missingIds: [missingId] as EntityId[],
+        parseFailures: 1,
+        batchFailures: 0,
+      }));
+      (index as unknown as { getDocumentsReport: typeof reportFn }).getDocumentsReport = reportFn;
 
-      const result = await index.getDocuments([
-        createEntityId('a'),
-        createEntityId('b'),
-      ]);
+      const attrs = new VespaCandidateAttributes(index, counter);
+      const result = await attrs.loadAttributes([goodId, missingId]);
 
-      expect(result.size).toBe(0);
+      expect(result.has(goodId)).toBe(true);
+      expect(result.has(missingId)).toBe(false);
+      const snap = counter.snapshot();
+      expect(snap.candidate_attributes_hydration_missing).toBe(1);
+      expect(snap.candidate_attributes_hydration_parse_failure).toBe(1);
+      expect(snap.candidate_attributes_hydration_batch_failure).toBe(0);
     });
   });
+
 });

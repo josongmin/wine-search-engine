@@ -104,6 +104,20 @@ describe('UtilityScorer', () => {
       expect(result.isSafeAbstain).toBe(false);
     });
 
+    it('resolved while gold ambiguous (over-resolve) → -0.3 AND isAvoidableAbstain=true', () => {
+      // Gold label is ambiguous but the engine resolved to a concrete entity.
+      // Per the in-code AVOIDABLE_ABSTAIN penalty, the over-resolve must carry
+      // the matching flag so it is visible in avoidableAbstainRate and the
+      // exactly-one-flag invariant holds for this non-failed outcome.
+      const evalCase = makeEvalCase('ambiguous');
+      const result = scorer.score('resolved', ENTITY_A, evalCase);
+      expect(result.utilityScore).toBe(-0.3);
+      expect(result.isAvoidableAbstain).toBe(true);
+      expect(result.isCorrectResolve).toBe(false);
+      expect(result.isWrongResolve).toBe(false);
+      expect(result.isSafeAbstain).toBe(false);
+    });
+
     it('failed status → 0.0 (neutral)', () => {
       const evalCase = makeEvalCase('resolved', 'entity-opus-one');
       const result = scorer.score('failed', undefined, evalCase);
@@ -221,6 +235,8 @@ describe('UtilityScorer', () => {
         { status: 'resolved', entityId: ENTITY_B, evalCase: makeEvalCase('resolved', 'entity-opus-one'), expectedFlag: 'isWrongResolve' },
         { status: 'ambiguous', entityId: undefined, evalCase: makeEvalCase('ambiguous'), expectedFlag: 'isSafeAbstain' },
         { status: 'ambiguous', entityId: undefined, evalCase: makeEvalCase('resolved', 'entity-opus-one'), expectedFlag: 'isAvoidableAbstain' },
+        // Over-resolve: engine resolved on a gold-ambiguous case → penalized as avoidable abstain.
+        { status: 'resolved', entityId: ENTITY_A, evalCase: makeEvalCase('ambiguous'), expectedFlag: 'isAvoidableAbstain' },
       ];
 
       for (const tc of testCases) {

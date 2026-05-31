@@ -124,6 +124,42 @@ describe('NormalizedConstraintSchema — SSoT in @shared/types', () => {
     const withVersion = { ...validInstance(), mapping_version: 'rfc-004-v1' };
     expect(NormalizedConstraintSchema.safeParse(withVersion).success).toBe(true);
   });
+
+  it('accepts a degenerate range where min === max (point range)', () => {
+    // e.g. "exactly the 2015 vintage" → { min: 2015, max: 2015 }. The closed
+    // interval [min, max] is non-empty when min === max, so this is valid.
+    const pointRange = {
+      ...validInstance(),
+      attribute: 'vintage',
+      operator: 'range' as const,
+      value: { min: 2015, max: 2015 },
+    };
+    expect(NormalizedConstraintSchema.safeParse(pointRange).success).toBe(true);
+  });
+
+  it('rejects an inverted range where min > max (empty-set invariant)', () => {
+    // min > max describes the empty set — always an emitter bug, never a
+    // legitimate constraint. The .refine() invariant must fail closed.
+    const invertedRange = {
+      ...validInstance(),
+      attribute: 'price',
+      operator: 'range' as const,
+      value: { min: 50, max: 10 },
+    };
+    expect(NormalizedConstraintSchema.safeParse(invertedRange).success).toBe(false);
+  });
+
+  it('rejects an inverted range just past the boundary (min one above max)', () => {
+    // Boundary: min === max passes; min === max + 1 is the smallest inverted
+    // range and must be rejected (off-by-one guard on the <= comparison).
+    const justInverted = {
+      ...validInstance(),
+      attribute: 'vintage',
+      operator: 'range' as const,
+      value: { min: 2016, max: 2015 },
+    };
+    expect(NormalizedConstraintSchema.safeParse(justInverted).success).toBe(false);
+  });
 });
 
 describe('NormalizedConstraintSchema — re-export identity (SSoT)', () => {

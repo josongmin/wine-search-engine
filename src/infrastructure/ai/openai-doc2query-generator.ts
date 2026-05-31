@@ -52,8 +52,12 @@ import type {
   Doc2QueryGeneratorPort,
   Doc2QueryInput,
 } from '../../domain/retrieval/port/doc2query-generator.port.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
+import { globalSilentSkipCounter } from '../../domain/observability/silent-skip-counters.js';
 import { filterStopwordOnly } from './doc2query-stopwords.js';
 import { augmentWithTypoVariants } from './doc2query-typo-augment.js';
+
+const log = bootstrapLogger.child({ component: 'OpenAiDoc2QueryGenerator' });
 
 // ---------------------------------------------------------------------------
 // Tunables
@@ -556,24 +560,44 @@ export class OpenAiDoc2QueryGenerator implements Doc2QueryGeneratorPort {
     const service = this.embeddingService;
     if (service === undefined) return queries;
     const sourceText = buildSourceDocText(input);
+
+    // The try wraps ONLY the embedding I/O — the one operation that can
+    // realistically throw (network / provider error). The cosine scoring
+    // and sort below are pure arithmetic on returned vectors and must not
+    // be swallowed by this degradation catch, or a programming bug there
+    // would masquerade as an "embedding failure" and silently disable the
+    // round-trip filter.
+    let embeddings: readonly (readonly number[])[];
     try {
-      const embeddings = await service.embedBatch([sourceText, ...queries]);
-      const sourceEmb = embeddings[0];
-      if (sourceEmb === undefined) return queries;
-      const scored: Array<{ query: string; sim: number }> = [];
-      for (let i = 0; i < queries.length; i += 1) {
-        const queryEmb = embeddings[i + 1];
-        if (queryEmb === undefined) continue;
-        const sim = cosine(sourceEmb, queryEmb);
-        if (sim < ROUND_TRIP_MIN_SIM) continue;
-        scored.push({ query: queries[i]!, sim });
-      }
-      scored.sort((a, b) => b.sim - a.sim);
-      return scored.map((s) => s.query);
-    } catch {
-      // Embedding failure degrades gracefully — fall back to
-      // un-filtered queries so the ETL pass still produces output.
+      embeddings = await service.embedBatch([sourceText, ...queries]);
+    } catch (err) {
+      // Embedding failure degrades gracefully — fall back to un-filtered
+      // queries so the ETL pass still produces output. Behavior preserved,
+      // but now observable: a high rate here means the embedding service
+      // is unhealthy and synthetic-query quality is silently degrading at
+      // index time (no off-topic drop, no relevance ranking).
+      globalSilentSkipCounter.increment('doc2query_round_trip_embedding_failure', {
+        candidateCount: queries.length,
+        canonicalLabel: input.canonicalLabel,
+      });
+      log.warn(
+        { err, candidateCount: queries.length, canonicalLabel: input.canonicalLabel },
+        'doc2query round-trip embedding failed; returning un-ranked/un-filtered queries',
+      );
       return queries;
     }
+
+    const sourceEmb = embeddings[0];
+    if (sourceEmb === undefined) return queries;
+    const scored: Array<{ query: string; sim: number }> = [];
+    for (let i = 0; i < queries.length; i += 1) {
+      const queryEmb = embeddings[i + 1];
+      if (queryEmb === undefined) continue;
+      const sim = cosine(sourceEmb, queryEmb);
+      if (sim < ROUND_TRIP_MIN_SIM) continue;
+      scored.push({ query: queries[i]!, sim });
+    }
+    scored.sort((a, b) => b.sim - a.sim);
+    return scored.map((s) => s.query);
   }
 }

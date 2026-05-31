@@ -22,8 +22,22 @@ export interface MatcherFeatureVector {
 
 const TRIGRAM_SIZE = 3;
 
-/** Partial credit when scripts differ or either side is mixed-script. */
+/**
+ * Partial credit when one side is mixed-script (e.g. "Sassicaia 사시카이아"
+ * vs "Sassicaia"): some character-level script overlap exists, so the signal
+ * is partial but non-trivial.
+ */
 const SCRIPT_COMPATIBILITY_PARTIAL = 0.5;
+
+/**
+ * Weak partial credit when the two sides use fully disjoint scripts and
+ * neither is mixed — e.g. a pure-Hangul query ("사시카이아") against a
+ * pure-Latin canonical label ("Sassicaia"). This is a legitimate
+ * transliteration match path in the Korean wine domain, so it MUST stay
+ * strictly above zero (we still want such candidates to surface), but it
+ * carries no script overlap and so is a weaker signal than the mixed case.
+ */
+const SCRIPT_COMPATIBILITY_DISJOINT = 0.25;
 
 /**
  * Extracts character n-grams (trigrams) from a lowercased string.
@@ -155,9 +169,12 @@ export function computeMatcherFeatures(
   if (queryScript === candidateScript) {
     scriptCompatibility = 1.0;
   } else if (queryScript === ScriptKind.Mixed || candidateScript === ScriptKind.Mixed) {
+    // One side carries multiple scripts → partial script overlap is possible.
     scriptCompatibility = SCRIPT_COMPATIBILITY_PARTIAL;
   } else {
-    scriptCompatibility = SCRIPT_COMPATIBILITY_PARTIAL;
+    // Fully disjoint single scripts (e.g. Hangul query vs Latin label):
+    // a weaker — but non-zero — transliteration signal.
+    scriptCompatibility = SCRIPT_COMPATIBILITY_DISJOINT;
   }
 
   // Provenance stage — determined later by the resolver; default to 'unknown'

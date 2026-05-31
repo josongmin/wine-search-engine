@@ -3,7 +3,13 @@ import type { CanonicalEntityId } from '../../domain/shared/types/index.js';
 import type { CandidateAttributePort } from '../../domain/mixed/service/mixed-solver.js';
 import type { SimilarityCandidate } from '../../domain/mixed/service/similarity-scorer.js';
 import type { SearchIndexPort } from '../../domain/retrieval/port/search-index.port.js';
+import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
 import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
+import {
+  globalSilentSkipCounter,
+  type SilentSkipCounter,
+} from '../../domain/observability/silent-skip-counters.js';
+import type { GetDocumentsReport } from './vespa-search-index.js';
 
 const attrLog = bootstrapLogger.child({ component: 'VespaCandidateAttributes' });
 
@@ -64,13 +70,42 @@ function validateAttributes(
 }
 
 /**
+ * Structural shape of the non-deprecated, diagnostics-rich batch-fetch API.
+ *
+ * The `SearchIndexPort` contract only exposes the legacy `getDocuments`
+ * (whose concrete `VespaSearchIndex` implementation is `@deprecated`).
+ * `getDocumentsReport` lives on the concrete Vespa adapter and surfaces
+ * `missingIds` / `parseFailures` / `batchFailures` so partial hydration is
+ * observable. We narrow for it structurally so this adapter can prefer the
+ * non-deprecated API when the injected index provides it, without forcing the
+ * domain port to depend on an infrastructure-only return shape.
+ */
+interface GetDocumentsReportCapable {
+  getDocumentsReport(
+    entityIds: readonly CanonicalEntityId[],
+  ): Promise<GetDocumentsReport>;
+}
+
+function hasGetDocumentsReport(
+  index: SearchIndexPort,
+): index is SearchIndexPort & GetDocumentsReportCapable {
+  return (
+    typeof (index as Partial<GetDocumentsReportCapable>).getDocumentsReport ===
+    'function'
+  );
+}
+
+/**
  * Vespa-backed implementation of {@link CandidateAttributePort}.
  *
  * Fetches full {@link RetrievalDocument}s from the Vespa index in parallel
  * and maps them to the attribute contracts expected by the mixed-query domain.
  */
 export class VespaCandidateAttributes implements CandidateAttributePort {
-  constructor(private readonly searchIndex: SearchIndexPort) {}
+  constructor(
+    private readonly searchIndex: SearchIndexPort,
+    private readonly silentSkipCounter: SilentSkipCounter = globalSilentSkipCounter,
+  ) {}
 
   async loadAttributes(
     entityIds: readonly CanonicalEntityId[],
@@ -81,13 +116,74 @@ export class VespaCandidateAttributes implements CandidateAttributePort {
 
     const map = new Map<CanonicalEntityId, Readonly<Record<string, unknown>>>();
 
-    // Epic-07 T07-2 / T-E4-01: `getDocuments` is now a required port contract,
-    // so we always prefer the backend-native batch fetch over N single GETs.
-    const docs = await this.searchIndex.getDocuments(entityIds);
+    // Epic-07 T07-2 / T-E4-01: prefer the backend-native batch fetch over N
+    // single GETs. The concrete `VespaSearchIndex.getDocuments` is `@deprecated`
+    // in favour of `getDocumentsReport`, which surfaces missing/parse/batch
+    // diagnostics so partial hydration is observable rather than silently
+    // swallowed. Use the non-deprecated API when the injected index exposes it;
+    // fall back to the legacy port method otherwise (migration fallback:
+    // newApi ?? deprecated). TODO(cleanup): remove the `getDocuments` branch
+    // once `getDocumentsReport` is promoted onto `SearchIndexPort`.
+    const docs = hasGetDocumentsReport(this.searchIndex)
+      ? await this.fetchDocsWithReport(this.searchIndex, entityIds)
+      : await this.searchIndex.getDocuments(entityIds);
     for (const [id, doc] of docs) {
       map.set(id, validateAttributes(id, doc));
     }
     return map;
+  }
+
+  /**
+   * Fetch documents via the non-deprecated diagnostics-rich API and record any
+   * partial-hydration signal on the silent-skip counter so a thinned candidate
+   * set (which degrades similarity/attribute scoring) is observable instead of
+   * silent. The behaviour-visible result is identical to `getDocuments` — only
+   * the surviving `docs` map is returned.
+   */
+  private async fetchDocsWithReport(
+    index: SearchIndexPort & GetDocumentsReportCapable,
+    entityIds: readonly CanonicalEntityId[],
+  ): Promise<ReadonlyMap<CanonicalEntityId, RetrievalDocument>> {
+    const report = await index.getDocumentsReport(entityIds);
+    if (
+      report.missingIds.length > 0 ||
+      report.parseFailures > 0 ||
+      report.batchFailures > 0
+    ) {
+      attrLog.warn(
+        {
+          requestedCount: entityIds.length,
+          returnedCount: report.docs.size,
+          missingCount: report.missingIds.length,
+          parseFailures: report.parseFailures,
+          batchFailures: report.batchFailures,
+        },
+        'VespaCandidateAttributes: partial document hydration — mixed-query attribute solver running on a thinned candidate set',
+      );
+      const context = {
+        requestedCount: entityIds.length,
+        returnedCount: report.docs.size,
+      } as const;
+      if (report.missingIds.length > 0) {
+        this.silentSkipCounter.increment('candidate_attributes_hydration_missing', {
+          ...context,
+          missingCount: report.missingIds.length,
+        });
+      }
+      if (report.parseFailures > 0) {
+        this.silentSkipCounter.increment('candidate_attributes_hydration_parse_failure', {
+          ...context,
+          parseFailures: report.parseFailures,
+        });
+      }
+      if (report.batchFailures > 0) {
+        this.silentSkipCounter.increment('candidate_attributes_hydration_batch_failure', {
+          ...context,
+          batchFailures: report.batchFailures,
+        });
+      }
+    }
+    return report.docs;
   }
 
   async loadSimilarityCandidate(

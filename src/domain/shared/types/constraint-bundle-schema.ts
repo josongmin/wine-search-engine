@@ -70,7 +70,16 @@ const NormalizedConstraintValueSchema = z.union([
   z.object({
     min: z.number().finite(),
     max: z.number().finite(),
-  }).strict(),
+  }).strict()
+    // Invariant: a range must be non-empty — `min` cannot exceed `max`.
+    // An inverted range (min > max) describes the empty set and is always a
+    // bug at the emitter (LLM constraint extraction, JSONB read, etc.), not a
+    // legitimate constraint. `min === max` IS valid (degenerate point range,
+    // e.g. "exactly 2015 vintage"). Fail closed rather than silently passing
+    // an unsatisfiable range to the downstream constraint compiler.
+    .refine((range) => range.min <= range.max, {
+      message: 'range.min must be <= range.max (inverted range describes the empty set)',
+    }),
   z.array(z.string().max(NORMALIZED_CONSTRAINT_MAX_STRING_CHARS))
     .max(NORMALIZED_CONSTRAINT_MAX_VALUE_LIST)
     .readonly(),

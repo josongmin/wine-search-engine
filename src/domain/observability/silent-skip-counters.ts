@@ -77,7 +77,34 @@ export type SilentSkipKind =
   // concurrent single) lookup threw, so fuzzy fallback entity recovery
   // degrades to an empty result map. The query still returns, but with
   // weaker anchor recall — a high rate here flags an unhealthy matcher.
-  | 'anchor_fuzzy_term_batch_lookup_failure';
+  | 'anchor_fuzzy_term_batch_lookup_failure'
+  // OpenAiDoc2QueryGenerator.roundTripRankAndFilter: the embedding batch
+  // call (source doc + candidate queries) threw, so the Promptagator-style
+  // round-trip consistency filter is skipped and the un-ranked, un-filtered
+  // candidate queries are returned. ETL output is still produced but at
+  // lower quality (no off-topic drop, no relevance ranking) — a high rate
+  // here flags an unhealthy embedding service degrading synthetic-query
+  // quality silently at index time.
+  | 'doc2query_round_trip_embedding_failure'
+  // relative-filter-policy.applyRelativeFilter: the anchor entity that
+  // defines the "relative" neighbourhood was absent from both the candidate
+  // pool and the loaded anchor document, so the filter degrades to returning
+  // the UNFILTERED pool (returning empty would kill the search UX). The query
+  // still returns results, but they are NOT actually constrained to the
+  // anchor's neighbourhood — a high rate here means anchor resolution is
+  // failing upstream and relative queries are silently un-narrowed.
+  | 'relative_filter_anchor_not_found'
+  // VespaCandidateAttributes.loadAttributes: the batch document hydration that
+  // feeds the mixed-query attribute solver returned fewer documents than were
+  // requested. `missing` = the requested entity produced no valid document at
+  // all (deleted/never-indexed); `parse_failure` = a returned Vespa hit failed
+  // `fromVespaFields()` parsing; `batch_failure` = a whole bulk-fetch batch was
+  // rejected (timeout / 5xx / breaker open). The solver still runs on the
+  // surviving attributes, but a high rate here means similarity/attribute
+  // scoring is silently operating on a thinned candidate set.
+  | 'candidate_attributes_hydration_missing'
+  | 'candidate_attributes_hydration_parse_failure'
+  | 'candidate_attributes_hydration_batch_failure';
 
 export type LtrInferenceComponentScoreField =
   | 'semantic'
@@ -142,6 +169,11 @@ const SILENT_SKIP_KINDS: readonly SilentSkipKind[] = [
   'constraint_validator_dropped',
   'constraint_validator_unrecognized',
   'anchor_fuzzy_term_batch_lookup_failure',
+  'doc2query_round_trip_embedding_failure',
+  'relative_filter_anchor_not_found',
+  'candidate_attributes_hydration_missing',
+  'candidate_attributes_hydration_parse_failure',
+  'candidate_attributes_hydration_batch_failure',
 ] as const;
 
 const SILENT_SKIP_KIND_SET: ReadonlySet<string> = new Set(SILENT_SKIP_KINDS);

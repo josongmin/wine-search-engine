@@ -14,6 +14,8 @@ import type { RetrievalDocument } from '../model/retrieval-document.js';
 import {
   RETRIEVAL_CHANNEL_RELATIVE_FILTER
 } from '../model/retrieval-channel.js';
+import { globalSilentSkipCounter } from '../../observability/silent-skip-counters.js';
+import { bootstrapLogger } from '../../shared/bootstrap-logger.js';
 
 // ---------------------------------------------------------------------------
 // Input contract
@@ -140,7 +142,26 @@ export function applyRelativeFilter(
   if (anchorSource === undefined) {
     // Anchor not found in candidates — return unfiltered list rather than
     // silently returning empty results (which kills the entire search).
-    // Log at warn so operators can investigate anchor resolution failures.
+    //
+    // This is a graceful degradation, NOT a success: the returned pool is
+    // NOT actually constrained to the anchor's neighbourhood. Make it
+    // observable so operators can investigate anchor-resolution failures —
+    // the previous implementation only *claimed* (in a comment) to log here
+    // but returned silently, so a chronically un-narrowed relative lane was
+    // invisible unless the caller happened to re-derive it by length compare.
+    globalSilentSkipCounter.increment('relative_filter_anchor_not_found', {
+      anchorEntityId: input.anchorEntityId,
+      candidatePoolSize: candidates.length,
+      constraintCount: input.constraints.length,
+    });
+    bootstrapLogger.warn(
+      {
+        anchorEntityId: input.anchorEntityId,
+        candidatePoolSize: candidates.length,
+        constraintCount: input.constraints.length,
+      },
+      '[relative-filter] anchor entity not found in candidate pool or document store — returning UNFILTERED pool (relative neighbourhood NOT applied)',
+    );
     return candidates;
   }
 
