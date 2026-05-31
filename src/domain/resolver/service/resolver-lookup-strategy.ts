@@ -7,7 +7,7 @@ const SHORT_FORM_NOISY_SUPPORT_GAP_CAP = 0.01;
 /** Decimal places when serializing gap for traces. */
 const RESOLVER_GAP_TRACE_DECIMAL_PLACES = 4;
 
-export const LOOKUP_STRATEGY_SCORE_WEIGHTS = {
+const LOOKUP_STRATEGY_SCORE_WEIGHTS = {
   exact: 0.06,
   lexical_exact: 0.05,
   compact_exact: 0.04,
@@ -22,7 +22,7 @@ export const LOOKUP_STRATEGY_SCORE_WEIGHTS = {
   smart_document: -0.02,
 } as const;
 
-export type LookupStrategy = keyof typeof LOOKUP_STRATEGY_SCORE_WEIGHTS;
+type LookupStrategy = keyof typeof LOOKUP_STRATEGY_SCORE_WEIGHTS;
 
 export interface LookupStrategyAdjustment {
   readonly entityId: string;
@@ -30,7 +30,7 @@ export interface LookupStrategyAdjustment {
   readonly rawScoreDelta: number;
 }
 
-export function isLookupStrategy(strategy: string): strategy is LookupStrategy {
+function isLookupStrategy(strategy: string): strategy is LookupStrategy {
   return strategy in LOOKUP_STRATEGY_SCORE_WEIGHTS;
 }
 

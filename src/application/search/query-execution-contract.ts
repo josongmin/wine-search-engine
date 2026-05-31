@@ -23,9 +23,6 @@ import {
 } from './query-execution-entity-signals.js';
 import { buildSearchDefaults, type AgentSearchDefaults } from './query-execution-defaults.js';
 
-// Re-exported for backward compatibility: these entity/SKU detectors previously
-// lived in this module and are imported by external callers/tests via this path.
-export { isExactMetadataEntityLookupCandidate, isSpecificSkuLikeQuery };
 export type { AgentSearchDefaults };
 
 /**

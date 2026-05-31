@@ -12,7 +12,7 @@ import {
   SEMANTIC_DISCOVERY_ALLOWED_HARD_ATTRIBUTES,
 } from './planner-constants.js';
 
-export function isPositivePreferenceConstraint(constraint: NormalizedConstraint): boolean {
+function isPositivePreferenceConstraint(constraint: NormalizedConstraint): boolean {
   return constraint.operator === '='
     || constraint.operator === '>='
     || constraint.operator === '<='
@@ -54,7 +54,7 @@ export function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }
 
-export function uniqueStrings(values: readonly string[]): readonly string[] {
+function uniqueStrings(values: readonly string[]): readonly string[] {
   return Array.from(new Set(values));
 }
 

@@ -97,7 +97,7 @@ export function detectExplicitRegion(query: string): string | undefined {
   return resolvedRegions.size === 1 ? [...resolvedRegions][0] : undefined;
 }
 
-export function hasDirectEntityAnchorForMetadata(query: string): boolean {
+function hasDirectEntityAnchorForMetadata(query: string): boolean {
   const queryViews = QUERY_NORMALIZER.normalize(query);
   for (const candidate of [
     queryViews.punctuationStripped,
@@ -147,7 +147,7 @@ export function hasDirectConceptAnchor(query: string): boolean {
   return false;
 }
 
-export function containsGenericWineNoun(query: string): boolean {
+function containsGenericWineNoun(query: string): boolean {
   return /(?:^|[^\p{L}\p{N}])(?:와인|wine)(?=$|[^\p{L}\p{N}])/iu.test(query);
 }
 

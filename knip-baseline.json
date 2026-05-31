@@ -6,12 +6,11 @@
   "unlisted": 0,
   "binaries": 0,
   "unresolved": 1,
-  "exports": 96,
-  "nsExports": 0,
-  "types": 56,
-  "nsTypes": 0,
+  "exports": 116,
+  "namespaceMembers": 0,
+  "types": 76,
   "duplicates": 1,
   "enumMembers": 0,
-  "classMembers": 0,
-  "total": 157
+  "catalog": 0,
+  "total": 197
 }

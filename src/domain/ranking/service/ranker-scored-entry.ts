@@ -10,7 +10,7 @@ import { PROVENANCE_QUERY_VIEWS, type ProvenanceQueryView } from '../../retrieva
 import type { ComponentScores } from '../model/ranked-result.js';
 
 /** Max characters sent to the cross-encoder (latency + model context). */
-export const RERANK_PASSAGE_MAX_CHARS = 1200;
+const RERANK_PASSAGE_MAX_CHARS = 1200;
 
 /**
  * Internal intermediate representation during ranking.
