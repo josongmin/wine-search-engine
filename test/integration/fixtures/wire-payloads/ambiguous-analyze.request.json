@@ -770,7 +770,7 @@
                   "type": "object",
                   "properties": {
                     "kind": {
-                      "const": "failed_softened_to_search"
+                      "const": "failed_preserved_unknown"
                     },
                     "failureReason": {
                       "type": "string",
