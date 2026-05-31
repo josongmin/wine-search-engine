@@ -206,17 +206,21 @@ const NEGATED_CONFLICT_PATTERN = new RegExp(
 );
 
 /**
- * Negated forms of the entailment/support stems. Symmetric to
- * NEGATED_CONFLICT_PATTERN: an LLM verdict like "not entailed" / "does not entail" /
- * "no entailment" / "doesn't support" asserts the ABSENCE of entailment. The
- * positive branch's `r.includes('entail')` substring check would otherwise flip
- * these negated phrases into a positive `entailed` verdict — silently turning an
- * unsupported claim into a supported one. Stripping the negated stems before the
- * positive check closes that mirror-image false positive (W4 fixed conflict; this
- * extends the same approach to entail/support).
+ * Negated forms of the entailment stem. Symmetric to NEGATED_CONFLICT_PATTERN:
+ * an LLM verdict like "not entailed" / "does not entail" / "no entailment"
+ * asserts the ABSENCE of entailment. The positive branch's `r.includes('entail')`
+ * substring check would otherwise flip these negated phrases into a positive
+ * `entailed` verdict — silently turning an unsupported claim into a supported one.
+ * Stripping the negated stem before the positive check closes that mirror-image
+ * false positive (W4 fixed conflict; this extends the same approach to entail).
+ *
+ * NOTE: only `entail\w*` is stripped, not `support` — the positive branch matches
+ * support via EXACT equality (r === 'supported' / 'support'), never a substring,
+ * so "not supported" already falls through to not_entailed without de-negation.
+ * Adding a support stem here would be inert (self-audit R3).
  */
 const NEGATED_ENTAIL_PATTERN = new RegExp(
-  `(?:^|[^\\p{L}\\p{N}])${NEGATOR}\\s+(?:entail\\w*|support\\w*)(?=$|[^\\p{L}\\p{N}])`,
+  `(?:^|[^\\p{L}\\p{N}])${NEGATOR}\\s+entail\\w*(?=$|[^\\p{L}\\p{N}])`,
   'gu',
 );
 

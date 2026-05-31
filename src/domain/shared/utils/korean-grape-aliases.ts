@@ -49,7 +49,11 @@ export const KOREAN_GRAPE_ALIASES: ReadonlyArray<readonly [RegExp, string]> = [
   // NOT swallow the Korean Cabernet *Franc* surface `카베르네 프랑` (W2 merge
   // regression: first-match-wins previously misclassified Franc as Sauvignon).
   [/까?베르네\s*소비뇽|까?베르네소비뇽|까?베르네(?!\s*프랑)|까쇼|cab(?:ernet)?\s*sauv(?:ignon)?/iu, 'Cabernet Sauvignon'],
-  [/카베르네\s*프랑|cab(?:ernet)?\s*franc/iu, 'Cabernet Franc'],
+  // `까?베르네\s*프랑` is symmetric with the Sauvignon entry's `까?베르네` so the
+  // ㄲ-romanization `까베르네 프랑` resolves to Franc (not null). Without the
+  // optional `까`, the Sauvignon lookahead blocks `까베르네 프랑` AND this entry
+  // misses it → null (self-audit R3 regression from the lookahead fix).
+  [/까?베르네\s*프랑|cab(?:ernet)?\s*franc/iu, 'Cabernet Franc'],
   [/메를로|merlot/iu, 'Merlot'],
   [/피노\s*누아르?|피노누아|pinot\s*noir/iu, 'Pinot Noir'],
   [/피노\s*그리(?:지오)?|pinot\s*gri(?:gio|s)/iu, 'Pinot Grigio'],

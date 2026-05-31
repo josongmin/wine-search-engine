@@ -94,6 +94,8 @@ describe('SSoT: KOREAN_GRAPE_ALIASES merged superset', () => {
   it.each([
     ['까쇼', 'Cabernet Sauvignon'], // claim-extractor shorthand
     ['까베르네 소비뇽', 'Cabernet Sauvignon'], // search ㄲ variant
+    ['까베르네 프랑', 'Cabernet Franc'], // ㄲ-Franc must resolve to Franc, not null (R3 gap)
+    ['카베르네 프랑', 'Cabernet Franc'], // ㄱ-Franc (lookahead must not swallow into Sauvignon)
     ['쇼비', 'Sauvignon Blanc'], // claim-extractor shorthand
     ['쇼비뇽', 'Sauvignon Blanc'], // search variant
     ['샤도네이', 'Chardonnay'], // claim-extractor romanization
