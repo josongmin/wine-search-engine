@@ -183,6 +183,63 @@ describe('SearchIndexAliasMatcher', () => {
     expect(matches[0]?.lookupStrategy).toContain('index_exact');
   });
 
+  it('tokenizes Korean alias surfaces so multi-syllable phrases anchor through whole-phrase containment', async () => {
+    const searchIndex = new InMemorySearchIndex();
+    const doc = makeDoc({
+      entityId: createCanonicalEntityId('wine-sassicaia-2018'),
+      canonicalLabel: 'Sassicaia 2018',
+      aliasesIdentitySafe: ['Sassicaia 2018'],
+      aliasesNoisyRecall: ['사씨카이아', 'sassicaia'],
+      producer: '사씨카이아 와이너리',
+      searchTextKo: '사씨카이아 2018 토스카나',
+      searchTextEn: 'Sassicaia 2018 Tuscany',
+    });
+    await searchIndex.upsertDocument(doc);
+
+    const matcher = new SearchIndexAliasMatcher(searchIndex);
+    // Producer surface "사씨카이아 와이너리" is a 2-token Korean phrase; the
+    // trailing request word "추천" must not break Unicode-aware tokenization.
+    const matches = await matcher.findMatches('사씨카이아 와이너리 추천');
+
+    expect(matches.length).toBeGreaterThan(0);
+    expect(matches[0]?.entityIds).toContain(doc.entityId);
+  });
+
+  it('tokenizes accented Latin surfaces without splitting on accented graphemes', async () => {
+    const searchIndex = new InMemorySearchIndex();
+    const doc = makeDoc({
+      entityId: createCanonicalEntityId('wine-chateau-margaux-2015'),
+      canonicalLabel: 'Château Margaux 2015',
+      aliasesIdentitySafe: ['Château Margaux 2015'],
+      aliasesNoisyRecall: ['chateau margaux', '샤또 마고'],
+      producer: 'Château Margaux',
+      searchTextKo: '샤또 마고 2015',
+      searchTextEn: 'Chateau Margaux 2015 Bordeaux',
+    });
+    await searchIndex.upsertDocument(doc);
+
+    const matcher = new SearchIndexAliasMatcher(searchIndex);
+    const matches = await matcher.findMatches('Château Margaux');
+
+    expect(matches.length).toBeGreaterThan(0);
+    expect(matches[0]?.entityIds).toContain(doc.entityId);
+  });
+
+  it('tokenizes emoji-mixed queries without corrupting whitespace token boundaries', async () => {
+    const searchIndex = new InMemorySearchIndex();
+    const doc = makeDoc();
+    await searchIndex.upsertDocument(doc);
+
+    const matcher = new SearchIndexAliasMatcher(searchIndex);
+    // Emoji is stripped as punctuation by the normalizer; surrounding tokens
+    // ("Opus", "One") must still split on the intervening whitespace.
+    const matches = await matcher.findMatches('🍷 Opus One 🍷');
+
+    expect(matches.length).toBeGreaterThan(0);
+    expect(matches[0]?.entityIds).toContain(doc.entityId);
+    expect(matches[0]?.lookupStrategy).toContain('index_exact');
+  });
+
   it('batches multiple lookup queries into a single sparseSearch call', async () => {
     const backingIndex = new InMemorySearchIndex();
     await backingIndex.upsertDocument(makeDoc());

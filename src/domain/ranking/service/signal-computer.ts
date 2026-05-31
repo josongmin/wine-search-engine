@@ -471,7 +471,26 @@ export class SignalComputer {
    * Computes preference alignment.
    *
    * User-preference data is not wired into the production ranking path yet.
-   * Preserve absence instead of fabricating a neutral midpoint.
+   * Preserve absence (return `undefined`) instead of fabricating a neutral
+   * midpoint — {@link ScoreAggregator.aggregate} treats `undefined` as a
+   * legitimately-absent signal and drops it from the weighted sum (it is NOT
+   * coerced to 0 and does NOT produce NaN). Verified by the
+   * "preference-alignment stub does not distort aggregate score" suite in
+   * signal-computer.test.ts across every query class.
+   *
+   * WEIGHT NOTE: `preferenceAlignment` still carries a non-zero weight in
+   * `scoring-weights.ts` (0.10 default, up to 0.20 for `semantic_preference`).
+   * Because this signal is permanently `undefined`, that weight mass is never
+   * applied — every candidate of a given query class loses the SAME constant
+   * mass, so relative ranking order is preserved (no per-candidate distortion),
+   * but absolute scores run below the nominal ~1.0 budget. The weight is left
+   * in place deliberately: it reserves the budget slot for the real preference
+   * plane and avoids re-tuning the whole weight table (which would shift live
+   * scores). Do NOT zero the weight or add denominator renormalization here
+   * without re-baselining ranking quality.
+   *
+   * TODO(ranking): wire the user-preference plane and return a real [0,1]
+   * alignment score; at that point the reserved weight becomes active.
    */
   computePreferenceAlignment(): number | undefined {
     return undefined;

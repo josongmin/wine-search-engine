@@ -14,6 +14,8 @@ import { buildAliasSurfaceLookupPlan } from './alias-lookup-plan.js';
 import { isExactLikeLookupStrategy } from './lookup-strategy-taxonomy.js';
 import { pickHigherTrustAliasType } from '../../alias/service/conflict-resolver.js';
 import { extractRuleBasedConstraints } from './rule-based-constraint-extractor.js';
+import { bootstrapLogger } from '../../shared/bootstrap-logger.js';
+import { globalSilentSkipCounter } from '../../observability/silent-skip-counters.js';
 
 /**
  * Result returned by an {@link AliasMatcher} lookup.
@@ -882,7 +884,15 @@ export class AnchorExtractor {
         );
       });
       return merged;
-    } catch {
+    } catch (err) {
+      // Degradation is intentional: callers treat an empty result map as
+      // "no fuzzy matches" and the query still completes. But the failure
+      // must be observable rather than silently swallowed.
+      bootstrapLogger.warn(
+        { err },
+        '[AnchorExtractor] fuzzy term batch lookup failed; returning empty',
+      );
+      globalSilentSkipCounter.increment('anchor_fuzzy_term_batch_lookup_failure');
       const merged = new Map<string, readonly AliasMatchResult[]>();
       for (const term of normalizedTerms) {
         merged.set(term, []);

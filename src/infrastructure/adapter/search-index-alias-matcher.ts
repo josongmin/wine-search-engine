@@ -88,7 +88,7 @@ function containsWholePhrase(haystack: string, needle: string): boolean {
 
 function tokenizeForLookup(value: string): readonly string[] {
   return buildNormalizedQueryViews(value).punctuationStripped
-    .split(/\s+/)
+    .split(/\s+/u)
     .filter(Boolean);
 }
 
@@ -141,7 +141,7 @@ function classifyMatch(query: string, candidate: string): ClassifiedMatch | null
   }
 
   const candidatePhrase = candidateVintage.length > 0 ? candidateVintage : candidateViews.punctuationStripped;
-  const candidatePhraseTokenCount = candidatePhrase.split(/\s+/).filter(Boolean).length;
+  const candidatePhraseTokenCount = candidatePhrase.split(/\s+/u).filter(Boolean).length;
   if (
     candidatePhraseTokenCount >= 2 &&
     (

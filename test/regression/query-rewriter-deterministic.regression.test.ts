@@ -14,8 +14,9 @@
  *
  * Append-only test: never delete this file.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createQueryRewriter } from '../../src/domain/retrieval/service/query-rewriter.js';
+import { bootstrapLogger } from '../../src/domain/shared/bootstrap-logger.js';
 import type { CriticDecision } from '../../src/domain/retrieval/service/retrieval-critic.js';
 import type { ChatLlmPort } from '../../src/domain/ai/port/chat-llm.port.js';
 import type { HybridRetrievalInput } from '../../src/domain/retrieval/model/retrieval-input.js';
@@ -110,6 +111,10 @@ function reformulateDecision(): Extract<CriticDecision, { retry: true }> {
 }
 
 describe('query-rewriter', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('relax is deterministic across two invocations', async () => {
     const rewriter = createQueryRewriter();
     const base = input(plan());
@@ -181,5 +186,27 @@ describe('query-rewriter', () => {
     const rewriter = createQueryRewriter();
     const base = input(plan());
     expect(await rewriter.apply(base, reformulateDecision())).toBeNull();
+  });
+
+  it('reformulate declines AND warn-logs when the LLM call throws (no silent swallow)', async () => {
+    const warnSpy = vi
+      .spyOn(bootstrapLogger, 'warn')
+      .mockImplementation(() => undefined);
+    const boom = new Error('upstream LLM timeout');
+    const llm: ChatLlmPort = {
+      complete: vi.fn(async () => {
+        throw boom;
+      }),
+    };
+    const rewriter = createQueryRewriter({ chatLlm: llm });
+    const base = input(plan());
+
+    // Fallback behaviour preserved: declines (returns null), does not throw.
+    expect(await rewriter.apply(base, reformulateDecision())).toBeNull();
+
+    // The error is surfaced via a warn log routed through the err serializer.
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    const [payload] = warnSpy.mock.calls[0] ?? [];
+    expect(payload).toMatchObject({ err: boom });
   });
 });

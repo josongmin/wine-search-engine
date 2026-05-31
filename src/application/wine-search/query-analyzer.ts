@@ -393,10 +393,14 @@ export class QueryAnalyzerService {
     // downstream observability can distinguish:
     //   - 'not_attempted'              — deterministic signal present OR port absent
     //   - 'success'                    — LLM returned a parseable analysis
-    //   - 'failed_softened_to_search'  — LLM call threw; we kept the
-    //                                    deterministic shell with intent='search'
-    // Before this field existed, the failure path silently masqueraded as a
-    // confident `intent='search'`, hiding LLM outages from orchestrator logs.
+    //   - 'failed_preserved_unknown'   — LLM call threw; we kept the
+    //                                    deterministic shell with intent='unknown'
+    // Before this fix the failure path silently softened intent='unknown' to
+    // 'search', masquerading an LLM outage as a confident search and bypassing
+    // the deterministic-router's `unsupported_intent` reject for fully-ambiguous
+    // queries. We now PRESERVE 'unknown' so the router handles the no-signal
+    // case explicitly, and the outcome flag plus the log.warn in
+    // `runLlmFallback` keep the failure observable.
     let llmFallbackOutcome: LlmFallbackOutcome = { kind: 'not_attempted' };
     if (
       candidate.intent === 'unknown'
@@ -413,13 +417,15 @@ export class QueryAnalyzerService {
         candidate = fallbackResult.analysis;
         llmFallbackOutcome = { kind: 'success' };
       } else {
-        // Defensive default: keep the deterministic shell, promote intent to
-        // 'search' so downstream still has a routing target. The outcome flag
-        // tells callers the intent was synthesized from a failure, not the
-        // LLM's actual classification.
-        candidate = { ...candidate, intent: 'search' };
+        // Honest failure: PRESERVE the deterministic shell as-is with
+        // intent='unknown'. We intentionally do NOT soften to 'search' — that
+        // would masquerade an LLM outage as a confident search and bypass the
+        // deterministic-router's `unsupported_intent` reject for this exact
+        // no-signal case (no anchors, no constraints). Keeping 'unknown' lets
+        // the router handle the ambiguous query explicitly; the outcome flag
+        // below plus the log.warn in `runLlmFallback` keep the failure visible.
         llmFallbackOutcome = {
-          kind: 'failed_softened_to_search',
+          kind: 'failed_preserved_unknown',
           failureReason: fallbackResult.failureReason,
         };
       }
@@ -489,7 +495,7 @@ export class QueryAnalyzerService {
           failureReason,
           err,
         },
-        '[query-analyzer] LLM fallback failed — softening to intent=search',
+        '[query-analyzer] LLM fallback failed — preserving intent=unknown',
       );
       return { kind: 'failed', failureReason };
     }
@@ -503,7 +509,7 @@ type LlmFallbackInternalResult =
   | { readonly kind: 'success'; readonly analysis: WineSearchAnalysis }
   | { readonly kind: 'failed'; readonly failureReason: LlmFallbackFailureReason };
 
-/** Branches in {@link LlmFallbackOutcome} of kind `failed_softened_to_search`. */
+/** Branches in {@link LlmFallbackOutcome} of kind `failed_preserved_unknown`. */
 type LlmFallbackFailureReason =
   | 'timeout'
   | 'refusal'

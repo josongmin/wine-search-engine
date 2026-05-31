@@ -291,8 +291,8 @@ export class DecisionEngine {
       ? AMBIGUITY_RAISE_THRESHOLD_BIAS
       : 0;
     const clarificationBias = Math.max(policyBias, uncertaintyBias, ambiguityBias);
-    const effectiveThresholds = clarificationBias > 0
-      ? { resolveTau: thresholds.resolveTau + clarificationBias, gapTau: thresholds.gapTau }
+    const effectiveThresholds: ThresholdEntry = clarificationBias > 0
+      ? { ...thresholds, resolveTau: thresholds.resolveTau + clarificationBias }
       : thresholds;
     if (clarificationBias > 0) {
       rulesApplied.push(`CLARIFICATION_BIAS_${clarificationBias.toFixed(2)}`);

@@ -6,7 +6,11 @@ function stableNormalize(value: unknown): unknown {
   }
   if (value !== null && typeof value === 'object') {
     const entries = Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
+      // Code-point ordering — NOT localeCompare. localeCompare is locale-dependent
+      // (e.g. accent/case ordering differs by ICU locale), which would make the
+      // serialized bytes — and therefore hashStableJson — non-deterministic across
+      // machines/runtimes. Code-unit comparison is locale-invariant and stable.
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
       .map(([key, entryValue]) => [key, stableNormalize(entryValue)] as const);
     return Object.fromEntries(entries);
   }

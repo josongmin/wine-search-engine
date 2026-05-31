@@ -24,6 +24,7 @@
  */
 
 import { z } from 'zod';
+import { bootstrapLogger } from '../../shared/bootstrap-logger.js';
 import type { ChatLlmPort } from '../../ai/port/chat-llm.port.js';
 import type { ConstraintAtom } from '../../shared/types/constraint-atom.js';
 import type { QueryDecompositionHint } from '../model/query-decomposition.js';
@@ -256,14 +257,29 @@ export class ConstraintTopologyPlanner {
         seed: TOPOLOGY_SEED,
         ...(input.abortSignal !== undefined ? { abortSignal: input.abortSignal } : {}),
       });
-    } catch {
+    } catch (err) {
+      // Failure semantics: LLM timeout / network error / upstream 5xx → null
+      // (caller falls back to the deterministic trivial graph). The return is
+      // intentional, but the silent swallow hid every upstream failure — log
+      // through the PII-scrubbing `err` serializer so the abstention is
+      // observable without leaking prompt/query content.
+      bootstrapLogger.warn(
+        { err },
+        '[ConstraintTopologyPlanner] LLM completion failed; abstaining (null topology)',
+      );
       return null;
     }
 
     let parsed: unknown;
     try {
       parsed = JSON.parse(result.text);
-    } catch {
+    } catch (err) {
+      // Non-JSON LLM response → null. Same abstention contract; log so a
+      // persistently malformed model output is not invisible.
+      bootstrapLogger.warn(
+        { err },
+        '[ConstraintTopologyPlanner] LLM response was not valid JSON; abstaining (null topology)',
+      );
       return null;
     }
 

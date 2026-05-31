@@ -19,8 +19,13 @@ import { getSafeErrorDiagnostics } from './utils/error-diagnostics.js';
  * least one false-positive regression case in
  * `test/regression/pino-logger-pii-properties.regression.test.ts`.
  */
+// `/u` flag for consistency with the other PII regexes (CLAUDE.md rule 8 /
+// lint-enforced "non-ASCII regex without /u"). The atext is ASCII, so `/u`
+// does not change matching behavior — it only makes the flag set uniform and
+// satisfies the lint rule. No `\b` is used here, so non-ASCII-adjacent emails
+// (e.g. wrapped in Korean text) already mask correctly.
 const PII_EMAIL_RE: RegExp =
-  /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+  /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/gu;
 
 // Unicode-aware boundaries (CLAUDE.md rule 8): `\b` is ASCII-only and silently
 // fails on Korean/accented Latin. We use `(?<![\p{L}\p{N}])` / `(?![\p{L}\p{N}])`

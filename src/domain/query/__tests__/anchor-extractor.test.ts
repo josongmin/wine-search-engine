@@ -8,6 +8,8 @@ import {
 import type { AnchorConditionedQuery } from '../model/relative-query.js';
 import { QueryNormalizer } from '../service/query-normalizer.js';
 import { createEntityId } from '../../shared/types/index.js';
+import { bootstrapLogger } from '../../shared/bootstrap-logger.js';
+import { globalSilentSkipCounter } from '../../observability/silent-skip-counters.js';
 
 // ── Stub AliasMatcher ─────────────────────────────────────────────────────────
 // For most tests we use a fixed-response stub so extraction logic is isolated.
@@ -522,6 +524,38 @@ describe('AnchorExtractor', () => {
       expect(results.get('opus one')?.map((entry) => entry.normalizedForm)).toEqual(['opus one']);
       expect(results.get('pinot noir')?.map((entry) => entry.normalizedForm)).toEqual(['pinot noir']);
       expect(batchLookup).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns an empty Map and logs a warning when the batch lookup throws', async () => {
+      const warnSpy = vi
+        .spyOn(bootstrapLogger, 'warn')
+        .mockImplementation(() => bootstrapLogger);
+      globalSilentSkipCounter.reset();
+      const lookupError = new Error('batch matcher unavailable');
+      const extractor = new AnchorExtractor({
+        findMatches: vi.fn(async (_query: string): Promise<readonly AliasMatchResult[]> => {
+          return [];
+        }),
+        findMatchesBatch: vi.fn(async (): Promise<never> => {
+          throw lookupError;
+        }),
+      });
+
+      const results = await extractor.lookupForFuzzyTerms(['opus one', 'pinot noir']);
+
+      // Degradation behavior is preserved: every term maps to an empty list.
+      expect(results.get('opus one')).toEqual([]);
+      expect(results.get('pinot noir')).toEqual([]);
+
+      // The failure is now observable instead of being silently swallowed.
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0]?.[0]).toMatchObject({ err: lookupError });
+      expect(
+        globalSilentSkipCounter.snapshot().anchor_fuzzy_term_batch_lookup_failure,
+      ).toBe(1);
+
+      warnSpy.mockRestore();
+      globalSilentSkipCounter.reset();
     });
   });
 

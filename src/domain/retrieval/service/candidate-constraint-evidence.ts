@@ -17,6 +17,22 @@ import { candidateMatchesRecipientProfile } from '../../query/service/recipient-
 
 type CandidateValue = string | number | readonly string[] | undefined;
 
+/**
+ * Matches rosé-intent style tokens at a Unicode-aware word boundary.
+ *
+ * `style.includes('ros')` previously false-positived on red-wine styles that
+ * merely contain the substring "ros" — "Rosso" (di Montalcino) and "Rossese"
+ * are reds, not rosés. We require a real token boundary and an exact rosé
+ * intent token: rose / rosé (EN/FR, accent-folded or not), rosado (ES),
+ * rosato (IT). The style string is lowercased but NOT accent-folded at this
+ * point, so the regex matches both `rose` and `rosé` explicitly.
+ *
+ * `\b` is ASCII-only and silently breaks on accented input (é), so we use the
+ * explicit `(?:^|[^\p{L}\p{N}])` / `(?=$|[^\p{L}\p{N}])` boundaries with /u.
+ */
+const ROSE_STYLE_TOKEN_RE =
+  /(?:^|[^\p{L}\p{N}])(?:ros[eé]|rosado|rosato)(?=$|[^\p{L}\p{N}])/u;
+
 function deriveWineType(candidate: HybridCandidate): string | undefined {
   if (candidate.wineType !== undefined && candidate.wineType.trim().length > 0) {
     return candidate.wineType.trim().toLowerCase();
@@ -29,7 +45,7 @@ function deriveWineType(candidate: HybridCandidate): string | undefined {
   if (style.includes('sparkling')) return 'sparkling';
   if (style.includes('white')) return 'white';
   if (style.includes('dessert') || style.includes('sweet')) return 'dessert';
-  if (style.includes('rose') || style.includes('ros')) return 'rose';
+  if (ROSE_STYLE_TOKEN_RE.test(style)) return 'rose';
   return 'red';
 }
 

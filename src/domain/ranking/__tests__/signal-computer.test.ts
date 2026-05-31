@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { SignalComputer } from '../service/signal-computer.js';
+import { ScoreAggregator } from '../service/score-aggregator.js';
+import { resolveWeights } from '../model/scoring-weights.js';
 import type { HybridCandidate } from '../../retrieval/model/hybrid-candidate.js';
 import type { RetrievalPlan } from '../../retrieval/service/retrieval-plan-builder.js';
+import type { QueryPlanV1 } from '../../query/model/query-plan.js';
+import type { ConstraintBundle, QueryClass } from '../../shared/types/index.js';
 
 function makeCandidate(overrides: Partial<HybridCandidate> = {}): HybridCandidate {
   return {
@@ -386,4 +390,67 @@ describe('SignalComputer specialized signals', () => {
       } as never),
     ).toBe(0);
   });
+});
+
+describe('SignalComputer preference-alignment stub does not distort aggregate score', () => {
+  const computer = new SignalComputer();
+  const aggregator = new ScoreAggregator();
+
+  function makeQueryPlan(): QueryPlanV1 {
+    return {
+      route: 'hybrid',
+      queryClass: 'semantic_preference',
+      plannerVersion: 'test',
+      policyRuleVersion: 'test',
+      thresholdProfileId: 'default',
+      queryTargetType: 'wine',
+      intent: 'explore_topic',
+      normalizedQuery: 'bold red wine like a cabernet',
+      constraints: { hard: [], soft: [], inferred: [] },
+      anchors: [],
+      retrievalMode: 'general',
+      explanation: '',
+      ambiguitySignals: [],
+      uncertainty: { overall: 0, ambiguitySignals: [], decisionEffect: 'trace_only' },
+      policy: { requireExact: false, allowApproximate: true, clarificationBias: 0, fallbackMode: 'allow' },
+    } as never;
+  }
+
+  const emptyConstraints: ConstraintBundle = { hard: [], soft: [], inferred: [] };
+
+  it('computeAll omits preferenceAlignment (unwired) so the key is absent', () => {
+    const scores = computer.computeAll(
+      makeCandidate({ matchedConstraints: [], availability: true }),
+      makeQueryPlan(),
+      emptyConstraints,
+    );
+    // Stub returns undefined → conditional spread omits the key entirely
+    // (exactOptionalPropertyTypes: not present, not `undefined`).
+    expect('preferenceAlignment' in scores).toBe(false);
+  });
+
+  // The largest unwired weight lives on semantic_preference (0.20). If the
+  // missing signal poisoned the weighted sum we would see NaN here.
+  const CLASSES: readonly QueryClass[] = [
+    'semantic_preference',
+    'pure_constraint',
+    'anchored_similarity',
+    'short_entity',
+  ];
+
+  for (const queryClass of CLASSES) {
+    it(`aggregate produces a finite, bounded score for ${queryClass} despite the stub`, () => {
+      const scores = computer.computeAll(
+        makeCandidate({ matchedConstraints: [], availability: true }),
+        makeQueryPlan(),
+        emptyConstraints,
+      );
+      const final = aggregator.aggregate(scores, resolveWeights(queryClass));
+      expect(Number.isNaN(final)).toBe(false);
+      expect(Number.isFinite(final)).toBe(true);
+      // Bounded into [0, 1] (gates passing → not -Infinity here).
+      expect(final).toBeGreaterThanOrEqual(0);
+      expect(final).toBeLessThanOrEqual(1);
+    });
+  }
 });

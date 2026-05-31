@@ -553,9 +553,22 @@ export class Resolver {
     // Treat gap-threshold as "not applicable" rather than silently reading
     // a synthetic 0 gap. Singletons below the confidence threshold still
     // flow to corrective retry / failed paths below.
-    const gapMeetsThreshold = calibrated.hasRunnerUp
-      ? (calibrated.calibratedGap ?? 0) >= thresholds.gapTau
-      : true;
+    //
+    // When hasRunnerUp=true the calibrator contract guarantees a defined
+    // calibratedGap (see CalibratedResolutionScore). A `?? 0` fallback here
+    // would silently substitute a 0 gap for a contract violation, masking a
+    // miscalibrated upstream. Fail loud instead.
+    let gapMeetsThreshold: boolean;
+    if (calibrated.hasRunnerUp) {
+      if (calibrated.calibratedGap === undefined) {
+        throw new Error(
+          'Invariant: hasRunnerUp=true but calibratedGap=undefined',
+        );
+      }
+      gapMeetsThreshold = calibrated.calibratedGap >= thresholds.gapTau;
+    } else {
+      gapMeetsThreshold = true;
+    }
     const isAmbiguous = ambiguity.detected;
 
     if (cMeetsThreshold) {

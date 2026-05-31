@@ -5,6 +5,7 @@ import type { ResolverInput } from '../service/resolver.js';
 import type { ResolverCandidate } from '../model/resolved-candidate.js';
 
 const ENTITY_ID = createCanonicalEntityId('wine-ce-test');
+const ENTITY_ID_2 = createCanonicalEntityId('wine-ce-test-2');
 
 function makeResolverInput(overrides: Partial<ResolverInput> = {}): ResolverInput {
   const candidate: ResolverCandidate = {
@@ -83,6 +84,124 @@ function makeResolverInput(overrides: Partial<ResolverInput> = {}): ResolverInpu
     ...overrides,
   };
 }
+
+function makeSecondCandidate(): ResolverCandidate {
+  return {
+    entityId: ENTITY_ID_2,
+    entityType: 'wine',
+    canonicalLabel: '2015 Kalaris Merlot',
+    aliasMatches: [{
+      aliasValue: 'Kalaris Merlot',
+      aliasType: 'canonical',
+      matchScore: 1,
+    }],
+    sourceSignals: {
+      canonicalExactMatch: 1,
+      canonicalNormalizedMatch: 1,
+      aliasExactMatch: 1,
+      aliasFuzzyMatch: 0,
+      aliasTypePrior: 1,
+      producerMatch: 0,
+      vintageMatch: 0,
+      regionMatch: 0,
+      grapeHintMatch: 0,
+      phoneticMatch: 0,
+      editDistanceScore: 0,
+      ambiguityPenalty: 0,
+    },
+    attributeHints: {
+      producer: 'Kalaris',
+      vintage: 2015,
+      vintage_year: 2015,
+      grape_primary: 'Merlot',
+    },
+    source: 'alias',
+    sources: ['alias'],
+  };
+}
+
+describe('Resolver applyDecisionBoundary calibratedGap invariant (C2)', () => {
+  it('throws when hasRunnerUp=true but calibratedGap is undefined', async () => {
+    const input = makeResolverInput({
+      candidateEntities: [
+        makeResolverInput().candidateEntities[0]!,
+        makeSecondCandidate(),
+      ],
+    });
+
+    const resolver = new Resolver(
+      {
+        block: vi.fn().mockResolvedValue([ENTITY_ID, ENTITY_ID_2]),
+      } as never,
+      {
+        score: vi.fn().mockReturnValue(0.5),
+      } as never,
+      {
+        classify: vi.fn().mockReturnValue({
+          detected: false,
+          types: [],
+          severity: 'low',
+        }),
+      } as never,
+      {
+        calibrate: vi.fn().mockResolvedValue({
+          top1CalibratedScore: 0.5,
+          top2CalibratedScore: 0.4,
+          hasRunnerUp: true,
+          // Contract violation: hasRunnerUp=true but gap undefined.
+          calibratedGap: undefined,
+          decisionConfidenceC: 0.5,
+          candidateCount: 2,
+          calibrationTrusted: true,
+        }),
+      } as never,
+    );
+
+    await expect(resolver.resolve(input)).rejects.toThrow(
+      'Invariant: hasRunnerUp=true but calibratedGap=undefined',
+    );
+  });
+
+  it('does not throw when hasRunnerUp=true and calibratedGap is a finite number', async () => {
+    const input = makeResolverInput({
+      candidateEntities: [
+        makeResolverInput().candidateEntities[0]!,
+        makeSecondCandidate(),
+      ],
+    });
+
+    const resolver = new Resolver(
+      {
+        block: vi.fn().mockResolvedValue([ENTITY_ID, ENTITY_ID_2]),
+      } as never,
+      {
+        score: vi.fn().mockReturnValue(0.5),
+      } as never,
+      {
+        classify: vi.fn().mockReturnValue({
+          detected: false,
+          types: [],
+          severity: 'low',
+        }),
+      } as never,
+      {
+        calibrate: vi.fn().mockResolvedValue({
+          top1CalibratedScore: 0.5,
+          top2CalibratedScore: 0.4,
+          hasRunnerUp: true,
+          calibratedGap: 0.1,
+          decisionConfidenceC: 0.5,
+          candidateCount: 2,
+          calibrationTrusted: true,
+        }),
+      } as never,
+    );
+
+    const result = await resolver.resolve(input);
+    expect(result).toBeDefined();
+    expect(result.status).toBeDefined();
+  });
+});
 
 describe('Resolver singleton routing', () => {
   it('does not resolve a singleton candidate below the calibrated threshold', async () => {

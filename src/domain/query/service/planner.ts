@@ -68,6 +68,9 @@ import type {
 } from '../model/ambiguity-intent-interpretation.js';
 import { isExactLikeLookupStrategy } from './lookup-strategy-taxonomy.js';
 import { splitLookupStrategies } from './anchor-extractor.js';
+import { bootstrapLogger } from '../../shared/bootstrap-logger.js';
+
+const log = bootstrapLogger.child({ component: 'Planner' });
 
 /** Current planner version. */
 const PLANNER_VERSION = '1.0.0';
@@ -1235,6 +1238,12 @@ export class Planner {
       if (isAbortError(error)) {
         throw error;
       }
+      log.warn(
+        {
+          err: error instanceof Error ? error.message : String(error),
+        },
+        '[Planner] constraint compiler failed; falling back to deterministic constraint compiler',
+      );
       return this.fallbackConstraintCompiler.compile(normalizedQuery, abortSignal);
     }
   }

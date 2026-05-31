@@ -23,6 +23,7 @@
  * Pure for deterministic branches; thin, testable seam for the LLM branch.
  */
 
+import { bootstrapLogger } from '../../shared/bootstrap-logger.js';
 import type { ChatLlmPort } from '../../ai/port/chat-llm.port.js';
 import type { HybridRetrievalInput } from '../model/retrieval-input.js';
 import type { CriticDecision, CriticRewriteType } from './retrieval-critic.js';
@@ -192,7 +193,15 @@ async function applyReformulate(
       maxOutputTokens: LLM_MAX_OUTPUT_TOKENS,
       seed: LLM_DETERMINISTIC_SEED,
     });
-  } catch {
+  } catch (err) {
+    // Fail-loud, fail-soft: the LLM reformulate call failed. Surface the
+    // error through the err serializer (PII/secret-scrubbed) so the silent
+    // swallow is gone, then decline gracefully — the executor treats `null`
+    // as a hard break out of its retry loop (no stale-input continuation).
+    bootstrapLogger.warn(
+      { err, component: 'QueryRewriter', subqueryId: decision.subqueryId },
+      'reformulate LLM call failed — declining rewrite',
+    );
     return null;
   }
 

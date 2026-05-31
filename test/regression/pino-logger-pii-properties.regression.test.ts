@@ -392,3 +392,50 @@ describe('pino-logger PII regex constants are named exports (CLAUDE.md rule 15)'
     expect(mod.PII_SQL_NUMERIC_LITERAL_RE.flags).toContain('u');
   });
 });
+
+// CLAUDE.md rule 8 / lint-enforced safety: every PII regex MUST carry the `/u`
+// flag for Unicode consistency (the email regex previously shipped only `/g`).
+// Behavioral guard: email masking must work when the address is wrapped in
+// non-ASCII (Korean) context, and Korean-only strings must pass through unchanged.
+describe('pino-logger email PII regex Unicode handling (CLAUDE.md rule 8)', () => {
+  it('masks an email embedded inside a Korean error message', async () => {
+    const { scrubPiiFromString } = await loadBootstrapLoggerModule();
+    const input = '사용자 조회 실패: user@example.com 계정을 찾을 수 없습니다';
+    const out = scrubPiiFromString(input);
+    expect(out).not.toContain('user@example.com');
+    expect(out).toContain(REDACTED);
+    // Surrounding Korean context preserved verbatim.
+    expect(out).toContain('사용자 조회 실패:');
+    expect(out).toContain('계정을 찾을 수 없습니다');
+  });
+
+  it('masks an email directly adjacent to Korean characters (no separator)', async () => {
+    const { scrubPiiFromString } = await loadBootstrapLoggerModule();
+    const input = '주소user@example.com확인';
+    const out = scrubPiiFromString(input);
+    expect(out).not.toContain('user@example.com');
+    expect(out).toContain(REDACTED);
+    expect(out).toContain('주소');
+    expect(out).toContain('확인');
+  });
+
+  it('leaves a Korean-only string (no email) unchanged', async () => {
+    const { scrubPiiFromString } = await loadBootstrapLoggerModule();
+    const input = '와인 검색 실패 — 이메일 없음 메시지';
+    const out = scrubPiiFromString(input);
+    expect(out).toBe(input);
+    expect(out).not.toContain(REDACTED);
+  });
+
+  it('leaves an empty string unchanged (boundary)', async () => {
+    const { scrubPiiFromString } = await loadBootstrapLoggerModule();
+    expect(scrubPiiFromString('')).toBe('');
+  });
+
+  it('still masks a plain ASCII email (no regression)', async () => {
+    const { scrubPiiFromString } = await loadBootstrapLoggerModule();
+    const out = scrubPiiFromString('contact admin@wine.io for help');
+    expect(out).not.toContain('admin@wine.io');
+    expect(out).toContain(REDACTED);
+  });
+});

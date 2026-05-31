@@ -428,3 +428,59 @@ describe('LlmNLMapper phrase cache', () => {
     expect(trace?.llmLinkedEntityCount).toBe(1);
   });
 });
+
+// ── alcohol_pct allowed-attribute parity ───────────────────────────────────
+// SYSTEM_PROMPT lists alcohol_pct as an allowed attribute (and gives a "도수 낮은"
+// example), but LLM_ALLOWED_ATTRIBUTES previously omitted it, so any LLM-emitted
+// alcohol_pct constraint was silently dropped at the attribute filter. alcohol_pct
+// is a fully supported downstream constraint (SOFT_CONSTRAINT_ATTRIBUTES,
+// constraint-to-sparse-filter-tokens.ts case 'alcohol_pct', constraint-relaxation
+// Tier 5), so the prompt and the filter must agree.
+describe('LlmNLMapper alcohol_pct attribute', () => {
+  it('keeps an LLM-emitted alcohol_pct constraint (prompt ↔ allow-list parity)', async () => {
+    // Use a phrase NOT covered by the deterministic DEFAULT_MAPPINGS so resolution
+    // falls through to the LLM path (where the allow-list filter applies).
+    const phrase = '알쓰 친화적인 가벼운 도수의';
+    const llm = new StubChatLlm([
+      {
+        phrase,
+        attribute: 'alcohol_pct',
+        operator: '<=',
+        value: 12,
+        confidence: 0.85,
+      },
+    ]);
+    const mapper = new LlmNLMapper(new NullMappingTable(), llm, 5_000);
+
+    const { constraints: result, constraintExtraction: trace } =
+      await mapper.mapConstraints([phrase]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.attribute).toBe('alcohol_pct');
+    expect(result[0]?.operator).toBe('<=');
+    expect(result[0]?.value).toBe(12);
+    // Not dropped by the attribute filter.
+    expect(trace?.llmSkippedCount).toBe(0);
+    expect(trace?.llmHitCount).toBe(1);
+  });
+
+  it('still drops a genuinely unknown attribute (filter is not weakened)', async () => {
+    const llm = new StubChatLlm([
+      {
+        phrase: 'noise',
+        attribute: 'definitely_not_an_attribute',
+        operator: '=',
+        value: 'x',
+        confidence: 0.9,
+      },
+    ]);
+    const mapper = new LlmNLMapper(new NullMappingTable(), llm, 5_000);
+
+    const { constraints: result, constraintExtraction: trace } =
+      await mapper.mapConstraints(['noise']);
+
+    expect(result).toHaveLength(0);
+    expect(trace?.llmSkippedCount).toBe(1);
+    expect(trace?.llmHitCount).toBe(0);
+  });
+});

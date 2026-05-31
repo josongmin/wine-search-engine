@@ -513,6 +513,67 @@ describe('NFD accent normalization (Fix P0-A)', () => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
+// deriveWineType — style-based rosé inference must not false-positive on
+// red-wine styles that merely contain the substring "ros" (Rosso, Rossese).
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('deriveWineType — rosé style token (no "ros" substring false positive)', () => {
+  // When wineType is absent, deriveWineType infers from style. A candidate with
+  // a rosé style must satisfy wine_type = rose; a red wine whose style merely
+  // contains "ros" (Rosso, Rossese) must NOT.
+  it('style "Rosé" (accented) infers wine_type rose', () => {
+    const candidate = makeCandidate({ wineType: undefined, style: 'Rosé' });
+    const bundle = makeBundle([makeConstraint('wine_type', '=', 'rose')]);
+    const result = annotateCandidateConstraintEvidence(candidate, bundle);
+    expect(result.matchedConstraints).toContain('wine_type');
+    expect(result.unmetHardConstraints ?? []).not.toContain('wine_type');
+  });
+
+  it('style "rosado" (Spanish) infers wine_type rose', () => {
+    const candidate = makeCandidate({ wineType: undefined, style: 'rosado' });
+    const bundle = makeBundle([makeConstraint('wine_type', '=', 'rose')]);
+    const result = annotateCandidateConstraintEvidence(candidate, bundle);
+    expect(result.matchedConstraints).toContain('wine_type');
+  });
+
+  it('style "rosato" (Italian) infers wine_type rose', () => {
+    const candidate = makeCandidate({ wineType: undefined, style: 'rosato' });
+    const bundle = makeBundle([makeConstraint('wine_type', '=', 'rose')]);
+    const result = annotateCandidateConstraintEvidence(candidate, bundle);
+    expect(result.matchedConstraints).toContain('wine_type');
+  });
+
+  it('style "Rosso di Montalcino" does NOT infer rose (red wine)', () => {
+    const candidate = makeCandidate({ wineType: undefined, style: 'Rosso di Montalcino' });
+    const roseBundle = makeBundle([makeConstraint('wine_type', '=', 'rose')]);
+    const roseResult = annotateCandidateConstraintEvidence(candidate, roseBundle);
+    expect(roseResult.unmetHardConstraints).toContain('wine_type');
+
+    const redBundle = makeBundle([makeConstraint('wine_type', '=', 'red')]);
+    const redResult = annotateCandidateConstraintEvidence(candidate, redBundle);
+    expect(redResult.matchedConstraints).toContain('wine_type');
+  });
+
+  it('style "Rossese DOC" does NOT infer rose (red grape)', () => {
+    const candidate = makeCandidate({ wineType: undefined, style: 'Rossese DOC' });
+    const roseBundle = makeBundle([makeConstraint('wine_type', '=', 'rose')]);
+    const roseResult = annotateCandidateConstraintEvidence(candidate, roseBundle);
+    expect(roseResult.unmetHardConstraints).toContain('wine_type');
+
+    const redBundle = makeBundle([makeConstraint('wine_type', '=', 'red')]);
+    const redResult = annotateCandidateConstraintEvidence(candidate, redBundle);
+    expect(redResult.matchedConstraints).toContain('wine_type');
+  });
+
+  it('style "pale provence rosé" (multi-word with accent) infers rose', () => {
+    const candidate = makeCandidate({ wineType: undefined, style: 'pale provence rosé' });
+    const bundle = makeBundle([makeConstraint('wine_type', '=', 'rose')]);
+    const result = annotateCandidateConstraintEvidence(candidate, bundle);
+    expect(result.matchedConstraints).toContain('wine_type');
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
 // exclude operator — array constraintValue (Fix P0-B)
 // ──────────────────────────────────────────────────────────────────────────────
 

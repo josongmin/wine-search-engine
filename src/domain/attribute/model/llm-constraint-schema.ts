@@ -14,6 +14,11 @@ export const LLM_ALLOWED_ATTRIBUTES = new Set([
   'sweetness',
   'acidity',
   'tannin',
+  // alcohol_pct is listed in llm-nl-mapper SYSTEM_PROMPT and backed downstream
+  // (SOFT_CONSTRAINT_ATTRIBUTES, constraint-to-sparse-filter-tokens 'alcohol_pct'
+  // case, constraint-relaxation Tier 5). Omitting it silently dropped every
+  // LLM-emitted "도수 낮은" / "low alcohol" constraint at the attribute filter.
+  'alcohol_pct',
   'price_band',
   'occasion',
   'wine_type',
