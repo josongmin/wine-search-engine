@@ -57,6 +57,7 @@ import {
   parseRetryAfterHeader,
   type RetryConfig,
 } from '../http/retry-with-backoff.js';
+import { withRetryLabel } from './llm-retry-config.js';
 import { runUnderLlmBreaker } from './llm-circuit-breaker-classifier.js';
 import {
   createCircuitBreaker,
@@ -97,14 +98,8 @@ const SYNTHESIZE_FN_NAME = 'synthesize';
  * transient HTTP failure surfacing as `tool arguments not valid JSON`
  * downstream (empty / malformed response wrapped in our parser).
  */
-const OPENAI_STRUCTURED_RETRY_CONFIG: RetryConfig = {
-  maxAttempts: 4,
-  transientBackoffBaseMs: 250,
-  transientBackoffCapMs: 2_000,
-  rateLimitBackoffBaseMs: 2_000,
-  rateLimitBackoffCapMs: 30_000,
-  label: 'OpenAI structured',
-};
+// Shared LLM retry envelope (SSoT: ./llm-retry-config.ts) + provider label.
+const OPENAI_STRUCTURED_RETRY_CONFIG: RetryConfig = withRetryLabel('OpenAI structured');
 
 const PREVIEW_CHARS = 240;
 

@@ -24,6 +24,7 @@ import {
   extractKoreanVintageBefore,
   extractVintageRange,
 } from '../../shared/utils/vintage.js';
+import { KOREAN_GRAPE_ALIASES } from '../../shared/utils/korean-grape-aliases.js';
 import { normalizeKoreanNegation } from './korean-negation-normalizer.js';
 import {
   DEFAULT_FX_RATE_PORT,
@@ -191,35 +192,11 @@ export interface SearchConstraints {
 // ---------------------------------------------------------------------------
 
 /**
- * Maps Korean grape name fragments (and common English abbreviations) to
- * their canonical English grape variety names for Vespa filtering.
- *
- * The key is a regex source string (used with the unicode-safe negation
- * boundary pattern); the value is the canonical English name stored in
- * the Vespa `grape_primary` / `grapes` fields.
+ * Korean grape name fragment → canonical English grape mapping is owned by the
+ * SSoT module `@domain/shared/utils/korean-grape-aliases` and imported above.
+ * The canonical values are written into the Vespa `grape_primary` / `grapes`
+ * fields. See that module for merge/ordering rationale.
  */
-const KOREAN_GRAPE_ALIASES: ReadonlyArray<readonly [RegExp, string]> = [
-  [/까?베르네\s*소비뇽|까?베르네|cab(?:ernet)?\s*sauv(?:ignon)?/iu, 'Cabernet Sauvignon'],
-  [/카베르네\s*프랑|cab(?:ernet)?\s*franc/iu, 'Cabernet Franc'],
-  [/메를로|merlot/iu, 'Merlot'],
-  [/피노\s*누아르?|피노누아|pinot\s*noir/iu, 'Pinot Noir'],
-  [/피노\s*그리(?:지오)?|pinot\s*gri(?:gio|s)/iu, 'Pinot Grigio'],
-  [/피노\s*블랑|pinot\s*blanc/iu, 'Pinot Blanc'],
-  [/소비뇽\s*블랑|쇼비뇽|sauvignon\s*blanc/iu, 'Sauvignon Blanc'],
-  [/샤르도네|chardonnay/iu, 'Chardonnay'],
-  [/시라(?:즈)?|shiraz|syrah/iu, 'Syrah'],
-  [/리슬링|riesling/iu, 'Riesling'],
-  [/그르나슈|grenache|garnacha/iu, 'Grenache'],
-  [/산지오베제|sangiovese/iu, 'Sangiovese'],
-  [/템프라니요|tempranillo/iu, 'Tempranillo'],
-  [/네비올로|nebbiolo/iu, 'Nebbiolo'],
-  [/말벡|malbec/iu, 'Malbec'],
-  [/무스카|muscat|moscato/iu, 'Muscat'],
-  [/게뷔르츠트라미너|gewürztraminer|gewurztraminer/iu, 'Gewürztraminer'],
-  [/비오니에|viognier/iu, 'Viognier'],
-  [/진판델|zinfandel/iu, 'Zinfandel'],
-  [/피노타지|pinotage/iu, 'Pinotage'],
-];
 
 /**
  * Normalizes a raw grape name token to its canonical English form.

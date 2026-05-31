@@ -25,8 +25,10 @@ import {
   resolveWeights,
   resolveChannelAwareWeights,
   applySituationIntentWeightOverlay,
+  sumNonPenaltyWeights,
 } from '../model/scoring-weights.js';
 import type { ScoringWeights } from '../model/scoring-weights.js';
+import { containsHangul } from '../../shared/utils/hangul.js';
 import { getModeWeights, applyModeWeightOverlay, scaleOverlaidWeights } from '../model/mode-weights.js';
 import { effectiveRerankBlendWeight } from './rerank-blend.js';
 import { type SignalComputer } from './signal-computer.js';
@@ -250,19 +252,9 @@ const EXACT_QUERY_VIEWS = new Set<ProvenanceQueryView>(['strict', 'accentless', 
 const TRANSLITERATED_QUERY_VIEWS = new Set<ProvenanceQueryView>(['transliterated', 'phonetic_compact']);
 const VINTAGE_QUERY_VIEWS = new Set<ProvenanceQueryView>(['vintage_canonicalized', 'vintage_stripped']);
 
-/**
- * Non-penalty scoring weight fields — used to compute the mode-overlay
- * normalisation factor. Hoisted to module scope so rank() does not
- * re-allocate the 12-element tuple (and the two .reduce() closures that
- * walk it) on every request. Rule 16: deterministic constants belong
- * outside hot-path functions.
- */
-const NON_PENALTY_WEIGHT_FIELDS = [
-  'entityIntegrity', 'anchorSimilarity', 'semantic', 'softConstraint',
-  'attributeAlignment', 'preferenceAlignment', 'popularity', 'availability',
-  'producerPrestige', 'recency', 'criticScore', 'multilingualScore',
-  'giftSuitability', 'beginnerSuitability',
-] as const;
+// NON_PENALTY_WEIGHT_FIELDS / sumNonPenaltyWeights moved to the SSoT owner of
+// ScoringWeights: ../model/scoring-weights.ts. Importing keeps the mode-overlay
+// normalisation denominator identical to the channel-aware/situation overlays.
 
 function projectObservedLtrComponentScore(
   componentScores: ComponentScores,
@@ -324,14 +316,6 @@ function buildObservedLtrInferenceArtifact(
     features,
     vector: rankingFeaturesToVector(features),
   };
-}
-
-function sumNonPenaltyWeights(weights: ScoringWeights): number {
-  let total = 0;
-  for (const key of NON_PENALTY_WEIGHT_FIELDS) {
-    total += weights[key];
-  }
-  return total;
 }
 
 /**
@@ -915,9 +899,12 @@ export class Ranker {
 
     // Pre-compute query-level signals shared across all candidates.
     const referenceYear = new Date().getFullYear();
-    const queryContainsHangul = /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/.test(
-      queryPlan.rawQuery,
-    );
+    // SSoT Hangul detection (@domain/shared/utils/hangul). rawQuery is an
+    // NFC-normalized user query, so the precomposed-syllable check
+    // (U+AC00..U+D7A3) is sufficient \u2014 the prior inline regex also matched
+    // bare conjoining/compatibility Jamo, but those do not occur in a
+    // normalized query and the multilingual signal is a Korean-syllable signal.
+    const queryContainsHangul = containsHangul(queryPlan.rawQuery);
 
     // Build query-level constraint context ONCE before the per-candidate loop.
     // Previously buildConstraintState() rebuilt the tracked-attribute Set and

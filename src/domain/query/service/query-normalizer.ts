@@ -4,6 +4,10 @@ import {
   isPotentialVintageToken,
 } from '../../shared/utils/vintage.js';
 import type { NormalizedQueryViews } from '../model/query-views.js';
+import {
+  LATIN_VOWEL_RE,
+  PHONETIC_NORMALIZATION_RULES,
+} from './phonetic-skeleton.js';
 import { globalSilentSkipCounter } from '../../../domain/observability/silent-skip-counters.js';
 import { correctKoreanWineTypos } from './korean-wine-aliases.js';
 import { expandVintageVariants } from './vintage-normalizer.js';
@@ -11,16 +15,10 @@ import { expandVintageVariants } from './vintage-normalizer.js';
 const PUNCTUATION_STRIP_RE = /[^\p{L}\p{N}\s]+/gu;
 const COMPACT_RE = /[^\p{L}\p{N}]+/gu;
 const SPACE_RE = /\s+/g;
-const LATIN_VOWEL_RE = /[aeiouy]/g;
+// LATIN_VOWEL_RE + PHONETIC_NORMALIZATION_RULES: SSoT in
+// `./phonetic-skeleton`. The query-time phonetic views below MUST stay
+// byte-identical to the alias-lookup-time skeleton or phonetic recall breaks.
 const HANGUL_RE = /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/u;
-const PHONETIC_NORMALIZATION_RULES: readonly [RegExp, string][] = [
-  [/sch/g, 'ch'],
-  [/sh/g, 'ch'],
-  [/ph/g, 'f'],
-  [/eaux/g, 'o'],
-  [/eau/g, 'o'],
-  [/aux/g, 'o'],
-] as const;
 /**
  * Korean josa (particle) suffix stripper.
  *

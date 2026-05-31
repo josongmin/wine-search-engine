@@ -17,6 +17,7 @@ import {
   parseRetryAfterHeader,
   type RetryConfig,
 } from '../http/retry-with-backoff.js';
+import { withRetryLabel } from './llm-retry-config.js';
 import { withGenAiSpan, type GenAiResponseAttributes } from '../telemetry/gen-ai-tracing.js';
 import {
   DEFAULT_BREAKER_FAILURE_THRESHOLD,
@@ -45,19 +46,14 @@ const OPENAI_CHAT_BREAKER_RECOVERY_TIMEOUT_MS = DEFAULT_RECOVERY_TIMEOUT_MS;
 const OPENAI_CHAT_BREAKER_HALF_OPEN_MAX_ATTEMPTS = DEFAULT_HALF_OPEN_ATTEMPTS;
 const OPENAI_CHAT_BREAKER_NAME = 'openai-chat';
 
-const OPENAI_RETRY_CONFIG: RetryConfig = {
-  maxAttempts: 4,
-  transientBackoffBaseMs: 250,
-  transientBackoffCapMs: 2_000,
-  rateLimitBackoffBaseMs: 2_000,
-  rateLimitBackoffCapMs: 30_000,
-  label: 'OpenAI chat',
-};
+// Shared LLM retry envelope (SSoT: ./llm-retry-config.ts) + provider label.
+const OPENAI_RETRY_CONFIG: RetryConfig = withRetryLabel('OpenAI chat');
 
-const OPENAI_POOL_RETRY_CONFIG: RetryConfig = {
-  ...OPENAI_RETRY_CONFIG,
+// Multi-key pool: a single attempt per key, then rotate to the next slot
+// (the pool loop provides the cross-key retry breadth instead).
+const OPENAI_POOL_RETRY_CONFIG: RetryConfig = withRetryLabel('OpenAI chat', {
   maxAttempts: 1,
-};
+});
 
 interface OpenAiChatLlmOptions {
   /** API base including `/v1`, e.g. `https://api.openai.com/v1` */

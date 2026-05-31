@@ -37,6 +37,7 @@ import {
 import type { NormalizedConstraint } from '../../src/domain/shared/types/index.js';
 import { bootstrapLogger } from '../../src/domain/shared/bootstrap-logger.js';
 import { globalSilentSkipCounter } from '../../src/domain/observability/silent-skip-counters.js';
+import { MS_PER_HOUR } from '../../src/domain/shared/utils/time-units.js';
 
 // Must mirror the production constants. The test deliberately re-declares
 // them (rather than importing them) so a future "let's loosen the TTL"
@@ -73,6 +74,16 @@ function makeInjectableClock(initialMs = 1_700_000_000_000): {
 }
 
 describe('constraint-validator — first-seen log TTL + count throttle', () => {
+  it('FIRST_SEEN_TTL_MS derives from the time-units SSoT (MS_PER_HOUR) — drift guard', () => {
+    // The constraint-validator previously re-multiplied MS_PER_SECOND *
+    // SECONDS_PER_MINUTE * MINUTES_PER_HOUR locally instead of importing the
+    // shared unit constants. This pins the 1h TTL to BOTH the hand-mirrored
+    // test constant AND the @domain/shared/utils/time-units SSoT, so a drift
+    // in either surfaces here.
+    expect(MS_PER_HOUR).toBe(TTL_MS_FOR_TEST);
+    expect(MS_PER_HOUR).toBe(60 * 60 * 1000);
+  });
+
   beforeEach(() => {
     __resetConstraintValidatorLogCacheForTests();
     globalSilentSkipCounter.reset();

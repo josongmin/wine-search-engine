@@ -3,6 +3,12 @@ import { DECISION_CONFIDENCE_SEMANTICS } from '../../../domain/shared/types/deci
 import {
   DecisionSnapshotSchema,
 } from './search-shared.schema.js';
+import {
+  // Snake-case wire shapes (SSoT, rule 30) — response surface emits the
+  // snake-only transport form (no camelCase transform).
+  QueryBudgetWireSchema,
+  SessionContextWireSchema,
+} from './session-budget-wire.schema.js';
 import { DETERMINISM_FINGERPRINT_HEX_LENGTH } from '../../../domain/shared/utils/determinism-fingerprint.js';
 import {
   MIN_PRODUCED_VINTAGE_YEAR,
@@ -44,9 +50,7 @@ import {
   MAX_INTERPRET_SECONDARY_INTENTS,
   MAX_NORMALIZED_QUERY_VIEW_STRINGS,
   MAX_QUERY_BUDGET_CANDIDATES,
-  MAX_QUERY_BUDGET_DENSE_CALLS,
   MAX_STAGE_TIMINGS_KEYS,
-  MAX_QUERY_BUDGET_LATENCY_MS,
   MAX_QUERY_BUDGET_RERANK_LIMIT,
   MAX_RESOLVE_CANDIDATES,
   MAX_SEARCH_CONSTRAINT_STRING_LIST,
@@ -59,8 +63,6 @@ import {
   MAX_SEARCH_RETRIEVAL_PROVENANCE_SLICES,
   MAX_SEARCH_SHORT_STRING_LIST,
   MAX_SEARCH_UNCERTAINTY_STRING_LIST,
-  MAX_SESSION_ENTITY_ID_CHARS,
-  MAX_SESSION_PREVIOUS_ENTITIES,
   MAX_RESOLVE_CANDIDATE_SOURCES_LIST,
   SEARCH_RELEVANCE_SCORE_ABS_MAX,
 } from '../constants.js';
@@ -249,6 +251,24 @@ export const CounterfactualRejectSchema = z.object({
   evidence_ref: z.string().min(1).optional(),
 }).strict();
 
+/**
+ * Per-lane execution trace entry (identity / general / fused). SSoT for both
+ * `EngineDecisionSchema.lane_trace` and `execution_trace.lane_trace` /
+ * `execution_contract.lane_trace`; previously the EngineDecision copy was
+ * inlined and could drift from this shape (rule 30).
+ */
+const ExecutionLaneTraceEntryWireSchema = z.object({
+  participated: z.boolean(),
+  artifact_count: z.number().int().nonnegative(),
+  resolve_status: z.enum(['resolved', 'ambiguous', 'failed']).optional(),
+}).strict();
+
+const ExecutionLaneTraceWireSchema = z.object({
+  identity: ExecutionLaneTraceEntryWireSchema,
+  general: ExecutionLaneTraceEntryWireSchema,
+  fused: ExecutionLaneTraceEntryWireSchema,
+}).strict();
+
 export const EngineDecisionSchema = z.object({
   decision_status: z.enum(['resolved', 'ambiguous', 'failed']),
   next_action: z.enum(['return_result', 'clarify', 'hybrid_search', 'fail']),
@@ -274,23 +294,9 @@ export const EngineDecisionSchema = z.object({
   retrieval_mode_source: z.enum(['planner', 'api_override']).optional(),
   planner_suggested_mode: z.enum(RETRIEVAL_MODES).optional(),
   execution_topology: z.enum(['entity_only', 'general_only', 'dual_lane']).optional(),
-  lane_trace: z.object({
-    identity: z.object({
-      participated: z.boolean(),
-      artifact_count: z.number().int().nonnegative(),
-      resolve_status: z.enum(['resolved', 'ambiguous', 'failed']).optional(),
-    }).strict(),
-    general: z.object({
-      participated: z.boolean(),
-      artifact_count: z.number().int().nonnegative(),
-      resolve_status: z.enum(['resolved', 'ambiguous', 'failed']).optional(),
-    }).strict(),
-    fused: z.object({
-      participated: z.boolean(),
-      artifact_count: z.number().int().nonnegative(),
-      resolve_status: z.enum(['resolved', 'ambiguous', 'failed']).optional(),
-    }).strict(),
-  }).strict().optional(),
+  // SSoT lane-trace shape (rule 30) — same schema used by execution_trace /
+  // execution_contract below; was an inline copy that could drift.
+  lane_trace: ExecutionLaneTraceWireSchema.optional(),
 }).strict();
 
 export const ParsedConstraintsExternSchema = z.object({
@@ -459,18 +465,6 @@ const ExecutionTopologyWireSchema = z.enum([
   'general_only',
   'dual_lane',
 ]);
-
-const ExecutionLaneTraceEntryWireSchema = z.object({
-  participated: z.boolean(),
-  artifact_count: z.number().int().nonnegative(),
-  resolve_status: z.enum(['resolved', 'ambiguous', 'failed']).optional(),
-}).strict();
-
-const ExecutionLaneTraceWireSchema = z.object({
-  identity: ExecutionLaneTraceEntryWireSchema,
-  general: ExecutionLaneTraceEntryWireSchema,
-  fused: ExecutionLaneTraceEntryWireSchema,
-}).strict();
 
 const InterpretPolicySchema = z.object({
   require_exact: z.boolean().optional(),
@@ -1188,20 +1182,6 @@ const NormalizedQueryViewsSchema = z.object({
   lookup_variants: z.array(z.string().min(1)).max(MAX_NORMALIZED_QUERY_VIEW_STRINGS),
 }).strict();
 
-const SessionContextTransportSchema = z.object({
-  session_id: z.string().min(1),
-  previous_entities: z
-    .array(z.string().min(1).max(MAX_SESSION_ENTITY_ID_CHARS))
-    .max(MAX_SESSION_PREVIOUS_ENTITIES),
-}).strict();
-
-const QueryBudgetTransportSchema = z.object({
-  max_latency_ms: z.number().int().positive().max(MAX_QUERY_BUDGET_LATENCY_MS),
-  max_candidates: z.number().int().positive().max(MAX_QUERY_BUDGET_CANDIDATES),
-  rerank_limit: z.number().int().positive().max(MAX_QUERY_BUDGET_RERANK_LIMIT),
-  max_dense_calls: z.number().int().positive().max(MAX_QUERY_BUDGET_DENSE_CALLS).optional(),
-}).strict();
-
 export const InterpretResponseSchema = z.object({
   raw_query: z.string().min(1),
   normalized_query: z.string().min(1),
@@ -1243,8 +1223,8 @@ export const InterpretResponseSchema = z.object({
     requires_constraint_evidence: z.boolean(),
     requires_anchor_evidence: z.boolean(),
   }).strict().optional(),
-  session_context: SessionContextTransportSchema.optional(),
-  query_budget: QueryBudgetTransportSchema.optional(),
+  session_context: SessionContextWireSchema.optional(),
+  query_budget: QueryBudgetWireSchema.optional(),
   target_entity_type: z.string().min(1).optional(),
 }).strict();
 

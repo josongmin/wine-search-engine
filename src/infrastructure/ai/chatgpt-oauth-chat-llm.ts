@@ -9,6 +9,7 @@ import {
   retryWithBackoff,
   type RetryConfig,
 } from '../http/retry-with-backoff.js';
+import { withRetryLabel } from './llm-retry-config.js';
 import {
   CODEX_MODELS_CLIENT_VERSION,
   readCodexChatGptAuth,
@@ -30,14 +31,8 @@ const DATA_PREFIX = 'data:';
 const DATA_PREFIX_LENGTH = DATA_PREFIX.length;
 const HTTP_STATUS_UNAUTHORIZED = 401;
 
-const CHATGPT_OAUTH_RETRY_CONFIG: RetryConfig = {
-  maxAttempts: 4,
-  transientBackoffBaseMs: 250,
-  transientBackoffCapMs: 2_000,
-  rateLimitBackoffBaseMs: 2_000,
-  rateLimitBackoffCapMs: 30_000,
-  label: 'ChatGPT OAuth chat',
-};
+// Shared LLM retry envelope (SSoT: ./llm-retry-config.ts) + provider label.
+const CHATGPT_OAUTH_RETRY_CONFIG: RetryConfig = withRetryLabel('ChatGPT OAuth chat');
 
 type EnvLike = NodeJS.ProcessEnv | Record<string, string | undefined>;
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;

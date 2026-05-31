@@ -1,4 +1,5 @@
 import type { HybridCandidate } from './hybrid-candidate.js';
+import type { ProvenanceProtectedReason } from './provenance.js';
 import type { RetrievalChannel } from './retrieval-channel.js';
 
 /**
@@ -11,13 +12,15 @@ export type CandidateChannel = RetrievalChannel;
 /**
  * Reason a candidate is "protected" — must survive assembly even if
  * RRF score is low.
+ *
+ * SSoT: the 5-value vocabulary lives in {@link ./provenance.js} as
+ * `PROVENANCE_PROTECTED_REASONS` / `ProvenanceProtectedReason`. This is an
+ * alias so existing consumers keep the `ProtectedInclusionReason` name while
+ * the literal set is defined in exactly one place (Rule 30/SSoT). Previously
+ * the same 5 literals were re-typed here, in provenance.ts, and as a Zod enum
+ * in retrieval-contract-v2.ts — three copies that could drift independently.
  */
-export type ProtectedInclusionReason =
-  | 'exact_alias_match'
-  | 'known_item_lookup'
-  | 'anchor_conditioned'
-  | 'hard_constraint_compatible'
-  | 'diversity_slot';   // preserved for source/producer diversity
+export type ProtectedInclusionReason = ProvenanceProtectedReason;
 
 /**
  * Per-channel score evidence attached to a candidate.

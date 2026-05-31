@@ -21,6 +21,10 @@ import {
   type AliasMatchConfidenceStrategy,
 } from '../../domain/query/service/alias-match-confidence.js';
 import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
+import {
+  compactForLookup,
+  phoneticCompactForLookup,
+} from '../../domain/query/service/phonetic-skeleton.js';
 import { Transliterator } from '../../domain/alias/service/transliterator.js';
 import { doubleMetaphoneKeys } from '../../domain/alias/service/double-metaphone.js';
 import { buildHangulJamoKey } from '../../domain/shared/utils/hangul.js';
@@ -84,7 +88,6 @@ const MIN_WHOLE_TOKEN_LOOKUP_LENGTH = 4;
  */
 const EMPTY_DM_KEYSET: ReadonlySet<string> = new Set<string>();
 
-const LATIN_VOWEL_RE = /[aeiouy]/g;
 type ConnectablePool = Pool & {
   connect: Pool['connect'];
 };
@@ -108,18 +111,10 @@ const SnapshotManifestSchema = z.object({
     aliasesNdjson: z.string().min(1),
   }).passthrough().optional(),
 }).passthrough();
-const PHONETIC_NORMALIZATION_RULES: readonly [RegExp, string][] = [
-  [/sch/g, 'ch'],
-  [/sh/g, 'ch'],
-  [/ph/g, 'f'],
-  [/eaux/g, 'o'],
-  [/eau/g, 'o'],
-  [/aux/g, 'o'],
-] as const;
 
-function compactForLookup(value: string): string {
-  return value.replace(/[^\p{L}\p{N}]+/gu, '');
-}
+// Phonetic skeleton (compactForLookup / phoneticCompactForLookup /
+// PHONETIC_NORMALIZATION_RULES / LATIN_VOWEL_RE) is the SSoT in
+// `@domain/query/service/phonetic-skeleton`.
 
 function tokenizeForLookup(value: string): readonly string[] {
   return buildNormalizedQueryViews(value).punctuationStripped
@@ -142,14 +137,6 @@ function createTimeoutSignal(timeoutMs: number): { signal: AbortSignal; clear: (
       clearTimeout(timer);
     },
   };
-}
-
-function phoneticCompactForLookup(value: string): string {
-  let normalized = compactForLookup(value).toLowerCase();
-  for (const [pattern, replacement] of PHONETIC_NORMALIZATION_RULES) {
-    normalized = normalized.replace(pattern, replacement);
-  }
-  return normalized.replace(LATIN_VOWEL_RE, '');
 }
 
 function parseNdjson(raw: string, filePath: string): readonly SnapshotAliasRecord[] {

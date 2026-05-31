@@ -62,6 +62,7 @@ import type { NormalizedConstraint } from '../../shared/types/index.js';
 import { SOFT_CONSTRAINT_ATTRIBUTES } from '../../shared/constants/constraint-attributes.js';
 import { bootstrapLogger } from '../../shared/bootstrap-logger.js';
 import { globalSilentSkipCounter } from '../../observability/silent-skip-counters.js';
+import { MS_PER_HOUR } from '../../shared/utils/time-units.js';
 import {
   classifyConstraintRepresentability,
   hardConstraintsToSparseFilterTokens,
@@ -157,10 +158,11 @@ export interface ConstraintValidationReport {
  * regardless of throttle state — it remains the SSoT for quantitative
  * volume. The log is purely the qualitative "this is happening" surface.
  */
-const MS_PER_SECOND = 1000;
-const SECONDS_PER_MINUTE = 60;
-const MINUTES_PER_HOUR = 60;
-const FIRST_SEEN_TTL_MS = MS_PER_SECOND * SECONDS_PER_MINUTE * MINUTES_PER_HOUR;
+// Rule 30/time-units SSoT: 1h derives from MS_PER_HOUR in
+// @domain/shared/utils/time-units — do NOT re-multiply MS_PER_SECOND *
+// SECONDS_PER_MINUTE * MINUTES_PER_HOUR locally (the previous copy drifted
+// from the shared unit definitions).
+const FIRST_SEEN_TTL_MS = MS_PER_HOUR;
 const FIRST_SEEN_COUNT_THRESHOLD = 1000;
 
 /**

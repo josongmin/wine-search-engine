@@ -31,6 +31,7 @@ import {
   parseRetryAfterHeader,
   type RetryConfig,
 } from '../http/retry-with-backoff.js';
+import { withRetryLabel } from './llm-retry-config.js';
 import { withGenAiSpan, type GenAiResponseAttributes } from '../telemetry/gen-ai-tracing.js';
 import { AnthropicTransportError } from './anthropic-transport-error.js';
 import { runUnderLlmBreaker } from './llm-circuit-breaker-classifier.js';
@@ -48,14 +49,8 @@ const ANTHROPIC_CHAT_BREAKER_RECOVERY_TIMEOUT_MS = DEFAULT_RECOVERY_TIMEOUT_MS;
 const ANTHROPIC_CHAT_BREAKER_HALF_OPEN_MAX_ATTEMPTS = DEFAULT_HALF_OPEN_ATTEMPTS;
 const ANTHROPIC_CHAT_BREAKER_NAME = 'anthropic-chat';
 
-const ANTHROPIC_RETRY_CONFIG: RetryConfig = {
-  maxAttempts: 4,
-  transientBackoffBaseMs: 250,
-  transientBackoffCapMs: 2_000,
-  rateLimitBackoffBaseMs: 2_000,
-  rateLimitBackoffCapMs: 30_000,
-  label: 'Anthropic chat',
-};
+// Shared LLM retry envelope (SSoT: ./llm-retry-config.ts) + provider label.
+const ANTHROPIC_RETRY_CONFIG: RetryConfig = withRetryLabel('Anthropic chat');
 
 interface AnthropicChatLlmOptions {
   readonly apiKey: string;

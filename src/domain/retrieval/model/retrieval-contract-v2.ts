@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PROVENANCE_PROTECTED_REASONS } from './provenance.js';
 import { RETRIEVAL_CHANNELS } from './retrieval-channel.js';
 
 /** Max number of retrieval channels attached to one candidate provenance. */
@@ -39,15 +40,11 @@ export const CandidateProvenanceV2Schema = z.object({
     .array(z.string())
     .max(RETRIEVAL_PROVENANCE_CONSTRAINT_LIST_MAX)
     .optional(),
-  protectedInclusionReason: z
-    .enum([
-      'exact_alias_match',
-      'known_item_lookup',
-      'anchor_conditioned',
-      'hard_constraint_compatible',
-      'diversity_slot',
-    ])
-    .optional(),
+  // SSoT: the 5-value protected-reason vocabulary is owned by
+  // PROVENANCE_PROTECTED_REASONS in provenance.ts. Deriving the Zod enum from
+  // that tuple keeps the runtime schema, the `ProtectedInclusionReason` type,
+  // and the eval-slice type all pinned to one literal set (Rule 30/SSoT).
+  protectedInclusionReason: z.enum(PROVENANCE_PROTECTED_REASONS).optional(),
   fusionProfile: z.string().min(1),
   fusionScore: z.number().finite(),
 }).strict();

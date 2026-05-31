@@ -15,6 +15,10 @@ import {
   matchesAliasPrefixTerm,
 } from '../../domain/query/service/alias-prefix-terms.js';
 import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
+import {
+  compactForLookup,
+  phoneticCompactForLookup,
+} from '../../domain/query/service/phonetic-skeleton.js';
 import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
 import { doubleMetaphoneKeys } from '../../domain/alias/service/double-metaphone.js';
 import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
@@ -60,16 +64,13 @@ const COMPACT_FUZZY_DISTANCE_RATIO = 0.25;
 const MIN_CHAR_NGRAM_OVERLAP = 0.45;
 const MIN_BIGRAM_OVERLAP = 0.6;
 const MIN_WHOLE_TOKEN_LOOKUP_LENGTH = 4;
-const LATIN_VOWEL_RE = /[aeiouy]/g;
 const ALIAS_TABLE_CHECK_TIMEOUT_MESSAGE = 'PostgreSQL alias-table existence probe timed out';
-const PHONETIC_NORMALIZATION_RULES: readonly [RegExp, string][] = [
-  [/sch/g, 'ch'],
-  [/sh/g, 'ch'],
-  [/ph/g, 'f'],
-  [/eaux/g, 'o'],
-  [/eau/g, 'o'],
-  [/aux/g, 'o'],
-] as const;
+
+// Phonetic skeleton (PHONETIC_NORMALIZATION_RULES / LATIN_VOWEL_RE /
+// compactForLookup / phoneticCompactForLookup) is the SSoT in
+// `@domain/query/service/phonetic-skeleton`. The SQL `regexp_replace` chain
+// in the exact-lookup query below mirrors PHONETIC_NORMALIZATION_RULES and is
+// drift-guarded by `phonetic-skeleton-ssot.regression.test.ts`.
 
 /**
  * Similarity score injected when a candidate's Double Metaphone key
@@ -206,36 +207,10 @@ function charNgramOverlap(a: string, b: string, size: number = 3): number {
   return shared / Math.max(aGrams.length, bGrams.size);
 }
 
-function compactForLookup(value: string): string {
-  return value.replace(/[^\p{L}\p{N}]+/gu, '');
-}
-
 function tokenizeForLookup(value: string): readonly string[] {
   return buildNormalizedQueryViews(value).punctuationStripped
     .split(/\s+/u)
     .filter(Boolean);
-}
-
-/**
- * Legacy compact phonetic skeleton used by the SQL phonetic recall channel.
- *
- * The SQL phonetic ANY-match still computes this skeleton via inline
- * `regexp_replace` because Double Metaphone cannot be expressed in
- * PostgreSQL without a stored procedure. Once a candidate is retrieved,
- * the *promotion decision* uses Double Metaphone instead — so this
- * skeleton is intentionally lossy/permissive (recall over precision).
- *
- * Kept exported here as a callsite-local helper so the strategy
- * resolution code in this file can compare values across the SQL
- * boundary. Do not export — the SSoT for phonetic *decisions* is
- * `doubleMetaphone` in `@domain/alias/service/double-metaphone`.
- */
-function phoneticCompactForLookup(value: string): string {
-  let normalized = compactForLookup(value).toLowerCase();
-  for (const [pattern, replacement] of PHONETIC_NORMALIZATION_RULES) {
-    normalized = normalized.replace(pattern, replacement);
-  }
-  return normalized.replace(LATIN_VOWEL_RE, '');
 }
 
 /**

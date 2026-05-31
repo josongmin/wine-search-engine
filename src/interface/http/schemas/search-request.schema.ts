@@ -1,14 +1,5 @@
 import { z } from 'zod';
 import {
-  MAX_QUERY_BUDGET_CANDIDATES,
-  MAX_QUERY_BUDGET_DENSE_CALLS,
-  MAX_QUERY_BUDGET_LATENCY_MS,
-  MAX_QUERY_BUDGET_RERANK_LIMIT,
-  MAX_SESSION_ENTITY_ID_CHARS,
-  MAX_SESSION_ID_CHARS,
-  MAX_SESSION_PREVIOUS_ENTITIES,
-} from '../constants.js';
-import {
   QueryBudgetSchema,
   QueryStringSchema,
   SearchContextSchema,
@@ -16,30 +7,12 @@ import {
   SearchOptionsSchema,
   SessionContextSchema,
 } from './search-shared.schema.js';
-
-const SessionContextSnakeSchema = z.object({
-  session_id: z.string().min(1).max(MAX_SESSION_ID_CHARS),
-  previous_entities: z.array(z.string().min(1).max(MAX_SESSION_ENTITY_ID_CHARS)).max(MAX_SESSION_PREVIOUS_ENTITIES),
-}).strict().transform((value) => ({
-  sessionContext: {
-    sessionId: value.session_id,
-    previousEntities: value.previous_entities,
-  },
-}));
-
-const QueryBudgetSnakeSchema = z.object({
-  max_latency_ms: z.number().int().positive().max(MAX_QUERY_BUDGET_LATENCY_MS),
-  max_candidates: z.number().int().positive().max(MAX_QUERY_BUDGET_CANDIDATES),
-  rerank_limit: z.number().int().positive().max(MAX_QUERY_BUDGET_RERANK_LIMIT),
-  max_dense_calls: z.number().int().positive().max(MAX_QUERY_BUDGET_DENSE_CALLS).optional(),
-}).strict().transform((value) => ({
-  queryBudget: {
-    maxLatencyMs: value.max_latency_ms,
-    maxCandidates: value.max_candidates,
-    rerankLimit: value.rerank_limit,
-    ...(value.max_dense_calls !== undefined ? { maxDenseCalls: value.max_dense_calls } : {}),
-  },
-}));
+import {
+  // Snake-case wire shapes (SSoT, rule 30) — request side uses the
+  // transforming aliases that emit camelCase envelopes for the use-case.
+  QueryBudgetSnakeSchema,
+  SessionContextSnakeSchema,
+} from './session-budget-wire.schema.js';
 
 function withRequestAliases<T extends z.ZodRawShape>(shape: T) {
   return z.object({

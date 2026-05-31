@@ -262,6 +262,41 @@ export function resolveWeights(queryClass: QueryClass): ScoringWeights {
 
 export { DEFAULT_WEIGHTS };
 
+/**
+ * SSoT: the non-penalty {@link ScoringWeights} fields, i.e. every numeric
+ * signal weight EXCEPT `uncertaintyPenalty` (subtracted, not summed) and
+ * `entityIntegrityThreshold` (a gate, not a weight).
+ *
+ * The proportional-normalisation factor used by {@link applySituationIntentWeightOverlay},
+ * {@link resolveChannelAwareWeights}, and the mode-overlay step in ranker.ts is
+ * computed as `baseSum / adjustedSum` over exactly these fields. Hand-inlining
+ * the field list in each call site silently dropped fields when new signals were
+ * added (RCA history: 6 SOTA++ fields missed the channel-aware sum). Maintaining
+ * a single ordered list here means a new `ScoringWeights` non-penalty field is
+ * normalised everywhere or nowhere — never partially.
+ *
+ * Frozen + module-scope (Rule 16): deterministic, allocated once.
+ */
+export const NON_PENALTY_WEIGHT_FIELDS = Object.freeze([
+  'entityIntegrity', 'anchorSimilarity', 'semantic', 'softConstraint',
+  'attributeAlignment', 'preferenceAlignment', 'popularity', 'availability',
+  'producerPrestige', 'recency', 'criticScore', 'multilingualScore',
+  'giftSuitability', 'beginnerSuitability',
+] as const) satisfies ReadonlyArray<keyof ScoringWeights>;
+
+/**
+ * Sums the non-penalty weight fields (see {@link NON_PENALTY_WEIGHT_FIELDS}).
+ * SSoT for the normalisation denominator/numerator used across the ranking
+ * weight overlays. Loop (not spread) so it is safe for arbitrary field counts.
+ */
+export function sumNonPenaltyWeights(weights: ScoringWeights): number {
+  let total = 0;
+  for (const key of NON_PENALTY_WEIGHT_FIELDS) {
+    total += weights[key];
+  }
+  return total;
+}
+
 const SITUATION_INTENT_GIFT_WEIGHT_FLOOR = 0.15;
 const SITUATION_INTENT_BEGINNER_WEIGHT_FLOOR = 0.15;
 const SITUATION_INTENT_PRESTIGE_WEIGHT_FLOOR = 0.12;
@@ -538,37 +573,19 @@ export function applySituationIntentWeightOverlay(
     ? Math.max(baseWeights.popularity, SITUATION_INTENT_POPULARITY_WEIGHT_FLOOR)
     : baseWeights.popularity;
 
-  const baseNonPenaltySum =
-    baseWeights.entityIntegrity +
-    baseWeights.anchorSimilarity +
-    baseWeights.semantic +
-    baseWeights.softConstraint +
-    baseWeights.attributeAlignment +
-    baseWeights.preferenceAlignment +
-    baseWeights.popularity +
-    baseWeights.availability +
-    baseWeights.producerPrestige +
-    baseWeights.recency +
-    baseWeights.criticScore +
-    baseWeights.multilingualScore +
-    baseWeights.giftSuitability +
-    baseWeights.beginnerSuitability;
-
-  const adjustedNonPenaltySum =
-    baseWeights.entityIntegrity +
-    baseWeights.anchorSimilarity +
-    baseWeights.semantic +
-    softConstraint +
-    baseWeights.attributeAlignment +
-    baseWeights.preferenceAlignment +
-    popularity +
-    baseWeights.availability +
-    producerPrestige +
-    baseWeights.recency +
-    baseWeights.criticScore +
-    baseWeights.multilingualScore +
-    giftSuitability +
-    beginnerSuitability;
+  // SSoT sum (NON_PENALTY_WEIGHT_FIELDS): build the adjusted weight snapshot
+  // first, then run both totals through sumNonPenaltyWeights so the field set
+  // can never drift between base and adjusted denominators.
+  const adjustedNonPenaltyWeights: ScoringWeights = {
+    ...baseWeights,
+    softConstraint,
+    popularity,
+    producerPrestige,
+    giftSuitability,
+    beginnerSuitability,
+  };
+  const baseNonPenaltySum = sumNonPenaltyWeights(baseWeights);
+  const adjustedNonPenaltySum = sumNonPenaltyWeights(adjustedNonPenaltyWeights);
 
   const rawNormFactor = adjustedNonPenaltySum > 0 ? baseNonPenaltySum / adjustedNonPenaltySum : 1;
   const normFactor = Number.isFinite(rawNormFactor) ? rawNormFactor : 1;
@@ -672,37 +689,29 @@ export function resolveChannelAwareWeights(
   // Proportional normalisation — preserve total of non-gate, non-penalty weights.
   // New SOTA++ weights (producerPrestige, recency, criticScore, multilingualScore)
   // are included in both base and adjusted sums so the norm factor accounts for them.
-  const baseNonPenaltySum =
-    baseWeights.entityIntegrity +
-    baseWeights.anchorSimilarity +
-    baseWeights.semantic +
-    baseWeights.softConstraint +
-    baseWeights.attributeAlignment +
-    baseWeights.preferenceAlignment +
-    baseWeights.popularity +
-    baseWeights.availability +
-    baseWeights.producerPrestige +
-    baseWeights.recency +
-    baseWeights.criticScore +
-    baseWeights.multilingualScore +
-    baseWeights.giftSuitability +
-    baseWeights.beginnerSuitability;
-
-  const adjustedNonPenaltySum =
-    entityIntegrity +
-    anchorSimilarity +
-    semantic +
-    softConstraint +
-    attributeAlignment +
-    preferenceAlignment +
-    popularity +
-    availability +
-    producerPrestige +
-    recency +
-    criticScore +
-    multilingualScore +
-    giftSuitability +
-    beginnerSuitability;
+  // SSoT sum (NON_PENALTY_WEIGHT_FIELDS): build the channel-adjusted snapshot
+  // then route both totals through sumNonPenaltyWeights — a new non-penalty
+  // ScoringWeights field is automatically included in both sums.
+  const adjustedNonPenaltyWeights: ScoringWeights = {
+    entityIntegrity,
+    anchorSimilarity,
+    semantic,
+    softConstraint,
+    attributeAlignment,
+    preferenceAlignment,
+    popularity,
+    availability,
+    uncertaintyPenalty,
+    entityIntegrityThreshold: baseWeights.entityIntegrityThreshold,
+    producerPrestige,
+    recency,
+    criticScore,
+    multilingualScore,
+    giftSuitability,
+    beginnerSuitability,
+  };
+  const baseNonPenaltySum = sumNonPenaltyWeights(baseWeights);
+  const adjustedNonPenaltySum = sumNonPenaltyWeights(adjustedNonPenaltyWeights);
 
   // Guard: if there is nothing to normalise (all weights are zero) return as-is.
   const rawNormFactor =

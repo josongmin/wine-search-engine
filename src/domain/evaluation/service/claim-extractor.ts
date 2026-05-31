@@ -14,6 +14,7 @@
 import crypto from 'node:crypto';
 import { KRW_PER_MAN_WON, KRW_PER_USD_APPROXIMATE } from '../../shared/constants.js';
 import { containsHangul } from '../../shared/utils/hangul.js';
+import { KOREAN_GRAPE_ALIASES } from '../../shared/utils/korean-grape-aliases.js';
 import { Transliterator } from '../../alias/service/transliterator.js';
 import { resolveEntity } from '../../attribute/service/entity-resolver.js';
 import { CURATED_ENTITY_ALIAS_CATALOG } from '../../attribute/service/entity-alias-catalog.js';
@@ -128,24 +129,6 @@ const REGION_ALIASES: ReadonlyMap<string, string> = new Map([
   ['프로방스', 'Provence'],
   ['보졸레', 'Beaujolais'],
 ]);
-
-/** Korean + Latin grape alias surfaces for claim extraction. */
-const KOREAN_GRAPE_ALIASES: ReadonlyArray<readonly [RegExp, string]> = [
-  [/(?:카베르네\s*소비뇽|카베르네소비뇽|까쇼|cab(?:ernet)?\s*sauv(?:ignon)?)/iu, 'Cabernet Sauvignon'],
-  [/(?:카베르네\s*프랑|cab(?:ernet)?\s*franc)/iu, 'Cabernet Franc'],
-  [/(?:메를로|merlot)/iu, 'Merlot'],
-  [/(?:피노\s*누아르?|피노누아|pinot\s*noir)/iu, 'Pinot Noir'],
-  [/(?:피노\s*그리(?:지오)?|pinot\s*gri(?:gio|s))/iu, 'Pinot Grigio'],
-  [/(?:소비뇽\s*블랑|쇼비|sauvignon\s*blanc)/iu, 'Sauvignon Blanc'],
-  [/(?:샤르도네|샤도네이|chardonnay)/iu, 'Chardonnay'],
-  [/(?:시라(?:즈)?|shiraz|syrah)/iu, 'Syrah'],
-  [/(?:리슬링|riesling)/iu, 'Riesling'],
-  [/(?:그르나슈|grenache|garnacha)/iu, 'Grenache'],
-  [/(?:산지오베제|sangiovese)/iu, 'Sangiovese'],
-  [/(?:템프라니요|tempranillo)/iu, 'Tempranillo'],
-  [/(?:네비올로|nebbiolo)/iu, 'Nebbiolo'],
-  [/(?:말벡|malbec)/iu, 'Malbec'],
-];
 
 /** Contract-driven grape surfaces that should never become identity claims. */
 const EXTRA_GRAPE_SURFACES: ReadonlyArray<readonly [string, string]> = [
