@@ -10,7 +10,7 @@ import {
 } from '../../attribute/service/entity-resolver.js';
 import type { FuzzyMatcherPort } from '../port/fuzzy-matcher.port.js';
 import { expandWithOntology } from '../../attribute/service/ontology-expansion.js';
-import { REGION_PARENTS } from '../../evaluation/service/wine-ontology.js';
+import { REGION_PARENTS } from '../../shared/wine-ontology-constants.js';
 import {
   applyCompositionalInference,
   inferComparisonImpliedWineType,

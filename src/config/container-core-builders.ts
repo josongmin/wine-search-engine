@@ -70,7 +70,6 @@ export function buildSnapshotVersions(config: Config): SnapshotVersions {
       killSwitchDenseRetrieval: config.killSwitch.denseRetrieval,
       killSwitchInjectionJudge: config.killSwitch.injectionJudge,
       killSwitchQueryCache: config.killSwitch.queryCache,
-      watchlistEnabled: config.watchlist.enabled,
     },
   };
 }
@@ -278,6 +277,7 @@ export function buildRanker(
     {
       ...(adapters.reranker !== undefined ? { reranker: adapters.reranker } : {}),
       rerankBlendScale: config.reranker.blendScale,
+      rerankBlendEpic5Restore: config.reranker.epic5Restore,
       ltrModels: support?.ltrModels,
     },
   );

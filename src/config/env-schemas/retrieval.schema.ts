@@ -35,6 +35,20 @@ export const RetrievalEnvSchema = z.object({
 
   /** Multiplies query-class rerank blend weights; lower = trust cross-encoder less (0–1). */
   RERANK_BLEND_SCALE: z.coerce.number().finite().min(0).max(1).default(DEFAULT_RERANK_BLEND_SCALE),
+
+  /**
+   * RFC-017 §6.3 Epic-5 restore flag for the query-class rerank blend table.
+   * OFF (default) → DETUNED production weights; ON → EPIC5 target weights.
+   *
+   * Truthiness must match the legacy domain reader exactly: only the literal
+   * strings `'1'` and `'true'` activate it — `'0'`, `'false'`, `''`, and any
+   * other value stay OFF. `z.coerce.boolean()` is intentionally NOT used here
+   * because it treats every non-empty string (incl. `'0'`/`'false'`) as true,
+   * which would silently flip the flag on. Coerce by explicit equality instead.
+   */
+  RERANK_BLEND_EPIC5_RESTORE: z
+    .preprocess((v) => v === '1' || v === 'true', z.boolean())
+    .default(false),
   /** Per-request HTTP timeout for Cohere reranker API calls (AbortSignal). */
   RERANKER_HTTP_TIMEOUT_MS: z.coerce
     .number()

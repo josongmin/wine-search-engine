@@ -33,6 +33,8 @@ export async function applyCrossEncoderReranking(
   deps: {
     readonly reranker: RerankerPort | undefined;
     readonly rerankBlendScale: number;
+    /** RFC-017 §6.3 Epic-5 blend-table regime (injected from validated config). */
+    readonly rerankBlendEpic5Restore: boolean;
   },
   query: string,
   viable: readonly ScoredEntry[],
@@ -127,7 +129,11 @@ export async function applyCrossEncoderReranking(
       continue;
     }
     // Blend: query-class weight × optional global scale (RFC-017 §5.3)
-    const rawW = effectiveRerankBlendWeight(queryClass, deps.rerankBlendScale);
+    const rawW = effectiveRerankBlendWeight(
+      queryClass,
+      deps.rerankBlendScale,
+      deps.rerankBlendEpic5Restore,
+    );
     // Guard against NaN/Infinity from a misconfigured rerankBlendScale (e.g. NaN env var).
     // A non-finite blend weight is a configuration failure, so fall back to
     // the heuristic score path instead of fabricating a midpoint blend.

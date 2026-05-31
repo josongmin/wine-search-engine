@@ -79,7 +79,7 @@ import type {
   WineSearchResponseBody,
   WineSearchStepBody,
   WineSearchToolCallBody,
-} from '@interface/http/schemas/wine-search.schema.js';
+} from './wine-search-wire.dto.js';
 
 // ---------------------------------------------------------------------------
 // Named constants (CLAUDE.md rule 15) — every bound is justified.

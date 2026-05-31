@@ -2,7 +2,7 @@ import {
   GRAPE_ALIASES,
   REGION_PARENTS,
   WINE_TYPE_ALIASES,
-} from '../../evaluation/service/wine-ontology.js';
+} from '../../shared/wine-ontology-constants.js';
 import { CURATED_ENTITY_ALIASES } from './entity-alias-registry.js';
 import { wineTitleCase } from '../../shared/utils/title-case.js';
 

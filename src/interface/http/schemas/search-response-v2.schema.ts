@@ -5,19 +5,20 @@
  * ─────────────────────────────────────────────────────────────────────────────
  * Route                        Response Schema              Consumer
  * ─────────────────────────────────────────────────────────────────────────────
- * POST /v1/search              SearchResponseSchema (V1)    Human + adapter
- * POST /v1/search/lookup       SearchResponseSchema (V1)    Human + adapter
- * POST /v1/agent         WineSearchResponseSchema     Agent runtime
- *
- * POST /v2/search              SearchResponseV2Human        Human
- * POST /v2/search/hybrid       SearchResponseV2Human        Human
- * POST /v2/search/interpret    InterpretResponseV2          Human
+ * POST /v1/search/hybrid       SearchResponseSchema (V1)    Machine + human adapter
+ * POST /v1/search/semantic     SearchResponseSchema (V1)    Machine + human adapter
+ * POST /v1/search/lexical      SearchResponseSchema (V1)    Machine + human adapter
+ * POST /v1/lookup/wine         SearchResponseSchema (V1)    Machine + human adapter
+ * POST /v1/agent*              WineSearchResponseSchema     Agent runtime
+ * (Accept: application/vnd.cuvee.human+json on /v1/*)
+ *                              SearchResponseV2Human        Human
  * (machine V2)                 SearchResponseV2Machine      Internal executor seam only
  * ─────────────────────────────────────────────────────────────────────────────
  *
- * V1 contracts are maintained until post-Wave-3 deprecation.
- * Machine V2 is not exposed via /v2/search/* — it remains an internal
- * `WineToolExecutor` projection rather than a public HTTP contract.
+ * There are no dedicated V2 URLs. Human V2 stays a content-
+ * negotiated projection on the canonical `/v1/*` search surfaces. Machine V2
+ * remains an internal `WineToolExecutor` projection rather than a public HTTP
+ * contract.
  */
 
 import { z } from 'zod';
@@ -32,6 +33,7 @@ import {
   MIN_PRODUCED_VINTAGE_YEAR,
   MAX_PRODUCED_VINTAGE_YEAR,
 } from '../../../domain/shared/constants.js';
+import type { InterpretResponseV2 as InterpretResponseV2Contract } from '@app/search/interpret-response.dto.js';
 
 // ---------------------------------------------------------------------------
 // V2 shared sub-schemas
@@ -177,7 +179,8 @@ export const SearchResponseV2HumanComparisonSchema = SearchResponseV2HumanCompar
 
 /**
  * V2 human-readable search response envelope.
- * Returned by POST /v2/search and POST /v2/search/hybrid.
+ * Returned by content negotiation on the canonical `/v1/search/*` primitives
+ * and `/v1/lookup/wine`.
  *
  * Discriminated union: {@code queryType} is {@code search} for normal ranked results,
  * or {@code comparison} for Epic 14 "A vs B" decomposition responses.
@@ -194,7 +197,7 @@ export const SearchResponseV2HumanSchema = z.union([
 /**
  * Machine/LLM-optimised result item for V2 machine responses.
  * Exposes full scoring detail for programmatic consumption.
- * NOT returned via /v2/search/* — internal executor projection only.
+ * Internal executor projection only — not exposed by any public HTTP route.
  */
 export const ResultItemV2MachineSchema = z.object({
   entityId: z.string().min(1),
@@ -215,7 +218,7 @@ export const ResultItemV2MachineSchema = z.object({
 /**
  * V2 machine-optimised search response envelope.
  * Exposed only via the internal `WineToolExecutor` seam, NOT via any
- * public /v2/search/* route.
+ * public HTTP route.
  */
 export const SearchResponseV2MachineSchema = z.object({
   queryId: z.string().min(1),
@@ -233,7 +236,8 @@ export const SearchResponseV2MachineSchema = z.object({
  *
  * This is an explain contract — it surfaces what the planner detected and
  * which signals/channels were activated. It is NOT a planner internals dump.
- * Returned by POST /v2/search/interpret.
+ * Retained for internal explain/diagnostic projections; there is no public
+ * V2 explain URL.
  */
 export const InterpretResponseV2Schema = z.object({
   queryId: z.string().min(1),
@@ -265,4 +269,24 @@ export type SearchResponseV2HumanComparison = z.infer<typeof SearchResponseV2Hum
 export type SearchResponseV2Human = z.infer<typeof SearchResponseV2HumanSchema>;
 export type ResultItemV2Machine = z.infer<typeof ResultItemV2MachineSchema>;
 export type SearchResponseV2Machine = z.infer<typeof SearchResponseV2MachineSchema>;
-export type InterpretResponseV2 = z.infer<typeof InterpretResponseV2Schema>;
+
+/**
+ * The interpret/explain V2 contract is OWNED by the application layer
+ * (`@app/search/interpret-response.dto.ts`) per DIP. The Zod schema above is
+ * the HTTP-boundary runtime validator; the canonical exported TYPE re-exports
+ * the application contract so consumers depend on the inward-pointing type.
+ *
+ * The two `_Assert*` pins below fail `tsc` if the runtime Zod shape and the
+ * application contract ever drift in either direction.
+ */
+export type InterpretResponseV2 = InterpretResponseV2Contract;
+
+type _InferredInterpretResponseV2 = z.infer<typeof InterpretResponseV2Schema>;
+type _AssertInterpretInferToContract =
+  _InferredInterpretResponseV2 extends InterpretResponseV2Contract ? true : never;
+type _AssertInterpretContractToInfer =
+  InterpretResponseV2Contract extends _InferredInterpretResponseV2 ? true : never;
+const _interpretInferOk: _AssertInterpretInferToContract = true;
+const _interpretContractOk: _AssertInterpretContractToInfer = true;
+void _interpretInferOk;
+void _interpretContractOk;

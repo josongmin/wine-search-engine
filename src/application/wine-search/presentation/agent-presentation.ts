@@ -11,19 +11,15 @@
  * transports point inward, not at each other.
  */
 
-import type { z } from 'zod';
 import type {
-  WineSearchResponseSchema,
   WineSearchStepBody,
   WineSearchTerminationBody,
   TokenUsageBody,
   WineSearchResponseBody,
-} from '@interface/http/schemas/wine-search.schema.js';
-import type {
   AgentSessionDescriptorBody,
   AgentSessionTurnDescriptorBody,
   AgentSessionTurnResponseBody,
-} from '@interface/http/schemas/agent.schema.js';
+} from '../wine-search-wire.dto.js';
 import type {
   AgentSessionRecord,
   AgentSessionTurn,
@@ -33,7 +29,7 @@ import type {
   TokenUsageShape as OrchestratorTokenUsage,
 } from '../wine-search-orchestrator.js';
 
-type WineSearchResponse = z.infer<typeof WineSearchResponseSchema>;
+type WineSearchResponse = WineSearchResponseBody;
 
 function toTokenUsageBody(usage: OrchestratorTokenUsage): TokenUsageBody {
   return {

@@ -12,7 +12,7 @@ import {
   CURATED_ENTITY_ALIAS_CATALOG,
   type ResolverCompatibleAttribute,
 } from './entity-alias-catalog.js';
-import { REGION_PARENTS } from '../../evaluation/service/wine-ontology.js';
+import { REGION_PARENTS } from '../../shared/wine-ontology-constants.js';
 
 /**
  * Current version of the default mapping table.

@@ -1,8 +1,11 @@
 /**
  * Agent surface — T-IR-02 schemas (single-shot run + server-managed sessions).
  *
- * Canonical request shape is `messages[]` — the legacy single-`query` field
- * is gone. The same surface is reused by both:
+ * Canonical request shape is `messages[]`. A narrow legacy single-`query`
+ * alias is still accepted on the run/turn routes and normalized to one
+ * `{ role: 'user', content: query }` message at the schema edge so stale
+ * callers do not hard-fail during the messages[] cutover. The same surface is
+ * reused by both:
  *
  *   POST /v1/agent                         — caller-managed history
  *   POST /v1/agent/sessions/:sessionId/turns   — server-managed history
@@ -18,6 +21,11 @@
 import { z } from 'zod';
 import { MAX_AGENT_HTTP_QUERY_CHARS } from '../constants.js';
 import { ANSWER_MAX_CHARS, WineSearchResponseSchema } from './wine-search.schema.js';
+import type {
+  AgentSessionDescriptorBody as AgentSessionDescriptorBodyContract,
+  AgentSessionTurnDescriptorBody as AgentSessionTurnDescriptorBodyContract,
+  AgentSessionTurnResponseBody as AgentSessionTurnResponseBodyContract,
+} from '@app/wine-search/wine-search-wire.dto.js';
 
 /** Hard cap on the number of messages in a single agent request. Bounded so
  *  a runaway client cannot exhaust the planner's context window. The value
@@ -173,7 +181,9 @@ export const AgentSessionDescriptorSchema = z.object({
   updated_at: z.string().min(1),
   expires_at: z.string().min(1),
 }).strict();
-export type AgentSessionDescriptorBody = z.infer<typeof AgentSessionDescriptorSchema>;
+/** OWNED by the application layer (`@app/wine-search/wine-search-wire.dto.ts`)
+ *  per DIP. Re-exported; the pin block below fails `tsc` on drift. */
+export type AgentSessionDescriptorBody = AgentSessionDescriptorBodyContract;
 
 export const AgentSessionCreateResponseSchema = z.object({
   session: AgentSessionDescriptorSchema,
@@ -187,14 +197,39 @@ export const AgentSessionTurnDescriptorSchema = z.object({
   created_at: z.string().min(1),
   replayed: z.boolean(),
 }).strict();
-export type AgentSessionTurnDescriptorBody = z.infer<typeof AgentSessionTurnDescriptorSchema>;
+/** OWNED by the application layer per DIP — see {@link AgentSessionDescriptorBody}. */
+export type AgentSessionTurnDescriptorBody = AgentSessionTurnDescriptorBodyContract;
 
 export const AgentSessionTurnResponseSchema = WineSearchResponseSchema.extend({
   session: AgentSessionDescriptorSchema,
   turn: AgentSessionTurnDescriptorSchema,
   history_applied: z.array(AgentHistoryMessageSchema).max(MAX_AGENT_MESSAGES * 2),
 }).strict();
-export type AgentSessionTurnResponseBody = z.infer<typeof AgentSessionTurnResponseSchema>;
+/** OWNED by the application layer per DIP — see {@link AgentSessionDescriptorBody}. */
+export type AgentSessionTurnResponseBody = AgentSessionTurnResponseBodyContract;
+
+// ---------------------------------------------------------------------------
+// Compile-time drift pins (DIP): the runtime Zod shapes MUST be mutually
+// assignable with the application-owned contract types.
+// ---------------------------------------------------------------------------
+
+type _AssertMutualAgent<A, B> = A extends B ? (B extends A ? true : never) : never;
+
+const _sessionDescriptorOk: _AssertMutualAgent<
+  z.infer<typeof AgentSessionDescriptorSchema>,
+  AgentSessionDescriptorBodyContract
+> = true;
+const _turnDescriptorOk: _AssertMutualAgent<
+  z.infer<typeof AgentSessionTurnDescriptorSchema>,
+  AgentSessionTurnDescriptorBodyContract
+> = true;
+const _turnResponseOk: _AssertMutualAgent<
+  z.infer<typeof AgentSessionTurnResponseSchema>,
+  AgentSessionTurnResponseBodyContract
+> = true;
+void _sessionDescriptorOk;
+void _turnDescriptorOk;
+void _turnResponseOk;
 
 const MessagesArraySchema = z
   .array(AgentMessageSchema)
@@ -207,10 +242,27 @@ const MessagesArraySchema = z
  * not retain state between calls.
  */
 export const AgentRunRequestSchema = z.object({
-  messages: MessagesArraySchema,
+  messages: MessagesArraySchema.optional(),
+  query: AgentMessageContentSchema.optional(),
   context: AgentContextSchema.optional(),
   options: AgentOptionsSchema.optional(),
-}).strict();
+}).strict().superRefine((value, ctx) => {
+  const hasMessages = value.messages !== undefined;
+  const hasQuery = value.query !== undefined;
+  if (hasMessages === hasQuery) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Provide exactly one of messages or query.',
+      path: ['messages'],
+    });
+  }
+}).transform((value) => {
+  const { query, messages, ...rest } = value;
+  return {
+    ...rest,
+    messages: messages ?? [{ role: 'user' as const, content: query ?? '' }],
+  };
+});
 export type AgentRunRequestBody = z.infer<typeof AgentRunRequestSchema>;
 
 /**
@@ -240,11 +292,28 @@ export type AgentSessionCreateRequestBody = z.infer<typeof AgentSessionCreateReq
  */
 export const AgentSessionTurnRequestSchema = z.object({
   client_turn_id: z.string().min(1).max(MAX_CLIENT_IDENTIFIER_CHARS),
-  messages: MessagesArraySchema,
+  messages: MessagesArraySchema.optional(),
+  query: AgentMessageContentSchema.optional(),
   context: AgentContextSchema.optional(),
   options: AgentOptionsSchema.optional(),
   expected_session_version: z.number().int().finite().nonnegative().optional(),
-}).strict();
+}).strict().superRefine((value, ctx) => {
+  const hasMessages = value.messages !== undefined;
+  const hasQuery = value.query !== undefined;
+  if (hasMessages === hasQuery) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Provide exactly one of messages or query.',
+      path: ['messages'],
+    });
+  }
+}).transform((value) => {
+  const { query, messages, ...rest } = value;
+  return {
+    ...rest,
+    messages: messages ?? [{ role: 'user' as const, content: query ?? '' }],
+  };
+});
 export type AgentSessionTurnRequestBody = z.infer<typeof AgentSessionTurnRequestSchema>;
 
 /** Path params for the turn route — exposed so the route registration site

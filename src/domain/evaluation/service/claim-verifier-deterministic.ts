@@ -63,7 +63,7 @@ import {
   grapesEquivalent,
   resolveGrapeAlias,
   normalizeWineType,
-} from './wine-ontology.js';
+} from '../../shared/wine-ontology-constants.js';
 
 /**
  * Evidence record — flattened view of a single wine entity from tool observations.

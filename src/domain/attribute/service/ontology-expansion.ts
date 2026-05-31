@@ -22,7 +22,7 @@ import type {
   ConstraintBundle,
   NormalizedConstraint,
 } from '../../shared/types/constraint-bundle.js';
-import { regionAncestors, REGION_PARENTS } from '../../evaluation/service/wine-ontology.js';
+import { regionAncestors, REGION_PARENTS } from '../../shared/wine-ontology-constants.js';
 import { wineTitleCase } from '../../shared/utils/title-case.js';
 import { canonicalJsonStringify } from '../../shared/utils/canonical-json.js';
 

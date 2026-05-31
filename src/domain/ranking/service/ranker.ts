@@ -90,6 +90,12 @@ export const RANKING_POLICY_VERSION = 'ranker-policy-v2.0';
 type RankerOptions = {
   readonly rerankTopK?: number;
   readonly rerankBlendScale?: number;
+  /**
+   * RFC-017 §6.3 Epic-5 rerank blend-table regime. Injected from the validated
+   * env (`RERANK_BLEND_EPIC5_RESTORE`) at the composition root; domain code no
+   * longer reads process.env. Default false = DETUNED production weights.
+   */
+  readonly rerankBlendEpic5Restore?: boolean;
   readonly rerankThreshold?: number;
   readonly attributeEncoder?: WineAttributeEncoderPort;
   readonly reranker?: RerankerPort;
@@ -138,6 +144,7 @@ export class Ranker {
   private readonly attributeEncoder: WineAttributeEncoderPort;
   private readonly rerankTopK: number;
   private readonly rerankBlendScale: number;
+  private readonly rerankBlendEpic5Restore: boolean;
   private readonly ltrModels: ReadonlyMap<string, QueryClassWeights> | undefined;
 
   /**
@@ -159,6 +166,7 @@ export class Ranker {
     this.attributeEncoder = options.attributeEncoder ?? WineAttributeEncoders;
     this.rerankTopK = options.rerankTopK ?? DEFAULT_RERANK_TOP_K;
     this.rerankBlendScale = options.rerankBlendScale ?? 1;
+    this.rerankBlendEpic5Restore = options.rerankBlendEpic5Restore ?? false;
     this.ltrModels = options.ltrModels;
   }
 
@@ -789,7 +797,11 @@ export class Ranker {
     readonly normalizationFailed?: boolean | undefined;
   }> {
     return applyCrossEncoderReranking(
-      { reranker: this.reranker, rerankBlendScale: this.rerankBlendScale },
+      {
+        reranker: this.reranker,
+        rerankBlendScale: this.rerankBlendScale,
+        rerankBlendEpic5Restore: this.rerankBlendEpic5Restore,
+      },
       query,
       viable,
       queryClass,

@@ -5,7 +5,7 @@ import type { InjectionJudgePort } from '../../domain/security/port/injection-ju
 import type { QueryEntrySecurityObserver } from '../../domain/security/port/security-observer.port.js';
 import type { QueryPlannerPort } from './port/search-pipeline-deps.port.js';
 import type { InterpretRequest } from './interpret-request.dto.js';
-import type { InterpretResponseV2 } from '../../interface/http/schemas/search-response-v2.schema.js';
+import type { InterpretResponseV2 } from './interpret-response.dto.js';
 import { buildPlannerContextFromSearchRequest } from './search-usecase-planner-context.js';
 import { createSearchQuerySecurityGate } from './search-usecase-security-gate.js';
 import { compileFromLegacyPlan } from './search-usecase-compiled-fallback.js';

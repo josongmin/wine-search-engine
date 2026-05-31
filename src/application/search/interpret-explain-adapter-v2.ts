@@ -10,7 +10,7 @@
 import type { QueryObservabilitySlice } from '../../domain/query/model/query-observability-vocab.js';
 import type { QueryDecompositionHint, DecompositionStrategy } from '../../domain/query/model/query-decomposition.js';
 import type { NormalizedConstraint } from '../../domain/shared/types/index.js';
-import type { InterpretResponseV2 } from '../../interface/http/schemas/search-response-v2.schema.js';
+import type { InterpretResponseV2 } from './interpret-response.dto.js';
 import { preferCanonicalRetrievalChannelLabels } from '../../domain/retrieval/model/retrieval-channel.js';
 import { clamp01 } from '../../domain/shared/utils/clamp.js';
 import {

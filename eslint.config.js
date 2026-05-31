@@ -588,14 +588,10 @@ export default tseslint.config(
     ignores: [
       'src/application/**/*.test.ts',
       'src/application/**/__tests__/**',
-      // Baseline freeze (removed in W2/W5): application code still importing
-      // interface-layer wire schemas / presentation types.
-      'src/application/wine-search/presentation/agent-presentation.ts',
-      'src/application/wine-search/wine-search-result-schemas.ts',
-      // Relative-path imports into interface (surfaced once the relative-path
-      // group was added — self-audit R1). Both pull HTTP wire schemas down.
-      'src/application/search/interpret-explain-adapter-v2.ts',
-      'src/application/search/interpret.usecase.ts',
+      // (W5 stage-2 resolved all prior baseline-frozen application→interface
+      // violations by inverting the dependency: wire types now live in
+      // application *.dto.ts and interface re-exports them. The gate is now
+      // fully enforced for application/** with no exceptions.)
     ],
     rules: {
       'no-restricted-imports': [

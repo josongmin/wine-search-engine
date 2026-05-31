@@ -24,7 +24,7 @@ import {
   resolveGrapeAlias,
   normalizeWineType,
   REGION_PARENTS,
-} from './wine-ontology.js';
+} from '../../shared/wine-ontology-constants.js';
 import { correctKoreanWineTypos } from '../../query/service/korean-wine-aliases.js';
 import { GENERATED_REGION_PARENTS } from './region-parents.generated.js';
 

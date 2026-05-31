@@ -55,6 +55,13 @@ import {
   MAX_ERROR_ENVELOPE_REQUEST_ID_CHARS,
   MAX_TOOL_CALL_ARGUMENT_KEYS,
 } from '../constants.js';
+import type {
+  TokenUsageBody as TokenUsageBodyContract,
+  WineSearchToolCallBody as WineSearchToolCallBodyContract,
+  WineSearchStepBody as WineSearchStepBodyContract,
+  WineSearchTerminationBody as WineSearchTerminationBodyContract,
+  WineSearchResponseBody as WineSearchResponseBodyContract,
+} from '@app/wine-search/wine-search-wire.dto.js';
 
 // ---------------------------------------------------------------------------
 // Named constants (CLAUDE.md rule 15)
@@ -114,7 +121,10 @@ export const TokenUsageSchema = z.object({
   cache_read_tokens: z.number().int().finite().min(0),
   cache_creation_tokens: z.number().int().finite().min(0),
 }).strict();
-export type TokenUsageBody = z.infer<typeof TokenUsageSchema>;
+/** Wire body type OWNED by the application layer (`@app/wine-search/wine-search-wire.dto.ts`)
+ *  per DIP. Re-exported here; the pin block at the bottom of this file fails
+ *  `tsc` if the Zod shape and the application contract drift. */
+export type TokenUsageBody = TokenUsageBodyContract;
 
 /**
  * Source stage that emitted a step.
@@ -147,7 +157,8 @@ export const WineSearchToolCallSchema = z.object({
       message: `tool call arguments exceed ${String(MAX_TOOL_CALL_ARGUMENT_KEYS)} keys`,
     }),
 }).strict();
-export type WineSearchToolCallBody = z.infer<typeof WineSearchToolCallSchema>;
+/** OWNED by the application layer per DIP — see {@link TokenUsageBody}. */
+export type WineSearchToolCallBody = WineSearchToolCallBodyContract;
 
 // ---------------------------------------------------------------------------
 // Request schema
@@ -259,7 +270,8 @@ export const WineSearchStepSchema = z.object({
   duration_ms: z.number().int().finite().min(0),
   token_usage: TokenUsageSchema.optional(),
 }).strict();
-export type WineSearchStepBody = z.infer<typeof WineSearchStepSchema>;
+/** OWNED by the application layer per DIP — see {@link TokenUsageBody}. */
+export type WineSearchStepBody = WineSearchStepBodyContract;
 
 // ---------------------------------------------------------------------------
 // Meta schema
@@ -365,7 +377,8 @@ export const WineSearchTerminationSchema = z.object({
   kind: WineSearchTerminationKindSchema.optional(),
   degraded_reason: WineSearchDegradedReasonSchema.optional(),
 }).strict();
-export type WineSearchTerminationBody = z.infer<typeof WineSearchTerminationSchema>;
+/** OWNED by the application layer per DIP — see {@link TokenUsageBody}. */
+export type WineSearchTerminationBody = WineSearchTerminationBodyContract;
 
 // ---------------------------------------------------------------------------
 // Response schema
@@ -388,4 +401,24 @@ export const WineSearchResponseSchema = z.object({
     policy_blocked: z.boolean(),
   }).strict(),
 }).strict();
-export type WineSearchResponseBody = z.infer<typeof WineSearchResponseSchema>;
+/** OWNED by the application layer per DIP — see {@link TokenUsageBody}. */
+export type WineSearchResponseBody = WineSearchResponseBodyContract;
+
+// ---------------------------------------------------------------------------
+// Compile-time drift pins (DIP): the runtime Zod shapes MUST be mutually
+// assignable with the application-owned contract types. If either side adds,
+// removes, or retypes a field the asserts below fail to compile.
+// ---------------------------------------------------------------------------
+
+type _AssertMutual<A, B> = A extends B ? (B extends A ? true : never) : never;
+
+const _tokenUsageBodyOk: _AssertMutual<z.infer<typeof TokenUsageSchema>, TokenUsageBodyContract> = true;
+const _toolCallBodyOk: _AssertMutual<z.infer<typeof WineSearchToolCallSchema>, WineSearchToolCallBodyContract> = true;
+const _stepBodyOk: _AssertMutual<z.infer<typeof WineSearchStepSchema>, WineSearchStepBodyContract> = true;
+const _terminationBodyOk: _AssertMutual<z.infer<typeof WineSearchTerminationSchema>, WineSearchTerminationBodyContract> = true;
+const _responseBodyOk: _AssertMutual<z.infer<typeof WineSearchResponseSchema>, WineSearchResponseBodyContract> = true;
+void _tokenUsageBodyOk;
+void _toolCallBodyOk;
+void _stepBodyOk;
+void _terminationBodyOk;
+void _responseBodyOk;

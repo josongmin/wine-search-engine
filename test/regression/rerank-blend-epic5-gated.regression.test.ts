@@ -9,76 +9,76 @@
  *    large enough that the cross-encoder reranker's contribution is
  *    effectively suppressed.
  *
- *  - The fix introduces TWO weight maps + an env feature flag so the
+ *  - The fix introduces TWO weight maps + a feature flag so the
  *    DETUNED behaviour remains the production default while the EPIC-5
  *    RFC-017 §6.3 target weights can be activated in bench / staging via
  *    `RERANK_BLEND_EPIC5_RESTORE=1`. Activating in production requires
  *    LTR calibration eval to confirm no regression.
  *
+ * Layer refactor (2026-06): the domain blend table no longer reads
+ * `process.env` directly. The flag is now validated by the retrieval env
+ * schema (`RERANK_BLEND_EPIC5_RESTORE`) and INJECTED into the domain
+ * functions as a plain boolean. Behaviour is unchanged — only the seam
+ * moved from ambient env to an explicit argument. This suite is updated to
+ * drive the injected boolean directly (no env mutation), plus a new case
+ * (f) that pins the env-schema coercion to the exact legacy truthiness so
+ * the `'1' | 'true'`-only contract is still guarded at the boundary.
+ *
  * Append-only per CLAUDE.md regression discipline. These tests guard:
  *   (a) DETUNED remains the default (production parity, no silent change)
  *   (b) the EPIC-5 map matches RFC-017 §6.3 exactly
  *   (c) both maps cover the same QueryClass key set (drift prevention)
- *   (d) the env flag flips `getRerankBlendWeights()` deterministically
+ *   (d) the injected flag flips `getRerankBlendWeights()` deterministically
  *   (e) `effectiveRerankBlendWeight` honours the flag via the same path
+ *   (f) the env schema coerces ONLY '1'/'true' to true (legacy parity)
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { QueryClass } from '../../src/domain/shared/types/query-class.js';
 import {
   effectiveRerankBlendWeight,
   getRerankBlendWeights,
-  isRerankBlendEpic5RestoreEnabled,
   __RERANK_BLEND_DETUNED,
   __RERANK_BLEND_EPIC5,
 } from '../../src/domain/ranking/service/rerank-blend.js';
+import { RetrievalEnvSchema } from '../../src/config/env-schemas/retrieval.schema.js';
+
+/** Parse only the Epic-5 flag through the real env schema and read its boolean. */
+function coerceEpic5Flag(raw: string | undefined): boolean {
+  const env: Record<string, string> = {};
+  if (raw !== undefined) {
+    env.RERANK_BLEND_EPIC5_RESTORE = raw;
+  }
+  return RetrievalEnvSchema.parse(env).RERANK_BLEND_EPIC5_RESTORE;
+}
 
 describe('rerank-blend Epic-5 gated feature flag (regression)', () => {
-  let originalFlag: string | undefined;
-
-  beforeEach(() => {
-    originalFlag = process.env.RERANK_BLEND_EPIC5_RESTORE;
-    delete process.env.RERANK_BLEND_EPIC5_RESTORE;
-  });
-
-  afterEach(() => {
-    if (originalFlag === undefined) {
-      delete process.env.RERANK_BLEND_EPIC5_RESTORE;
-    } else {
-      process.env.RERANK_BLEND_EPIC5_RESTORE = originalFlag;
-    }
-  });
-
   describe('(a) production default: DETUNED', () => {
-    it('default (no env) → returns DETUNED map', () => {
-      expect(isRerankBlendEpic5RestoreEnabled()).toBe(false);
-      expect(getRerankBlendWeights()).toBe(__RERANK_BLEND_DETUNED);
+    it('flag off → returns DETUNED map', () => {
+      expect(getRerankBlendWeights(false)).toBe(__RERANK_BLEND_DETUNED);
     });
 
-    it('default → semantic_preference is 0.18 (pre-fix production value)', () => {
-      expect(getRerankBlendWeights().semantic_preference).toBe(0.18);
+    it('flag off → semantic_preference is 0.18 (pre-fix production value)', () => {
+      expect(getRerankBlendWeights(false).semantic_preference).toBe(0.18);
     });
 
-    it('default → pure_constraint is 0.12 (pre-fix production value)', () => {
-      expect(getRerankBlendWeights().pure_constraint).toBe(0.12);
+    it('flag off → pure_constraint is 0.12 (pre-fix production value)', () => {
+      expect(getRerankBlendWeights(false).pure_constraint).toBe(0.12);
     });
 
-    it('flag set to empty string → still OFF (only 1/true activates)', () => {
-      process.env.RERANK_BLEND_EPIC5_RESTORE = '';
-      expect(isRerankBlendEpic5RestoreEnabled()).toBe(false);
-      expect(getRerankBlendWeights()).toBe(__RERANK_BLEND_DETUNED);
+    it('env empty string → coerces OFF (only 1/true activates)', () => {
+      expect(coerceEpic5Flag('')).toBe(false);
+      expect(getRerankBlendWeights(coerceEpic5Flag(''))).toBe(__RERANK_BLEND_DETUNED);
     });
 
-    it('flag set to 0 → OFF', () => {
-      process.env.RERANK_BLEND_EPIC5_RESTORE = '0';
-      expect(isRerankBlendEpic5RestoreEnabled()).toBe(false);
-      expect(getRerankBlendWeights()).toBe(__RERANK_BLEND_DETUNED);
+    it('env "0" → coerces OFF', () => {
+      expect(coerceEpic5Flag('0')).toBe(false);
+      expect(getRerankBlendWeights(coerceEpic5Flag('0'))).toBe(__RERANK_BLEND_DETUNED);
     });
 
-    it('flag set to "false" → OFF (only literal 1 / true activates)', () => {
-      process.env.RERANK_BLEND_EPIC5_RESTORE = 'false';
-      expect(isRerankBlendEpic5RestoreEnabled()).toBe(false);
-      expect(getRerankBlendWeights()).toBe(__RERANK_BLEND_DETUNED);
+    it('env "false" → coerces OFF (only literal 1 / true activates)', () => {
+      expect(coerceEpic5Flag('false')).toBe(false);
+      expect(getRerankBlendWeights(coerceEpic5Flag('false'))).toBe(__RERANK_BLEND_DETUNED);
     });
   });
 
@@ -148,57 +148,68 @@ describe('rerank-blend Epic-5 gated feature flag (regression)', () => {
     });
   });
 
-  describe('(d) env flag flips getRerankBlendWeights() deterministically', () => {
-    it('RERANK_BLEND_EPIC5_RESTORE=1 → EPIC-5 map active', () => {
-      process.env.RERANK_BLEND_EPIC5_RESTORE = '1';
-      expect(isRerankBlendEpic5RestoreEnabled()).toBe(true);
-      expect(getRerankBlendWeights()).toBe(__RERANK_BLEND_EPIC5);
-      expect(getRerankBlendWeights().semantic_preference).toBe(0.75);
-      expect(getRerankBlendWeights().pure_constraint).toBe(0.70);
+  describe('(d) injected flag flips getRerankBlendWeights() deterministically', () => {
+    it('epic5Restore=true → EPIC-5 map active', () => {
+      expect(getRerankBlendWeights(true)).toBe(__RERANK_BLEND_EPIC5);
+      expect(getRerankBlendWeights(true).semantic_preference).toBe(0.75);
+      expect(getRerankBlendWeights(true).pure_constraint).toBe(0.70);
     });
 
-    it('RERANK_BLEND_EPIC5_RESTORE=true → EPIC-5 map active', () => {
-      process.env.RERANK_BLEND_EPIC5_RESTORE = 'true';
-      expect(isRerankBlendEpic5RestoreEnabled()).toBe(true);
-      expect(getRerankBlendWeights()).toBe(__RERANK_BLEND_EPIC5);
+    it('env "1" coerces true → EPIC-5 map active', () => {
+      expect(coerceEpic5Flag('1')).toBe(true);
+      expect(getRerankBlendWeights(coerceEpic5Flag('1'))).toBe(__RERANK_BLEND_EPIC5);
     });
 
-    it('toggling flag between calls returns the matching map each time', () => {
-      // No memoization / stale snapshot: tests can rely on per-call resolution.
-      delete process.env.RERANK_BLEND_EPIC5_RESTORE;
-      expect(getRerankBlendWeights()).toBe(__RERANK_BLEND_DETUNED);
-      process.env.RERANK_BLEND_EPIC5_RESTORE = '1';
-      expect(getRerankBlendWeights()).toBe(__RERANK_BLEND_EPIC5);
-      delete process.env.RERANK_BLEND_EPIC5_RESTORE;
-      expect(getRerankBlendWeights()).toBe(__RERANK_BLEND_DETUNED);
+    it('env "true" coerces true → EPIC-5 map active', () => {
+      expect(coerceEpic5Flag('true')).toBe(true);
+      expect(getRerankBlendWeights(coerceEpic5Flag('true'))).toBe(__RERANK_BLEND_EPIC5);
+    });
+
+    it('toggling the injected flag returns the matching map each time', () => {
+      // No memoization / stale snapshot: per-call resolution from the argument.
+      expect(getRerankBlendWeights(false)).toBe(__RERANK_BLEND_DETUNED);
+      expect(getRerankBlendWeights(true)).toBe(__RERANK_BLEND_EPIC5);
+      expect(getRerankBlendWeights(false)).toBe(__RERANK_BLEND_DETUNED);
     });
   });
 
   describe('(e) effectiveRerankBlendWeight honours the flag', () => {
-    it('default (flag off) + scale=1 → DETUNED weight passes through', () => {
-      delete process.env.RERANK_BLEND_EPIC5_RESTORE;
-      expect(effectiveRerankBlendWeight('semantic_preference', 1)).toBeCloseTo(0.18, 10);
-      expect(effectiveRerankBlendWeight('pure_constraint', 1)).toBeCloseTo(0.12, 10);
+    it('flag off + scale=1 → DETUNED weight passes through', () => {
+      expect(effectiveRerankBlendWeight('semantic_preference', 1, false)).toBeCloseTo(0.18, 10);
+      expect(effectiveRerankBlendWeight('pure_constraint', 1, false)).toBeCloseTo(0.12, 10);
     });
 
     it('flag on + scale=1 → EPIC-5 weight passes through', () => {
-      process.env.RERANK_BLEND_EPIC5_RESTORE = '1';
-      expect(effectiveRerankBlendWeight('semantic_preference', 1)).toBeCloseTo(0.75, 10);
-      expect(effectiveRerankBlendWeight('pure_constraint', 1)).toBeCloseTo(0.70, 10);
+      expect(effectiveRerankBlendWeight('semantic_preference', 1, true)).toBeCloseTo(0.75, 10);
+      expect(effectiveRerankBlendWeight('pure_constraint', 1, true)).toBeCloseTo(0.70, 10);
     });
 
     it('global scale still multiplies under both regimes', () => {
-      delete process.env.RERANK_BLEND_EPIC5_RESTORE;
-      expect(effectiveRerankBlendWeight('semantic_preference', 0.5)).toBeCloseTo(0.09, 10);
-      process.env.RERANK_BLEND_EPIC5_RESTORE = '1';
-      expect(effectiveRerankBlendWeight('semantic_preference', 0.5)).toBeCloseTo(0.375, 10);
+      expect(effectiveRerankBlendWeight('semantic_preference', 0.5, false)).toBeCloseTo(0.09, 10);
+      expect(effectiveRerankBlendWeight('semantic_preference', 0.5, true)).toBeCloseTo(0.375, 10);
     });
 
     it('non-finite global scale falls back to 1.0 under both regimes', () => {
-      delete process.env.RERANK_BLEND_EPIC5_RESTORE;
-      expect(effectiveRerankBlendWeight('semantic_preference', Number.NaN)).toBeCloseTo(0.18, 10);
-      process.env.RERANK_BLEND_EPIC5_RESTORE = '1';
-      expect(effectiveRerankBlendWeight('semantic_preference', Number.NaN)).toBeCloseTo(0.75, 10);
+      expect(effectiveRerankBlendWeight('semantic_preference', Number.NaN, false)).toBeCloseTo(0.18, 10);
+      expect(effectiveRerankBlendWeight('semantic_preference', Number.NaN, true)).toBeCloseTo(0.75, 10);
+    });
+  });
+
+  describe('(f) env schema coerces ONLY 1/true (legacy truthiness parity)', () => {
+    it('unset → defaults to false', () => {
+      expect(coerceEpic5Flag(undefined)).toBe(false);
+    });
+
+    it('"1" and "true" → true; everything else → false', () => {
+      expect(coerceEpic5Flag('1')).toBe(true);
+      expect(coerceEpic5Flag('true')).toBe(true);
+      // Legacy reader matched neither of these — schema must agree.
+      expect(coerceEpic5Flag('0')).toBe(false);
+      expect(coerceEpic5Flag('false')).toBe(false);
+      expect(coerceEpic5Flag('')).toBe(false);
+      expect(coerceEpic5Flag('yes')).toBe(false);
+      expect(coerceEpic5Flag('TRUE')).toBe(false);
+      expect(coerceEpic5Flag('2')).toBe(false);
     });
   });
 });

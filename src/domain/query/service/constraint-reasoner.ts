@@ -1,7 +1,7 @@
 import type { ConstraintAtom } from '../../shared/types/constraint-atom.js';
 import { liftBundleToAtoms } from '../../shared/types/constraint-atom.js';
 import type { ConstraintBundle, NormalizedConstraint } from '../../shared/types/constraint-bundle.js';
-import { regionAncestors } from '../../evaluation/service/wine-ontology.js';
+import { regionAncestors } from '../../shared/wine-ontology-constants.js';
 
 /**
  * E2-T2: ConstraintRelation — semantic relationship between two constraint atoms.

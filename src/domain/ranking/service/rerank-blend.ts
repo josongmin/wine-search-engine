@@ -85,31 +85,25 @@ const RERANK_BLEND_EPIC5: Readonly<Record<QueryClass, number>> = Object.freeze({
 });
 
 /**
- * Env-driven feature flag for the RFC-017 §6.3 restore.
+ * Returns the active blend-weight map according to the injected Epic-5 flag.
  *
- * Default: OFF (returns the DETUNED map → production behaviour preserved).
- * Activate by setting `RERANK_BLEND_EPIC5_RESTORE=1` (or `'true'`).
- *
- * Mirrors the inline-env pattern used elsewhere in domain/ (see
- * `constraint-graph-flags.ts`, `feature-activation-registry.ts`): we read
- * `process.env` on each invocation so tests can mutate the flag between
- * cases without re-importing the module.
- */
-export function isRerankBlendEpic5RestoreEnabled(): boolean {
-  const raw = process.env['RERANK_BLEND_EPIC5_RESTORE'];
-  return raw === '1' || raw === 'true';
-}
-
-/**
- * Returns the active blend-weight map according to the feature flag.
+ * The flag is resolved at the composition root from the validated env schema
+ * (`RERANK_BLEND_EPIC5_RESTORE`) and threaded down as a plain boolean — domain
+ * code MUST NOT read `process.env` directly (layer rule: domain has no infra/
+ * config dependency, and the value must flow through Zod validation).
  *
  * Exported (and named, not inlined) so:
- *   - regression tests can assert both regimes without env mutation,
+ *   - regression tests can assert both regimes deterministically,
  *   - ops can log the active regime in pipeline-debug,
  *   - downstream code never needs a second flag read.
+ *
+ * @param epic5Restore - When true, return the RFC-017 §6.3 EPIC5 target weights;
+ *   when false (default), the DETUNED production weights.
  */
-export function getRerankBlendWeights(): Readonly<Record<QueryClass, number>> {
-  return isRerankBlendEpic5RestoreEnabled() ? RERANK_BLEND_EPIC5 : RERANK_BLEND_DETUNED;
+export function getRerankBlendWeights(
+  epic5Restore: boolean,
+): Readonly<Record<QueryClass, number>> {
+  return epic5Restore ? RERANK_BLEND_EPIC5 : RERANK_BLEND_DETUNED;
 }
 
 /**
@@ -119,21 +113,27 @@ export function getRerankBlendWeights(): Readonly<Record<QueryClass, number>> {
  *   `weight * rerankerScore + (1 - weight) * aggregatedScore`
  *
  * @param queryClass - The classified query type.
+ * @param epic5Restore - Active blend-table regime (see {@link getRerankBlendWeights}).
  * @returns Blend weight in [0, 1] for the reranker score component.
  */
-function rerankBlendWeight(queryClass: QueryClass): number {
-  return getRerankBlendWeights()[queryClass];
+function rerankBlendWeight(queryClass: QueryClass, epic5Restore: boolean): number {
+  return getRerankBlendWeights(epic5Restore)[queryClass];
 }
 
 /**
  * Multiplies the class weight by a global scale (ops tuning). Clamps product to [0, 1].
+ *
+ * @param queryClass - The classified query type.
+ * @param globalScale - Ops blend-scale multiplier (`RERANK_BLEND_SCALE`).
+ * @param epic5Restore - Active blend-table regime (see {@link getRerankBlendWeights}).
  */
 export function effectiveRerankBlendWeight(
   queryClass: QueryClass,
   globalScale: number,
+  epic5Restore: boolean,
 ): number {
   const s = Number.isFinite(globalScale) ? clamp01(globalScale) : 1;
-  return clamp01(rerankBlendWeight(queryClass) * s);
+  return clamp01(rerankBlendWeight(queryClass, epic5Restore) * s);
 }
 
 // Test-only exports (leading double-underscore signals intent).

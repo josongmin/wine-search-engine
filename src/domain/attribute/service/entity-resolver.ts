@@ -24,7 +24,7 @@ import {
   GRAPE_ALIASES,
   REGION_PARENTS,
   WINE_TYPE_ALIASES,
-} from '../../evaluation/service/wine-ontology.js';
+} from '../../shared/wine-ontology-constants.js';
 import { listDefaultEntityAliasMappings } from './nl-mapper.js';
 import { CURATED_ENTITY_ALIASES } from './entity-alias-registry.js';
 import type { EntityResolutionMode } from './entity-alias-catalog.js';

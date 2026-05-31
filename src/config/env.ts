@@ -75,17 +75,12 @@ function buildConfig(
   parsed: EnvVars,
   rawEnv: NodeJS.ProcessEnv | Record<string, string | undefined>,
 ) {
-  const watchlistEnabled = parsed.WATCHLIST_ENABLED ?? parsed.WEBHOOK_SECRET !== undefined;
   const openAiApiKeys = parseOpenAiApiKeyPool(parsed.OPENAI_API_KEY, parsed.OPENAI_API_KEYS);
   const hasOpenAiApiKey = openAiApiKeys.length > 0;
   const hasCodexChatCredential = hasCodexChatGptAuthSync(rawEnv, {
     allowProcessFallback: rawEnv === process.env,
   });
   const hasChatCredential = hasOpenAiApiKey || hasCodexChatCredential;
-
-  if (watchlistEnabled && parsed.WEBHOOK_SECRET === undefined) {
-    throw new Error('WATCHLIST_ENABLED requires WEBHOOK_SECRET to be set');
-  }
 
   if (parsed.AGENT_ENABLED && !hasChatCredential) {
     throw new Error(
@@ -203,6 +198,10 @@ function buildConfig(
     /** Reranker settings (Cohere-backed). */
     reranker: {
       blendScale: parsed.RERANK_BLEND_SCALE,
+      // RFC-017 §6.3 Epic-5 blend-table restore flag. Validated/coerced in the
+      // retrieval env schema; threaded into Ranker options so the domain
+      // rerank-blend table no longer reads process.env directly.
+      epic5Restore: parsed.RERANK_BLEND_EPIC5_RESTORE,
       httpTimeoutMs: parsed.RERANKER_HTTP_TIMEOUT_MS,
     },
 
@@ -246,12 +245,6 @@ function buildConfig(
       injectionProvider: parsed.LLM_INJECTION_PROVIDER,
       judgeFailureMode: parsed.INJECTION_JUDGE_FAIL_OPEN ? 'fail_open' : 'fail_closed',
       judgeTimeoutMs: parsed.INJECTION_JUDGE_TIMEOUT_MS ?? parsed.OPENAI_INJECTION_HTTP_TIMEOUT_MS,
-    },
-
-    /** Watchlist webhook settings (Epic 17.1). */
-    watchlist: {
-      enabled: watchlistEnabled,
-      webhookSecret: parsed.WEBHOOK_SECRET,
     },
 
     /** Confidence refusal settings (Epic 17.3: Hallucination Verify; P0.2: AURC). */
