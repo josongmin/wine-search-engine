@@ -5,741 +5,83 @@ import type {
   ExecutionRetrievalMode,
   ExecutionTopology,
 } from '../../domain/query/model/engine-execution-contract.js';
-import type { AuditExtension, PolicyOutcome } from '../../domain/audit/model/audit-extension.js';
 import type { CandidateDropRecord } from '../../domain/retrieval/model/candidate-envelope.js';
 import type { QueryRoute } from '../../domain/query/model/query-route.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
-import type { ResolvedCandidate } from '../../domain/resolver/model/resolved-candidate.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { RankingMetadata } from '../../domain/ranking/port/ranker.port.js';
 import type { AbstainPolicy } from '../../domain/query/service/abstain-policy.js';
 import type { RrfFusionTrace } from '../../domain/retrieval/model/candidate-envelope.js';
-import type { TypedAbstainDecision } from '../../domain/query/model/abstain-decision.js';
 import type { DrinkingWindowUseCasePort } from '../drinking-window/port/drinking-window-usecase.port.js';
 import type { SearchResponseCachePort } from '../../domain/performance/port/search-response-cache.port.js';
 import type { DecisionEnginePort, ResponseBuilderPort } from './port/search-pipeline-deps.port.js';
-import type { DecisionOutput } from '../../domain/decision/model/decision-output.js';
 import type { SearchRequest } from './search-request.dto.js';
 import type { SearchRouteDecisionContext } from './search-usecase-route-dispatch.js';
 import type {
   SearchExecutionLaneArtifacts,
-  SearchExecutionLaneArtifactRef,
   SearchRouteRetrievalKind,
 } from './search-usecase-route-dispatch.js';
-import type {
-  DualLaneArtifact,
-  EntityLaneCandidateArtifact,
-} from '../../domain/retrieval/model/dual-lane-artifact.js';
 import { buildEntropyAbstainResponseParams } from './search-usecase-execute-builders.js';
 import { buildSearchCacheRequestContext } from './search-usecase-cache-context.js';
 import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import { isCorruptedSnapshot } from '../../domain/shared/types/index.js';
 import { ConstraintReasoner } from '../../domain/query/service/constraint-reasoner.js';
-import type { ConstraintReasonerOutput } from '../../domain/query/service/constraint-reasoner.js';
 import type { ChannelDegradationSummary } from '../../domain/query/model/abstain-decision.js';
 import { buildAuthorityTraceRef } from '../../domain/decision/service/authority-trace.js';
 import { deriveDecisionConfidenceSemantics } from '../../domain/shared/types/index.js';
 import { evaluateAdmissionClosure } from '../../domain/decision/service/admission-gate.js';
 import { DomainError, EvidenceObligationError } from '../../domain/shared/error/domain-error.js';
 import { buildSearchCounterfactuals } from './search-usecase-counterfactuals.js';
-import { getExplanationObligation } from '../../domain/response/service/explanation-obligation.js';
 import {
-  deriveQueryFamily,
   planToObservabilitySlice,
 } from '../../domain/query/model/query-observability-vocab.js';
 import { buildSearchDecisionInput } from './search-usecase-decision-input.js';
 import type {
-  AdmissionClosureSummary,
   DecisionInputCriticRewrite,
 } from '../../domain/decision/model/decision-input.js';
 import { buildDecisionSnapshotFromPlan } from './search-usecase-decision-snapshot.js';
 import { rankedResultsToEvalProvenanceSlices } from './search-usecase-eval-provenance.js';
 import { mapRankedResultsToResultItems } from './search-usecase-map-result-items.js';
-import type { ResultItemMappingOptions } from './search-usecase-map-result-items.js';
 import {
   extractSensoryPriorsFromConstraints,
   extractSensoryPriorsFromRetrievalPlan,
 } from './extract-sensory-priors.js';
 import { topKFinalScores } from './search-usecase-ranking-scores.js';
 import type { SnapshotVersionInjection } from './search-usecase-cache-lookup.js';
-import type { DeterminismFingerprintParams } from '../../domain/shared/utils/determinism-fingerprint.js';
-import { deterministicHash } from '../../domain/shared/utils/hash.js';
-import { RRF_DEFAULT_K } from '../../domain/shared/utils/rrf.js';
-import {
-  LIVE_RETRIEVAL_POLICY_CONFIG_HASH,
-  LIVE_RETRIEVAL_POLICY_VERSION,
-} from '../../domain/retrieval/service/live-retrieval-policy-registry.js';
-import {
-  getFusionConfig,
-  mapDomainQueryClassToFusionQueryClass,
-} from '../../domain/retrieval/service/per-class-fusion-config.js';
-import { RetrievalProfileService } from '../../domain/retrieval/service/retrieval-profile.js';
-import { retrievalPlanVersion } from '../../domain/retrieval/service/retrieval-plan-builder.js';
-import { getModeWeights, MODE_WEIGHT_OVERLAY_MAP } from '../../domain/ranking/model/mode-weights.js';
-import { RANKING_POLICY_VERSION } from '../../domain/ranking/service/ranker.js';
 import { pipelineDebug } from '../../domain/observability/request-pipeline-debug.js';
 import { PipelineDebugStep } from '../../domain/observability/pipeline-debug-steps.js';
 import { logSearchEvent } from '../../domain/observability/log-search-event.js';
 import type { RankingDegradationSignal } from '../../domain/ranking/model/ranking-runtime-signal.js';
-import type { DecisionSnapshot } from '../../domain/shared/types/index.js';
-
-const ADMISSION_HEALTHY_DEGRADATION_REASONS = new Set([
-  'mixed_constraint_guided_hybrid_fallback',
-]);
-import { SOFT_INTENT_STRATEGY_VERSION } from '../../domain/query/service/soft-intent-strategy-table.js';
 import {
   toSpecializedRouteMeta,
   type SpecializedRouteObservability,
 } from './specialized-route-observability.js';
 import { classifyShortfallLayer } from '../../domain/shared/types/provenance-shortfall-taxonomy.js';
-/** Number of top-ranked entity IDs captured in pre/post-rerank audit snapshots. */
-const AUDIT_RERANK_SNAPSHOT_COUNT = 5;
-const retrievalProfileService = new RetrievalProfileService();
-/**
- * Cap on how many top-ranked results trigger a (potentially slow) drinking-window
- * prediction in `recommendation` mode. Recommendation responses surface a broad
- * list, but the drinking-window block is only valuable for the few headline picks
- * the user actually acts on; predicting it for the whole list multiplies predictor
- * calls (each bounded by DRINKING_WINDOW_CHECK_TIMEOUT_MS in map-result-items) for
- * little user benefit. Limited to the top 3 picks. Other retrieval modes leave it
- * uncapped (maxPredictions undefined).
- */
-const RECOMMENDATION_DRINKING_WINDOW_PREDICTION_LIMIT = 3;
+import {
+  selectDisplayRankedResultsForDecision,
+  resolveResultItemMappingOptions,
+  resolveTargetYear,
+  shouldIncludeCounterfactualsForRequest,
+  toAdmissionHonestyContract,
+  buildResponseExecutionContract,
+} from './post-route-phase-helpers.js';
+import {
+  deriveAuditExtension,
+  buildExecutionAuditTrace,
+  shouldEmitConstraintResolutionTrace,
+  buildConstraintResolutionTrace,
+  buildDeterminismFingerprintParams,
+  buildResolverProvenanceTrace,
+  mergeRouteDegradation,
+} from './post-route-phase-audit-extension.js';
+import {
+  resolveWinnerAlignedDualLaneArtifact,
+  resolveWinnerAlignedIdentityArtifact,
+} from './post-route-phase-lane-artifacts.js';
 
-/**
- * entity_lookup contract: a lookup caller asked for a single authoritative
- * wine. The decisionStatus field is the authoritative correctness signal —
- * when admission rejects (failed) or ambiguity stands (ambiguous), the top-1
- * result is still the closest candidate the engine found, and exposing it
- * with the appropriate status lets the caller act on the closest miss.
- * Returning multiple results would violate the lookup contract.
- *
- * Behaviour:
- *  - non entity_lookup kinds → unchanged (full rankedResults).
- *  - empty rankedResults → unchanged (return empty).
- *  - resolved → prefer decisionOutput.selectedEntity / chosenEntityId match,
- *    fall back to rankedResults[0].
- *  - ambiguous / failed → top-1 (closest miss). selectedEntity is absent on
- *    non-resolved decisions per RFC-007 §3.
- */
-export function selectDisplayRankedResultsForDecision(
-  rankedResults: readonly RankedResult[],
-  decisionOutput: DecisionOutput,
-  retrievalKind: SearchRouteRetrievalKind | undefined,
-): readonly RankedResult[] {
-  if (retrievalKind !== 'entity_lookup' || rankedResults.length === 0) {
-    return rankedResults;
-  }
-
-  if (decisionOutput.decisionStatus === 'resolved') {
-    const selectedEntityId =
-      decisionOutput.selectedEntity?.entityId ?? decisionOutput.chosenEntityId;
-    if (selectedEntityId !== undefined) {
-      const selected = rankedResults.find((result) => result.entityId === selectedEntityId);
-      if (selected !== undefined) {
-        return [selected];
-      }
-    }
-  }
-  return rankedResults.slice(0, 1);
-}
-
-function isDualLaneArtifact(
-  artifact: SearchExecutionLaneArtifactRef,
-): artifact is DualLaneArtifact {
-  return (
-    'lanePresence' in artifact &&
-    'fusedCandidate' in artifact
-  );
-}
-
-function findWinnerDualLaneArtifact(
-  resolveResult: EntityResolveResult,
-  fusedArtifacts: SearchExecutionLaneArtifacts['fused'],
-): DualLaneArtifact | undefined {
-  const winnerEntityId = resolveResult.topEntity?.entityId;
-  if (winnerEntityId === undefined) {
-    return undefined;
-  }
-
-  return fusedArtifacts.find(
-    (artifact): artifact is DualLaneArtifact =>
-      isDualLaneArtifact(artifact) && artifact.entityId === winnerEntityId,
-  );
-}
-
-function isEntityLaneArtifact(
-  artifact: SearchExecutionLaneArtifactRef,
-): artifact is EntityLaneCandidateArtifact {
-  return (
-    'identityProvenance' in artifact &&
-    'candidate' in artifact &&
-    'resolvedCandidate' in artifact
-  );
-}
-
-function hasWinnerAlignedIdentityResolveCandidate(
-  identityResolveResult: EntityResolveResult | null | undefined,
-  winnerEntityId: string,
-): boolean {
-  if (identityResolveResult == null) {
-    return false;
-  }
-  const { candidates } = identityResolveResult;
-  if (!Array.isArray(candidates)) {
-    return false;
-  }
-  return candidates.some(
-    (candidate: ResolvedCandidate) => candidate.entityId === winnerEntityId,
-  );
-}
-
-function isWinnerAlignedEntityLaneArtifact(
-  artifact: EntityLaneCandidateArtifact | undefined,
-  winnerEntityId: string,
-): artifact is EntityLaneCandidateArtifact {
-  return artifact !== undefined
-    && artifact.entityId === winnerEntityId
-    && artifact.identityProvenance.entityId === winnerEntityId
-    && artifact.candidate.entityId === winnerEntityId
-    && artifact.resolvedCandidate.entityId === winnerEntityId;
-}
-
-function isWinnerAlignedDualLaneArtifact(
-  artifact: DualLaneArtifact | undefined,
-  winnerEntityId: string,
-): artifact is DualLaneArtifact & { readonly identityProvenance: NonNullable<DualLaneArtifact['identityProvenance']> } {
-  if (
-    artifact === undefined
-    || artifact.entityId !== winnerEntityId
-    || artifact.fusedCandidate.entityId !== winnerEntityId
-    || artifact.identityProvenance?.entityId !== winnerEntityId
-  ) {
-    return false;
-  }
-
-  if (
-    artifact.entityLane !== undefined
-    && !isWinnerAlignedEntityLaneArtifact(artifact.entityLane, winnerEntityId)
-  ) {
-    return false;
-  }
-
-  return artifact.generalLane === undefined
-    || (
-      artifact.generalLane.entityId === winnerEntityId
-      && artifact.generalLane.candidate.entityId === winnerEntityId
-    );
-}
-
-function findWinnerIdentityLaneArtifact(
-  resolveResult: EntityResolveResult,
-  identityArtifacts: SearchExecutionLaneArtifacts['identity'],
-): EntityLaneCandidateArtifact | undefined {
-  const winnerEntityId = resolveResult.topEntity?.entityId;
-  if (winnerEntityId === undefined) {
-    return undefined;
-  }
-
-  return identityArtifacts.find(
-    (artifact): artifact is EntityLaneCandidateArtifact =>
-      isEntityLaneArtifact(artifact) && artifact.entityId === winnerEntityId,
-  );
-}
-
-function resolveWinnerAlignedDualLaneArtifact(params: {
-  readonly executionTopology: ExecutionTopology;
-  readonly identityResolveResult: EntityResolveResult | null;
-  readonly resolveResult: EntityResolveResult;
-  readonly fusedArtifacts: SearchExecutionLaneArtifacts['fused'];
-}): DualLaneArtifact | undefined {
-  if (
-    params.executionTopology !== 'dual_lane'
-    || params.identityResolveResult === null
-  ) {
-    return undefined;
-  }
-
-  const winnerDualLaneArtifact = findWinnerDualLaneArtifact(
-    params.resolveResult,
-    params.fusedArtifacts,
-  );
-  const winnerEntityId = params.resolveResult.topEntity?.entityId;
-  if (
-    winnerEntityId === undefined
-    || !hasWinnerAlignedIdentityResolveCandidate(params.identityResolveResult, winnerEntityId)
-    || !isWinnerAlignedDualLaneArtifact(winnerDualLaneArtifact, winnerEntityId)
-  ) {
-    return undefined;
-  }
-
-  return winnerDualLaneArtifact;
-}
-
-function resolveWinnerAlignedIdentityArtifact(params: {
-  readonly executionTopology: ExecutionTopology;
-  readonly identityResolveResult: EntityResolveResult | null;
-  readonly resolveResult: EntityResolveResult;
-  readonly identityArtifacts: SearchExecutionLaneArtifacts['identity'];
-}): EntityLaneCandidateArtifact | undefined {
-  if (params.identityResolveResult === null) {
-    return undefined;
-  }
-
-  const winnerIdentityArtifact = findWinnerIdentityLaneArtifact(
-    params.resolveResult,
-    params.identityArtifacts,
-  );
-  const winnerEntityId = params.resolveResult.topEntity?.entityId;
-  if (
-    winnerEntityId === undefined
-    || !hasWinnerAlignedIdentityResolveCandidate(params.identityResolveResult, winnerEntityId)
-    || !isWinnerAlignedEntityLaneArtifact(winnerIdentityArtifact, winnerEntityId)
-  ) {
-    return undefined;
-  }
-
-  return winnerIdentityArtifact;
-}
-
-/**
- * Derives AuditExtension from planner/ranking runtime state and optional
- * retrieval/abstain traces.
- * Returns undefined when no gated trace payload is available.
- *
- * Gating policy (from AuditExtension field documentation):
- *  - planner_policy_trace      explain=true OR debug header (sourced from compiled.plannerTrace)
- *  - retrieval_fusion_trace    explain=true OR debug header (sourced from RRF fusion)
- *  - ranking_delta_trace       LTR applied + explain=true (sourced from scoreDriftRecord)
- *  - abstain_policy_trace      always when abstain occurs (sourced from TypedAbstainDecision)
- */
-/** Maximum drop records included in hard_filter_drop_log to keep payload lean. */
-const AUDIT_DROP_LOG_MAX = 5;
-
-function deriveAuditExtension(
-  compiled: CompiledWineQuery,
-  rankingMetadata: RankingMetadata | undefined,
-  rankedResults: readonly RankedResult[],
-  executionTrace: AuditExtension['execution_trace'] | undefined,
-  retrievalFusionTrace?: RrfFusionTrace,
-  constraintResolutionTrace?: AuditExtension['constraint_resolution_trace'],
-  abstainDecision?: TypedAbstainDecision | false,
-  channelDegradation?: ChannelDegradationSummary,
-  hardFilterDropLog?: readonly CandidateDropRecord[],
-  correctiveRetryCalibration?: number,
-  resolverProvenanceTrace?: AuditExtension['resolver_provenance_trace'],
-): AuditExtension | undefined {
-  const plannerTrace = compiled.plannerTrace;
-  // E1-T4: Read scoreDriftRecord from rerankDecision (structured contract).
-  // The top-level RankingMetadata.scoreDriftRecord field is @deprecated —
-  // all new reads must go through rerankDecision.scoreDriftRecord.
-  const rerankDecision = rankingMetadata?.rerankDecision;
-  const scoreDriftRecord = rerankDecision?.scoreDriftRecord;
-
-  // Abstain policy trace is emitted whenever abstain evaluation ran (abstainDecision !== undefined).
-  const hasAbstainTrace = abstainDecision !== undefined;
-  // Retrieval fusion trace present when hybrid RRF path was used.
-  const hasFusionTrace = retrievalFusionTrace !== undefined;
-  const hasRerankDecisionTrace =
-    rerankDecision !== undefined
-    && (scoreDriftRecord !== undefined || (plannerTrace?.length ?? 0) > 0);
-  // E4: Drop log present when at least one candidate was hard-filtered out.
-  const hasDropLog = hardFilterDropLog !== undefined && hardFilterDropLog.length > 0;
-  // TA5: Corrective retry calibration present when retry was accepted.
-  const hasRetryCalibration = correctiveRetryCalibration !== undefined && Number.isFinite(correctiveRetryCalibration);
-
-  if (
-    executionTrace === undefined
-    && (plannerTrace == null || plannerTrace.length === 0)
-    && scoreDriftRecord === undefined
-    && !hasFusionTrace
-    && constraintResolutionTrace === undefined
-    && !hasAbstainTrace
-    && !hasDropLog
-    && !hasRetryCalibration
-    && resolverProvenanceTrace === undefined
-  ) {
-    return undefined;
-  }
-
-  // Normalize topKEntropy: only emit when it's a finite number.
-  const topKEntropy = (() => {
-    if (abstainDecision !== false && abstainDecision?.reason === 'low_confidence' && abstainDecision.entropy !== undefined) {
-      return abstainDecision.entropy;
-    }
-    // Compute from topKScores when abstain decision doesn't carry entropy directly.
-    // This is the case for no_match / semantic_conflict / insufficient_evidence.
-    // We don't recompute entropy here — rely on what AbstainPolicy returned.
-    return undefined;
-  })();
-
-  return {
-    ...(executionTrace !== undefined
-      ? { execution_trace: executionTrace }
-      : {}),
-    ...(plannerTrace != null && plannerTrace.length > 0
-      ? { planner_policy_trace: plannerTrace }
-      : {}),
-    ...(constraintResolutionTrace !== undefined
-      ? { constraint_resolution_trace: constraintResolutionTrace }
-      : {}),
-    ...(hasFusionTrace
-      ? { retrieval_fusion_trace: retrievalFusionTrace }
-      : {}),
-    ...(scoreDriftRecord !== undefined
-      ? {
-          ranking_delta_trace: {
-            preRerankTop5: rankingMetadata?.preRerankTop5 ?? [],
-            postRerankTop5: rankedResults.slice(0, AUDIT_RERANK_SNAPSHOT_COUNT).map((result) => String(result.entityId)),
-            safetyEnvelopeBlocks: scoreDriftRecord.safetyEnvelopeBlocks,
-            drift: scoreDriftRecord,
-          },
-        }
-      : {}),
-    ...(hasRerankDecisionTrace
-      ? {
-          rerank_decision_trace: {
-            gateDecision: rerankDecision.decision,
-            ...(rerankDecision.modelId !== undefined ? { appliedModel: rerankDecision.modelId } : {}),
-            ...(rerankDecision.applied ? { scoreContract: 'bounded_normalized_0_1' as const } : {}),
-          },
-        }
-      : {}),
-    ...(hasAbstainTrace
-      ? {
-          abstain_policy_trace: {
-            evaluated: true,
-            decision: abstainDecision,
-            ...(topKEntropy !== undefined ? { topKEntropy } : {}),
-            ...(abstainDecision !== false && abstainDecision.conflictingRelations !== undefined
-              ? { constraintConflicts: abstainDecision.conflictingRelations }
-              : {}),
-            ...(channelDegradation !== undefined ? { channelDegradation } : {}),
-          },
-        }
-      : {}),
-    ...(hasDropLog
-      ? {
-          // E4: Sample top-AUDIT_DROP_LOG_MAX drops by lastKnownScore desc to keep payload lean.
-          hard_filter_drop_log: [...hardFilterDropLog]
-            .sort((a, b) => {
-              const aFinite = Number.isFinite(a.lastKnownScore);
-              const bFinite = Number.isFinite(b.lastKnownScore);
-              if (!aFinite && !bFinite) return 0;
-              if (!aFinite) return 1;
-              if (!bFinite) return -1;
-              return b.lastKnownScore - a.lastKnownScore;
-            })
-            .slice(0, AUDIT_DROP_LOG_MAX),
-        }
-      : {}),
-    ...(hasRetryCalibration
-      ? { corrective_retry_calibrated_confidence: correctiveRetryCalibration }
-      : {}),
-    ...(resolverProvenanceTrace !== undefined
-      ? { resolver_provenance_trace: resolverProvenanceTrace }
-      : {}),
-  };
-}
-
-function resolveResultItemMappingOptions(
-  effectiveRetrievalMode: ExecutionRetrievalMode,
-): ResultItemMappingOptions | undefined {
-  return effectiveRetrievalMode === 'recommendation'
-    ? { maxPredictions: RECOMMENDATION_DRINKING_WINDOW_PREDICTION_LIMIT }
-    : undefined;
-}
-
-function buildExecutionAuditTrace(
-  effectiveRoute: QueryRoute,
-  retrievalModeSource: 'planner' | 'api_override',
-  routeExecutionFacts: {
-    readonly executionTopology: ExecutionTopology;
-    readonly laneTrace: ExecutionLaneTrace;
-    readonly effectiveRetrievalMode: ExecutionRetrievalMode;
-    readonly retrievalKind: SearchRouteRetrievalKind;
-    readonly sparseExecuted: boolean;
-    readonly specializedRouteExecuted: SpecializedRouteObservability['specializedRouteExecuted'] | undefined;
-    readonly usedCompiledExecution: boolean;
-  },
-  rankingMetadata: RankingMetadata | undefined,
-  compiled: CompiledWineQuery,
-): NonNullable<AuditExtension['execution_trace']> {
-  const executionBudget = compiled.execution.budget;
-  const provenancePolicy = compiled.execution.provenancePolicy;
-  const provenanceClosure = rankingMetadata?.provenanceClosure;
-  const rerankLimit = Number.isFinite(executionBudget.rerankLimit)
-    ? executionBudget.rerankLimit
-    : 0;
-
-  return {
-    effective_route: effectiveRoute,
-    execution_topology: routeExecutionFacts.executionTopology,
-    retrieval_mode_source: retrievalModeSource,
-    effective_retrieval_mode: routeExecutionFacts.effectiveRetrievalMode,
-    retrieval_kind: routeExecutionFacts.retrievalKind,
-    sparse_executed: routeExecutionFacts.sparseExecuted,
-    ...(routeExecutionFacts.specializedRouteExecuted !== undefined
-      ? { specialized_route_executed: routeExecutionFacts.specializedRouteExecuted }
-      : {}),
-    used_compiled_execution: routeExecutionFacts.usedCompiledExecution,
-    compiled_budget: {
-      max_candidates: executionBudget.maxCandidates,
-      rerank_limit: rerankLimit,
-      enable_precision_rerank: executionBudget.enablePrecisionRerank,
-    },
-    provenance_policy: {
-      require_identity_seal: provenancePolicy.requireIdentitySeal,
-      require_constraint_evidence: provenancePolicy.requireConstraintEvidence,
-      require_anchor_evidence: provenancePolicy.requireAnchorEvidence,
-    },
-    lane_trace: routeExecutionFacts.laneTrace,
-    ...(provenanceClosure !== undefined
-      ? { provenance_closure: provenanceClosure }
-      : {}),
-  };
-}
-
-function shouldEmitConstraintResolutionTrace(
-  compiled: CompiledWineQuery,
-  requestExplain?: boolean,
-): boolean {
-  return requestExplain === true || (compiled.plannerTrace?.length ?? 0) > 0;
-}
-
-function buildConstraintPolicyOutcomes(
-  reasonerOutput: ConstraintReasonerOutput,
-): readonly PolicyOutcome[] {
-  const relationsByAtom = new Map<number, typeof reasonerOutput.relations>();
-  for (let index = 0; index < reasonerOutput.atoms.length; index++) {
-    relationsByAtom.set(index, []);
-  }
-  for (const relation of reasonerOutput.relations) {
-    relationsByAtom.set(relation.atomIndexA, [...(relationsByAtom.get(relation.atomIndexA) ?? []), relation]);
-    relationsByAtom.set(relation.atomIndexB, [...(relationsByAtom.get(relation.atomIndexB) ?? []), relation]);
-  }
-
-  return reasonerOutput.atoms.map((_atom, atomIndex) => {
-    const relations = relationsByAtom.get(atomIndex) ?? [];
-    const losingRelation = relations.find((relation) => {
-      if (
-        relation.type !== 'contradiction'
-        && relation.type !== 'redundancy'
-        && relation.type !== 'overshadow'
-      ) {
-        return false;
-      }
-      const loserIndex =
-        relation.winner === 'a'
-          ? relation.atomIndexB
-          : relation.atomIndexA;
-      return loserIndex === atomIndex;
-    });
-    if (losingRelation !== undefined) {
-      return {
-        atomIndex,
-        outcome: losingRelation.type === 'overshadow' ? 'shadowed' : 'dropped',
-        reason: losingRelation.explanation,
-      } satisfies PolicyOutcome;
-    }
-
-    const winningOrInformative = relations
-      .map((relation) => relation.explanation)
-      .filter((explanation, index, all) => all.indexOf(explanation) === index);
-
-    return {
-      atomIndex,
-      outcome: 'kept',
-      reason: winningOrInformative.length > 0
-        ? winningOrInformative.join('; ')
-        : 'No conflict detected',
-    } satisfies PolicyOutcome;
-  });
-}
-
-function buildConstraintResolutionTrace(
-  reasonerOutput: ConstraintReasonerOutput,
-): NonNullable<AuditExtension['constraint_resolution_trace']> {
-  return {
-    atoms: reasonerOutput.atoms,
-    relations: reasonerOutput.relations,
-    policy_outcomes: buildConstraintPolicyOutcomes(reasonerOutput),
-  };
-}
-
-/**
- * E1-T5: Build DeterminismFingerprintParams from the execution context snapshot.
- *
- * The fingerprint covers engine configuration (planner version, primary model ID,
- * fusion k constant, ranking config hash) so that two executions with the same
- * configuration always produce the same fingerprint regardless of query content.
- *
- * modelVersionsHash and indexVersionsHash are canonical hashes over the full
- * snapshot version maps, avoiding insertion-order dependence and capturing
- * full execution-snapshot drift rather than a single "primary" model.
- *
- * E1-T5 extended fields:
- *   - responseContractVersion: from snapshot.response_contract_version
- *   - rerankApplied: from rankingMetadata.rerankExecuted
- *   - rerankModelId: from model_versions['reranker_model'] or rerankDecision.modelId
- */
-function buildDeterminismFingerprintParams(
-  snapshot: DecisionSnapshot,
-  snapshotVersions: SnapshotVersionInjection,
-  plan: QueryPlanV1,
-  compiled: CompiledWineQuery,
-  rankingMetadata?: RankingMetadata,
-): DeterminismFingerprintParams {
-  const modelVersions = snapshotVersions?.modelVersions ?? {};
-  const primaryModelId =
-    modelVersions['query_understanding'] ??
-    modelVersions['rerank'] ??
-    'unknown';
-
-  const modelVersionsHash = deterministicHash(
-    ...Object.keys(modelVersions).sort().map((key) => `${key}:${modelVersions[key] ?? ''}`),
-  );
-
-  const featureFlagsHash = deterministicHash(
-    ...Object.keys(snapshot.feature_flags).sort().map((key) => `${key}:${JSON.stringify(snapshot.feature_flags[key])}`),
-  );
-
-  // Stable hash of ranking config — index versions act as a proxy for the
-  // feature schema version that drives LTR scoring.
-  const indexVersions = snapshotVersions?.indexVersions ?? {};
-  const indexVersionsHash = deterministicHash(
-    ...Object.keys(indexVersions).sort().map((key) => `${key}:${indexVersions[key] ?? ''}`),
-  );
-  const queryFamily = deriveQueryFamily(plan, compiled);
-  const effectiveRetrievalMode = compiled.execution.effectiveRetrievalMode;
-  const effectiveRoute = compiled.execution.effectiveRoute;
-  const fusionQueryClass = mapDomainQueryClassToFusionQueryClass(plan.queryClass, effectiveRetrievalMode);
-  const fusionConfig = getFusionConfig(fusionQueryClass);
-  const retrievalProfile = retrievalProfileService.getProfile(
-    plan.queryClass,
-    effectiveRoute,
-    effectiveRetrievalMode,
-    queryFamily,
-  );
-  const modeWeights = getModeWeights(effectiveRetrievalMode);
-  const fusionConfigHash = deterministicHash(
-    LIVE_RETRIEVAL_POLICY_VERSION,
-    LIVE_RETRIEVAL_POLICY_CONFIG_HASH,
-    SOFT_INTENT_STRATEGY_VERSION,
-    String(RRF_DEFAULT_K),
-    fusionQueryClass,
-    String(fusionConfig.rrfK),
-    String(fusionConfig.sparseWeight),
-    String(fusionConfig.denseWeight),
-    String(fusionConfig.anchorWeight),
-    String(fusionConfig.learnedSparseWeight),
-    retrievalProfile.name,
-    retrievalProfile.channelMix.join(','),
-    String(retrievalProfile.sparseWeight),
-    String(retrievalProfile.denseWeight),
-    String(retrievalProfile.anchorWeight),
-    String(retrievalProfile.sparseTopN),
-    String(retrievalProfile.denseTopN),
-    String(retrievalProfile.fusionK),
-    String(retrievalProfile.finalTopK),
-    String(compiled.execution.budget.maxCandidates),
-  );
-  // Iterate the SSoT overlay map so a new mode-weights field automatically
-  // participates in the hash and a removed field cannot drift the cache key.
-  const rankingConfigHash = deterministicHash(
-    indexVersionsHash,
-    RANKING_POLICY_VERSION,
-    effectiveRetrievalMode,
-    String(compiled.execution.budget.enablePrecisionRerank),
-    String(compiled.execution.budget.rerankLimit),
-    ...MODE_WEIGHT_OVERLAY_MAP.map(({ modeField }) => String(modeWeights[modeField])),
-  );
-
-  // E1-T5: extended fields — reranker model ID prefers the explicit rerankDecision
-  // record (E1-T4 typed contract), falling back to model_versions['reranker_model'].
-  const rerankApplied = rankingMetadata?.rerankExecuted;
-  const rerankModelId =
-    rankingMetadata?.rerankDecision?.modelId
-    ?? (rerankApplied === true ? (modelVersions['reranker_model'] ?? modelVersions['dense_model']) : undefined);
-
-  return {
-    plannerVersion: snapshot.planner_version,
-    modelId: primaryModelId,
-    modelVersionsHash,
-    featureFlagsHash,
-    fusionConfigHash,
-    indexVersionsHash,
-    rankingConfigHash,
-    retrievalPlanVersion: retrievalPlanVersion(),
-    rankingPolicyVersion: RANKING_POLICY_VERSION,
-    policyRuleVersion: snapshot.policy_rule_version,
-    thresholdProfileId: snapshot.threshold_profile_id,
-    responseContractVersion: snapshot.response_contract_version,
-    ...(rerankApplied !== undefined ? { rerankApplied } : {}),
-    ...(rerankModelId !== undefined ? { rerankModelId } : {}),
-  };
-}
-
-function buildResolverProvenanceTrace(
-  fusedResolveResult: EntityResolveResult,
-): AuditExtension['resolver_provenance_trace'] {
-  const provenance = fusedResolveResult.decisionTrace.queryProvenance;
-  if (provenance === undefined) {
-    return undefined;
-  }
-  const candidateSourceBreakdown = provenance.candidateSourceBreakdown?.map((entry) => ({
-    source: entry.source,
-    entity_ids: entry.entityIds,
-    count: entry.count,
-  }));
-  if (
-    (candidateSourceBreakdown?.length ?? 0) === 0
-    && provenance.blockerSeedEntityIds === undefined
-    && provenance.blockerSeedCount === undefined
-  ) {
-    return undefined;
-  }
-  return {
-    ...(candidateSourceBreakdown !== undefined && candidateSourceBreakdown.length > 0
-      ? { candidate_source_breakdown: candidateSourceBreakdown }
-      : {}),
-    ...(provenance.blockerSeedEntityIds !== undefined
-      ? { blocker_seed_entity_ids: provenance.blockerSeedEntityIds }
-      : {}),
-    ...(provenance.blockerSeedCount !== undefined
-      ? { blocker_seed_count: provenance.blockerSeedCount }
-      : {}),
-  };
-}
-
-function mergeRouteDegradation(
-  snapshot: DecisionSnapshot,
-  effectiveRoute: QueryRoute,
-  routeDegradation?: RankingDegradationSignal,
-  fusedResolveResult?: EntityResolveResult,
-): RankingDegradationSignal | undefined {
-  const reasons = new Set([
-    ...(routeDegradation?.degradationReasons ?? []),
-    ...(fusedResolveResult?.degradation?.reasons ?? []),
-  ]);
-  if (snapshot.feature_flags['killSwitchLearning'] === true) {
-    reasons.add('learning_kill_switch');
-  }
-  if (
-    snapshot.feature_flags['killSwitchDenseRetrieval'] === true
-    && effectiveRoute !== 'entity'
-  ) {
-    reasons.add('dense_retrieval_disabled');
-  }
-  if (reasons.size === 0) {
-    return undefined;
-  }
-  return {
-    executionMode: 'degraded',
-    degradationReasons: [...reasons],
-  };
-}
+// Re-exported so existing importers (and tests) keep the original module path.
+export { selectDisplayRankedResultsForDecision };
 
 /**
  * Context for Steps 3b–7: entropy abstain → DecisionEngine → ResponseBuilder → optional cache write.
@@ -890,90 +232,6 @@ function assertSearchRouteExecutionFacts(
     sparseExecuted: ctx.sparseExecuted,
     specializedRouteExecuted: ctx.specializedRouteExecuted,
     usedCompiledExecution: ctx.usedCompiledExecution,
-  };
-}
-
-/**
- * Resolves the target year for drinking-window `currentlyDrinkable` checks.
- * Prefers the caller-injected `nowYear` (deterministic, replay-stable);
- * otherwise derives from `ctx.startTime`, which captures wall-clock exactly
- * ONCE per request at the pre-route phase entry. This funnels every
- * wall-clock read through a single seam so replay harnesses can override it.
- *
- * Accepts the minimal {startTime, nowYear?} shape so both
- * SearchPostRouteExecutionContext and RankedRouteDecisionPhaseContext can
- * call it. nowYear is optional in both — only RankedRouteDecisionPhaseContext
- * actually exposes it to replay harnesses today.
- */
-function resolveTargetYear(ctx: { readonly startTime: number; readonly nowYear?: number | undefined }): number {
-  if (ctx.nowYear !== undefined && Number.isFinite(ctx.nowYear)) {
-    return ctx.nowYear;
-  }
-  return new Date(ctx.startTime).getFullYear();
-}
-
-function shouldIncludeCounterfactualsForRequest(
-  plan: QueryPlanV1,
-  compiled: CompiledWineQuery,
-  includeCounterfactuals: boolean | undefined,
-): boolean {
-  const queryFamily = deriveQueryFamily(plan, compiled);
-  const obligation = getExplanationObligation(queryFamily);
-  return obligation.requiresCounterfactual || includeCounterfactuals !== false;
-}
-
-function toAdmissionHonestyContract(
-  routeDegradation: RankingDegradationSignal | undefined,
-): {
-  readonly executionMode?: 'authoritative' | 'degraded' | 'heuristic' | 'advisory' | undefined;
-  readonly routeHealthy?: boolean | undefined;
-} {
-  if (routeDegradation === undefined) {
-    return {
-      executionMode: 'authoritative',
-      routeHealthy: true,
-    };
-  }
-
-  const admissionRelevantReasons = routeDegradation.degradationReasons.includes(
-    'mixed_constraint_guided_hybrid_fallback',
-  )
-    ? routeDegradation.degradationReasons.filter((reason) => reason !== 'mixed_similar_retrieval_fallback')
-    : routeDegradation.degradationReasons;
-
-  return {
-    executionMode: routeDegradation.executionMode,
-    routeHealthy: admissionRelevantReasons.every((reason) =>
-      ADMISSION_HEALTHY_DEGRADATION_REASONS.has(reason),
-    ),
-  };
-}
-
-function buildResponseExecutionContract(
-  routeExecutionFacts: {
-    readonly executionTopology: ExecutionTopology;
-    readonly laneTrace: ExecutionLaneTrace;
-    readonly effectiveRetrievalMode: ExecutionRetrievalMode;
-    readonly retrievalKind: SearchRouteRetrievalKind;
-    readonly sparseExecuted: boolean;
-    readonly specializedRouteExecuted: SpecializedRouteObservability['specializedRouteExecuted'];
-    readonly usedCompiledExecution: boolean;
-  },
-  rankingMetadata?: RankingMetadata,
-  admissionClosure?: AdmissionClosureSummary,
-): NonNullable<ResponseBuilderPort['build'] extends (params: infer T) => unknown ? T : never>['executionContract'] {
-  return {
-    executionTopology: routeExecutionFacts.executionTopology,
-    effectiveRetrievalMode: routeExecutionFacts.effectiveRetrievalMode,
-    retrievalKind: routeExecutionFacts.retrievalKind,
-    sparseExecuted: routeExecutionFacts.sparseExecuted,
-    specializedRouteExecuted: routeExecutionFacts.specializedRouteExecuted,
-    usedCompiledExecution: routeExecutionFacts.usedCompiledExecution,
-    laneTrace: routeExecutionFacts.laneTrace,
-    ...(rankingMetadata?.provenanceClosure !== undefined
-      ? { provenanceClosure: rankingMetadata.provenanceClosure }
-      : {}),
-    ...(admissionClosure !== undefined ? { admissionClosure } : {}),
   };
 }
 

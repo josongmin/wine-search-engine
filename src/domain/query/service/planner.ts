@@ -2,12 +2,10 @@ import type {
   QueryClass,
   ConstraintBundle,
   ConstraintAtom,
-  NormalizedConstraint,
 } from '../../shared/types/index.js';
 import { liftBundleToAtoms } from '../../shared/types/index.js';
 import type { QueryPlanV2 } from '../model/query-plan.js';
 import type { QueryIntent } from '../model/query-intent.js';
-import type { QueryRoute } from '../model/query-route.js';
 import type { RetrievalMode } from '../model/retrieval-mode.js';
 import { isExploratoryRetrievalMode } from '../model/retrieval-mode-classification.js';
 import type { AnchorCandidate } from '../model/anchor-candidate.js';
@@ -23,34 +21,28 @@ import type {
   AmbiguityInfo,
 } from '../port/ambiguity-dictionary.port.js';
 import type { FuzzyMatcherPort } from '../port/fuzzy-matcher.port.js';
-import { type AliasMatchResult, type AnchorExtractor } from './anchor-extractor.js';
+import { type AnchorExtractor } from './anchor-extractor.js';
 import { type ExpansionBuilder } from './expansion-builder.js';
 import { type NLMapper } from '../../attribute/service/nl-mapper.js';
 import { ConstraintCompiler, type ConstraintCompilerResult } from './constraint-compiler.js';
 import type { ConstraintTopologyPlanner } from './constraint-topology-planner.js';
 import { hasVintageYear as hasBoundedVintageYear } from '../../shared/utils/vintage.js';
 import type { RequestExecutionContext } from '../../shared/request-execution-context.js';
-import type { AmbiguousEntityHint } from '../../attribute/model/ambiguous-entity-hint.js';
 import { parseSpans } from '../../attribute/service/span-parser.js';
 import { QueryNormalizer } from './query-normalizer.js';
 import { compareScoreWithTiebreaker } from '../../shared/utils/stable-comparator.js';
 import {
-  ANCHOR_PRESENT_CONFIDENCE,
   detectQueryIntent,
   EXACT_ANCHOR_CONFIDENCE,
 } from './planner-intent-detection.js';
 import { analyzeQueryDecomposition } from './decomposition-detector.js';
-import { extractAllPairingConstraints } from './pairing-extractor.js';
 import { correctKoreanWineTypos } from './korean-wine-aliases.js';
 import {
   hasEntityMetadataKeyword,
   hasExactEntityLookupKeyword,
   stripExactEntityLookupSuffix,
 } from './exact-entity-metadata-signals.js';
-import {
-  isGenericWineNounToken,
-  isShortEntityLikeSurface,
-} from './short-entity-surface.js';
+import { isGenericWineNounToken } from './short-entity-surface.js';
 import type { PolicyDecisionRecord } from '../model/policy-decision-record.js';
 import { buildBundleFromAtoms } from './constraint-reasoner.js';
 import { buildRetrievalPlan } from '../../retrieval/service/retrieval-plan-builder.js';
@@ -63,22 +55,16 @@ import type {
   AmbiguityIntentInterpretation,
   AmbiguityIntentTrace,
 } from '../model/ambiguity-intent-interpretation.js';
-import { isExactLikeLookupStrategy } from './lookup-strategy-taxonomy.js';
 import { splitLookupStrategies } from './anchor-extractor.js';
 import { bootstrapLogger } from '../../shared/bootstrap-logger.js';
 import {
   PLANNER_VERSION,
   POLICY_RULE_VERSION,
-  FUZZY_ANCHOR_CONFIDENCE_FLOOR,
-  FUZZY_ANCHOR_EDIT_DISTANCE_PENALTY,
   CONSTRAINT_SHAPED_ANCHOR_ATTRIBUTES,
   GENERIC_ANCHOR_SOURCE_ATTRIBUTES,
   GENERIC_LOOKUP_VARIANT_SINGLE_SUPPORT_MAX,
   GENERIC_CONSTRAINT_SURFACE_TRUSTED_ALIAS_TYPES,
-  EXPLICIT_NO_MATCH_PATTERNS,
   SHORT_QUERY_AMBIGUOUS_ANCHOR_CONFIDENCE_THRESHOLD,
-  PAIRING_SOFT_CONSTRAINT_CONFIDENCE,
-  PAIRING_SOFT_CONSTRAINT_MAPPING_VERSION,
   UNCERTAINTY_PARSER_CONFIDENCE_FLOOR,
   UNCERTAINTY_PARSER_CONFIDENCE_PER_TOKEN_PENALTY,
   UNCERTAINTY_CONSTRAINT_CONFIDENCE_NEUTRAL,
@@ -96,14 +82,24 @@ import {
   EMPTY_FALLBACK_MAPPER,
 } from './planner-constants.js';
 import {
-  hasSensoryPreferenceConstraint,
-  hasOnlySemanticDiscoveryCompatibleHardConstraints,
   hasDirectResolvableAttributeEntity,
   isAbortError,
   applyAmbiguityIntentInterpretation,
   escapeRegex,
   buildDecisionRecord,
 } from './planner-helpers.js';
+import {
+  anchorUsesExactLikeLookup,
+  promoteQueryClassFromConstraintEvidence,
+  mergePairingIntoBundle,
+  promoteIntentFromParsedConstraints,
+  shouldApplyFuzzyAnchorFallback,
+  computeFuzzyFallbackConfidence,
+  deriveExplicitNoMatchOverride,
+  contextualizeConstraintAtoms,
+  shouldStripStrongEntityAnchorFromConstraintParsing,
+  stripDominantAnchorTokens,
+} from './planner-pure-logic.js';
 import {
   determineRoute,
   determineRetrievalMode,
@@ -231,7 +227,7 @@ export class Planner {
         return false;
       }
 
-      if (!this.anchorUsesExactLikeLookup(anchor)) {
+      if (!anchorUsesExactLikeLookup(anchor)) {
         return relativeQuery !== null;
       }
 
@@ -307,11 +303,6 @@ export class Planner {
         this.addGenericSurfacePhrase(surfaces, String(value));
       }
     }
-  }
-
-  private anchorUsesExactLikeLookup(anchor: AnchorCandidate): boolean {
-    return (anchor.lookupStrategies ?? [])
-      .some((strategy) => isExactLikeLookupStrategy(strategy));
   }
 
   private buildLookupVariantSupportCount(
@@ -504,11 +495,11 @@ export class Planner {
       parsed.ambiguousEntityHints,
       ambiguityIntentResult.interpretation,
     );
-    const mergedConstraints = this.mergePairingIntoBundle(
+    const mergedConstraints = mergePairingIntoBundle(
       buildBundleFromAtoms(parsed.reasonerOutput.survivingAtoms),
       normalizedQuery,
     );
-    const parsedIntent = this.promoteIntentFromParsedConstraints(
+    const parsedIntent = promoteIntentFromParsedConstraints(
       intent,
       mergedConstraints,
       allAnchors,
@@ -516,7 +507,7 @@ export class Planner {
     if (
       anchors.length === 0
       && this.fuzzyMatcher !== undefined
-      && this.shouldApplyFuzzyAnchorFallback(
+      && shouldApplyFuzzyAnchorFallback(
         plannerSurfaceNormalized,
         initialClassifiedQueryClass,
         parsedIntent,
@@ -535,7 +526,7 @@ export class Planner {
       }
     }
     const mergedConstraintAtoms = liftBundleToAtoms(mergedConstraints);
-    const roleTypedAtoms = this.contextualizeConstraintAtoms(
+    const roleTypedAtoms = contextualizeConstraintAtoms(
       mergedConstraintAtoms,
       parsedIntent,
     );
@@ -554,7 +545,7 @@ export class Planner {
         relativeQuery,
       )
       : parsedIntent;
-    const effectiveIntent = this.promoteIntentFromParsedConstraints(
+    const effectiveIntent = promoteIntentFromParsedConstraints(
       detectedIntentAfterAnchorSuppression,
       buildBundleFromAtoms(roleTypedAtoms),
       effectiveAnchors,
@@ -577,13 +568,13 @@ export class Planner {
         effectiveAnchors,
       )
       : initialClassifiedQueryClass;
-    const promotedQueryClass = this.promoteQueryClassFromConstraintEvidence(
+    const promotedQueryClass = promoteQueryClassFromConstraintEvidence(
       classifiedQueryClass,
       interpretedAmbiguousHints,
       ambiguityIntentResult.interpretation,
     );
     const constraints = buildBundleFromAtoms(roleTypedAtoms);
-    const noMatchOverride = this.deriveExplicitNoMatchOverride(
+    const noMatchOverride = deriveExplicitNoMatchOverride(
       plannerSurfaceNormalized,
       constraints,
       effectiveAnchors,
@@ -866,27 +857,6 @@ export class Planner {
     }
   }
 
-  private promoteQueryClassFromConstraintEvidence(
-    classifiedQueryClass: QueryClass,
-    ambiguousEntityHints: readonly AmbiguousEntityHint[],
-    interpretation?: AmbiguityIntentInterpretation,
-  ): QueryClass {
-    const queryClassOverride = interpretation?.branchSelections
-      .map((selection) => selection.resolvedQueryClass)
-      .find((queryClass): queryClass is QueryClass => queryClass !== undefined);
-    if (queryClassOverride !== undefined) {
-      return queryClassOverride;
-    }
-
-    if (classifiedQueryClass === 'ambiguous_short_form') {
-      return classifiedQueryClass;
-    }
-
-    return ambiguousEntityHints.some((hint) => hint.explorationBranches.length > 1)
-      ? 'ambiguous_short_form'
-      : classifiedQueryClass;
-  }
-
   private async compileAmbiguityIntent(args: {
     readonly rawQuery: string;
     readonly normalizedQuery: string;
@@ -928,41 +898,6 @@ export class Planner {
     return this.ambiguityIntentCompiler.compile(compilerInput);
   }
 
-  /**
-   * Parses constraints from the normalized query by scanning for known
-   * natural-language phrases via the NLMapper.
-   *
-   * Generates token n-grams (up to {@link MAX_NGRAM_TOKENS} tokens) from the
-   * query and probes each against the mapping table. Matched constraints are
-   * classified as hard (body, sweetness, etc.) or soft (price_band, occasion).
-   */
-  /**
-   * Adds soft `pairing` constraints from the pairing taxonomy when the query
-   * mentions foods or occasions (e.g. salmon → pairing tag for retrieval).
-   */
-  private mergePairingIntoBundle(
-    bundle: ConstraintBundle,
-    normalizedQuery: string,
-  ): ConstraintBundle {
-    const tags = extractAllPairingConstraints(normalizedQuery);
-    if (tags.length === 0) {
-      return bundle;
-    }
-    const extraSoft: NormalizedConstraint[] = [{
-      attribute: 'pairing',
-      operator: 'in',
-      value: [...tags],
-      source_phrase: normalizedQuery,
-      confidence: PAIRING_SOFT_CONSTRAINT_CONFIDENCE,
-      mapping_version: PAIRING_SOFT_CONSTRAINT_MAPPING_VERSION,
-    }];
-    return {
-      hard: bundle.hard,
-      soft: [...bundle.soft, ...extraSoft],
-      inferred: bundle.inferred,
-    };
-  }
-
   private async parseConstraints(
     normalizedQuery: string,
     _intent: QueryIntent,
@@ -984,71 +919,6 @@ export class Planner {
       );
       return this.fallbackConstraintCompiler.compile(normalizedQuery, abortSignal);
     }
-  }
-
-  private promoteIntentFromParsedConstraints(
-    intent: QueryIntent,
-    constraints: ConstraintBundle,
-    anchors: readonly AnchorCandidate[],
-  ): QueryIntent {
-    const hasMeaningfulAnchor = anchors.some(
-      (anchor) => anchor.confidence >= ANCHOR_PRESENT_CONFIDENCE,
-    );
-    if (hasMeaningfulAnchor) {
-      return intent;
-    }
-    if (
-      intent !== 'facet_search'
-      && intent !== 'budget_search'
-      && intent !== 'semantic_discovery'
-    ) {
-      return intent;
-    }
-    if (!hasSensoryPreferenceConstraint(constraints)) {
-      return intent;
-    }
-    if (!hasOnlySemanticDiscoveryCompatibleHardConstraints(constraints)) {
-      return intent;
-    }
-    return 'semantic_discovery';
-  }
-
-  private shouldApplyFuzzyAnchorFallback(
-    normalizedQuery: string,
-    initialClassifiedQueryClass: QueryClass,
-    parsedIntent: QueryIntent,
-    constraints: ConstraintBundle,
-    relativeQuery: AnchorConditionedQuery | null,
-  ): boolean {
-    if (relativeQuery !== null && relativeQuery.relativeExpressions.length > 0) {
-      return true;
-    }
-
-    if (
-      parsedIntent === 'entity_exact'
-      || parsedIntent === 'entity_fuzzy'
-      || parsedIntent === 'comparison_search'
-      || parsedIntent === 'mixed_query'
-    ) {
-      return true;
-    }
-
-    if (
-      constraints.hard.length > 0
-      || constraints.soft.length > 0
-      || constraints.inferred.length > 0
-    ) {
-      return false;
-    }
-
-    if (
-      initialClassifiedQueryClass === 'short_entity'
-      || initialClassifiedQueryClass === 'ambiguous_short_form'
-    ) {
-      return true;
-    }
-
-    return isShortEntityLikeSurface(normalizedQuery);
   }
 
   private async buildFuzzyFallbackAnchors(
@@ -1098,7 +968,7 @@ export class Planner {
         emittedTerms.add(fuzzyTerm);
 
         for (const aliasMatch of aliasMatches) {
-          const confidence = this.computeFuzzyFallbackConfidence(
+          const confidence = computeFuzzyFallbackConfidence(
             aliasMatch,
             fuzzyMatch.editDistance,
             fuzzyMatch.combinedScore,
@@ -1159,86 +1029,6 @@ export class Planner {
     }
   }
 
-  private computeFuzzyFallbackConfidence(
-    aliasMatch: AliasMatchResult,
-    editDistance: number,
-    combinedScore: number,
-  ): number {
-    const editPenaltyFactor = Math.max(
-      FUZZY_ANCHOR_CONFIDENCE_FLOOR,
-      1 - (editDistance * FUZZY_ANCHOR_EDIT_DISTANCE_PENALTY),
-    );
-    const baseConfidence = Math.min(aliasMatch.matchConfidence, combinedScore);
-    return Math.max(
-      FUZZY_ANCHOR_CONFIDENCE_FLOOR,
-      Math.min(1, baseConfidence * editPenaltyFactor),
-    );
-  }
-
-  private deriveExplicitNoMatchOverride(
-    normalizedQuery: string,
-    constraints: ConstraintBundle,
-    anchors: readonly AnchorCandidate[],
-  ): {
-    readonly route: QueryRoute;
-    readonly retrievalMode: RetrievalMode;
-    readonly queryClass: QueryClass;
-  } | undefined {
-    if (anchors.length > 0) {
-      return undefined;
-    }
-    if (
-      constraints.hard.length > 0
-      || constraints.soft.length > 0
-      || constraints.inferred.length > 0
-    ) {
-      return undefined;
-    }
-    if (!EXPLICIT_NO_MATCH_PATTERNS.some((pattern) => pattern.test(normalizedQuery))) {
-      return undefined;
-    }
-    return {
-      route: 'entity',
-      retrievalMode: 'no_match_detection',
-      queryClass: 'unknown',
-    };
-  }
-
-  private contextualizeConstraintAtoms(
-    atoms: readonly ConstraintAtom[],
-    intent: QueryIntent,
-  ): readonly ConstraintAtom[] {
-    const allowsSemanticVarietalPromotion =
-      intent === 'semantic_discovery' || intent === 'pairing_search';
-    const allowsPairingPromotion = intent === 'pairing_search';
-    if (!allowsSemanticVarietalPromotion && !allowsPairingPromotion) {
-      return atoms;
-    }
-
-    return atoms.map((atom) => {
-      const isPositiveVarietalPrior =
-        atom.attribute === 'grape_primary'
-        && (atom.operator === '=' || atom.operator === 'in');
-      const isPositivePairingPrior =
-        atom.attribute === 'pairing'
-        && atom.source_tier === 'soft'
-        && (atom.operator === '=' || atom.operator === 'in');
-      const shouldAllowPromotion =
-        (allowsSemanticVarietalPromotion && isPositiveVarietalPrior)
-        || (allowsPairingPromotion && isPositivePairingPrior);
-      if (!shouldAllowPromotion) {
-        return atom;
-      }
-      return {
-        ...atom,
-        soft_promotion_authority: 'allow',
-        source_tier: 'soft',
-        conflict_policy: 'prefer',
-        constraint_role: 'prefer',
-      };
-    });
-  }
-
   private buildConstraintParsingQuery(
     normalizedQuery: string,
     anchors: readonly AnchorCandidate[],
@@ -1288,122 +1078,11 @@ export class Planner {
       }
     }
 
-    if (this.shouldStripStrongEntityAnchorFromConstraintParsing(intent, anchors)) {
-      sanitizedQuery = this.stripDominantAnchorTokens(sanitizedQuery, matchedAnchorForms, intent);
+    if (shouldStripStrongEntityAnchorFromConstraintParsing(intent, anchors)) {
+      sanitizedQuery = stripDominantAnchorTokens(sanitizedQuery, matchedAnchorForms, intent);
     }
 
     return sanitizedQuery.replace(/\s+/gu, ' ').trim();
-  }
-
-  private shouldStripStrongEntityAnchorFromConstraintParsing(
-    intent: QueryIntent,
-    anchors: readonly AnchorCandidate[],
-  ): boolean {
-    if (intent !== 'entity_exact' && intent !== 'mixed_query') {
-      return false;
-    }
-
-    const strongAnchors = anchors.filter((anchor) => anchor.confidence >= EXACT_ANCHOR_CONFIDENCE);
-    if (strongAnchors.length === 0) {
-      return false;
-    }
-
-    const uniqueStrongEntityCount = new Set(
-      strongAnchors.flatMap((anchor) => anchor.candidateEntityIds.map(String)),
-    ).size;
-    return uniqueStrongEntityCount === 1;
-  }
-
-  private stripDominantAnchorTokens(
-    normalizedQuery: string,
-    anchorForms: ReadonlySet<string>,
-    intent: QueryIntent,
-  ): string {
-    const queryTokens = normalizedQuery
-      .trim()
-      .split(/\s+/u)
-      .map((token) => token.trim())
-      .filter((token) => token.length > 0);
-    if (queryTokens.length === 0) {
-      return normalizedQuery;
-    }
-
-    const dominantAnchorTokens = this.selectDominantAnchorTokenSequence(queryTokens, anchorForms);
-    if (dominantAnchorTokens.length === 0) {
-      return normalizedQuery;
-    }
-
-    if (
-      intent === 'mixed_query'
-      && dominantAnchorTokens.length === queryTokens.length
-    ) {
-      return normalizedQuery;
-    }
-
-    const remainingCounts = new Map<string, number>();
-    for (const token of dominantAnchorTokens) {
-      remainingCounts.set(token, (remainingCounts.get(token) ?? 0) + 1);
-    }
-
-    const retainedTokens: string[] = [];
-    for (const token of queryTokens) {
-      const count = remainingCounts.get(token) ?? 0;
-      if (count > 0) {
-        remainingCounts.set(token, count - 1);
-        continue;
-      }
-      retainedTokens.push(token);
-    }
-
-    return retainedTokens.join(' ');
-  }
-
-  private selectDominantAnchorTokenSequence(
-    queryTokens: readonly string[],
-    anchorForms: ReadonlySet<string>,
-  ): readonly string[] {
-    const queryCounts = new Map<string, number>();
-    for (const token of queryTokens) {
-      queryCounts.set(token, (queryCounts.get(token) ?? 0) + 1);
-    }
-
-    let bestTokens: readonly string[] = [];
-    for (const form of anchorForms) {
-      const tokens = form
-        .split(/\s+/u)
-        .map((token) => token.trim())
-        .filter((token) => token.length > 0);
-      if (tokens.length === 0 || !this.isTokenMultisetCovered(tokens, queryCounts)) {
-        continue;
-      }
-
-      if (
-        tokens.length > bestTokens.length ||
-        (tokens.length === bestTokens.length && form.length > bestTokens.join(' ').length)
-      ) {
-        bestTokens = tokens;
-      }
-    }
-
-    return bestTokens;
-  }
-
-  private isTokenMultisetCovered(
-    candidateTokens: readonly string[],
-    queryCounts: ReadonlyMap<string, number>,
-  ): boolean {
-    const requiredCounts = new Map<string, number>();
-    for (const token of candidateTokens) {
-      requiredCounts.set(token, (requiredCounts.get(token) ?? 0) + 1);
-    }
-
-    for (const [token, requiredCount] of requiredCounts) {
-      if ((queryCounts.get(token) ?? 0) < requiredCount) {
-        return false;
-      }
-    }
-
-    return true;
   }
 
   /**
