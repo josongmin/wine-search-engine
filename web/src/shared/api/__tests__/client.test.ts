@@ -30,7 +30,7 @@ describe('api client', () => {
   }
 
   describe('search', () => {
-    it('sends POST to /v1/search with body', async () => {
+    it('sends POST to /v1/search/hybrid with body', async () => {
       const mockResponse = { query_type: 'search', results: [] };
       mockFetch({ ok: true, status: 200 }, mockResponse);
 
@@ -38,7 +38,7 @@ describe('api client', () => {
       expect(result).toEqual(mockResponse);
 
       const [url, options] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
-      expect(url).toContain('/v1/search');
+      expect(url).toContain('/v1/search/hybrid');
       expect(options.method).toBe('POST');
       expect(JSON.parse(options.body)).toEqual({ query: 'red wine' });
     });
@@ -133,7 +133,9 @@ describe('api client', () => {
         },
       );
 
-      const res = await api.wineSearch.execute({ query: '레드 와인 추천해줘' });
+      const res = await api.wineSearch.execute({
+        messages: [{ role: 'user', content: '레드 와인 추천해줘' }],
+      });
       expect(res.query_type).toBe('wine_search');
       expect(res.meta.intent).toBe('search');
       expect(res.meta.plan_kind).toBe('single-search');
@@ -142,7 +144,9 @@ describe('api client', () => {
       const [url, options] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(String(url)).toContain('/v1/agent');
       expect(options.method).toBe('POST');
-      expect(JSON.parse(options.body)).toEqual({ query: '레드 와인 추천해줘' });
+      expect(JSON.parse(options.body)).toEqual({
+        messages: [{ role: 'user', content: '레드 와인 추천해줘' }],
+      });
     });
 
     it('forwards options.max_steps in the request body', async () => {
@@ -169,9 +173,15 @@ describe('api client', () => {
         },
       );
 
-      await api.wineSearch.execute({ query: 'x', options: { max_steps: 7 } });
+      await api.wineSearch.execute({
+        messages: [{ role: 'user', content: 'x' }],
+        options: { max_steps: 7 },
+      });
       const [, options] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
-      expect(JSON.parse(options.body)).toEqual({ query: 'x', options: { max_steps: 7 } });
+      expect(JSON.parse(options.body)).toEqual({
+        messages: [{ role: 'user', content: 'x' }],
+        options: { max_steps: 7 },
+      });
     });
 
     it('throws ApiError on non-OK wine-search response', async () => {
@@ -180,12 +190,80 @@ describe('api client', () => {
         { error: { code: 'VALIDATION', message: 'query empty', retryable: false } },
       );
       try {
-        await api.wineSearch.execute({ query: '' });
+        await api.wineSearch.execute({ messages: [{ role: 'user', content: '' }] });
       } catch (e) {
         const err = e as ApiError;
         expect(err.status).toBe(400);
         expect(err.code).toBe('VALIDATION');
       }
+    });
+  });
+
+  describe('agent.sessions', () => {
+    it('create sends POST to /v1/agent/sessions', async () => {
+      mockFetch(
+        { ok: true, status: 201 },
+        {
+          session: {
+            session_id: 'sess-1',
+            session_version: 0,
+            created_at: '2026-05-30T00:00:00Z',
+            updated_at: '2026-05-30T00:00:00Z',
+            expires_at: '2026-05-31T00:00:00Z',
+          },
+          replayed: false,
+        },
+      );
+
+      const res = await api.agent.sessions.create({ client_session_id: 'cs-1' });
+      expect(res.session.session_id).toBe('sess-1');
+      expect(res.replayed).toBe(false);
+
+      const [url, options] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(String(url)).toContain('/v1/agent/sessions');
+      expect(options.method).toBe('POST');
+      expect(JSON.parse(options.body)).toEqual({ client_session_id: 'cs-1' });
+    });
+
+    it('turn sends POST to /v1/agent/sessions/:id/turns with the new turn messages', async () => {
+      mockFetch(
+        { ok: true, status: 201 },
+        {
+          query_type: 'wine_search',
+          answer: '추천 결과',
+          execution: { steps: [], tool_call_count: 0 },
+          meta: {
+            request_id: 'r3',
+            total_duration_ms: 1,
+            total_tokens: { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0 },
+            intent: 'search',
+            plan_kind: 'single-search',
+            termination: { reason: 'answer', layer: 'primary' },
+            policy_blocked: false,
+          },
+          session: { session_id: 'sess-1', session_version: 1, created_at: 'x', updated_at: 'x', expires_at: 'x' },
+          turn: { turn_index: 0, client_turn_id: 'turn-1', created_at: 'x', replayed: false },
+          history_applied: [{ role: 'user', content: '레드 와인' }],
+        },
+      );
+
+      const res = await api.agent.sessions.turn('sess-1', {
+        client_turn_id: 'turn-1',
+        messages: [{ role: 'user', content: '레드 와인' }],
+        expected_session_version: 0,
+      });
+      expect(res.session.session_version).toBe(1);
+      expect(res.turn.turn_index).toBe(0);
+      expect(res.history_applied).toHaveLength(1);
+
+      const [url, options] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(String(url)).toContain('/v1/agent/sessions/sess-1/turns');
+      expect(options.method).toBe('POST');
+      expect(JSON.parse(options.body)).toEqual({
+        client_turn_id: 'turn-1',
+        messages: [{ role: 'user', content: '레드 와인' }],
+        expected_session_version: 0,
+      });
     });
   });
 

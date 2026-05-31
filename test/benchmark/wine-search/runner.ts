@@ -269,17 +269,21 @@ async function executeScenario(
       10,
     );
     const result = await orchestrator.execute({
-      query: scenario.query,
+      // T-MTA-01: messages-native — the bench scenario's single query is the
+      // anchor user message.
+      messages: [{ role: 'user', content: scenario.query }],
       requestId,
-      ...(scenario.expectation.maxSteps !== undefined
-        ? { maxSteps: scenario.expectation.maxSteps }
-        : {}),
-      ...(scenario.expectation.maxTotalTokens !== undefined
-        ? { maxTotalTokens: scenario.expectation.maxTotalTokens }
-        : {}),
-      ...(Number.isFinite(perStepTimeoutMs) && perStepTimeoutMs > 0
-        ? { perStepTimeoutMs }
-        : {}),
+      options: {
+        ...(scenario.expectation.maxSteps !== undefined
+          ? { maxSteps: scenario.expectation.maxSteps }
+          : {}),
+        ...(scenario.expectation.maxTotalTokens !== undefined
+          ? { maxTotalTokens: scenario.expectation.maxTotalTokens }
+          : {}),
+        ...(Number.isFinite(perStepTimeoutMs) && perStepTimeoutMs > 0
+          ? { perStepTimeoutMs }
+          : {}),
+      },
     });
     const projection = wineSearchResultToScenarioExecution(result);
     // ScenarioExecutionLike is structurally a ScenarioExecution superset

@@ -283,7 +283,7 @@ function parseDrinkingWindowFromObs(
   obsText: string,
   expected: 'now' | 'hold' | 'past',
 ): boolean | null {
-  // Strategy 1: exact status phrases from check_drinking_window output
+  // Strategy 1: exact status phrases from an explicit drinking-window result
   const STATUS_PHRASES: Record<string, RegExp> = {
     now: /currently drinkable/i,
     hold: /not yet at peak|hold until/i,

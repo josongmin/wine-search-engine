@@ -5,7 +5,7 @@ import { makeScenario, makeExecution } from './__helpers__/scorer-test-helpers.j
 describe('step-0 fallback exemption (LLM unavailable — infra failure)', () => {
   it('step-0 fallback with expected tool → toolAccuracy=1 (not penalized)', () => {
     const r = scoreScenario(
-      makeScenario({ maxSteps: 2, tools: [{ tool: 'search_wines' }] }),
+      makeScenario({ maxSteps: 2, tools: [{ tool: 'search_hybrid' }] }),
       makeExecution({ stepCount: 0, toolsUsed: [], toolCallCount: 0, terminationReason: 'fallback' }),
       undefined,
     );
@@ -29,7 +29,7 @@ describe('step-0 fallback exemption (LLM unavailable — infra failure)', () => 
 
   it('step-0 fallback with mustNotCallTools → still checks (security gate must not be bypassed)', () => {
     const r = scoreScenario(
-      makeScenario({ maxSteps: 1, mustNotCallTools: ['search_wines'] }),
+      makeScenario({ maxSteps: 1, mustNotCallTools: ['search_hybrid'] }),
       makeExecution({ stepCount: 0, toolsUsed: [], terminationReason: 'fallback' }),
       undefined,
     );
@@ -51,7 +51,7 @@ describe('step-0 fallback exemption (LLM unavailable — infra failure)', () => 
 
   it('step-1 fallback (agent ran) → tool accuracy scored normally (missing tool IS penalized)', () => {
     const r = scoreScenario(
-      makeScenario({ maxSteps: 2, tools: [{ tool: 'search_wines' }] }),
+      makeScenario({ maxSteps: 2, tools: [{ tool: 'search_hybrid' }] }),
       makeExecution({ stepCount: 1, toolsUsed: [], toolCallCount: 0, terminationReason: 'fallback' }),
       undefined,
     );

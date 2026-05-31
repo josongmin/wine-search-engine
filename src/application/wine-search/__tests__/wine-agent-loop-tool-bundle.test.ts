@@ -124,9 +124,22 @@ describe('SEARCH_HYBRID_TOOL_DEF', () => {
       styles: ['approachable', 'presentation_forward'],
       vintage_min: 2020,
       vintage_max: 2022,
-      retrieval_mode: 'hybrid',
     });
     expect(parsed.success).toBe(true);
+  });
+
+  it('rejects retrieval selector knobs because the path already selects the primitive lane', () => {
+    const retrievalMode = SEARCH_HYBRID_TOOL_DEF.inputSchema.safeParse({
+      query: 'gift wine',
+      retrieval_mode: 'hybrid',
+    });
+    expect(retrievalMode.success).toBe(false);
+
+    const mode = SEARCH_HYBRID_TOOL_DEF.inputSchema.safeParse({
+      query: 'gift wine',
+      mode: 'hybrid',
+    });
+    expect(mode.success).toBe(false);
   });
 
   it('rejects empty query', () => {

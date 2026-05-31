@@ -321,6 +321,7 @@ function makeInput(overrides: Partial<WineAgentLoopInput> & { readonly analysis?
     maxOutputTokens: overrides.maxOutputTokens ?? WINE_AGENT_LOOP_DEFAULT_MAX_OUTPUT_TOKENS,
     perToolCap: overrides.perToolCap ?? WINE_AGENT_LOOP_DEFAULT_PER_TOOL_CAP,
     ...(overrides.initialDirective !== undefined ? { initialDirective: overrides.initialDirective } : {}),
+    ...(overrides.priorHistory !== undefined ? { priorHistory: overrides.priorHistory } : {}),
     ...(overrides.abortSignal !== undefined ? { abortSignal: overrides.abortSignal } : {}),
   };
 }
@@ -422,7 +423,9 @@ describe('WineAgentLoopRunner — required tool directive', () => {
     expect(searchPort.executeMock).toHaveBeenCalledTimes(1);
     expect(searchPort.executeMock.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
       query: expect.stringContaining('wine pairing for spicy Korean BBQ'),
+      retrievalLane: 'hybrid',
     }));
+    expect(searchPort.executeMock.mock.calls[0]?.[0]).not.toHaveProperty('mode');
   });
 });
 
@@ -825,5 +828,79 @@ describe('computeNextDirective (pure function)', () => {
       selectDirectiveCopy(false),
     );
     expect(out).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T-MTA-01 — prior conversation history is seeded into the planner
+// ---------------------------------------------------------------------------
+
+describe('WineAgentLoopRunner — multi-turn priorHistory (T-MTA-01)', () => {
+  it('seeds priorHistory BEFORE the anchor query in the first LLM call', async () => {
+    const llm = makeStubLlm([
+      async () => asTextResult('Grounded answer from full context.'),
+    ]);
+    const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
+    await runner.run(
+      makeInput({
+        query: 'Something under $50 instead',
+        priorHistory: [
+          { role: 'user', content: 'Recommend a Burgundy Pinot Noir' },
+          { role: 'assistant', content: 'How about a Gevrey-Chambertin?' },
+        ],
+      }),
+    );
+
+    const firstCall = llm.executeMock.mock.calls[0]?.[0] as { messages: { role: string; content: string }[] };
+    // The planner sees the real conversation: prior turns first, then anchor.
+    expect(firstCall.messages.map((m) => m.content)).toEqual([
+      'Recommend a Burgundy Pinot Noir',
+      'How about a Gevrey-Chambertin?',
+      'Something under $50 instead',
+    ]);
+    expect(firstCall.messages[firstCall.messages.length - 1]).toEqual({
+      role: 'user',
+      content: 'Something under $50 instead',
+    });
+  });
+
+  it('a fresh single-turn run (no priorHistory) seeds only the anchor', async () => {
+    const llm = makeStubLlm([async () => asTextResult('Answer.')]);
+    const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
+    await runner.run(makeInput({ query: 'recommend a Napa Cabernet' }));
+    const firstCall = llm.executeMock.mock.calls[0]?.[0] as { messages: { role: string; content: string }[] };
+    expect(firstCall.messages).toEqual([{ role: 'user', content: 'recommend a Napa Cabernet' }]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T-MTA-07 fix — history trim must never evict the anchor (current query)
+// ---------------------------------------------------------------------------
+
+describe('WineAgentLoopRunner — trim preserves the anchor under overflow (T-MTA-07)', () => {
+  it('keeps the anchor user query in the LLM history even when a huge prior message pins the head', async () => {
+    // priorHistory[0] is huge (> WINE_AGENT_LOOP_MAX_HISTORY_CHARS) and is the
+    // pinned head; a naive "drop from index 1 to end" trim would walk past the
+    // anchor and evict it. The fix retains the anchor explicitly.
+    const huge = 'X'.repeat(13_000);
+    const llm = makeStubLlm([
+      async () => asToolUseResult([toolUse('search_hybrid', { query: 'q' })]),
+      async () => asTextResult('final answer based on the anchor.'),
+    ]);
+    const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
+    await runner.run(
+      makeInput({
+        query: 'ANCHOR-QUERY-UNIQUE',
+        priorHistory: [
+          { role: 'user', content: huge },
+          { role: 'assistant', content: 'older context' },
+        ],
+      }),
+    );
+
+    // The SECOND LLM call happens AFTER trimHistoryInPlace ran (post step 0).
+    const secondCall = llm.executeMock.mock.calls[1]?.[0] as { messages: { content: string }[] };
+    const contents = secondCall.messages.map((m) => m.content);
+    expect(contents).toContain('ANCHOR-QUERY-UNIQUE');
   });
 });

@@ -117,11 +117,15 @@ const CASCADE_MEDIUM_ANCHOR_CONFIDENCE = 0.8;
  *  effectiveConstraintComplexity. See block comment above for derivation. */
 const LOG_FACTOR = 0.7;
 
-/** effectiveConstraintComplexity strictly below this threshold → 'easy'
- *  is the cap for OR-heavy / no-AND queries. Calibrated so a query with
- *  0 AND constraints and any non-trivial OR alternatives (log term
- *  pulls the score below zero) routes easy. */
-const CASCADE_EASY_THRESHOLD = 1.0;
+// NOTE: there is intentionally no live CASCADE_EASY_THRESHOLD constant.
+// An 'easy' (sparse-only) graph-aware route was prototyped (W4) but removed
+// because it (a) dropped dense recall for andDepth=0 constraint queries with
+// no recall justification and (b) was unreachable in prod — the only prod
+// caller (candidate-pool.ts getDispatchDecision) never passes `graph`, so the
+// graph-aware branch never runs. Below-hard graph queries route 'medium'
+// (sparse + dense). If a graph-gated sparse-only fast path is reintroduced
+// later, restore the threshold const here AND validate it against a recall
+// benchmark before wiring `graph` into the prod caller.
 
 /** effectiveConstraintComplexity at or above this threshold → 'hard'.
  *  Calibrated against the legacy `constraintCount > 3` cutoff: with
@@ -265,18 +269,12 @@ export class CascadeRouter {
       if (queryClass === 'unknown') {
         return 'hard';
       }
-      if (analysis.andDepth === 0 && analysis.effectiveComplexity < CASCADE_EASY_THRESHOLD) {
-        // Pure-OR / zero-AND-depth queries: the candidate set WIDENS
-        // (alternatives expand recall rather than collapse it) and there is no
-        // required AND constraint to satisfy, so the documented cascade design
-        // routes these 'easy' = sparse-only. The dominant hard cases
-        // (anchored_similarity, semantic_preference, comparison_query,
-        // ambiguous_short_form, unknown) are short-circuited above this graph
-        // branch. A query with any AND-depth (e.g. "(Cabernet OR Merlot) AND
-        // under-50") keeps a required attribute and stays 'medium' so dense
-        // recall is preserved for the AND leg.
-        return 'easy';
-      }
+      // Below CASCADE_HARD_THRESHOLD (OR-heavy / few-AND queries) → 'medium':
+      // sparse + dense. Dense recall is deliberately KEPT even for pure-OR /
+      // andDepth=0 queries — see the CASCADE_EASY_THRESHOLD removal note near
+      // CASCADE_HARD_THRESHOLD for why the 'easy' (sparse-only) graph route was
+      // dropped. The 'easy' difficulty (getPhases('easy')) therefore has no
+      // live prod entry point today.
       return 'medium';
     }
 

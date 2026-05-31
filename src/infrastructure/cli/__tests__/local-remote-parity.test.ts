@@ -2,12 +2,30 @@ import { describe, expect, it } from 'vitest';
 
 import { LocalSearchFacade } from '../local/local-search-facade.js';
 import { RemoteSearchFacade } from '../remote/remote-search-facade.js';
-import { LocalWineSearchFacade } from '../local/local-wine-search-facade.js';
-import { RemoteWineSearchFacade } from '../remote/remote-wine-search-facade.js';
+import { LocalAgentFacade } from '../local/local-agent-facade.js';
+import { RemoteAgentFacade } from '../remote/remote-agent-facade.js';
 import type { ResolvedCliProfile } from '../../../application/cli/context/cli-profile.js';
 import { deepKeysToSnake } from '../../../interface/http/middleware/snake-case-hook.js';
-import { mapWineSearchResultToResponse } from '../../../interface/http/routes/wine-search-response-mapper.js';
-import type { WineSearchResult } from '../../../application/wine-search/wine-search-orchestrator.js';
+import {
+  mapWineSearchResultToResponse,
+  buildSessionDescriptor,
+  buildTurnResponse,
+} from '../../../application/wine-search/presentation/agent-presentation.js';
+import type { WineSearchResult, WineSearchOrchestratorContract } from '../../../application/wine-search/wine-search-orchestrator.js';
+import { AgentUseCase } from '../../../application/wine-search/agent-usecase.js';
+import type { AgentSessionService } from '../../../application/wine-search/agent-session-service.js';
+
+/** Wrap mocked deps in a real AgentUseCase — the facade only sees the use-case
+ *  seam, so parity must be proven through it. */
+function makeUseCase(
+  execute: (input: Record<string, unknown>) => Promise<unknown>,
+  sessionService?: unknown,
+): AgentUseCase {
+  return new AgentUseCase({
+    orchestrator: { execute } as unknown as WineSearchOrchestratorContract,
+    ...(sessionService !== undefined ? { sessionService: sessionService as AgentSessionService } : {}),
+  });
+}
 
 const REMOTE_PROFILE: ResolvedCliProfile = {
   name: 'parity-test',
@@ -32,8 +50,8 @@ function makeFakeFetch(wirePayload: unknown): {
   return { fetchImpl, calls };
 }
 
-describe('search.run local↔remote parity', () => {
-  it('emits identical wire JSON from local container + remote HTTP for /v1/search', async () => {
+describe('search.hybrid local↔remote parity', () => {
+  it('emits identical wire JSON from local container + remote HTTP for /v1/search/hybrid', async () => {
     const domainPayload = {
       queryType: 'search',
       engineDecision: { runtimeCorrelationRef: 'runtime-1' },
@@ -52,16 +70,16 @@ describe('search.run local↔remote parity', () => {
         } as never),
     });
 
-    const localOut = await local.run(
-      { query: 'opus one 2018', retrievalMode: 'entity' },
+    const localOut = await local.hybrid(
+      { query: 'opus one 2018' },
       { requestId: 'req-1' },
     );
 
     const { fetchImpl, calls } = makeFakeFetch(expectedWire);
     const remote = new RemoteSearchFacade(REMOTE_PROFILE, { fetchImpl });
 
-    const remoteOut = await remote.run(
-      { query: 'opus one 2018', retrievalMode: 'entity' },
+    const remoteOut = await remote.hybrid(
+      { query: 'opus one 2018' },
       { requestId: 'req-1' },
     );
 
@@ -69,11 +87,11 @@ describe('search.run local↔remote parity', () => {
     expect(remoteOut).toEqual(expectedWire);
     expect(localOut).toEqual(remoteOut);
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.input).toBe('https://api.example.com/v1/search');
+    expect(calls[0]?.input).toBe('https://api.example.com/v1/search/hybrid');
   });
 });
 
-describe('wine-search.run local↔remote parity', () => {
+describe('agent.run local↔remote parity', () => {
   it('emits identical wire JSON from local container + remote HTTP for /v1/agent', async () => {
     const orchestratorResult = {
       answer: 'A representative wine answer.',
@@ -103,27 +121,23 @@ describe('wine-search.run local↔remote parity', () => {
     } as unknown as WineSearchResult;
     const expectedWire = mapWineSearchResultToResponse(orchestratorResult, 'req-1');
 
-    const local = new LocalWineSearchFacade({
+    const local = new LocalAgentFacade({
       withContainer: async (work) =>
         await work({
-          wineSearch: {
-            wineSearchOrchestrator: {
-              execute: async () => orchestratorResult,
-            },
-          },
+          wineSearch: { agentUseCase: makeUseCase(async () => orchestratorResult) },
         } as never),
     });
 
     const localOut = await local.run(
-      { query: 'a complex wine search question' },
+      { messages: [{ role: 'user', content: 'a complex wine search question' }] },
       { requestId: 'req-1' },
     );
 
     const { fetchImpl, calls } = makeFakeFetch(expectedWire);
-    const remote = new RemoteWineSearchFacade(REMOTE_PROFILE, { fetchImpl });
+    const remote = new RemoteAgentFacade(REMOTE_PROFILE, { fetchImpl });
 
     const remoteOut = await remote.run(
-      { query: 'a complex wine search question' },
+      { messages: [{ role: 'user', content: 'a complex wine search question' }] },
       { requestId: 'req-1' },
     );
 
@@ -132,5 +146,102 @@ describe('wine-search.run local↔remote parity', () => {
     expect(localOut).toEqual(remoteOut);
     expect(calls).toHaveLength(1);
     expect(calls[0]?.input).toBe('https://api.example.com/v1/agent');
+  });
+});
+
+describe('agent.session local↔remote parity (T-MTA-05)', () => {
+  const NOW = new Date('2026-05-30T00:00:00Z');
+  const sessionRecord = {
+    sessionId: 'sess-1',
+    sessionVersion: 0,
+    turns: [],
+    createdAt: NOW,
+    updatedAt: NOW,
+    expiresAt: NOW,
+  };
+
+  it('start: identical create wire JSON from local service + remote HTTP for /v1/agent/sessions', async () => {
+    const expectedWire = { session: buildSessionDescriptor(sessionRecord as never), replayed: false };
+
+    const local = new LocalAgentFacade({
+      withContainer: async (work) =>
+        await work({
+          wineSearch: {
+            agentUseCase: makeUseCase(async () => ({}), {
+              createSession: async () => ({ kind: 'created', session: sessionRecord }),
+            }),
+          },
+        } as never),
+    });
+    const localOut = await local.startSession({ clientSessionId: 'cs-1' }, { requestId: 'req-1' });
+
+    const { fetchImpl, calls } = makeFakeFetch(expectedWire);
+    const remote = new RemoteAgentFacade(REMOTE_PROFILE, { fetchImpl });
+    const remoteOut = await remote.startSession({ clientSessionId: 'cs-1' }, { requestId: 'req-1' });
+
+    expect(localOut).toEqual(expectedWire);
+    expect(remoteOut).toEqual(expectedWire);
+    expect(localOut).toEqual(remoteOut);
+    expect(calls[0]?.input).toBe('https://api.example.com/v1/agent/sessions');
+  });
+
+  it('turn: identical turn wire JSON from local service + remote HTTP for /turns', async () => {
+    const result = {
+      answer: 'A representative wine answer.',
+      layer: 'primary',
+      groundedOnToolResults: true,
+      toolOutcomes: [],
+      executionSteps: [],
+      toolCallCount: 0,
+      tokenUsage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0 },
+      totalDurationMs: 1,
+      terminationReason: 'answer',
+      policyBlocked: false,
+      intent: 'general_search',
+      planKind: 'single',
+    } as unknown as WineSearchResult;
+    const session = { ...sessionRecord, sessionVersion: 1 };
+    const turn = {
+      turnIndex: 0,
+      clientTurnId: 'turn-1',
+      messages: [{ role: 'user' as const, content: 'q' }],
+      historyApplied: [{ role: 'user' as const, content: 'q' }],
+      result,
+      toolTraceSummary: [],
+      createdAt: NOW,
+    };
+    const expectedWire = buildTurnResponse(
+      mapWineSearchResultToResponse(result, 'req-1'),
+      session as never,
+      turn as never,
+      false,
+    );
+
+    const local = new LocalAgentFacade({
+      withContainer: async (work) =>
+        await work({
+          wineSearch: {
+            agentUseCase: makeUseCase(async () => ({}), {
+              runTurn: async () => ({ kind: 'appended', session, turn, result, replayed: false }),
+            }),
+          },
+        } as never),
+    });
+    const localOut = await local.turnSession(
+      { sessionId: 'sess-1', clientTurnId: 'turn-1', messages: [{ role: 'user', content: 'q' }] },
+      { requestId: 'req-1' },
+    );
+
+    const { fetchImpl, calls } = makeFakeFetch(expectedWire);
+    const remote = new RemoteAgentFacade(REMOTE_PROFILE, { fetchImpl });
+    const remoteOut = await remote.turnSession(
+      { sessionId: 'sess-1', clientTurnId: 'turn-1', messages: [{ role: 'user', content: 'q' }] },
+      { requestId: 'req-1' },
+    );
+
+    expect(localOut).toEqual(expectedWire);
+    expect(remoteOut).toEqual(expectedWire);
+    expect(localOut).toEqual(remoteOut);
+    expect(calls[0]?.input).toBe('https://api.example.com/v1/agent/sessions/sess-1/turns');
   });
 });

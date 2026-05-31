@@ -38,7 +38,6 @@ import { SearchUseCaseAdapter } from '../../../src/application/wine-search/adapt
 import { WineSearchOrchestrator } from '../../../src/application/wine-search/wine-search-orchestrator.js';
 import type { OrchestratorWineAgentLoopToolBundle } from '../../../src/application/wine-search/wine-search-orchestrator.js';
 import type { QueryAnalyzerService } from '../../../src/application/wine-search/query-analyzer.js';
-import type { WineSearchRouteDeps } from '../../../src/interface/http/routes/wine-search.route.js';
 import { errorHandler } from '../../../src/interface/http/middleware/error-handler.js';
 import { registerRequestContext } from '../../../src/interface/http/middleware/request-context.js';
 import Fastify from 'fastify';
@@ -228,9 +227,6 @@ export async function buildAppWithoutWineSearch(): Promise<{
     cleanup: async () => { await app.close(); },
   };
 }
-
-// Re-export the route deps type so test files can spy on its shape if needed.
-export type { WineSearchRouteDeps };
 
 // ---------------------------------------------------------------------------
 // Convenience stub builders — bypass the pre-existing runtime bug in

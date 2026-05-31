@@ -22,6 +22,8 @@ import { verifySemanticBatch } from './claim-verifier-semantic.js';
 
 export type { EvidenceRecord } from './claim-verifier-deterministic.js';
 
+const DEFAULT_EVIDENCE_SOURCE_TOOL = 'search_hybrid' as const;
+
 /**
  * Route and verify all claims against evidence.
  *
@@ -308,7 +310,7 @@ function comparativeAnchorSource(evidence: EvidenceRecord): FieldAnchor['source'
       toolName,
     };
   }
-  return { type: 'tool_observation', stepIndex: 0, toolName: 'search_wines' };
+  return { type: 'tool_observation', stepIndex: 0, toolName: DEFAULT_EVIDENCE_SOURCE_TOOL };
 }
 
 const SEMANTIC_ANCHOR_FIELDS: readonly WineField[] = [
@@ -408,5 +410,5 @@ function semanticAnchorSource(evidence: EvidenceRecord): FieldAnchor['source'] {
       toolName,
     };
   }
-  return { type: 'tool_observation', stepIndex: 0, toolName: 'search_wines' };
+  return { type: 'tool_observation', stepIndex: 0, toolName: DEFAULT_EVIDENCE_SOURCE_TOOL };
 }

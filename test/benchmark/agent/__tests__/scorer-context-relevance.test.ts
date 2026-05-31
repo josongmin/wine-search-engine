@@ -174,7 +174,7 @@ describe('RAGAS Context Relevance', () => {
         expectedEntities: [{ surface: '바롤로', canonical: 'Barolo', type: 'appellation' }],
       }),
       makeExecution({
-        toolsUsed: [tool('search_wines', '{"query":"바롤로"}')],
+        toolsUsed: [tool('search_hybrid', '{"query":"바롤로"}')],
         observations: ['Found: Barolo 2018 | appellation: Barolo | producer: Benchmark Winery'],
       }),
       undefined,
@@ -189,7 +189,7 @@ describe('RAGAS Context Relevance', () => {
         expectedEntities: [{ surface: '레드', canonical: 'red', type: 'wine_type' }],
       }),
       makeExecution({
-        toolsUsed: [tool('search_wines', '{"query":"레드 와인 추천"}')],
+        toolsUsed: [tool('search_hybrid', '{"query":"레드 와인 추천"}')],
         observations: [
           'Found 1 result\nGROUNDING_JSON: {"query_type":"search","total_results":1,"wines":[{"entity_id":"red-1","canonical_label":"Benchmark Red","wine_type":"red","style":"red"}]}',
         ],
@@ -206,7 +206,7 @@ describe('RAGAS Context Relevance', () => {
         expectedEntities: [{ surface: '바롤로', canonical: 'Barolo', type: 'appellation' }],
       }),
       makeExecution({
-        toolsUsed: [tool('search_wines', '{"query":"바롤로","wine_type":"red"}')],
+        toolsUsed: [tool('search_hybrid', '{"query":"바롤로","wine_type":"red"}')],
         observations: [
           'Found 1 result\nGROUNDING_JSON: {"query_type":"search","total_results":1,"wines":[{"entity_id":"random-red-1","canonical_label":"Random Red Wine","wine_type":"red","style":"red","producer":"Benchmark Winery"}]}',
         ],
@@ -232,7 +232,7 @@ describe('RAGAS Context Relevance', () => {
         ],
       }),
       makeExecution({
-        toolsUsed: [tool('search_wines', '{"query":"이탈리아 레드 평점 좋고 지금 마실 수 있는"}')],
+        toolsUsed: [tool('search_hybrid', '{"query":"이탈리아 레드 평점 좋고 지금 마실 수 있는"}')],
         observations: ['Found 5 results: 1. Barolo 2018 (id: wine-001) | producer: Giacomo Conterno | region: Piedmont, Italy | grapes: Nebbiolo | price: 80000-120000'],
       }),
       undefined,
@@ -267,7 +267,7 @@ describe('RAGAS Context Relevance', () => {
       makeScenario({ maxSteps: 5 }),
       makeExecution({
         toolsUsed: [
-          tool('search_wines', '{"query":"달달하고 도수 낮은 선물용","styles":["sweet"],"max_alcohol_pct":12}'),
+          tool('search_hybrid', '{"query":"달달하고 도수 낮은 선물용","styles":["sweet"],"max_alcohol_pct":12}'),
         ],
         observations: [
           'Found 1 result\nGROUNDING_JSON: {"query_type":"search","total_results":1,"wines":[{"entity_id":"sweet-1","canonical_label":"Sweet Dessert Wine","wine_type":"dessert","style":"sweet","sweetness":0.9}]}',
@@ -287,7 +287,7 @@ describe('RAGAS Context Relevance', () => {
         expectedEntities: [{ surface: '바롤로', canonical: 'Barolo', type: 'appellation' }],
       }),
       makeExecution({
-        toolsUsed: [tool('search_wines', '{"query":"바롤로","wine_type":"red"}')],
+        toolsUsed: [tool('search_hybrid', '{"query":"바롤로","wine_type":"red"}')],
         observations: [
           'Found 1 result\nGROUNDING_JSON: {"query_type":"search","total_results":1,"wines":[{"entity_id":"barolo-2018","canonical_label":"Benchmark Barolo 2018","appellation":"Barolo","wine_type":"red","style":"red","producer":"Benchmark Winery"}]}',
         ],
@@ -326,7 +326,7 @@ describe('RAGAS Context Relevance', () => {
       }),
       makeExecution({
         toolsUsed: [
-          tool('search_wines', '{"query":"바롤로","wine_type":"red","country":"Italy","styles":["dry"]}'),
+          tool('search_hybrid', '{"query":"바롤로","wine_type":"red","country":"Italy","styles":["dry"]}'),
         ],
         observations: [
           'Found 1 result\nGROUNDING_JSON: {"query_type":"search","total_results":1,"wines":[{"entity_id":"random-red-1","canonical_label":"Random Red Wine","wine_type":"red","style":"dry","country":"Italy","producer":"Benchmark Winery"}]}',
@@ -345,7 +345,7 @@ describe('RAGAS Context Relevance', () => {
     const r = scoreScenario(
       makeScenario({ maxSteps: 5 }),
       makeExecution({
-        toolsUsed: [tool('search_wines', '{"query":"Italian red high rating"}')],
+        toolsUsed: [tool('search_hybrid', '{"query":"Italian red high rating"}')],
         observations: ['Found 2 results: 1. Barolo Nebbiolo 2018 | region: Piedmont, Italy | grapes: Nebbiolo'],
       }),
       undefined,
@@ -376,7 +376,7 @@ describe('P1-B regression — contextRelevance hard constraint collapse', () => 
       }),
       makeExecution({
         observations: ['Wine A: 200,000원 | Napa Cabernet 2019 | grapes: Cabernet Sauvignon | score: 95'],
-        toolsUsed: [tool('search_wines', JSON.stringify({ query: 'Cabernet Napa' }))],
+        toolsUsed: [tool('search_hybrid', JSON.stringify({ query: 'Cabernet Napa' }))],
       }),
       undefined,
     );
@@ -406,7 +406,7 @@ describe('P1-B regression — contextRelevance hard constraint collapse', () => 
       }),
       makeExecution({
         observations: ['Wine C: 2018 Napa Cabernet | 80,000원'],
-        toolsUsed: [tool('search_wines', JSON.stringify({ query: 'Cabernet Napa 2018' }))],
+        toolsUsed: [tool('search_hybrid', JSON.stringify({ query: 'Cabernet Napa 2018' }))],
       }),
       undefined,
     );

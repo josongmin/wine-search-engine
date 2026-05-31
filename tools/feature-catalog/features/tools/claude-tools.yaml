@@ -2,25 +2,27 @@ id: tools.claude-tools
 name: Claude Tools Schema Route (MCP / Function Calling)
 category: tools
 summary: |
-  Claude / Anthropic MCP-style tool 정의 export endpoint. agent tool schema를 외부
-  Claude SDK consumer에게 제공. tool 정의의 single source 외부 노출.
+  Claude / Anthropic MCP-style tool 정의 export endpoint. 현재 public route는
+  제거되었고, route-contract guard가 `/v1/claude-tools`가 다시 노출되지 않도록
+  막는다.
 
 maturity: 3
 maturity_rationale: |
   HTTP route + claude-tools/tool-schemas.ts 와이어링. 그러나 schema migration 정책 부재,
   consumer 등록부 없음.
 
-status: active
+status: deprecated
 since: 2025-11
 last_reviewed: 2026-05-21
 owner: core
 
 surfaces:
-  - "HTTP: GET /v1/claude-tools"
+  - "Removed public route: /v1/claude-tools"
 
 key_files:
-  - src/interface/http/routes/claude-tools.route.ts
-  - src/interface/claude-tools/tool-schemas.ts
+  - src/interface/http/routes/http-route-contract-catalog.ts
+  - src/interface/http/routes/__tests__/http-route-contract-openapi.test.ts
+  - src/interface/http/routes/__tests__/http-contract-openapi-bridge.test.ts
 
 tests: {}
 

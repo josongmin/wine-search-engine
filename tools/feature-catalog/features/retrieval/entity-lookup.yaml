@@ -3,7 +3,7 @@ name: Entity Retrieval (Deterministic Lookup)
 category: retrieval
 summary: |
   Curated entity 카탈로그를 기반으로 query를 canonical entity로 결정적으로 해석하고
-  retrieval_mode='entity' 단발 lookup으로 직행하는 경로. 한국어 별칭 catalog (3-tier:
+  dedicated lookup primitive로 직행하는 경로. 한국어 별칭 catalog (3-tier:
   gold/seeded/silver)에 매칭되면 LLM 없이 처리.
 
 maturity: 5
@@ -26,8 +26,8 @@ last_reviewed: 2026-05-21
 owner: core
 
 surfaces:
-  - "Agent tool: search_wines (retrieval_mode=entity)"
-  - "HTTP: POST /v1/search (retrieval_mode=entity)"
+  - "Agent tool: lookup_wine"
+  - "HTTP: POST /v1/lookup/wine"
 
 key_files:
   - src/domain/query/model/retrieval-mode.ts

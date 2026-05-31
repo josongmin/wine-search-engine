@@ -30,10 +30,10 @@ describe('ToolCallEvidenceFrame v1 → v1.1 migration', () => {
     const v1Envelope = {
       frameSchemaVersion: TOOL_EVIDENCE_FRAME_SCHEMA_VERSION,
       toolCallId: 'req-1-s0',
-      toolName: 'search_wines',
+      toolName: 'search_hybrid',
       invokedAt: '2026-04-15T00:00:00.000Z',
       requestId: 'req-1',
-      request: { toolName: 'search_wines', input: { query: 'opus one' } },
+      request: { toolName: 'search_hybrid', input: { query: 'opus one' } },
       structuredOutput: { kind: 'no_op' as const, reason: 'stub' },
       observationSnapshot: 'obs',
       observationHash: createHash('sha256').update('obs', 'utf8').digest('hex'),
@@ -46,7 +46,7 @@ describe('ToolCallEvidenceFrame v1 → v1.1 migration', () => {
   it('v1.1 envelope carries retryCount and serialises with v1.1 schema string', () => {
     const frame = buildToolCallEvidenceFrame({
       toolCallId: 'req-1-s0',
-      toolName: 'search_wines',
+      toolName: 'search_hybrid',
       requestId: 'req-1',
       input: { query: 'opus one' },
       structuredOutput: { kind: 'search_result_set', resultSet: [], resultCount: 0 },
@@ -64,7 +64,7 @@ describe('ToolCallEvidenceFrame v1 → v1.1 migration', () => {
     const obs = 'observation text';
     const r0 = buildToolCallEvidenceFrame({
       toolCallId: 'a',
-      toolName: 'search_wines',
+      toolName: 'search_hybrid',
       requestId: 'r',
       input: {},
       structuredOutput: { kind: 'no_op', reason: 'x' },
@@ -75,7 +75,7 @@ describe('ToolCallEvidenceFrame v1 → v1.1 migration', () => {
     });
     const r1 = buildToolCallEvidenceFrame({
       toolCallId: 'a',
-      toolName: 'search_wines',
+      toolName: 'search_hybrid',
       requestId: 'r',
       input: {},
       structuredOutput: { kind: 'no_op', reason: 'x' },
@@ -86,7 +86,7 @@ describe('ToolCallEvidenceFrame v1 → v1.1 migration', () => {
     });
     const r2 = buildToolCallEvidenceFrame({
       toolCallId: 'a',
-      toolName: 'search_wines',
+      toolName: 'search_hybrid',
       requestId: 'r',
       input: {},
       structuredOutput: { kind: 'no_op', reason: 'x' },
@@ -104,7 +104,7 @@ describe('ToolCallEvidenceFrame v1 → v1.1 migration', () => {
     const obs = 'stable observation';
     const noRetry = buildToolCallEvidenceFrame({
       toolCallId: 'a',
-      toolName: 'search_wines',
+      toolName: 'search_hybrid',
       requestId: 'r',
       input: {},
       structuredOutput: { kind: 'no_op', reason: 'x' },
@@ -122,10 +122,10 @@ describe('ToolCallEvidenceFrame v1 → v1.1 migration', () => {
     const bogus = {
       frameSchemaVersion: 'tool_evidence_v999',
       toolCallId: 'x',
-      toolName: 'search_wines',
+      toolName: 'search_hybrid',
       invokedAt: '2026-04-15T00:00:00.000Z',
       requestId: 'x',
-      request: { toolName: 'search_wines', input: {} },
+      request: { toolName: 'search_hybrid', input: {} },
       structuredOutput: { kind: 'no_op' as const, reason: 'x' },
       observationSnapshot: 'x',
       observationHash: 'a'.repeat(64),

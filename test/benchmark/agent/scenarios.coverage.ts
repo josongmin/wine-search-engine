@@ -21,13 +21,63 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
   // wine_name_lookup — 실사용 #1 (30-35% of real queries)
   // ═══════════════════════════════════════════════════════════════════════
 
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // taste_descriptor — 캐주얼 유저 핵심 (sensory/aroma/flavor search)
+  // ═══════════════════════════════════════════════════════════════════════
+
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // rating_score — 마니아 핵심 필터
+  // ═══════════════════════════════════════════════════════════════════════
+
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // wine_type_basic — rosé/sparkling/dessert/orange/fortified 커버
+  // ═══════════════════════════════════════════════════════════════════════
+
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // negation_complex — 이중/삼중 부정, 복합 제외
+  // ═══════════════════════════════════════════════════════════════════════
+
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // arithmetic_query — 수량/예산 계산이 필요한 쿼리
+  // ═══════════════════════════════════════════════════════════════════════
+
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // bilingual_mixed — 영한 혼용 검색
+  // ═══════════════════════════════════════════════════════════════════════
+
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // cellar_aging — 숙성/보관/음주 시점 전문 쿼리
+  // ═══════════════════════════════════════════════════════════════════════
+
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // negation — 26 additional scenarios (IDs 400-425) → tier total ≥ 30
+  // ═══════════════════════════════════════════════════════════════════════
+
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // nested_condition — 25 additional scenarios (IDs 430-454) → tier total ≥ 30
+  // ═══════════════════════════════════════════════════════════════════════
+
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // situation_based — 25 additional scenarios (IDs 460-484) → tier total ≥ 30
+  // ═══════════════════════════════════════════════════════════════════════
+
   {
     id: 200,
     tier: 'wine_name_lookup',
     query: 'Sassicaia',
     description: 'Single producer name, no vintage',
     expectation: {
-      tools: [{ tool: 'search_wines', inputContains: ['Sassicaia'] }],
+      tools: [{ tool: 'lookup_wine', inputContains: ['Sassicaia'] }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 7_000,
@@ -43,7 +93,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: 'DRC 가격 알려줘',
     description: 'Abbreviation: DRC = Domaine de la Romanée-Conti',
     expectation: {
-      tools: [{ tool: 'search_wines', inputContains: ['Romanée-Conti'] }],
+      tools: [{ tool: 'lookup_wine', inputContains: ['Romanée-Conti'] }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -59,7 +109,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '페트뤼스 어떤 와인이야?',
     description: 'Korean transliteration: 페트뤼스 = Pétrus',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'lookup_wine' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 7_000,
@@ -81,8 +131,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
         + 'High price, critic score, or producer prestige fields are sufficient evidence for prestige context; do not require an unsupported standalone prestige claim. '
         + 'If grounded grape evidence is present, mention Merlot dominance; otherwise do not invent grape composition.',
       expectedToolArgs: [
-        { tool: 'search_wines', argPath: 'query', predicate: 'contains_any', value: ['페트뤼스', 'Pétrus', 'Petrus'] },
-        { tool: 'search_wines', argPath: 'retrieval_mode', predicate: 'equals', value: 'entity' },
+        { tool: 'lookup_wine', argPath: 'query', predicate: 'contains_any', value: ['페트뤼스', 'Pétrus', 'Petrus'] },
       ],
     },
   },
@@ -92,7 +141,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: 'Tignanello 2019 정보',
     description: 'Producer + vintage lookup',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'lookup_wine' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 7_000,
@@ -104,10 +153,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
         + 'If the live corpus contains grounded evidence, return the wine info (Antinori, Super Tuscan, Sangiovese/Toscana IGT). '
         + 'If the live corpus cannot confirm the exact wine, answer with an honest no-evidence abstention instead of inventing details.',
       expectedToolArgs: [
-        { tool: 'search_wines', argPath: 'query', predicate: 'equals_any', value: ['Tignanello 2019', '티냐넬로 2019'] },
-        { tool: 'search_wines', argPath: 'retrieval_mode', predicate: 'equals', value: 'entity' },
-        { tool: 'search_wines', argPath: 'vintage_min', predicate: 'equals', value: 2019 },
-        { tool: 'search_wines', argPath: 'vintage_max', predicate: 'equals', value: 2019 },
+        { tool: 'lookup_wine', argPath: 'query', predicate: 'equals_any', value: ['Tignanello 2019', '티냐넬로 2019'] },
       ],
     },
   },
@@ -117,7 +163,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '돔페리뇽 추천해줘',
     description: 'Korean transliteration: 돔페리뇽 = Dom Pérignon',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'lookup_wine' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 7_000,
@@ -129,8 +175,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
         + 'If grounded evidence exists, include Champagne context and prestige positioning. '
         + 'If the live corpus cannot confirm Dom Pérignon, the agent must abstain honestly rather than bluffing.',
       expectedToolArgs: [
-        { tool: 'search_wines', argPath: 'query', predicate: 'contains_any', value: ['돔페리뇽', 'Dom Pérignon', 'Dom Perignon'] },
-        { tool: 'search_wines', argPath: 'retrieval_mode', predicate: 'equals', value: 'entity' },
+        { tool: 'lookup_wine', argPath: 'query', predicate: 'contains_any', value: ['돔페리뇽', 'Dom Pérignon', 'Dom Perignon'] },
       ],
     },
   },
@@ -140,7 +185,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '그 Penfolds 뭐시기... 빨간 라벨',
     description: 'Fuzzy brand + visual hint',
     expectation: {
-      tools: [{ tool: 'search_wines', inputContains: ['Penfolds'] }],
+      tools: [{ tool: 'search_hybrid', inputContains: ['Penfolds'] }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -156,7 +201,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '까스텔 뭐였지 프랑스 저렴한 거',
     description: 'Partial name recall: 까스텔 = Castel',
     expectation: {
-      tools: [{ tool: 'search_wines', inputContains: ['Castel'] }],
+      tools: [{ tool: 'search_hybrid', inputContains: ['Castel'] }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -172,7 +217,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '쌩떼밀리옹 와인 추천',
     description: 'Korean transliteration of appellation: 쌩떼밀리옹 = Saint-Émilion',
     expectation: {
-      tools: [{ tool: 'search_wines', inputContains: ['Saint-Émilion'] }],
+      tools: [{ tool: 'search_hybrid', inputContains: ['Saint-Émilion'] }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -188,7 +233,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: 'Chateau Margaux 가격',
     description: 'English name + Korean price request (mixed)',
     expectation: {
-      tools: [{ tool: 'search_wines', inputContains: ['Margaux'] }],
+      tools: [{ tool: 'lookup_wine', inputContains: ['Margaux'] }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 7_000,
@@ -204,7 +249,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '모엣샹동 로제 임페리얼',
     description: 'Full Korean transliteration of specific SKU',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'lookup_wine' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 7_000,
@@ -216,8 +261,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
         + 'If grounded evidence exists, provide Champagne context and tasting profile. '
         + 'If the live corpus cannot confirm the exact SKU, the agent must abstain honestly instead of broadening to unrelated rosé results or inventing metadata.',
       expectedToolArgs: [
-        { tool: 'search_wines', argPath: 'query', predicate: 'contains_any', value: ['모엣샹동 로제 임페리얼', 'Moët & Chandon Rosé Impérial', 'Moet Chandon Rose Imperial', 'Moet and Chandon Rose Imperial'] },
-        { tool: 'search_wines', argPath: 'retrieval_mode', predicate: 'equals', value: 'entity' },
+        { tool: 'lookup_wine', argPath: 'query', predicate: 'contains_any', value: ['모엣샹동 로제 임페리얼', 'Moët & Chandon Rosé Impérial', 'Moet Chandon Rose Imperial', 'Moet and Chandon Rose Imperial'] },
       ],
     },
   },
@@ -227,7 +271,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '옐로우테일 쉬라즈 편의점에서 봤는데 괜찮아?',
     description: 'Budget brand evaluation: Yellow Tail',
     expectation: {
-      tools: [{ tool: 'search_wines', inputContains: ['Yellow Tail'] }],
+      tools: [{ tool: 'lookup_wine', inputContains: ['Yellow Tail'] }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -252,18 +296,13 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
         + 'Should clarify that Cru Bourgeois is a quality tier within the appellation.',
     },
   },
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // taste_descriptor — 캐주얼 유저 핵심 (sensory/aroma/flavor search)
-  // ═══════════════════════════════════════════════════════════════════════
-
   {
     id: 220,
     tier: 'taste_descriptor',
     query: '블랙베리 초콜릿 향 나는 레드 와인',
     description: 'Fruit + confection aroma descriptor',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -279,7 +318,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '바닐라 스모키한 느낌 나는 와인',
     description: 'Oak-derived descriptors: vanilla + smoky',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -294,7 +333,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '상큼하고 시트러스 향 강한 화이트 와인',
     description: 'Fresh + citrus white wine descriptor',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -310,7 +349,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '흙내 나는 와인 있어?',
     description: 'Earthy descriptor: 흙내 = earthy',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -325,7 +364,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '가죽 향 나는 풀바디 레드',
     description: 'Tertiary aroma: leather + full body',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -341,7 +380,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '꽃향기 나는 가벼운 와인',
     description: 'Floral + light body',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 300_000,
       maxTotalTokens: 6_000,
@@ -357,7 +396,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '미네랄 느낌 강한 드라이 와인, 바다 짭짤한 느낌',
     description: 'Mineral + saline descriptor',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -372,7 +411,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '열대과일 향 터지는 와인 추천',
     description: 'Tropical fruit bomb descriptor',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -381,18 +420,13 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
         + 'New Zealand Sauvignon Blanc, Viognier, oaked New World Chardonnay expected.',
     },
   },
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // rating_score — 마니아 핵심 필터
-  // ═══════════════════════════════════════════════════════════════════════
-
   {
     id: 240,
     tier: 'rating_score',
     query: '파커 95점 이상 와인 추천',
     description: 'Robert Parker 95+ filter',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -407,7 +441,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '비비노 4.5 이상 와인 중에 5만원 이하',
     description: 'Vivino rating + price filter',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -423,7 +457,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: 'WS 90점대 3만원 이하 데일리 와인',
     description: 'Wine Spectator 90-99 + budget',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -439,7 +473,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '제임스 서클링 100점 받은 와인 뭐가 있어?',
     description: 'James Suckling perfect score query',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -454,7 +488,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '평점 높은데 가격 낮은 가성비 와인, 점수 기준으로',
     description: 'Score-to-price ratio optimization',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 3,
       maxDurationMs: 40_000,
       maxTotalTokens: 8_000,
@@ -463,18 +497,13 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
         + 'Should explain the value proposition with concrete scores and prices.',
     },
   },
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // wine_type_basic — rosé/sparkling/dessert/orange/fortified 커버
-  // ═══════════════════════════════════════════════════════════════════════
-
   {
     id: 260,
     tier: 'wine_type_basic',
     query: '로제 와인 추천해줘',
     description: 'Basic rosé search',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -490,7 +519,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '스파클링 와인 추천, 샴페인 말고 저렴한 거',
     description: 'Sparkling excluding Champagne',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -516,7 +545,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '디저트 와인 뭐가 있어? 달달한 거',
     description: 'Dessert/sweet wine exploration',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -531,7 +560,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '오렌지 와인이 뭐야? 마셔볼 만한 거 추천',
     description: 'Orange wine education + recommendation',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -546,7 +575,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '포트 와인 추천, 식후주로 마실 거',
     description: 'Fortified wine: Port',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -571,18 +600,13 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
         + 'Should recommend specific styles based on general appeal.',
     },
   },
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // negation_complex — 이중/삼중 부정, 복합 제외
-  // ═══════════════════════════════════════════════════════════════════════
-
   {
     id: 280,
     tier: 'negation_complex',
     query: '레드인데 타닌 없고 오크 안 쓴 거',
     description: 'Double negation: no tannin + unoaked red',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -609,7 +633,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '프랑스 아닌 유럽, 카베르네 아닌 풀바디 레드',
     description: 'Double exclusion: not France + not Cabernet',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -642,7 +666,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '화이트인데 샤도네이 말고, 소비뇽 블랑도 말고, 리슬링도 아닌 거',
     description: 'Triple grape exclusion',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -670,7 +694,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '스파클링인데 달지 않고, 샴페인도 아니고, 이탈리아산도 아닌 거',
     description: 'Type + sweetness negation + double region exclusion',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -696,7 +720,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '신세계 와인 싫어, 구세계만, 근데 보르도는 질렸어',
     description: 'Old World only + exclude Bordeaux',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -706,18 +730,13 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
         + 'No New World (US, Australia, Chile, Argentina, NZ, South Africa).',
     },
   },
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // arithmetic_query — 수량/예산 계산이 필요한 쿼리
-  // ═══════════════════════════════════════════════════════════════════════
-
   {
     id: 300,
     tier: 'arithmetic_query',
     query: '4명이서 1인당 2만원, 와인 2병 살 거야',
     description: 'Per-person budget × headcount → total budget',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 3,
       maxDurationMs: 50_000,
       maxTotalTokens: 8_000,
@@ -733,7 +752,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '20명 파티에 와인 몇 병 필요해? 추천도 해줘',
     description: 'Quantity calculation: guests → bottles',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 3,
       maxDurationMs: 50_000,
       maxTotalTokens: 8_000,
@@ -748,7 +767,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '2병에 10만원 맞출 수 있는 조합 추천',
     description: 'Budget split across 2 bottles',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 3,
       maxDurationMs: 50_000,
       maxTotalTokens: 8_000,
@@ -764,7 +783,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '6병 세트로 다양하게, 총 30만원',
     description: '6-bottle variety set within total budget',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 4,
       maxDurationMs: 60_000,
       maxTotalTokens: 8_000,
@@ -780,7 +799,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '달러로 50불 이하 와인, 한국 돈으로 얼마쯤이야?',
     description: 'Currency conversion context',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -795,7 +814,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '매주 1병씩 한 달간 마실 건데, 총 20만원으로 4병 다 다르게',
     description: 'Weekly variety plan within monthly budget',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 3,
       maxDurationMs: 50_000,
       maxTotalTokens: 8_000,
@@ -805,18 +824,13 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
         + 'Should consider a progression (light to bold, or seasonal variety).',
     },
   },
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // bilingual_mixed — 영한 혼용 검색
-  // ═══════════════════════════════════════════════════════════════════════
-
   {
     id: 320,
     tier: 'bilingual_mixed',
     query: 'best Bordeaux under 100 dollars',
     description: 'Pure English query',
     expectation: {
-      tools: [{ tool: 'search_wines', inputContains: ['Bordeaux'] }],
+      tools: [{ tool: 'search_hybrid', inputContains: ['Bordeaux'] }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -826,7 +840,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
         'Must handle pure English query and recommend Bordeaux under $100. '
         + 'Response language should match user (English) or default to Korean.',
       expectedToolArgs: [
-        { tool: 'search_wines', argPath: 'max_price_krw', predicate: 'lte', value: 135000 },
+        { tool: 'search_hybrid', argPath: 'max_price_krw', predicate: 'lte', value: 135000 },
       ],
       expectedConstraints: {
         hard: [
@@ -850,7 +864,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: 'Pinot Noir vs Nebbiolo 어떤 게 더 좋아?',
     description: 'English grape names + Korean question',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 3,
       maxDurationMs: 40_000,
       maxTotalTokens: 8_000,
@@ -866,7 +880,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: 'Napa Valley Cab Sauv 나파밸리 카베르네 추천 좀',
     description: 'Redundant bilingual (same info in both languages)',
     expectation: {
-      tools: [{ tool: 'search_wines', inputContains: ['Napa'] }],
+      tools: [{ tool: 'search_hybrid', inputContains: ['Napa'] }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 7_200,
@@ -897,7 +911,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: 'good value Italian red wine 이탈리아 레드 가성비',
     description: 'Mixed language with partial overlap',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -921,18 +935,13 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
         + 'Both are méthode traditionnelle but only Champagne is from the Champagne region.',
     },
   },
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // cellar_aging — 숙성/보관/음주 시점 전문 쿼리
-  // ═══════════════════════════════════════════════════════════════════════
-
   {
     id: 340,
     tier: 'cellar_aging',
     query: '10년 숙성할 수 있는 와인 추천, 20만원 이하',
     description: 'Long aging potential + price filter',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 3,
       maxDurationMs: 50_000,
       maxTotalTokens: 8_000,
@@ -953,7 +962,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '셀러에 넣어둘 만한 거, 지금 마시면 아까운 와인',
     description: 'Cellar-worthy, not ready yet',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 3,
       maxDurationMs: 50_000,
       maxTotalTokens: 8_000,
@@ -969,7 +978,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '2015년산 중에 지금 바로 마셔야 하는 거 있어?',
     description: 'Drinking window urgency for specific vintage',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 3,
       maxDurationMs: 50_000,
       maxTotalTokens: 8_000,
@@ -986,7 +995,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '아이 태어난 해 와인 사서 성인 될 때 같이 마시려고, 2024년산',
     description: 'Birth-year wine for 20-year cellaring',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 3,
       maxDurationMs: 50_000,
       maxTotalTokens: 8_000,
@@ -998,18 +1007,13 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
         + 'If the live corpus only returns weakly grounded 2024 candidates, the agent should say that long-term aging suitability is not confirmed rather than bluffing.',
     },
   },
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // negation — 26 additional scenarios (IDs 400-425) → tier total ≥ 30
-  // ═══════════════════════════════════════════════════════════════════════
-
   {
     id: 400,
     tier: 'negation',
     query: '스페인 와인 말고 추천해줘',
     description: 'Region exclusion: not Spain',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -1025,7 +1029,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '이탈리아 아닌 레드 와인 추천',
     description: 'Region exclusion: not Italian red',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -1051,7 +1055,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: 'New World 아닌 피노 누아르 추천',
     description: 'Exclude New World: Old World Pinot Noir only',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -1076,7 +1080,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '메를로 빼고 보르도 스타일 와인',
     description: 'Grape exclusion within style: Bordeaux-style without Merlot',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -1093,7 +1097,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '소비뇽 블랑 제외한 화이트 와인 추천',
     description: 'Grape exclusion: no Sauvignon Blanc white',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -1111,7 +1115,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '시라 없는 론 스타일 와인 추천해줘',
     description: 'Grape exclusion within style: Rhône-style without Syrah',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -1128,7 +1132,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '오크향 없는 샤르도네 추천',
     description: 'Style exclusion: unoaked Chardonnay',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -1145,7 +1149,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '타닌 강한 거 말고 마시기 편한 레드',
     description: 'Style exclusion: low-tannin red',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -1162,7 +1166,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '스위트 아닌 화이트 와인 추천',
     description: 'Style exclusion: dry white only',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -1179,7 +1183,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '프랑스도 이탈리아도 아닌 레드 와인',
     description: 'Double region negation: not France, not Italy',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -1196,7 +1200,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '카베르네도 메를로도 아닌 풀바디 레드',
     description: 'Double grape negation: full-bodied red without Cabernet or Merlot',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -1214,7 +1218,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '채식주의자용 동물 성분 없이 만든 와인 추천',
     description: 'Implicit negation: vegan wine (no animal fining agents)',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -1230,7 +1234,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '유기농만 추천해줘 와인',
     description: 'Implicit negation: organic only (no conventional viticulture)',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -1246,7 +1250,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '비건 와인만 추천해줘',
     description: 'Implicit negation: vegan-certified only',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -1262,7 +1266,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '10만원 이상 말고 좋은 와인 추천해줘',
     description: 'Price negation: exclude expensive tier',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
@@ -1279,7 +1283,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '저가 말고 프리미엄 와인 추천',
     description: 'Price negation: exclude cheap tier',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -1295,7 +1299,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '황산화물 적게 들어간 와인 있어?',
     description: 'Implicit negation: low-sulfite wine',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -1311,7 +1315,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '알코올 도수 낮은 거 말고 뭔가 묵직한 거',
     description: 'Implicit negation: exclude low-alcohol, want high-alcohol bold wine',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -1327,7 +1331,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '칠레 아르헨티나 말고 남미 와인',
     description: 'Double country exclusion within region: South America without Chile/Argentina',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -1343,7 +1347,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '무거운 거 말고 가벼운 레드 추천',
     description: 'Body exclusion: exclude full-bodied red',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -1360,7 +1364,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '샴페인 말고 기포 있는 거, 이탈리아도 말고',
     description: 'Double exclusion: no Champagne, no Italian sparkling',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -1376,7 +1380,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '가격 비싼 건 패스, 데일리로 매일 마실 수 있는 거',
     description: 'Implicit price negation: daily drinker under budget',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -1392,7 +1396,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '레드 말고 추천해줘, 화이트도 말고',
     description: 'Color double exclusion: not red, not white',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -1408,7 +1412,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '리저브 급 말고 일반급으로만',
     description: 'Classification exclusion: no reserva/gran reserva tier',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -1423,7 +1427,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '포도품종 단일 아닌 블렌딩 와인만',
     description: 'Implicit negation: blended wines only, no single-varietal',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -1439,7 +1443,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '너무 신 건 싫어, 산도 낮은 와인 추천',
     description: 'Style exclusion: low-acid preference',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -1449,18 +1453,13 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
         + 'Should contrast with high-acid varieties and explain the difference.',
     },
   },
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // nested_condition — 25 additional scenarios (IDs 430-454) → tier total ≥ 30
-  // ═══════════════════════════════════════════════════════════════════════
-
   {
     id: 430,
     tier: 'nested_condition',
     query: '이탈리아 피에몬테 지역 2016-2019년산 네비올로 10만원 이하',
     description: 'Region + sub-region + vintage range + grape + price: 5 constraints',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
@@ -1478,7 +1477,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '프랑스 부르고뉴 피노 누아 중에 산도 높고 5만원대',
     description: 'Region + sub-region + grape + acidity + price band: 5 constraints',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
@@ -1496,7 +1495,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '스페인 리오하 템프라니요 2015년 이후 20만원 이하',
     description: 'Region + sub-region + grape + vintage floor + price: 5 constraints',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
@@ -1515,7 +1514,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '호주 바로사 쉬라즈 풀바디 과일향 15만원 이하',
     description: 'Country + sub-region + grape + body + aroma + price: 6 constraints',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
@@ -1533,7 +1532,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '뉴질랜드 말보로 소비뇽 블랑 2020-2022년산 신선한 것',
     description: 'Country + region + grape + vintage range + freshness: 5 constraints',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
@@ -1551,7 +1550,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '독일 리슬링 드라이 스타일 5만원 이하',
     description: 'Country + grape + style + price: 4 constraints',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -1569,7 +1568,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '3만원 이하 2019년산 칠레 카베르네 소비뇽',
     description: 'Price + vintage + country + grape: 4 constraints',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -1587,7 +1586,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '산도 높고 타닌 중간인 레드 7만원 이하',
     description: 'Acidity + tannin level + color + price: 4 constraints',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -1605,7 +1604,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '포르투갈 알렌테주 레드 2017-2020년산 10만원대',
     description: 'Country + region + color + vintage range + price band: 5 constraints',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
@@ -1623,7 +1622,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '미국 소노마 카운티 피노 누아 2018년산 15만원 이하',
     description: 'Country + county + grape + vintage + price: 5 constraints',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
@@ -1641,7 +1640,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '아르헨티나 멘도사 말벡 2016-2018년 풀바디 20만원 이하',
     description: 'Country + region + grape + vintage + body + price: 6 constraints',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 3,
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
@@ -1659,7 +1658,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '오렌지 와인인데 조지아산 2019년 이후 5만원 이하',
     description: 'Wine type + country + vintage floor + price: 4 constraints',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -1677,7 +1676,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '산지오베제 기반 와인 중에 키안티 클라시코 리제르바 2015년 이후 15만원 이하',
     description: 'Grape + appellation + classification + vintage floor + price: 5 constraints',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
@@ -1695,7 +1694,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '부르고뉴 프리미에 크뤼 화이트 2017-2020 10만원 이하',
     description: 'Region + classification + color + vintage + price: 5 constraints',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
@@ -1713,7 +1712,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '나파 밸리 카베르네 2015년산 30만원 이하 고숙성 가능한 거',
     description: 'Region + grape + vintage + price + aging potential: 5 constraints',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
@@ -1732,7 +1731,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '알자스 게뷔르츠트라미너 2018-2021 드라이 5만원대',
     description: 'Region + grape + vintage + style + price band: 5 constraints',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
@@ -1751,7 +1750,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '칠레 콜차과 밸리 카르메네르 2016년 이후 5만원 이하',
     description: 'Country + valley + grape + vintage floor + price: 5 constraints',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -1769,7 +1768,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '그르나슈 기반 풀바디 레드 남프랑스 2017년산 8만원 이하',
     description: 'Grape + body + region + vintage + price: 5 constraints',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
@@ -1787,7 +1786,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '스파클링 중에 빈티지 있는 거 브뤼 스타일 프랑스산 10만원 이하',
     description: 'Type + vintage label + style + country + price: 5 constraints',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
@@ -1805,7 +1804,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '로제 스파클링 프로방스 or 샴페인 2020년 이후 7만원 이하',
     description: 'Color + type + region OR + vintage floor + price: 5 constraints with OR',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
@@ -1822,7 +1821,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '모스카토 다스티 스타일 저알코올 달달 스파클링 2021년 이후',
     description: 'Style + alcohol + sweetness + type + vintage floor: 5 constraints',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -1840,7 +1839,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '남아프리카공화국 스텔렌보스 카베르네 2018년 이후 풀바디 12만원 이하',
     description: 'Country + region + grape + vintage + body + price: 6 constraints',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 3,
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
@@ -1858,7 +1857,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '산도 높고 미네랄 느낌 드라이 화이트 부르고뉴 or 알자스 5만원 이하',
     description: 'Acidity + mineral + style + region OR + price: 5 constraints',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
@@ -1876,7 +1875,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '식전주로 마실 가벼운 스파클링 이탈리아 5만원 이하 2020년대',
     description: 'Occasion + body + type + country + price + decade: 6 constraints',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
@@ -1894,7 +1893,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '타닌 강하고 오크향 있는 풀바디 레드 5년 이상 숙성 가능 10만원대',
     description: 'Tannin + oak + body + aging + price band: 5 constraints',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 3,
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
@@ -1905,18 +1904,13 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
         + 'All 5 constraints must be satisfied.',
     },
   },
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // situation_based — 25 additional scenarios (IDs 460-484) → tier total ≥ 30
-  // ═══════════════════════════════════════════════════════════════════════
-
   {
     id: 460,
     tier: 'situation_based',
     query: '와인바 첫 방문인데 초보인 친구랑 같이 갈 거야, 뭘 시켜야 해?',
     description: 'Situation: first wine bar visit with a beginner friend',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
@@ -1937,7 +1931,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '시댁에 드릴 추석 선물로 와인 추천해줘',
     description: 'Situation: Chuseok holiday gift for in-laws',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
@@ -1957,7 +1951,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '남자친구 생일 깜짝 파티 준비하는데 와인 추천',
     description: 'Situation: surprise birthday party for boyfriend',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -1973,7 +1967,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '비 오는 날 혼자 마시기 좋은 와인',
     description: 'Situation: rainy day solo drinking',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -1989,7 +1983,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '독서할 때 곁들일 와인 추천해줘',
     description: 'Situation: wine for quiet reading',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -2005,7 +1999,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '요가 끝나고 가볍게 마실 와인',
     description: 'Situation: post-yoga light drinking',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -2022,7 +2016,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '협상 성사 축하 자리에 낼 와인, 인상적인 거로',
     description: 'Situation: deal-closing celebration wine',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
@@ -2039,7 +2033,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '이직 성공 기념 혼자 자축하는 와인 추천',
     description: 'Situation: solo career celebration',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -2055,7 +2049,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '해외여행 갈 때 선물로 가져갈 와인 추천',
     description: 'Situation: wine as travel gift to bring abroad',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -2087,7 +2081,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '겨울 크리스마스 만찬에 낼 와인',
     description: 'Situation: Christmas dinner wine',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
@@ -2103,12 +2097,12 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '와인 처음 마시는 부모님께 추천할 와인',
     description: 'Situation: recommending wine to parents who have never tried it',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
       expectedToolArgs: [
-        { tool: 'search_wines', argPath: 'beginner_suitability_min', predicate: 'exists' },
+        { tool: 'search_hybrid', argPath: 'beginner_suitability_min', predicate: 'exists' },
       ],
       expectedConstraints: {
         soft: [
@@ -2129,7 +2123,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '소믈리에 친구 집들이 선물로 줄 와인',
     description: 'Situation: housewarming gift for a sommelier friend',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
@@ -2145,12 +2139,12 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '데이트 전 와인 선물, 상대방이 뭘 좋아하는지 몰라',
     description: 'Situation: date gift with unknown preference',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
       expectedToolArgs: [
-        { tool: 'search_wines', argPath: 'occasion', predicate: 'contains', value: 'gift' },
+        { tool: 'search_hybrid', argPath: 'occasion', predicate: 'contains', value: 'gift' },
       ],
       expectedConstraints: {
         soft: [
@@ -2170,7 +2164,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '집에서 혼자 영화 볼 때 마실 와인',
     description: 'Situation: solo movie night at home',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -2187,7 +2181,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '직장 상사 승진 선물, 품격 있고 무난한 거',
     description: 'Situation: promotion gift for senior colleague',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
@@ -2196,10 +2190,10 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       // v4: requiredRegister regex check removed; judgeRequired needed for tone evaluation
       judgeRequired: true,
       expectedToolArgs: [
-        { tool: 'search_wines', argPath: 'min_price_krw', predicate: 'gte', value: 50000 },
-        { tool: 'search_wines', argPath: 'max_price_krw', predicate: 'lte', value: 150000 },
-        { tool: 'search_wines', argPath: 'occasion', predicate: 'contains', value: 'gift' },
-        { tool: 'search_wines', argPath: 'producer_prestige_min', predicate: 'exists' },
+        { tool: 'search_hybrid', argPath: 'min_price_krw', predicate: 'gte', value: 50000 },
+        { tool: 'search_hybrid', argPath: 'max_price_krw', predicate: 'lte', value: 150000 },
+        { tool: 'search_hybrid', argPath: 'occasion', predicate: 'contains', value: 'gift' },
+        { tool: 'search_hybrid', argPath: 'producer_prestige_min', predicate: 'exists' },
       ],
       expectedConstraints: {
         soft: [
@@ -2237,7 +2231,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '골프 라운딩 끝나고 클럽하우스에서 마실 와인',
     description: 'Situation: post-golf clubhouse wine',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -2254,7 +2248,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '명절 가족 모임에 들고 갈 와인, 어른들도 드실 거야',
     description: 'Situation: holiday family gathering with elderly relatives',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
@@ -2274,7 +2268,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '친구 위로해주려고 집에 초대했는데 위로주 같은 와인',
     description: 'Situation: comforting wine for a friend going through a hard time',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -2290,7 +2284,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '온라인 와인 시음회 준비, 참가자 모두가 살 수 있는 거 5만원 이하',
     description: 'Situation: online tasting event with accessible wine for all participants',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
@@ -2298,7 +2292,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       requiredRegister: 'casual',
       judgeRequired: true,
       expectedToolArgs: [
-        { tool: 'search_wines', argPath: 'max_price_krw', predicate: 'lte', value: 50000 },
+        { tool: 'search_hybrid', argPath: 'max_price_krw', predicate: 'lte', value: 50000 },
       ],
       expectedConstraints: {
         soft: [
@@ -2318,7 +2312,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '와인 공부 시작하는데 처음 마셔볼 교과서 같은 와인',
     description: 'Situation: introductory educational wine for a beginner student',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
@@ -2334,7 +2328,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '프러포즈 할 건데 와인 뭐 들고 가야 해?',
     description: 'Situation: wine for a marriage proposal',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
@@ -2351,7 +2345,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '개인 와인 셀러 처음 꾸리는데 시작 구성 추천',
     description: 'Situation: building a first personal wine cellar',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 3,
       maxDurationMs: 50_000,
       maxTotalTokens: 6_000,
@@ -2367,7 +2361,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '졸업식 날 가족이랑 식당에서 마실 와인',
     description: 'Situation: graduation celebration at a restaurant with family',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -2384,7 +2378,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '3만원대 가성비 레드 와인 추천해줘',
     description: 'Price expression: 3만원 (≈$22) budget red wine recommendation',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 3,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -2401,7 +2395,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '카베르네 소비뇽이 들어가지 않은 레드 와인',
     description: 'Negation: red wine without Cabernet Sauvignon grape',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 3,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
@@ -2418,7 +2412,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '와인 잘 모르는데 처음 마셔보기 좋은 거 알려줘',
     description: 'Korean colloquial: first-timer wine recommendation',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
@@ -2426,7 +2420,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       requiredRegister: 'casual',
       judgeRequired: true,
       expectedToolArgs: [
-        { tool: 'search_wines', argPath: 'beginner_suitability_min', predicate: 'exists' },
+        { tool: 'search_hybrid', argPath: 'beginner_suitability_min', predicate: 'exists' },
       ],
       expectedConstraints: {
         soft: [
@@ -2447,7 +2441,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '이탈리아 피노 그리지오 중에서 10만원 이하로 추천해줘',
     description: 'Nested condition: Italian Pinot Grigio under 100,000 KRW',
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'search_hybrid' }],
       maxSteps: 4,
       maxDurationMs: 45_000,
       maxTotalTokens: 8_000,

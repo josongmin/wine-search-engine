@@ -3,7 +3,8 @@ name: Web Search UI (Next.js)
 category: tools
 summary: |
   사용자 검색 UI (search-bar + clarification widget + search-results widget). Next.js
-  App Router. 백엔드 /v1/search + /v1/autocomplete + /v1/interpret 호출.
+  App Router. 백엔드 primitive search surface (`/v1/search/hybrid`,
+  `/v1/lookup/wine`) 호출.
 
 maturity: 3
 maturity_rationale: |

@@ -24,8 +24,8 @@ last_reviewed: 2026-05-21
 owner: core
 
 surfaces:
-  - "Agent tool: search_wines (retrieval_mode=mixed)"
-  - "HTTP: POST /v1/search (retrieval_mode=mixed)"
+  - "Internal retrieval planner mode: mixed"
+  - "No public primitive surface; composed behind agent/search planning"
 
 key_files:
   - src/infrastructure/vespa/vespa-similar-retrieval.ts

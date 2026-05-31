@@ -1,9 +1,9 @@
 id: tools.batch-search
-name: Batch Search Endpoint
+name: Batch Search Use Case
 category: tools
 summary: |
-  POST /v1/batch-search — N개 쿼리를 단일 HTTP 호출로 batch 실행. 공유 execution context
-  + 결과 집계. 대시보드 / 시뮬레이션 사용자 시나리오 용.
+  N개 쿼리를 단일 execution context로 batch 실행하고 결과를 집계하는 internal
+  use case. 대시보드 / 시뮬레이션 사용자 시나리오 용.
 
 maturity: 3
 maturity_rationale: |
@@ -16,13 +16,14 @@ last_reviewed: 2026-05-21
 owner: core
 
 surfaces:
-  - "HTTP: POST /v1/batch-search"
+  - "Internal batch-search use case"
 
 key_files:
   - src/application/search/batch-search.usecase.ts
-  - src/interface/http/routes/batch-search.route.ts
 
-tests: {}
+tests:
+  unit:
+    - test/unit/application/search/batch-search.usecase.test.ts
 
 depends_on:
   - retrieval.hybrid-search

@@ -1,7 +1,7 @@
 /**
  * Per-scenario aggregator for planner-emitted hard constraints.
  *
- * Source of truth: each successful `search_wines` tool call returns a
+ * Source of truth: each successful discovery-search / lookup tool call returns a
  * `SearchResponseV1` whose `parsedConstraints.hard` array enumerates the
  * planner's final hard-constraint set (rule-based direct hits + ontology
  * expansion + LLM-extracted hits, after the constraint compiler merges them).
@@ -11,7 +11,7 @@
  *
  * Aggregation policy:
  *   - Sum across ALL search tool invocations within the scenario (multi-step
- *     agents may call `search_wines` more than once; we count every emission).
+ *     agents may call search primitives more than once; we count every emission).
  *   - Tool outcomes whose result is not a SearchResponseV1 are ignored.
  *   - Missing `parsedConstraints` (older response shape) contributes 0.
  *
@@ -29,12 +29,10 @@ import type { ToolOutcome } from '../../../src/domain/agent/model/tool-outcome.j
 import type { SearchResponseV1 } from '../../../src/domain/response/model/search-response.js';
 
 const SEARCH_TOOL_NAMES = new Set([
-  'search_wines',
-  'browse_by_producer',
-  'browse_by_region',
-  'compare_candidates',
-  'similar_items',
-  'recommend_wines',
+  'search_hybrid',
+  'search_semantic',
+  'search_lexical',
+  'lookup_wine',
 ]);
 
 function isSearchResponseV1(value: unknown): value is SearchResponseV1 {

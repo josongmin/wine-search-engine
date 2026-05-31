@@ -184,7 +184,7 @@ function asNonEmptyString(value: unknown): string | undefined {
 /**
  * Pull the strongest grounded top result out of a list of tool outcomes.
  * Iterates in order — the planner is expected to emit the highest-confidence
- * result first. Returns `undefined` if no `search_wines` outcome with a
+ * result first. Returns `undefined` if no search primitive / lookup outcome with a
  * usable canonical label can be found.
  */
 function findGroundedTopResult(

@@ -52,6 +52,17 @@ export interface AgentConfig {
  *   System prompt ≈ 700 tokens; 5 step messages ≈ 3_000 tokens; response ≈ 1_024 tokens.
  *   Headroom per step ≈ 10_000 − 700 − 3_000 − 1_024 ≈ 5_276 tokens for context.
  */
+/**
+ * Hard ceiling on `maxSteps` — the real runtime cap (the HTTP schema's
+ * `MAX_AGENT_STEPS_CAP` is a defense-in-depth edge mirror of this). Enforced
+ * in `WineSearchOrchestrator.resolveAgentConfig` so EVERY transport — HTTP run,
+ * HTTP session, local CLI run, local CLI session — inherits the same ceiling
+ * and a malicious/buggy caller cannot request a runaway step count (e.g.
+ * `--max-steps 999`). SSoT per CLAUDE.md rule 30; the HTTP constant imports
+ * this value rather than redefining it.
+ */
+export const AGENT_MAX_STEPS_HARD_CAP = 10;
+
 export const DEFAULT_AGENT_CONFIG: AgentConfig = {
   maxSteps: 5,
   agentTimeoutMs: 25_000,

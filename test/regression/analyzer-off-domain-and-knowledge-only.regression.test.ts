@@ -5,7 +5,7 @@
  * Pre-fix the analyzer only branched on `adversarial` and silently fell
  * through to the deterministic pipeline for `off_domain`/`knowledge_only`,
  * which then misclassified as `intent=search` → router emitted a
- * single-search plan → search_wines was called → `mustNotCallTools`
+ * single-search plan → search_hybrid was called → `mustNotCallTools`
  * violation on bench #20 / #103 / #104 / #109.
  *
  * Patches pinned here:

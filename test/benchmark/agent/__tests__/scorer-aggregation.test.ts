@@ -281,13 +281,13 @@ describe('penalty constants are used correctly', () => {
     const r = scoreScenario(
       makeScenario({
         maxSteps: 10,
-        tools: [{ tool: 'search_wines' }],
+        tools: [{ tool: 'search_hybrid' }],
       }),
       makeExecution({
         stepCount: 7,
         toolCallCount: 7,
         toolsUsed: [
-          tool('search_wines'),
+          tool('search_hybrid'),
           tool('extra1'), tool('extra2'), tool('extra3'),
           tool('extra4'), tool('extra5'), tool('extra6'),
         ],
@@ -310,7 +310,7 @@ describe('P0-B regression — DIMENSION_FLOOR exemptions', () => {
     // making a critical tool failure look 5x less bad in the geo-mean.
     // After fix: executionEfficiency passes through unmodified.
     const r = scoreScenario(
-      makeScenario({ maxSteps: 2, tools: [{ tool: 'search_wines' }] }),
+      makeScenario({ maxSteps: 2, tools: [{ tool: 'search_hybrid' }] }),
       makeExecution({
         stepCount: 20,        // massively over budget → near-zero stepEfficiency
         toolCallCount: 20,

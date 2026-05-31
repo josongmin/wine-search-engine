@@ -4,7 +4,7 @@
  * Canonical request shape is `messages[]` — the legacy single-`query` field
  * is gone. The same surface is reused by both:
  *
- *   POST /v1/agent/run                         — caller-managed history
+ *   POST /v1/agent                         — caller-managed history
  *   POST /v1/agent/sessions/:sessionId/turns   — server-managed history
  *
  * Both paths share the same orchestrator (architecture-decision §3.3 — run
@@ -17,6 +17,7 @@
 
 import { z } from 'zod';
 import { MAX_AGENT_HTTP_QUERY_CHARS } from '../constants.js';
+import { ANSWER_MAX_CHARS, WineSearchResponseSchema } from './wine-search.schema.js';
 
 /** Hard cap on the number of messages in a single agent request. Bounded so
  *  a runaway client cannot exhaust the planner's context window. The value
@@ -30,6 +31,14 @@ const MAX_AGENT_MESSAGES = 64;
  *  the same "max sensible user utterance" reasoning. Codepoint-counted at
  *  the schema layer (see the `messages` refinement). */
 const MAX_AGENT_MESSAGE_CONTENT_CHARS = MAX_AGENT_HTTP_QUERY_CHARS;
+/** Persisted history can include the agent's own synthesized answer, whose
+ *  max length is larger than a single input message. Session-managed
+ *  `history_applied` therefore uses a wider bound than inbound request
+ *  messages. */
+const MAX_AGENT_HISTORY_MESSAGE_CONTENT_CHARS = Math.max(
+  MAX_AGENT_MESSAGE_CONTENT_CHARS,
+  ANSWER_MAX_CHARS,
+);
 /** Hard cap on the `name` field — used for tool messages to identify the
  *  tool that produced the content. Short ASCII identifiers in practice. */
 const MAX_AGENT_MESSAGE_NAME_CHARS = 256;
@@ -90,26 +99,44 @@ const AgentMessageContentSchema = z
 export const AgentMessageRoleSchema = z.enum(['system', 'user', 'assistant', 'tool']);
 export type AgentMessageRole = z.infer<typeof AgentMessageRoleSchema>;
 
-export const AgentMessageSchema = z.object({
-  role: AgentMessageRoleSchema,
-  content: AgentMessageContentSchema,
-  /** Optional message identifier — used by tool messages to name the tool
-   *  and by client-side dedup/replay logic. */
-  name: z.string().min(1).max(MAX_AGENT_MESSAGE_NAME_CHARS).optional(),
-  /** Optional ISO-8601 timestamp set by the client. Treated as informational;
-   *  the server stamps its own `created_at` on persisted turns. */
-  timestamp: z.string().min(1).max(MAX_AGENT_MESSAGE_TIMESTAMP_CHARS).optional(),
-  /** Optional client-supplied routing/correlation bag. Bounded key count so
-   *  it cannot grow into a free-form payload sink. */
-  metadata: z
-    .record(z.unknown())
-    .refine(
-      (rec) => Object.keys(rec).length <= MAX_AGENT_MESSAGE_METADATA_KEYS,
-      { message: `metadata exceeds ${String(MAX_AGENT_MESSAGE_METADATA_KEYS)} keys` },
-    )
-    .optional(),
-}).strict();
+function buildAgentMessageSchema(contentSchema: z.ZodType<string>) {
+  return z.object({
+    role: AgentMessageRoleSchema,
+    content: contentSchema,
+    /** Optional message identifier — used by tool messages to name the tool
+     *  and by client-side dedup/replay logic. */
+    name: z.string().min(1).max(MAX_AGENT_MESSAGE_NAME_CHARS).optional(),
+    /** Optional ISO-8601 timestamp set by the client. Treated as informational;
+     *  the server stamps its own `created_at` on persisted turns. */
+    timestamp: z.string().min(1).max(MAX_AGENT_MESSAGE_TIMESTAMP_CHARS).optional(),
+    /** Optional client-supplied routing/correlation bag. Bounded key count so
+     *  it cannot grow into a free-form payload sink. */
+    metadata: z
+      .record(z.unknown())
+      .refine(
+        (rec) => Object.keys(rec).length <= MAX_AGENT_MESSAGE_METADATA_KEYS,
+        { message: `metadata exceeds ${String(MAX_AGENT_MESSAGE_METADATA_KEYS)} keys` },
+      )
+      .optional(),
+  }).strict();
+}
+
+export const AgentMessageSchema = buildAgentMessageSchema(AgentMessageContentSchema);
 export type AgentMessage = z.infer<typeof AgentMessageSchema>;
+
+const AgentHistoryMessageContentSchema = z
+  .string()
+  .min(1)
+  .refine(
+    (s) => countCodepoints(s) <= MAX_AGENT_HISTORY_MESSAGE_CONTENT_CHARS,
+    {
+      message:
+        `history message content exceeds max length of ${String(MAX_AGENT_HISTORY_MESSAGE_CONTENT_CHARS)} codepoints`,
+    },
+  );
+
+export const AgentHistoryMessageSchema = buildAgentMessageSchema(AgentHistoryMessageContentSchema);
+export type AgentHistoryMessage = z.infer<typeof AgentHistoryMessageSchema>;
 
 /** Per-request options. Identical shape to the legacy
  *  `WineSearchRequestSchema.options` so the orchestrator integration is a
@@ -139,13 +166,43 @@ export const AgentContextSchema = z.object({
 }).strict();
 export type AgentContext = z.infer<typeof AgentContextSchema>;
 
+export const AgentSessionDescriptorSchema = z.object({
+  session_id: z.string().min(1).max(MAX_SESSION_ID_CHARS),
+  session_version: z.number().int().finite().nonnegative(),
+  created_at: z.string().min(1),
+  updated_at: z.string().min(1),
+  expires_at: z.string().min(1),
+}).strict();
+export type AgentSessionDescriptorBody = z.infer<typeof AgentSessionDescriptorSchema>;
+
+export const AgentSessionCreateResponseSchema = z.object({
+  session: AgentSessionDescriptorSchema,
+  replayed: z.boolean(),
+}).strict();
+export type AgentSessionCreateResponseBody = z.infer<typeof AgentSessionCreateResponseSchema>;
+
+export const AgentSessionTurnDescriptorSchema = z.object({
+  turn_index: z.number().int().finite().nonnegative(),
+  client_turn_id: z.string().min(1).max(MAX_CLIENT_IDENTIFIER_CHARS),
+  created_at: z.string().min(1),
+  replayed: z.boolean(),
+}).strict();
+export type AgentSessionTurnDescriptorBody = z.infer<typeof AgentSessionTurnDescriptorSchema>;
+
+export const AgentSessionTurnResponseSchema = WineSearchResponseSchema.extend({
+  session: AgentSessionDescriptorSchema,
+  turn: AgentSessionTurnDescriptorSchema,
+  history_applied: z.array(AgentHistoryMessageSchema).max(MAX_AGENT_MESSAGES * 2),
+}).strict();
+export type AgentSessionTurnResponseBody = z.infer<typeof AgentSessionTurnResponseSchema>;
+
 const MessagesArraySchema = z
   .array(AgentMessageSchema)
   .min(1, 'messages must contain at least one entry')
   .max(MAX_AGENT_MESSAGES, `messages exceed cap of ${String(MAX_AGENT_MESSAGES)}`);
 
 /**
- * `POST /v1/agent/run` — single-shot, caller-managed history. The caller is
+ * `POST /v1/agent` — single-shot, caller-managed history. The caller is
  * responsible for stitching prior turns into `messages[]`; the server does
  * not retain state between calls.
  */

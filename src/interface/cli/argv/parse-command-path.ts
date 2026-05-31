@@ -1,20 +1,37 @@
 export interface CommandPath {
-  readonly group: string;
-  readonly name: string;
-  /** Tokens after `<group> <name>` — handed to the leaf command's own parser. */
+  readonly path: readonly string[];
+  /** Tokens after the resolved command path — handed to the leaf parser. */
   readonly leafArgs: readonly string[];
 }
 
-/**
- * Resolves the `<group> <name>` command path from the leftover tokens. Returns
- * `null` when a full path is not present (no tokens, or group without a leaf
- * name), so the shell can fall back to help or a usage error.
- */
-export function parseCommandPath(rest: readonly string[]): CommandPath | null {
-  const group = rest[0];
-  const name = rest[1];
-  if (group === undefined || name === undefined) {
-    return null;
+export function parseCommandPath(
+  rest: readonly string[],
+  registeredPaths: readonly (readonly string[])[],
+): CommandPath | null {
+  const maxPrefixLength = Math.min(
+    rest.length,
+    registeredPaths.reduce((max, path) => Math.max(max, path.length), 0),
+  );
+  for (let prefixLength = maxPrefixLength; prefixLength >= 1; prefixLength -= 1) {
+    const prefix = rest.slice(0, prefixLength);
+    const matched = registeredPaths.find(
+      (path) => path.length === prefixLength && path.every((token, index) => token === prefix[index]),
+    );
+    if (matched !== undefined) {
+      return {
+        path: [...matched],
+        leafArgs: rest.slice(prefixLength),
+      };
+    }
   }
-  return { group, name, leafArgs: rest.slice(2) };
+  return null;
+}
+
+export function hasCommandPathPrefix(
+  rest: readonly string[],
+  registeredPaths: readonly (readonly string[])[],
+): boolean {
+  return registeredPaths.some(
+    (path) => rest.length < path.length && rest.every((token, index) => token === path[index]),
+  );
 }

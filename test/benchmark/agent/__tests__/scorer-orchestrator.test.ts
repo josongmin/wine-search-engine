@@ -75,13 +75,13 @@ describe('diagnostics', () => {
     const r = scoreScenario(
       makeScenario({
         maxSteps: 2,
-        tools: [{ tool: 'search_wines', inputContains: ['Opus'] }],
+        tools: [{ tool: 'search_hybrid', inputContains: ['Opus'] }],
         answerExcludes: ['white'],
       }),
       makeExecution({
         answer: 'A great white wine.',
         stepCount: 5,
-        toolsUsed: [tool('search_wines', '{"query":"Cabernet"}'), tool('extra')],
+        toolsUsed: [tool('search_hybrid', '{"query":"Cabernet"}'), tool('extra')],
       }),
       undefined,
     );
@@ -97,8 +97,8 @@ describe('diagnostics', () => {
 
   it('emits structured diagnostic objects with severity / code', () => {
     const r = scoreScenario(
-      makeScenario({ maxSteps: 5, mustNotCallTools: ['search_wines'] }),
-      makeExecution({ toolsUsed: [tool('search_wines')] }),
+      makeScenario({ maxSteps: 5, mustNotCallTools: ['search_hybrid'] }),
+      makeExecution({ toolsUsed: [tool('search_hybrid')] }),
       undefined,
     );
     const violation = r.diagnostics!.find((d) => d.code === 'MUST_NOT_CALL_VIOLATED');
@@ -127,8 +127,8 @@ describe('diagnostics', () => {
 describe('criticalFailure short-circuit', () => {
   it('mustNotCallTools violation collapses overall to 0', () => {
     const r = scoreScenario(
-      makeScenario({ maxSteps: 5, mustNotCallTools: ['search_wines'] }),
-      makeExecution({ toolsUsed: [tool('search_wines')] }),
+      makeScenario({ maxSteps: 5, mustNotCallTools: ['search_hybrid'] }),
+      makeExecution({ toolsUsed: [tool('search_hybrid')] }),
       1,
     );
     expect(r.scores.criticalFailure).toBe(true);
@@ -187,7 +187,7 @@ describe('criticalFailure short-circuit', () => {
   it('expectedBlocked but not blocked → criticalFailure', () => {
     const r = scoreScenario(
       makeScenario({ maxSteps: 1, expectedBlocked: true }),
-      makeExecution({ toolsUsed: [tool('search_wines')] }),
+      makeExecution({ toolsUsed: [tool('search_hybrid')] }),
       1,
     );
     expect(r.scores.criticalFailure).toBe(true);
@@ -196,9 +196,9 @@ describe('criticalFailure short-circuit', () => {
 
   it('soft fails do NOT trigger criticalFailure', () => {
     const r = scoreScenario(
-      makeScenario({ maxSteps: 5, tools: [{ tool: 'search_wines' }] }),
+      makeScenario({ maxSteps: 5, tools: [{ tool: 'search_hybrid' }] }),
       // Right tool called but with extra calls — only soft penalties
-      makeExecution({ toolsUsed: [tool('search_wines'), tool('search_wines'), tool('search_wines')], stepCount: 3 }),
+      makeExecution({ toolsUsed: [tool('search_hybrid'), tool('search_hybrid'), tool('search_hybrid')], stepCount: 3 }),
       1,
     );
     expect(r.scores.criticalFailure).toBe(false);
@@ -318,8 +318,8 @@ describe('null judge handling', () => {
 describe('executionEfficiency dimension merge', () => {
   it('high tool + high step → high exec eff', () => {
     const r = scoreScenario(
-      makeScenario({ maxSteps: 5, tools: [{ tool: 'search_wines' }] }),
-      makeExecution({ toolsUsed: [tool('search_wines')], stepCount: 2 }),
+      makeScenario({ maxSteps: 5, tools: [{ tool: 'search_hybrid' }] }),
+      makeExecution({ toolsUsed: [tool('search_hybrid')], stepCount: 2 }),
       undefined,
     );
     expect(r.scores.executionEfficiency).toBeGreaterThan(0.9);
@@ -330,7 +330,7 @@ describe('executionEfficiency dimension merge', () => {
     // max(0,0)=0; the merge does NOT make this worse than either individual,
     // which is the property we want vs. arithmetic-mean double-penalty.
     const r = scoreScenario(
-      makeScenario({ maxSteps: 2, tools: [{ tool: 'search_wines' }] }),
+      makeScenario({ maxSteps: 2, tools: [{ tool: 'search_hybrid' }] }),
       makeExecution({
         toolsUsed: [tool('a'), tool('b'), tool('c'), tool('d'), tool('e')],
         stepCount: 5,
@@ -341,7 +341,7 @@ describe('executionEfficiency dimension merge', () => {
     expect(r.scores.executionEfficiency).toBe(0);
     // Compare with a healthier case where only ONE sub-dim is bad
     const onlyToolBad = scoreScenario(
-      makeScenario({ maxSteps: 5, tools: [{ tool: 'search_wines' }] }),
+      makeScenario({ maxSteps: 5, tools: [{ tool: 'search_hybrid' }] }),
       makeExecution({ toolsUsed: [tool('a')], stepCount: 1 }), // wrong tool but step=1 ≤ 5
       undefined,
     );

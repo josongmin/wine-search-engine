@@ -308,7 +308,7 @@ function stripForSnapshot(req: CapturedAnthropicRequest): unknown {
 }
 
 /** Epoch-millis runs (13 consecutive digits) appear inside orchestrator-minted
- *  `stepId` strings (e.g. `orch:search_wines:1700000000000`). Even with a fixed
+ *  `stepId` strings (e.g. `orch:search_hybrid:1700000000000`). Even with a fixed
  *  clock these are pinned, but we additionally normalize them so the snapshot
  *  is robust to clock-injection regressions. Unicode-safe — operates on the
  *  raw string; the digit class is ASCII so `/u` is unnecessary. */
@@ -561,7 +561,7 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
 
     const orchestrator = buildHarness();
     const result = await orchestrator.execute({
-      query: '부르고뉴 피노누아 추천해줘',
+      messages: [{ role: 'user', content: '부르고뉴 피노누아 추천해줘' }],
       requestId: 'req-ko-single',
     });
 
@@ -582,7 +582,7 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
 
     const orchestrator = buildHarness();
     const result = await orchestrator.execute({
-      query: 'recommend a Burgundy pinot noir under 50000 KRW',
+      messages: [{ role: 'user', content: 'recommend a Burgundy pinot noir under 50000 KRW' }],
       requestId: 'req-en-single',
     });
 
@@ -621,7 +621,7 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
     vi.stubGlobal('fetch', capture.fetchMock);
 
     const orchestrator = buildHarness();
-    await orchestrator.execute({ query: 'something nice', requestId: 'req-ambiguous' });
+    await orchestrator.execute({ messages: [{ role: 'user', content: 'something nice' }], requestId: 'req-ambiguous' });
 
     // First call is analyze (forced respond, model = analyzer fallback model),
     // last call is synthesize.
@@ -658,7 +658,6 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
       },
       contract: {
         requiresDrinkabilityCheck: false,
-        requiredTool: 'compare_wines',
         requiresGroundedWineSearch: false,
         hasEntityMetadataSignal: false,
       },
@@ -667,7 +666,7 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
     const orchestrator = buildHarness({
       queryAnalyzer: { analyze: async () => ({ kind: 'ok', analysis }) },
     });
-    await orchestrator.execute({ query: 'compare Barolo vs Brunello', requestId: 'req-compare' });
+    await orchestrator.execute({ messages: [{ role: 'user', content: 'compare Barolo vs Brunello' }], requestId: 'req-compare' });
 
     // ExecutionRunner is deterministic (no LLM); only synthesize hits the API.
     expect(capture.requests).toHaveLength(1);
@@ -708,7 +707,7 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
       queryAnalyzer: { analyze: async () => ({ kind: 'ok', analysis }) },
       wineAgentLoopToolBundle: bundle,
     });
-    await orchestrator.execute({ query: 'find and assess a Burgundy pinot', requestId: 'req-multistep' });
+    await orchestrator.execute({ messages: [{ role: 'user', content: 'find and assess a Burgundy pinot' }], requestId: 'req-multistep' });
 
     // At least one execute() turn + one synthesize().
     expect(capture.requests.length).toBeGreaterThanOrEqual(2);
@@ -739,7 +738,7 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
     vi.stubGlobal('fetch', capture.fetchMock);
 
     const orchestrator = buildHarness();
-    await orchestrator.execute({ query: 'Sancerre recommendation', requestId: 'req-cache' });
+    await orchestrator.execute({ messages: [{ role: 'user', content: 'Sancerre recommendation' }], requestId: 'req-cache' });
 
     const synth = capture.requests.at(-1)!;
     const body = assertWireInvariants(synth);
@@ -772,7 +771,7 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
       queryAnalyzer: { analyze: async () => ({ kind: 'ok', analysis }) },
     });
     const result = await orchestrator.execute({
-      query: 'recommend a Sancerre for dinner',
+      messages: [{ role: 'user', content: 'recommend a Sancerre for dinner' }],
       requestId: 'req-refusal',
     });
 
@@ -824,7 +823,7 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
     vi.stubGlobal('fetch', capture.fetchMock);
 
     const orchestrator = buildHarness();
-    const result = await orchestrator.execute({ query: 'nice wine', requestId: 'req-usage' });
+    const result = await orchestrator.execute({ messages: [{ role: 'user', content: 'nice wine' }], requestId: 'req-usage' });
 
     // Two LLM calls fired (analyze fallback + synthesize). Note: the analyzer
     // does NOT add its usage to the orchestrator total (it returns AnalysisOutcome
@@ -861,7 +860,7 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
       queryAnalyzer: { analyze: async () => ({ kind: 'ok', analysis }) },
       wineAgentLoopToolBundle: bundle,
     });
-    await orchestrator.execute({ query: 'multi tool schema check', requestId: 'req-schema' });
+    await orchestrator.execute({ messages: [{ role: 'user', content: 'multi tool schema check' }], requestId: 'req-schema' });
 
     expect(capture.requests.length).toBeGreaterThanOrEqual(2);
     // Validate EVERY tool input_schema on EVERY captured request. The
@@ -917,7 +916,7 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
       logger: silentLogger,
       clock: fixedClock,
     });
-    await orchestrator.execute({ query: 'Sancerre please', requestId: 'req-modeldev' });
+    await orchestrator.execute({ messages: [{ role: 'user', content: 'Sancerre please' }], requestId: 'req-modeldev' });
 
     expect(capture.requests).toHaveLength(1);
     const synth = capture.requests[0]!;

@@ -126,11 +126,11 @@ describe('scoreStructuredChecks', () => {
       makeScenario({
         maxSteps: 5,
         expectedToolArgs: [
-          { tool: 'search_wines', argPath: 'filters.priceMaxKrw', predicate: 'lte', value: 50000 },
+          { tool: 'search_hybrid', argPath: 'filters.priceMaxKrw', predicate: 'lte', value: 50000 },
         ],
       }),
       makeExecution({
-        toolsUsed: [tool('search_wines', '{"query":"wine","filters":{"priceMaxKrw":100000}}')],
+        toolsUsed: [tool('search_hybrid', '{"query":"wine","filters":{"priceMaxKrw":100000}}')],
       }),
       undefined,
     );
@@ -146,11 +146,11 @@ describe('scoreStructuredChecks', () => {
       makeScenario({
         maxSteps: 5,
         expectedToolArgs: [
-          { tool: 'search_wines', argPath: 'filters.priceMaxKrw', predicate: 'lte', value: 50000 },
+          { tool: 'search_hybrid', argPath: 'filters.priceMaxKrw', predicate: 'lte', value: 50000 },
         ],
       }),
       makeExecution({
-        toolsUsed: [tool('search_wines', '{"query":"wine","filters":{"priceMaxKrw":30000}}')],
+        toolsUsed: [tool('search_hybrid', '{"query":"wine","filters":{"priceMaxKrw":30000}}')],
       }),
       undefined,
     );
@@ -162,13 +162,13 @@ describe('scoreStructuredChecks', () => {
       makeScenario({
         maxSteps: 5,
         expectedToolArgs: [
-          { tool: 'search_wines', argPath: 'styles', predicate: 'contains', value: 'screw_cap' },
-          { tool: 'search_wines', argPath: 'occasion', predicate: 'contains', value: 'camping' },
+          { tool: 'search_hybrid', argPath: 'styles', predicate: 'contains', value: 'screw_cap' },
+          { tool: 'search_hybrid', argPath: 'occasion', predicate: 'contains', value: 'camping' },
         ],
       }),
       makeExecution({
         toolsUsed: [
-          tool('search_wines', '{"query":"캠핑 와인","styles":["screw_cap","chillable"],"occasion":["camping"]}'),
+          tool('search_hybrid', '{"query":"캠핑 와인","styles":["screw_cap","chillable"],"occasion":["camping"]}'),
         ],
       }),
       undefined,
@@ -183,11 +183,11 @@ describe('scoreStructuredChecks', () => {
       makeScenario({
         maxSteps: 5,
         expectedToolArgs: [
-          { tool: 'search_wines', argPath: 'query', predicate: 'contains_any', value: ['Almaviva', '알마비바'] },
+          { tool: 'lookup_wine', argPath: 'query', predicate: 'contains_any', value: ['Almaviva', '알마비바'] },
         ],
       }),
       makeExecution({
-        toolsUsed: [tool('search_wines', '{"query":"알마비바 2026 빈티지","retrieval_mode":"entity"}')],
+        toolsUsed: [tool('lookup_wine', '{"query":"알마비바 2026 빈티지"}')],
       }),
       undefined,
     );
@@ -201,11 +201,11 @@ describe('scoreStructuredChecks', () => {
       makeScenario({
         maxSteps: 5,
         expectedToolArgs: [
-          { tool: 'search_wines', argPath: 'query', predicate: 'equals_any', value: ['보졸레 누보', 'beaujolais nouveau'] },
+          { tool: 'search_hybrid', argPath: 'query', predicate: 'equals_any', value: ['보졸레 누보', 'beaujolais nouveau'] },
         ],
       }),
       makeExecution({
-        toolsUsed: [tool('search_wines', '{"query":"보졸레 누보"}')],
+        toolsUsed: [tool('search_hybrid', '{"query":"보졸레 누보"}')],
       }),
       undefined,
     );
@@ -279,7 +279,7 @@ describe('step-0 fallback exemptions for structured checks', () => {
       makeExecution({
         answer: '이거 해줘. 맛있건데 좋잖아. 다음에도 할게.',
         stepCount: 1,
-        toolsUsed: [tool('search_wines')],
+        toolsUsed: [tool('search_hybrid')],
         toolCallCount: 1,
         terminationReason: 'fallback',
       }),
@@ -297,4 +297,3 @@ describe('step-0 fallback exemptions for structured checks', () => {
 // ─────────────────────────────────────────────────────────────────────
 // Korean CLR (Correct Language Rate) diagnostics
 // ─────────────────────────────────────────────────────────────────────
-

@@ -83,7 +83,7 @@ function makeSearchOutcome(
 ): ToolOutcome {
   return {
     stepId: opts?.stepId ?? 'q:0:0',
-    tool: 'search_wines',
+    tool: 'search_hybrid',
     kind: opts?.kind ?? 'success',
     durationMs: 12,
     result: {
@@ -107,7 +107,7 @@ function makeGroundingObservation(wines: ReadonlyArray<{
 }>): ToolOutcome {
   return {
     stepId: 'q:0:0',
-    tool: 'search_wines',
+    tool: 'search_hybrid',
     kind: 'success',
     durationMs: 12,
     result: { wines },
@@ -629,7 +629,7 @@ describe('SynthesisRunner — token / timeout / circuit-open accounting', () => 
       hangulDominant: false,
       toolOutcomes: [{
         stepId: 'q:0:0',
-        tool: 'search_wines',
+        tool: 'search_hybrid',
         kind: 'success',
         durationMs: 12,
         result: { opaque: true },
@@ -720,7 +720,7 @@ function makeGroundedWineOutcome(
 ): ToolOutcome {
   return {
     stepId: 'q:0:0',
-    tool: 'search_wines',
+    tool: 'search_hybrid',
     kind: 'success',
     durationMs: 12,
     result: {

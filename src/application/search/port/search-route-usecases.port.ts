@@ -39,7 +39,7 @@ export interface DecomposedSearchParentContext {
   readonly explain?: boolean | undefined;
   /**
    * Caller-provided execution mode override for BOTH legs (api_override
-   * semantics — mirrors `search_wines.retrieval_mode`). When set, each
+   * semantics — mirrors the search-family retrieval-mode override). When set, each
    * sub-search runs with this exact `options.mode` and the leg's auto-detected
    * retrieval mode is bypassed. Bench #117 RCA: the planner reasonably emits
    * `retrieval_mode: 'entity'` for exact-pair compares; without this override

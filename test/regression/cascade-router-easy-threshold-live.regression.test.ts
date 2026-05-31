@@ -1,17 +1,28 @@
 /**
- * Cascade-router CASCADE_EASY_THRESHOLD live-branch regression.
+ * Cascade-router 'easy' (sparse-only) route is graph-gated and prod-unwired.
  *
- * Bug: in the graph-aware path of `estimateDifficulty`, the
- * `effectiveComplexity < CASCADE_EASY_THRESHOLD` branch returned 'medium'
- * in BOTH of its sub-branches AND the fall-through also returned 'medium'.
- * The threshold check therefore produced no distinct outcome — it was a
- * dead branch and `CASCADE_EASY_THRESHOLD` was an unauditable dead constant.
+ * History: a prior change (W4) made the graph-aware path route andDepth===0
+ * queries to 'easy' (sparse-only) via a CASCADE_EASY_THRESHOLD constant. That
+ * was reverted because:
+ *   (a) it dropped dense recall for a whole class of OR-heavy / zero-AND
+ *       constraint queries with no offsetting recall justification, and
+ *   (b) it was unreachable in production anyway — the sole prod caller
+ *       (candidate-pool.ts getDispatchDecision) does NOT pass a ConstraintGraph,
+ *       so the graph-aware branch never executes at all.
  *
- * Fix: an OR-heavy / no-AND query (effectiveComplexity below the easy
- * threshold) expands the candidate set, so the documented cascade design
- * ("Easy: sparse only") routes it to 'easy'. AND-heavy queries (>= hard
- * threshold) still route 'hard'; queries in the band between easy and hard
- * thresholds still route 'medium'.
+ * Invariant now asserted (reverse-logic guard — if someone re-introduces the
+ * sparse-only easy route on the below-hard graph branch, these expectations
+ * break):
+ *   - OR-heavy / andDepth=0 graph queries route 'medium' (sparse + dense),
+ *     NOT 'easy'. Dense recall is preserved.
+ *   - The 'medium' dispatch keeps the dense channel; it does not collapse to a
+ *     sparse-only channel set.
+ *   - AND-heavy graphs still route 'hard'; the [easy,hard) band stays 'medium'.
+ *   - High-confidence anchored_similarity still short-circuits to 'medium'.
+ *
+ * The 'easy' difficulty itself still exists (getPhases('easy') === ['sparse'])
+ * but has no live prod entry point; reaching it requires a future graph-gated
+ * caller validated against a recall benchmark.
  *
  * Append-only test: never delete this file.
  */
@@ -49,9 +60,11 @@ function slot(nodeId: string, attribute: string): ConstraintGraphNode {
   };
 }
 
-describe('CascadeRouter — CASCADE_EASY_THRESHOLD drives an "easy" outcome', () => {
-  it('OR-heavy / no-AND graph (complexity < easy threshold) → easy (sparse only)', () => {
-    // andDepth=0, orBreadth=3 → effectiveComplexity = -0.7*log(4) ≈ -0.97 < 1.0
+describe('CascadeRouter — below-hard graph route keeps dense recall (no sparse-only easy)', () => {
+  it('OR-heavy / no-AND graph (complexity < hard threshold) → medium (sparse + dense), NOT easy', () => {
+    // andDepth=0, orBreadth=3 → effectiveComplexity = -0.7*log(4) ≈ -0.97.
+    // Pre-revert this returned 'easy'; the conservative route keeps 'medium'
+    // so dense recall is not dropped for OR-heavy constraint queries.
     const graph = makeGraph(
       [
         { kind: 'group_and', nodeId: 'root', children: ['or1'] },
@@ -62,10 +75,10 @@ describe('CascadeRouter — CASCADE_EASY_THRESHOLD drives an "easy" outcome', ()
       ],
       'root',
     );
-    expect(router.estimateDifficulty('pure_constraint', 0, 0, 3, graph)).toBe('easy');
+    expect(router.estimateDifficulty('pure_constraint', 0, 0, 3, graph)).toBe('medium');
   });
 
-  it('easy outcome dispatches sparse-only channel set (no dense/anchor)', () => {
+  it('OR-heavy dispatch keeps the dense channel (NOT a sparse-only channel set)', () => {
     const graph = makeGraph(
       [
         { kind: 'group_and', nodeId: 'root', children: ['or1'] },
@@ -77,9 +90,11 @@ describe('CascadeRouter — CASCADE_EASY_THRESHOLD drives an "easy" outcome', ()
       'root',
     );
     const decision = router.getDispatchDecision('pure_constraint', 0, 0, 3, graph);
-    expect(decision.difficulty).toBe('easy');
+    expect(decision.difficulty).toBe('medium');
     expect(decision.channelsToActivate).toContain('sparse_bm25');
-    expect(decision.channelsToActivate).not.toContain('dense_semantic');
+    // Dense recall preserved — this is the regression guard.
+    expect(decision.channelsToActivate).toContain('dense_semantic');
+    // Still below 'hard', so anchor ANN stays off.
     expect(decision.channelsToActivate).not.toContain('anchor_similarity');
   });
 
@@ -97,8 +112,7 @@ describe('CascadeRouter — CASCADE_EASY_THRESHOLD drives an "easy" outcome', ()
   });
 
   it('adjacent: complexity in the [easy, hard) band → medium', () => {
-    // andDepth=2, orBreadth=0 → effectiveComplexity = 2.0, which is
-    // >= CASCADE_EASY_THRESHOLD (1.0) and < CASCADE_HARD_THRESHOLD (3.0).
+    // andDepth=2, orBreadth=0 → effectiveComplexity = 2.0, in [1.0, 3.0).
     const graph = makeGraph(
       [
         { kind: 'group_and', nodeId: 'root', children: ['s1', 's2'] },
@@ -122,5 +136,11 @@ describe('CascadeRouter — CASCADE_EASY_THRESHOLD drives an "easy" outcome', ()
       'root',
     );
     expect(router.estimateDifficulty('anchored_similarity', 0.9, 0, 3, graph)).toBe('medium');
+  });
+
+  it("'easy' difficulty still maps to the sparse-only phase set (route exists but is prod-unwired)", () => {
+    // The difficulty level itself is unchanged; only the graph-aware *entry*
+    // to it was removed. getPhases('easy') must stay sparse-only.
+    expect(router.getPhases('easy')).toEqual(['sparse']);
   });
 });

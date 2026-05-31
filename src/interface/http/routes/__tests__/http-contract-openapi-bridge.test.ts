@@ -14,12 +14,11 @@ describe.skipIf(!CAN_RUN_TSX_SUBPROCESS)('HTTP contract OpenAPI bridge', () => {
     const document = buildHttpRouteContractOpenApiBridge();
 
     expect(document.openapi).toBe('3.1.0');
-    expect(document.paths['/v1/search']?.post).toEqual(expect.objectContaining({
-      operationId: 'search.execute',
+    expect(document.paths['/v1/search/hybrid']?.post).toEqual(expect.objectContaining({
+      operationId: 'search.hybrid',
       tags: ['search'],
       'x-search-capabilities': [
         'security',
-        'decomposition',
         'planner',
         'SAT',
         'cache',
@@ -31,15 +30,12 @@ describe.skipIf(!CAN_RUN_TSX_SUBPROCESS)('HTTP contract OpenAPI bridge', () => {
       'x-contract-success-status-codes': [200],
       'x-contract-error-status-codes': [400, 403, 408, 429, 500, 503],
     }));
-    expect(document.paths['/v1/search']?.post?.requestBody?.content['application/json'].schema).toEqual(
+    expect(document.paths['/v1/search/hybrid']?.post?.requestBody?.content['application/json'].schema).toEqual(
       expect.objectContaining({
         type: 'object',
         properties: expect.objectContaining({
           query: expect.objectContaining({
             type: 'string',
-          }),
-          options: expect.objectContaining({
-            type: 'object',
           }),
         }),
       }),
@@ -74,7 +70,11 @@ describe.skipIf(!CAN_RUN_TSX_SUBPROCESS)('HTTP contract OpenAPI bridge', () => {
         },
       ],
     }));
-    expect(document.paths['/v1/search/hybrid']).toBeUndefined();
+    expect(document.paths['/v1/search']).toBeUndefined();
+    expect(document.paths['/v1/search/lookup']).toBeUndefined();
+    expect(document.paths['/v1/search/hybrid']?.post).toEqual(expect.objectContaining({
+      operationId: 'search.hybrid',
+    }));
     expect(document.paths['/v1/search/interpret']).toBeUndefined();
     expect(document.paths['/v1/entity/resolve']).toBeUndefined();
     expect(document.paths['/v1/entity/autocomplete']).toBeUndefined();

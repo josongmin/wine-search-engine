@@ -87,7 +87,7 @@ function makeAnalysis(query: string, hangulDominant: boolean): WineSearchAnalysi
 function makeSearchOutcome(canonicalLabel: string, producer = 'P', region = 'R'): ToolOutcome {
   return {
     stepId: 'q:0:0',
-    tool: 'search_wines',
+    tool: 'search_hybrid',
     kind: 'success',
     durationMs: 12,
     result: {

@@ -99,7 +99,7 @@ export interface AgentQueryExecutionContract {
   readonly nonExactEntityLookupQuery?: string | undefined;
   readonly requiresGroundedWineSearch?: boolean | undefined;
   readonly totalBudgetKrw?: number | undefined;
-  readonly requiredTool?: 'get_food_pairings' | undefined;
+  readonly requiredTool?: 'search_hybrid' | undefined;
   readonly foodPairing?: {
     readonly rawQuery: string;
     readonly pairingTags: readonly PairingTag[];
@@ -803,7 +803,7 @@ export function buildAgentQueryExecutionContract(query: string): AgentQueryExecu
     ...(totalBudgetKrw !== undefined ? { totalBudgetKrw } : {}),
     ...(foodPairing !== undefined
       ? {
-          requiredTool: 'get_food_pairings' as const,
+          requiredTool: 'search_hybrid' as const,
           foodPairing,
         }
       : {}),
@@ -852,4 +852,3 @@ function isSpecificSkuLikeNormalized(query: string): boolean {
     && isSpecificSkuLikeQuery(candidate),
   );
 }
-

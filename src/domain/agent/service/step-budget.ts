@@ -213,8 +213,8 @@ function evaluateAndRecordStep(
   }
 
   // Per-tool call cap — catches reformulation thrashing that exact-key
-  // dedup misses (e.g. search_wines("Opus One"), search_wines("Opus 2018"),
-  // search_wines("Opus One wine") all distinct under canonical key).
+  // dedup misses (e.g. search_hybrid("Opus One"), search_hybrid("Opus 2018"),
+  // search_hybrid("Opus One wine") all distinct under canonical key).
   const projectedPerToolCount = (state.perToolCallCounts.get(tool) ?? 0) + 1;
   if (projectedPerToolCount > perToolCallCap) {
     return { allowed: false, reason: 'loop_detected' };

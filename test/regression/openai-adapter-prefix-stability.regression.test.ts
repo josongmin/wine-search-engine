@@ -173,14 +173,14 @@ describe('regression: openai-structured-llm-adapter prefix stability', () => {
   // -------------------------------------------------------------------------
   it('execute(): system message is byte-identical across two different chat histories', async () => {
     const { captures } = stubFetch({
-      toolFnName: 'search_wines',
+      toolFnName: 'search_hybrid',
       toolArguments: JSON.stringify({ query: 'x' }),
     });
     const ad = adapter();
     const SYSTEM_PROMPT = 'You are a tool-using agent. Static rules only.';
     const tools: readonly ToolDefinition[] = [
       {
-        name: 'search_wines',
+        name: 'search_hybrid',
         description: 'Search wines',
         inputSchema: z.object({ query: z.string() }),
       },
@@ -220,25 +220,25 @@ describe('regression: openai-structured-llm-adapter prefix stability', () => {
   // -------------------------------------------------------------------------
   it('execute(): tools array is byte-identical regardless of caller-supplied ordering', async () => {
     const { captures } = stubFetch({
-      toolFnName: 'search_wines',
+      toolFnName: 'search_hybrid',
       toolArguments: JSON.stringify({ query: 'x' }),
     });
     const ad = adapter();
     const SYSTEM_PROMPT = 'static system';
     const toolA: ToolDefinition = {
-      name: 'search_wines',
+      name: 'search_hybrid',
       description: 'a',
       inputSchema: z.object({ query: z.string() }),
     };
     const toolB: ToolDefinition = {
-      name: 'compare_wines',
+      name: 'lookup_wine',
       description: 'b',
-      inputSchema: z.object({ query_a: z.string(), query_b: z.string() }),
+      inputSchema: z.object({ query: z.string() }),
     };
     const toolC: ToolDefinition = {
-      name: 'get_food_pairings',
+      name: 'search_semantic',
       description: 'c',
-      inputSchema: z.object({ food: z.string() }),
+      inputSchema: z.object({ query: z.string() }),
     };
 
     // Call 1: A, B, C
@@ -268,9 +268,9 @@ describe('regression: openai-structured-llm-adapter prefix stability', () => {
     expect(JSON.stringify(tools1)).toBe(JSON.stringify(tools0));
     // Confirm sort order is alphabetical so a caller can predict the prefix.
     expect(tools0?.map((t) => t.function.name)).toEqual([
-      'compare_wines',
-      'get_food_pairings',
-      'search_wines',
+      'lookup_wine',
+      'search_hybrid',
+      'search_semantic',
     ]);
   });
 
@@ -324,14 +324,14 @@ describe('regression: openai-structured-llm-adapter prefix stability', () => {
   // -------------------------------------------------------------------------
   it('execute(): inbound `system` role message in `messages[]` is demoted to user (system slot stays clean)', async () => {
     const { captures } = stubFetch({
-      toolFnName: 'search_wines',
+      toolFnName: 'search_hybrid',
       toolArguments: JSON.stringify({ query: 'x' }),
     });
     const ad = adapter();
     const SYSTEM_PROMPT = 'static system bytes only';
     const tools: readonly ToolDefinition[] = [
       {
-        name: 'search_wines',
+        name: 'search_hybrid',
         description: 'a',
         inputSchema: z.object({ query: z.string() }),
       },

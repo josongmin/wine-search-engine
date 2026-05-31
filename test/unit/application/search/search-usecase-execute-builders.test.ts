@@ -612,6 +612,59 @@ describe('search-usecase-execute-builders synthetic decision traces', () => {
     });
   });
 
+  it('caps clarification preview at the top 3 candidates even when many ranked results exist', () => {
+    // Drift guard: the clarification preview top-N must stay 3
+    // (CLARIFICATION_PREVIEW_TOP_N in search-usecase-execute-builders.ts), NOT
+    // the HTTP array bound MAX_CLARIFICATION_CANDIDATES (=20) in
+    // interface/http/constants.ts. The two share the wrong name before the
+    // rename; if a later edit re-collapses them, this surfaces >3 candidates.
+    const plan = {
+      ...makePlan(),
+      rawQuery: 'opus',
+      normalizedQuery: 'opus',
+      intent: 'semantic_discovery',
+      queryClass: 'ambiguous_short_form',
+    } as QueryPlanV1;
+    // Six distinct identity-supported ranked results — well above the top-3 cap
+    // but below the HTTP bound of 20, so a regression to the =20 constant would
+    // surface all six and fail this assertion.
+    const rankedResults = Array.from({ length: 6 }, (_value, index) =>
+      makeRankedResult(`Distinct Opus Candidate ${index + 1}`, index + 1),
+    );
+    const results = rankedResults.map((ranked) => makeResultItem(ranked, 'alias_exact'));
+
+    const params = buildEntropyAbstainResponseParams({
+      plan,
+      compiled: makeCompiled(),
+      snapshot: makeSnapshot(),
+      requestId: 'req-opus-topn-cap',
+      startTime: Date.now(),
+      effectiveRoute: 'hybrid',
+      retrievalModeSource: 'planner',
+      plannerSuggestedMode: 'entity_resolution',
+      abstainDecision: {
+        shouldAbstain: true,
+        reason: 'low_confidence',
+        detail: 'ambiguous short-form entity requires clarification',
+        recoverableBy: 'clarify',
+        entropy: 0.99,
+      },
+      entropy: 0.99,
+      results,
+      rankedResults,
+    });
+
+    expect(params.clarification.candidates).toHaveLength(3);
+    expect(params.clarification.candidates.map((candidate) => candidate.label)).toEqual([
+      'Distinct Opus Candidate 1',
+      'Distinct Opus Candidate 2',
+      'Distinct Opus Candidate 3',
+    ]);
+    const payload = params.clarification.structuredPayload;
+    expect(payload.kind).toBe('anchor_disambiguation');
+    expect(payload.options).toHaveLength(3);
+  });
+
   it('prefers compiler-authored clarify payload over ambiguity-hint-derived clarification', () => {
     const plan = {
       ...makePlan(),

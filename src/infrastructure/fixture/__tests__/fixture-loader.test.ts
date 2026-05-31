@@ -95,7 +95,7 @@ describe('BenchmarkCaseSchema — happy path', () => {
       difficulty: 'easy',
       evaluation: {
         mode: 'tool_sequence',
-        expected_tools: [{ tool: 'search_wines' }],
+        expected_tools: [{ tool: 'search_hybrid' }],
         answer_must_match: ['(red|레드|풀바디)'],
         max_steps: 2,
         max_duration_ms: 40000,
@@ -648,7 +648,7 @@ describe('BenchmarkCaseSchema — strict() rejects unknown keys (Rule 10)', () =
       ...validBase,
       evaluation: {
         mode: 'tool_sequence',
-        expected_tools: [{ tool: 'search_wines', extra_key: 'oops' }],
+        expected_tools: [{ tool: 'search_hybrid', extra_key: 'oops' }],
       },
     });
     expect(result.success).toBe(false);

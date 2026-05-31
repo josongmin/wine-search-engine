@@ -6,12 +6,11 @@ describe('HTTP contract OpenAPI bridge', () => {
     const document = buildHttpRouteContractOpenApiBridge();
 
     expect(document.openapi).toBe('3.1.0');
-    expect(document.paths['/v1/search']?.post).toEqual(expect.objectContaining({
-      operationId: 'search.execute',
+    expect(document.paths['/v1/search/hybrid']?.post).toEqual(expect.objectContaining({
+      operationId: 'search.hybrid',
       tags: ['search'],
       'x-search-capabilities': [
         'security',
-        'decomposition',
         'planner',
         'SAT',
         'cache',
@@ -23,15 +22,12 @@ describe('HTTP contract OpenAPI bridge', () => {
       'x-contract-success-status-codes': [200],
       'x-contract-error-status-codes': [400, 403, 408, 429, 500, 503],
     }));
-    expect(document.paths['/v1/search']?.post?.requestBody?.content['application/json'].schema).toEqual(
+    expect(document.paths['/v1/search/hybrid']?.post?.requestBody?.content['application/json'].schema).toEqual(
       expect.objectContaining({
         type: 'object',
         properties: expect.objectContaining({
           query: expect.objectContaining({
             type: 'string',
-          }),
-          options: expect.objectContaining({
-            type: 'object',
           }),
         }),
       }),
@@ -55,10 +51,6 @@ describe('HTTP contract OpenAPI bridge', () => {
         },
       ],
     }));
-    // T-IR-01/02: path-authoritative primitive surface is now declared in the
-    // catalog alongside the legacy mode-monolith routes. These must be present
-    // as `post` operations (additive — legacy `/v1/search`, `/v1/search/lookup`,
-    // `/v1/agent` stay until T-IR-07 removes them).
     expect(document.paths['/v1/search/hybrid']?.post).toEqual(expect.objectContaining({
       operationId: 'search.hybrid',
       tags: ['search'],
@@ -75,8 +67,19 @@ describe('HTTP contract OpenAPI bridge', () => {
       operationId: 'lookup.wine',
       tags: ['lookup'],
     }));
-    expect(document.paths['/v1/agent/run']?.post).toEqual(expect.objectContaining({
-      operationId: expect.any(String),
+    expect(document.paths['/v1/search']).toBeUndefined();
+    expect(document.paths['/v1/search/lookup']).toBeUndefined();
+    expect(document.paths['/v1/agent']?.post).toEqual(expect.objectContaining({
+      operationId: 'agent.run',
+      tags: ['agent'],
+    }));
+    expect(document.paths['/v1/agent/run']).toBeUndefined();
+    expect(document.paths['/v1/agent/sessions']?.post).toEqual(expect.objectContaining({
+      operationId: 'agent.session.create',
+      tags: ['agent'],
+    }));
+    expect(document.paths['/v1/agent/sessions/{sessionId}/turns']?.post).toEqual(expect.objectContaining({
+      operationId: 'agent.session.turn',
       tags: ['agent'],
     }));
     expect(document.paths['/v1/search/interpret']).toBeUndefined();

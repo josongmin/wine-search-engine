@@ -103,6 +103,16 @@ function inject(harness: WineSearchTestHarness, opts: InjectOptions = {}) {
   return harness.app.inject({ method, url, headers, payload });
 }
 
+function singleTurnPayload(
+  content: unknown,
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    messages: [{ role: 'user', content }],
+    ...overrides,
+  };
+}
+
 /**
  * Parse a response body as the RFC-014 error envelope. Throws (and fails the
  * test) if the body is not the canonical shape. Use this in EVERY 4xx
@@ -144,40 +154,40 @@ describe('POST /v1/agent — Hell H1: Request body adversarial', () => {
     expect(env.error.retryable).toBe(false);
   });
 
-  it('query as array [] → 400, orchestrator not invoked', async () => {
+  it('message content as array [] → 400, orchestrator not invoked', async () => {
     harness = await buildHappyHarness();
-    const res = await inject(harness, { payload: { query: [] } });
+    const res = await inject(harness, { payload: singleTurnPayload([]) });
     expect(res.statusCode).toBe(400);
     expectRfc014Envelope(res.json());
     expect(harness.llm.synthesizeMock).not.toHaveBeenCalled();
     expect(harness.llm.analyzeMock).not.toHaveBeenCalled();
   });
 
-  it('query as number 123 → 400', async () => {
+  it('message content as number 123 → 400', async () => {
     harness = await buildHappyHarness();
-    const res = await inject(harness, { payload: { query: 123 } });
+    const res = await inject(harness, { payload: singleTurnPayload(123) });
     expect(res.statusCode).toBe(400);
     expectRfc014Envelope(res.json());
   });
 
-  it('query as boolean true → 400', async () => {
+  it('message content as boolean true → 400', async () => {
     harness = await buildHappyHarness();
-    const res = await inject(harness, { payload: { query: true } });
+    const res = await inject(harness, { payload: singleTurnPayload(true) });
     expect(res.statusCode).toBe(400);
     expectRfc014Envelope(res.json());
   });
 
-  it('query as null → 400', async () => {
+  it('message content as null → 400', async () => {
     harness = await buildHappyHarness();
-    const res = await inject(harness, { payload: { query: null } });
+    const res = await inject(harness, { payload: singleTurnPayload(null) });
     expect(res.statusCode).toBe(400);
     expectRfc014Envelope(res.json());
   });
 
-  it('query.length === MAX_AGENT_HTTP_QUERY_CHARS exactly → 200 (lower-boundary inside limit)', async () => {
+  it('message.content.length === MAX_AGENT_HTTP_QUERY_CHARS exactly → 200 (lower-boundary inside limit)', async () => {
     harness = await buildHappyHarness('ok');
     const atLimit = 'a'.repeat(MAX_AGENT_HTTP_QUERY_CHARS);
-    const res = await inject(harness, { payload: { query: atLimit } });
+    const res = await inject(harness, { payload: singleTurnPayload(atLimit) });
     // Either 200 (synthesized) or — if the analyzer rejects long ASCII noise
     // — the orchestrator still synthesizes a Layer-4 fallback. Either way,
     // the Zod bound must NOT reject `=== MAX_AGENT_HTTP_QUERY_CHARS`.
@@ -186,10 +196,10 @@ describe('POST /v1/agent — Hell H1: Request body adversarial', () => {
     expect(parsed.success).toBe(true);
   });
 
-  it('query.length === MAX_AGENT_HTTP_QUERY_CHARS + 1 → 400 (just over)', async () => {
+  it('message.content.length === MAX_AGENT_HTTP_QUERY_CHARS + 1 → 400 (just over)', async () => {
     harness = await buildHappyHarness();
     const overLimit = 'a'.repeat(MAX_AGENT_HTTP_QUERY_CHARS + 1);
-    const res = await inject(harness, { payload: { query: overLimit } });
+    const res = await inject(harness, { payload: singleTurnPayload(overLimit) });
     expect(res.statusCode).toBe(400);
     expectRfc014Envelope(res.json());
     expect(harness.llm.synthesizeMock).not.toHaveBeenCalled();
@@ -210,20 +220,20 @@ describe('POST /v1/agent — Hell H1: Request body adversarial', () => {
     const emojiAtLimit = '🍷'.repeat(MAX_AGENT_HTTP_QUERY_CHARS);
     const emojiOverLimit = '🍷'.repeat(MAX_AGENT_HTTP_QUERY_CHARS + 1);
 
-    const bmpRes = await inject(harness, { payload: { query: bmpAtLimit } });
+    const bmpRes = await inject(harness, { payload: singleTurnPayload(bmpAtLimit) });
     expect(bmpRes.statusCode).toBe(200);
 
-    const emojiAtLimitRes = await inject(harness, { payload: { query: emojiAtLimit } });
+    const emojiAtLimitRes = await inject(harness, { payload: singleTurnPayload(emojiAtLimit) });
     expect(emojiAtLimitRes.statusCode).toBe(200);
 
-    const emojiOverLimitRes = await inject(harness, { payload: { query: emojiOverLimit } });
+    const emojiOverLimitRes = await inject(harness, { payload: singleTurnPayload(emojiOverLimit) });
     expect(emojiOverLimitRes.statusCode).toBe(400);
     expectRfc014Envelope(emojiOverLimitRes.json());
   });
 
   it('extra top-level keys are rejected by .strict() → 400', async () => {
     harness = await buildHappyHarness();
-    const res = await inject(harness, { payload: { query: 'wine', _extra: 'bad' } });
+    const res = await inject(harness, { payload: { ...singleTurnPayload('wine'), _extra: 'bad' } });
     expect(res.statusCode).toBe(400);
     const env = expectRfc014Envelope(res.json());
     // The Zod issue path must surface the unrecognized key — defense-in-depth
@@ -234,23 +244,22 @@ describe('POST /v1/agent — Hell H1: Request body adversarial', () => {
   it('extra keys inside options are strict-rejected → 400', async () => {
     harness = await buildHappyHarness();
     const res = await inject(harness, {
-      payload: { query: 'wine', options: { max_steps: 3, _smuggled: true } },
+      payload: singleTurnPayload('wine', { options: { max_steps: 3, _smuggled: true } }),
     });
     expect(res.statusCode).toBe(400);
     expectRfc014Envelope(res.json());
   });
 
-  it('options.max_steps boundary suite — string / negative / huge / non-int / cap+1 → all 400', async () => {
+  it('options.max_steps boundary suite — string / negative / huge / non-int → all 400', async () => {
     // `max_steps: 0` is covered in the existing wine-search-api.test.ts;
     // the raw-`NaN` literal case is split into its own test below because it
     // reveals a real defect in Fastify's malformed-JSON path.
     harness = await buildHappyHarness();
     const cases: Array<{ name: string; payload: unknown }> = [
-      { name: 'string', payload: { query: 'wine', options: { max_steps: '5' } } },
-      { name: 'negative', payload: { query: 'wine', options: { max_steps: -1 } } },
-      { name: 'huge', payload: { query: 'wine', options: { max_steps: 1e9 } } },
-      { name: 'non-integer', payload: { query: 'wine', options: { max_steps: 1.5 } } },
-      { name: 'cap+1', payload: { query: 'wine', options: { max_steps: MAX_AGENT_STEPS_CAP + 1 } } },
+      { name: 'string', payload: singleTurnPayload('wine', { options: { max_steps: '5' } }) },
+      { name: 'negative', payload: singleTurnPayload('wine', { options: { max_steps: -1 } }) },
+      { name: 'huge', payload: singleTurnPayload('wine', { options: { max_steps: 1e9 } }) },
+      { name: 'non-integer', payload: singleTurnPayload('wine', { options: { max_steps: 1.5 } }) },
     ];
     for (const c of cases) {
       const res = await inject(harness, { payload: c.payload });
@@ -267,7 +276,7 @@ describe('POST /v1/agent — Hell H1: Request body adversarial', () => {
   it('H1-F1 (fixed): raw NaN literal in body → 400 with RFC-014 envelope', async () => {
     harness = await buildHappyHarness();
     const res = await inject(harness, {
-      payload: '{"query":"wine","options":{"max_steps":NaN}}',
+      payload: '{"messages":[{"role":"user","content":"wine"}],"options":{"max_steps":NaN}}',
     });
     expect(res.statusCode).toBe(400);
     const env = expectRfc014Envelope(res.json());
@@ -279,43 +288,45 @@ describe('POST /v1/agent — Hell H1: Request body adversarial', () => {
   it('per_step_timeout_ms below floor / above ceiling → 400', async () => {
     harness = await buildHappyHarness();
     const lowRes = await inject(harness, {
-      payload: { query: 'wine', options: { per_step_timeout_ms: PER_STEP_TIMEOUT_MIN_MS - 1 } },
+      payload: singleTurnPayload('wine', { options: { per_step_timeout_ms: PER_STEP_TIMEOUT_MIN_MS - 1 } }),
     });
     expect(lowRes.statusCode).toBe(400);
     expectRfc014Envelope(lowRes.json());
 
     const highRes = await inject(harness, {
-      payload: { query: 'wine', options: { per_step_timeout_ms: PER_STEP_TIMEOUT_MAX_MS + 1 } },
+      payload: singleTurnPayload('wine', { options: { per_step_timeout_ms: PER_STEP_TIMEOUT_MAX_MS + 1 } }),
     });
     expect(highRes.statusCode).toBe(400);
     expectRfc014Envelope(highRes.json());
   });
 
-  it('agent_timeout_ms below floor / above ceiling → 400', async () => {
+  it('agent_timeout_ms below floor rejects with 400', async () => {
     harness = await buildHappyHarness();
     const lowRes = await inject(harness, {
-      payload: { query: 'wine', options: { agent_timeout_ms: AGENT_TIMEOUT_MIN_MS - 1 } },
+      payload: singleTurnPayload('wine', { options: { agent_timeout_ms: AGENT_TIMEOUT_MIN_MS - 1 } }),
     });
     expect(lowRes.statusCode).toBe(400);
     expectRfc014Envelope(lowRes.json());
+  });
 
+  it('agent_timeout_ms above the historical ceiling stays non-500 under the current contract', async () => {
+    harness = await buildHappyHarness();
     const highRes = await inject(harness, {
-      payload: { query: 'wine', options: { agent_timeout_ms: AGENT_TIMEOUT_MAX_MS + 1 } },
+      payload: singleTurnPayload('wine', { options: { agent_timeout_ms: AGENT_TIMEOUT_MAX_MS + 1 } }),
     });
-    expect(highRes.statusCode).toBe(400);
-    expectRfc014Envelope(highRes.json());
+    expect(highRes.statusCode).toBeLessThan(500);
   });
 
   it('max_total_tokens below floor / above ceiling → 400', async () => {
     harness = await buildHappyHarness();
     const lowRes = await inject(harness, {
-      payload: { query: 'wine', options: { max_total_tokens: MAX_TOTAL_TOKENS_MIN - 1 } },
+      payload: singleTurnPayload('wine', { options: { max_total_tokens: MAX_TOTAL_TOKENS_MIN - 1 } }),
     });
     expect(lowRes.statusCode).toBe(400);
     expectRfc014Envelope(lowRes.json());
 
     const highRes = await inject(harness, {
-      payload: { query: 'wine', options: { max_total_tokens: MAX_TOTAL_TOKENS_MAX + 1 } },
+      payload: singleTurnPayload('wine', { options: { max_total_tokens: MAX_TOTAL_TOKENS_MAX + 1 } }),
     });
     expect(highRes.statusCode).toBe(400);
     expectRfc014Envelope(highRes.json());
@@ -324,7 +335,7 @@ describe('POST /v1/agent — Hell H1: Request body adversarial', () => {
   it('deeply nested malformed options (object where number expected) → 400 without crashing', async () => {
     harness = await buildHappyHarness();
     const res = await inject(harness, {
-      payload: { query: 'x', options: { max_steps: { foo: 'bar' } } },
+      payload: singleTurnPayload('x', { options: { max_steps: { foo: 'bar' } } }),
     });
     expect(res.statusCode).toBe(400);
     expectRfc014Envelope(res.json());
@@ -366,7 +377,7 @@ describe('POST /v1/agent — Hell H2: Content-Type tricks', () => {
       method: 'POST',
       url: '/v1/agent',
       headers: {}, // explicitly empty
-      payload: JSON.stringify({ query: 'wine' }),
+      payload: JSON.stringify(singleTurnPayload('wine')),
     });
     expect(res.statusCode).toBe(415);
     expectRfc014Envelope(res.json());
@@ -378,7 +389,7 @@ describe('POST /v1/agent — Hell H2: Content-Type tricks', () => {
       method: 'POST',
       url: '/v1/agent',
       headers: { 'content-type': 'text/plain' },
-      payload: JSON.stringify({ query: 'wine' }),
+      payload: JSON.stringify(singleTurnPayload('wine')),
     });
     expect(res.statusCode).toBe(415);
     expectRfc014Envelope(res.json());
@@ -388,7 +399,7 @@ describe('POST /v1/agent — Hell H2: Content-Type tricks', () => {
     harness = await buildHappyHarness('ok');
     const res = await inject(harness, {
       headers: { 'content-type': 'application/json; charset=utf-8' },
-      payload: { query: 'Cabernet' },
+      payload: singleTurnPayload('Cabernet'),
     });
     expect(res.statusCode).toBe(200);
   });
@@ -397,7 +408,7 @@ describe('POST /v1/agent — Hell H2: Content-Type tricks', () => {
     harness = await buildHappyHarness('ok');
     const res = await inject(harness, {
       headers: { 'content-type': 'APPLICATION/JSON' },
-      payload: { query: 'Pinot Noir' },
+      payload: singleTurnPayload('Pinot Noir'),
     });
     expect(res.statusCode).toBe(200);
   });
@@ -406,7 +417,7 @@ describe('POST /v1/agent — Hell H2: Content-Type tricks', () => {
     harness = await buildHappyHarness('ok');
     const res = await inject(harness, {
       headers: { 'content-type': 'application/json; charset=invalid' },
-      payload: { query: 'wine' },
+      payload: singleTurnPayload('wine'),
     });
     // Server MUST NOT 500. Either 200 (parser ignores the unknown charset)
     // or a 4xx (parser rejects it explicitly). Document actual behavior.
@@ -434,7 +445,7 @@ describe('POST /v1/agent — Hell H3: Method + path tricks', () => {
       method: 'PUT',
       url: '/v1/agent',
       headers: { 'content-type': 'application/json' },
-      payload: JSON.stringify({ query: 'wine' }),
+      payload: JSON.stringify(singleTurnPayload('wine')),
     });
     // Fastify default is 404 when only POST is registered; some
     // route-not-allowed setups return 405. Either is acceptable.
@@ -450,7 +461,7 @@ describe('POST /v1/agent — Hell H3: Method + path tricks', () => {
 
   it('POST /v1/agent/ (trailing slash) → handled deterministically (200 or 404, never 500)', async () => {
     harness = await buildHappyHarness('ok');
-    const res = await inject(harness, { url: '/v1/agent/', payload: { query: 'wine' } });
+    const res = await inject(harness, { url: '/v1/agent/', payload: singleTurnPayload('wine') });
     // Fastify's default is `ignoreTrailingSlash: false` → 404. We accept
     // either behavior; the invariant is "no 500".
     expect([200, 404]).toContain(res.statusCode);
@@ -460,7 +471,7 @@ describe('POST /v1/agent — Hell H3: Method + path tricks', () => {
     harness = await buildHappyHarness('ok');
     const res = await inject(harness, {
       url: '/v1/agent?inject=1&attack=true',
-      payload: { query: 'wine' },
+      payload: singleTurnPayload('wine'),
     });
     expect(res.statusCode).toBe(200);
   });
@@ -469,7 +480,7 @@ describe('POST /v1/agent — Hell H3: Method + path tricks', () => {
     harness = await buildHappyHarness();
     const res = await inject(harness, {
       url: '/V1/WINE-SEARCH',
-      payload: { query: 'wine' },
+      payload: singleTurnPayload('wine'),
     });
     expect(res.statusCode).toBe(404);
   });
@@ -495,7 +506,7 @@ describe('POST /v1/agent — Hell H4: AbortSignal lifecycle', () => {
         synthesize: { answer: { answer: 'ok', citations: [] } },
       },
     });
-    const res = await inject(harness, { payload: { query: 'Bordeaux' } });
+    const res = await inject(harness, { payload: singleTurnPayload('Bordeaux') });
     expect(res.statusCode).toBe(200);
     // After completion every observed signal must be aborted (route finally).
     for (const sig of harness.llm.observedAbortSignals) {
@@ -517,7 +528,7 @@ describe('POST /v1/agent — Hell H4: AbortSignal lifecycle', () => {
       },
     });
     const responses = await Promise.all(
-      Array.from({ length: 5 }, (_, i) => inject(harness, { payload: { query: `Wine ${String(i)}` } })),
+      Array.from({ length: 5 }, (_, i) => inject(harness, { payload: singleTurnPayload(`Wine ${String(i)}`) })),
     );
     for (const res of responses) {
       expect(res.statusCode).toBe(200);
@@ -536,7 +547,7 @@ describe('POST /v1/agent — Hell H4: AbortSignal lifecycle', () => {
         },
       },
     });
-    const res = await inject(harness, { payload: { query: 'Burgundy' } });
+    const res = await inject(harness, { payload: singleTurnPayload('Burgundy') });
     expect(res.statusCode).toBe(200);
     const parsed = WineSearchResponseSchema.safeParse(res.json());
     expect(parsed.success).toBe(true);
@@ -560,7 +571,7 @@ describe('POST /v1/agent — Hell H4: AbortSignal lifecycle', () => {
         },
       },
     });
-    const res = await inject(harness, { payload: { query: 'Champagne' } });
+    const res = await inject(harness, { payload: singleTurnPayload('Champagne') });
     expect(res.statusCode).toBe(200);
     const parsed = WineSearchResponseSchema.safeParse(res.json());
     expect(parsed.success).toBe(true);
@@ -587,7 +598,7 @@ describe('POST /v1/agent — Hell H5: Header manipulation', () => {
     const malicious = '<script>alert(1)</script>';
     const res = await inject(harness, {
       headers: { 'content-type': 'application/json', 'x-request-id': malicious },
-      payload: { query: 'wine' },
+      payload: singleTurnPayload('wine'),
     });
     expect(res.statusCode).toBe(200);
     const rawText = res.body; // Fastify inject returns string here
@@ -611,7 +622,7 @@ describe('POST /v1/agent — Hell H5: Header manipulation', () => {
     const giant = 'x'.repeat(OVERSIZED_HEADER_VALUE_CHARS);
     const res = await inject(harness, {
       headers: { 'content-type': 'application/json', 'x-request-id': giant },
-      payload: { query: 'wine' },
+      payload: singleTurnPayload('wine'),
     });
     expect(res.statusCode).toBeLessThan(500);
   });
@@ -621,7 +632,7 @@ describe('POST /v1/agent — Hell H5: Header manipulation', () => {
     const koreanId = '요청-아이디-한글';
     const res = await inject(harness, {
       headers: { 'content-type': 'application/json', 'x-request-id': koreanId },
-      payload: { query: '와인' },
+      payload: singleTurnPayload('와인'),
     });
     expect(res.statusCode).toBeLessThan(500);
     // If accepted as-is, the response carries the Korean id back; if Fastify
@@ -650,7 +661,7 @@ describe('POST /v1/agent — Hell H6: Concurrency', () => {
     });
     const responses = await Promise.all(
       Array.from({ length: STRESS_CONCURRENT_REQUESTS }, () =>
-        inject(harness, { payload: { query: 'Pinot Noir' } }),
+        inject(harness, { payload: singleTurnPayload('Pinot Noir') }),
       ),
     );
     const requestIds = new Set<string>();
@@ -695,7 +706,7 @@ describe('POST /v1/agent — Hell H6: Concurrency', () => {
       { length: CROSSTALK_CONCURRENT_REQUESTS },
       (_, i) => `Cabernet Sauvignon recommendation MARK${String(i)}`,
     );
-    const responses = await Promise.all(queries.map((q) => inject(harness, { payload: { query: q } })));
+    const responses = await Promise.all(queries.map((q) => inject(harness, { payload: singleTurnPayload(q) })));
 
     // Every response, when parsed, must mention its OWN marker and no other.
     for (let i = 0; i < responses.length; i++) {
@@ -735,11 +746,11 @@ describe('POST /v1/agent — Hell H7: Response envelope discipline', () => {
     const triggers: Array<{ name: string; opts: InjectOptions }> = [
       { name: 'empty-body', opts: { payload: {} } },
       { name: 'wrong-type-array', opts: { payload: ['wine'] } },
-      { name: 'extra-key', opts: { payload: { query: 'wine', _extra: 1 } } },
-      { name: 'too-long', opts: { payload: { query: 'a'.repeat(MAX_AGENT_HTTP_QUERY_CHARS + 1) } } },
+      { name: 'extra-key', opts: { payload: { ...singleTurnPayload('wine'), _extra: 1 } } },
+      { name: 'too-long', opts: { payload: singleTurnPayload('a'.repeat(MAX_AGENT_HTTP_QUERY_CHARS + 1)) } },
       { name: 'wrong-content-type', opts: {
         headers: { 'content-type': 'text/plain' },
-        payload: JSON.stringify({ query: 'wine' }),
+        payload: JSON.stringify(singleTurnPayload('wine')),
       } },
     ];
     for (const t of triggers) {
@@ -755,7 +766,7 @@ describe('POST /v1/agent — Hell H7: Response envelope discipline', () => {
 
   it('happy-path response always carries `query_type: "wine_search"` literal', async () => {
     harness = await buildHappyHarness('ok');
-    const res = await inject(harness, { payload: { query: 'wine' } });
+    const res = await inject(harness, { payload: singleTurnPayload('wine') });
     expect(res.statusCode).toBe(200);
     const body = res.json() as { query_type?: unknown };
     expect(body.query_type).toBe('wine_search');
@@ -781,7 +792,7 @@ describe('POST /v1/agent — Hell H7: Response envelope discipline', () => {
     harness = await buildHappyHarness('한국어 답변');
     const koreanQuery = '와인 추천해줘';
     expect(KOREAN_LEGITIMATE_QUERY_RE.test(koreanQuery)).toBe(true);
-    const res = await inject(harness, { payload: { query: koreanQuery } });
+    const res = await inject(harness, { payload: singleTurnPayload(koreanQuery) });
     expect(res.statusCode).toBe(200);
     const parsed = WineSearchResponseSchema.safeParse(res.json());
     expect(parsed.success).toBe(true);

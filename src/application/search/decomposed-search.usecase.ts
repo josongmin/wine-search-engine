@@ -38,9 +38,9 @@ export class DecomposedSearchUseCase {
   private resolveLegExecutionMode(
     leg: ComparisonDecompositionLegs[number],
     /**
-     * Optional caller override (compare_wines.retrieval_mode → parentContext.retrievalMode).
+     * Optional caller override (comparison tool payload → parentContext.retrievalMode).
      * When provided, it bypasses the leg's auto-detected mode entirely — this is the
-     * api_override path, mirroring `search_wines.retrieval_mode` semantics. See
+     * api_override path, mirroring the search-family retrieval-mode override semantics. See
      * `DecomposedSearchParentContext.retrievalMode` for the rationale.
      */
     overrideMode?: 'auto' | 'entity' | 'hybrid' | 'mixed',

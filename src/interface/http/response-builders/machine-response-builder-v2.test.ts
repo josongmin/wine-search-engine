@@ -1,15 +1,13 @@
 /**
- * T6.3: Unit tests for machine-response-builder-v2 and the tool-executor V2 seam.
+ * T6.3: Unit tests for machine-response-builder-v2.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { buildMachineResponseV2 } from './machine-response-builder-v2.js';
 import type { MachineResponseBuildParamsV2 } from './machine-response-builder-v2.js';
 import type { RankedResult, ComponentScores } from '../../../domain/ranking/model/ranked-result.js';
 import type { EvidenceItem } from '../../../domain/shared/types/index.js';
 import { createEntityId } from '../../../domain/shared/types/index.js';
-import { WineToolExecutor } from '../../claude-tools/tool-executor.js';
-import type { WineToolExecutorDeps, ToolExecutionV2Options } from '../../claude-tools/tool-executor.js';
 import type { CandidateProvenance } from '../../../domain/retrieval/model/candidate-envelope.js';
 import { SearchResponseV2MachineSchema } from '../schemas/search-response-v2.schema.js';
 
@@ -244,89 +242,5 @@ describe('buildMachineResponseV2', () => {
     const response = buildSingleResultResponse({ retrievalProvenance: makeCandidateProvenance() });
     const result = SearchResponseV2MachineSchema.safeParse(response);
     expect(result.success).toBe(true);
-  });
-});
-
-// ── WineToolExecutor V2 seam ─────────────────────────────────────────────────
-
-describe('WineToolExecutor — V2 migration seam (T6.3)', () => {
-  function makeDeps(): WineToolExecutorDeps {
-    return {
-      searchUseCase: {
-        execute: vi.fn().mockResolvedValue({ queryType: 'search', results: [] }),
-      },
-      decomposedSearchUseCase: {
-        execute: vi.fn().mockResolvedValue({ legs: [] }),
-      },
-      drinkingWindowUseCase: {
-        check: vi.fn().mockResolvedValue({
-          drinkingWindowStart: 2024,
-          drinkingWindowEnd: 2032,
-          currentlyDrinkable: true,
-          confidence: 'high',
-        }),
-      },
-    };
-  }
-
-  it.each([
-    {
-      name: 'returns V1 SearchResponseV1 when v2Options is absent',
-      requestId: 'req-001',
-      v2Options: undefined,
-      assertDeps: (deps: WineToolExecutorDeps) => {
-        expect(deps.searchUseCase.execute).toHaveBeenCalledOnce();
-      },
-      assertResult: (result: unknown) => {
-        expect(result).toMatchObject({ queryType: 'search' });
-      },
-    },
-    {
-      name: 'returns SearchResponseV2Machine when useV2MachineFormat is true',
-      requestId: 'req-v2',
-      v2Options: {
-        useV2MachineFormat: true,
-        rankedResults: [makeRankedResult()],
-        queryId: 'q-v2-001',
-      } satisfies ToolExecutionV2Options,
-      assertDeps: (deps: WineToolExecutorDeps) => {
-        expect(deps.searchUseCase.execute).not.toHaveBeenCalled();
-      },
-      assertResult: (result: unknown) => {
-        expect(result).toMatchObject({
-          version: '2',
-          responseType: 'machine',
-          queryId: 'q-v2-001',
-        });
-      },
-    },
-    {
-      name: 'falls back to requestId as queryId when v2Options.queryId is omitted',
-      requestId: 'fallback-req-id',
-      v2Options: {
-        useV2MachineFormat: true,
-        rankedResults: [makeRankedResult()],
-      } satisfies ToolExecutionV2Options,
-      assertDeps: () => undefined,
-      assertResult: (result: unknown) => {
-        expect(result).toMatchObject({ queryId: 'fallback-req-id' });
-      },
-    },
-  ])('$name', async ({ requestId, v2Options, assertDeps, assertResult }) => {
-    const deps = makeDeps();
-    const executor = new WineToolExecutor(deps);
-    const result = await executor.execute('search_wines', { query: 'Opus One' }, requestId, v2Options);
-    assertDeps(deps);
-    assertResult(result);
-  });
-
-  it('v2Options does not affect non-search_wines tools', async () => {
-    const deps = makeDeps();
-    const executor = new WineToolExecutor(deps);
-
-    // compare_wines — v2Options is only meaningful for search_wines
-    const result = await executor.execute('compare_wines', { query_a: 'A', query_b: 'B' }, 'req-cmp');
-    expect(deps.decomposedSearchUseCase.execute).toHaveBeenCalledOnce();
-    expect(result).toMatchObject({ legs: [] });
   });
 });

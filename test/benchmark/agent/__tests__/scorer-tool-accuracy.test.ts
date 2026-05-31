@@ -14,8 +14,8 @@ describe('scoreToolAccuracy', () => {
 
   it('returns 1 when all expected tools called', () => {
     const r = scoreScenario(
-      makeScenario({ maxSteps: 5, tools: [{ tool: 'search_wines' }] }),
-      makeExecution({ toolsUsed: [tool('search_wines', '{"query":"x"}')] }),
+      makeScenario({ maxSteps: 5, tools: [{ tool: 'search_hybrid' }] }),
+      makeExecution({ toolsUsed: [tool('search_hybrid', '{"query":"x"}')] }),
       undefined,
     );
     expect(r.scores.toolAccuracy).toBe(1);
@@ -25,9 +25,9 @@ describe('scoreToolAccuracy', () => {
     const r = scoreScenario(
       makeScenario({
         maxSteps: 5,
-        tools: [{ tool: 'search_wines' }, { tool: 'search_wines' }],
+        tools: [{ tool: 'search_hybrid' }, { tool: 'search_hybrid' }],
       }),
-      makeExecution({ toolsUsed: [tool('search_wines')] }),
+      makeExecution({ toolsUsed: [tool('search_hybrid')] }),
       undefined,
     );
     expect(r.scores.toolAccuracy).toBe(0.5);
@@ -37,10 +37,10 @@ describe('scoreToolAccuracy', () => {
     const r = scoreScenario(
       makeScenario({
         maxSteps: 5,
-        tools: [{ tool: 'search_wines', inputContains: ['Opus'] }],
+        tools: [{ tool: 'search_hybrid', inputContains: ['Opus'] }],
       }),
       makeExecution({
-        toolsUsed: [tool('search_wines', '{"query":"Opus One 2018"}')],
+        toolsUsed: [tool('search_hybrid', '{"query":"Opus One 2018"}')],
       }),
       undefined,
     );
@@ -51,10 +51,10 @@ describe('scoreToolAccuracy', () => {
     const r = scoreScenario(
       makeScenario({
         maxSteps: 5,
-        tools: [{ tool: 'search_wines', inputContains: ['Opus'] }],
+        tools: [{ tool: 'search_hybrid', inputContains: ['Opus'] }],
       }),
       makeExecution({
-        toolsUsed: [tool('search_wines', '{"query":"Cabernet"}')],
+        toolsUsed: [tool('search_hybrid', '{"query":"Cabernet"}')],
       }),
       undefined,
     );
@@ -66,10 +66,10 @@ describe('scoreToolAccuracy', () => {
       makeScenario({
         maxSteps: 5,
         ordered: true,
-        tools: [{ tool: 'search_wines' }, { tool: 'search_wines' }],
+        tools: [{ tool: 'lookup_wine' }, { tool: 'search_hybrid' }],
       }),
       makeExecution({
-        toolsUsed: [tool('compare_wines'), tool('search_wines')],
+        toolsUsed: [tool('search_hybrid'), tool('lookup_wine')],
       }),
       undefined,
     );
@@ -79,12 +79,12 @@ describe('scoreToolAccuracy', () => {
 
   it('extra-call penalty: docks 10% per unexpected call', () => {
     const r = scoreScenario(
-      makeScenario({ maxSteps: 5, tools: [{ tool: 'search_wines' }] }),
+      makeScenario({ maxSteps: 5, tools: [{ tool: 'search_hybrid' }] }),
       makeExecution({
         toolsUsed: [
-          tool('search_wines'),
-          tool('get_food_pairings'),
-          tool('get_food_pairings'),
+          tool('search_hybrid'),
+          tool('search_semantic'),
+          tool('search_semantic'),
         ],
       }),
       undefined,
@@ -95,10 +95,10 @@ describe('scoreToolAccuracy', () => {
 
   it('extra-call penalty: caps at 50%', () => {
     const r = scoreScenario(
-      makeScenario({ maxSteps: 10, tools: [{ tool: 'search_wines' }] }),
+      makeScenario({ maxSteps: 10, tools: [{ tool: 'search_hybrid' }] }),
       makeExecution({
         toolsUsed: [
-          tool('search_wines'),
+          tool('search_hybrid'),
           tool('a'), tool('b'), tool('c'), tool('d'), tool('e'), tool('f'),
           tool('g'), tool('h'),
         ],
@@ -113,9 +113,9 @@ describe('scoreToolAccuracy', () => {
     const r = scoreScenario(
       makeScenario({
         maxSteps: 5,
-        mustNotCallTools: ['search_wines'],
+        mustNotCallTools: ['search_hybrid'],
       }),
-      makeExecution({ toolsUsed: [tool('search_wines')] }),
+      makeExecution({ toolsUsed: [tool('search_hybrid')] }),
       undefined,
     );
     expect(r.scores.toolAccuracy).toBe(0);
@@ -133,7 +133,7 @@ describe('scoreToolAccuracy', () => {
   it('expectedBlocked: fails when tools called', () => {
     const r = scoreScenario(
       makeScenario({ maxSteps: 2, expectedBlocked: true }),
-      makeExecution({ toolsUsed: [tool('search_wines')] }),
+      makeExecution({ toolsUsed: [tool('search_hybrid')] }),
       undefined,
     );
     expect(r.scores.toolAccuracy).toBe(0);
@@ -150,14 +150,14 @@ describe('TOOL_DUPLICATE_CALLS — all violations penalized', () => {
     const r = scoreScenario(
       makeScenario({
         maxSteps: 10,
-        tools: [{ tool: 'search_wines' }, { tool: 'search_wines' }],
+        tools: [{ tool: 'search_hybrid' }, { tool: 'lookup_wine' }],
       }),
       makeExecution({
         stepCount: 6,
         toolCallCount: 6,
         toolsUsed: [
-          tool('search_wines'), tool('search_wines'), tool('search_wines'),
-          tool('compare_wines'), tool('compare_wines'), tool('compare_wines'),
+          tool('search_hybrid'), tool('search_hybrid'), tool('search_hybrid'),
+          tool('lookup_wine'), tool('lookup_wine'), tool('lookup_wine'),
         ],
       }),
       undefined,
@@ -171,35 +171,35 @@ describe('TOOL_DUPLICATE_CALLS — all violations penalized', () => {
     const r = scoreScenario(
       makeScenario({
         maxSteps: 10,
-        tools: [{ tool: 'search_wines' }, { tool: 'search_wines' }],
+        tools: [{ tool: 'search_hybrid' }, { tool: 'lookup_wine' }],
       }),
       makeExecution({
         stepCount: 4,
         toolCallCount: 4,
         toolsUsed: [
-          tool('search_wines'), tool('search_wines'), tool('search_wines'),
-          tool('compare_wines'),
+          tool('search_hybrid'), tool('search_hybrid'), tool('search_hybrid'),
+          tool('lookup_wine'),
         ],
       }),
       undefined,
     );
-    // Only search_wines is over-duplicated (3x vs 1x expected). Score = 1.0 * 0.7 = 0.7
+    // Only search_hybrid is over-duplicated (3x vs 1x expected). Score = 1.0 * 0.7 = 0.7
     expect(r.scores.toolAccuracy).toBeGreaterThanOrEqual(0.69);
     expect(r.scores.toolAccuracy).toBeLessThan(0.71);
   });
 
-  it('does not penalize slot-disjoint parallel search_wines calls as duplicates', () => {
+  it('does not penalize slot-disjoint parallel search_hybrid calls as duplicates', () => {
     const r = scoreScenario(
       makeScenario({
         maxSteps: 10,
-        tools: [{ tool: 'search_wines' }],
+        tools: [{ tool: 'search_hybrid' }],
       }),
       makeExecution({
         stepCount: 3,
         toolCallCount: 2,
         toolsUsed: [
-          tool('search_wines', '{"query":"커플용 세트","wine_type":"red","limit":1,"want_diversity":false}'),
-          tool('search_wines', '{"query":"커플용 세트","wine_type":"white","limit":1,"want_diversity":false}'),
+          tool('search_hybrid', '{"query":"커플용 세트","wine_type":"red","limit":1,"want_diversity":false}'),
+          tool('search_hybrid', '{"query":"커플용 세트","wine_type":"white","limit":1,"want_diversity":false}'),
         ],
       }),
       undefined,
@@ -208,18 +208,18 @@ describe('TOOL_DUPLICATE_CALLS — all violations penalized', () => {
     expect(r.diagnostics?.some((d) => d.code === 'TOOL_DUPLICATE_CALLS')).toBe(false);
   });
 
-  it('still penalizes repeated equivalent structured search_wines calls', () => {
+  it('still penalizes repeated equivalent structured search_hybrid calls', () => {
     const r = scoreScenario(
       makeScenario({
         maxSteps: 10,
-        tools: [{ tool: 'search_wines' }],
+        tools: [{ tool: 'search_hybrid' }],
       }),
       makeExecution({
         stepCount: 3,
         toolCallCount: 2,
         toolsUsed: [
-          tool('search_wines', '{"query":"오퍼스원","wine_type":"red","limit":1}'),
-          tool('search_wines', '{"wine_type":"red","limit":1,"query":"오퍼스원"}'),
+          tool('search_hybrid', '{"query":"오퍼스원","wine_type":"red","limit":1}'),
+          tool('search_hybrid', '{"wine_type":"red","limit":1,"query":"오퍼스원"}'),
         ],
       }),
       undefined,
@@ -229,4 +229,3 @@ describe('TOOL_DUPLICATE_CALLS — all violations penalized', () => {
     expect(r.diagnostics?.some((d) => d.code === 'TOOL_DUPLICATE_CALLS')).toBe(true);
   });
 });
-

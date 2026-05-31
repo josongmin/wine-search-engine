@@ -47,21 +47,15 @@ export type WatchlistTriggerType =
 export interface SearchRequest {
   query: string;
   context?: { locale?: string; currency?: string };
-  session_context?: {
-    session_id: string;
-    previous_entities?: readonly string[];
-  };
   query_budget?: {
     max_latency_ms?: number;
     max_candidates?: number;
     rerank_limit?: number;
+    max_dense_calls?: number;
   };
-  options?: {
-    mode?: 'auto' | QueryRoute;
-    explain?: boolean;
-    clarification?: boolean;
-  };
-  retrieval_mode?: 'auto' | QueryRoute;
+  filters?: readonly Record<string, unknown>[];
+  preferences?: readonly Record<string, unknown>[];
+  limit?: number;
 }
 
 // ── Search Response ──
@@ -496,7 +490,7 @@ export interface WineSearchTokenUsage {
 }
 
 export interface WineSearchToolCallDto {
-  /** Tool name (e.g. `search_wines`, `compare_wines`). May also be an
+  /** Tool name (e.g. `search_hybrid`, `lookup_wine`). May also be an
    *  unregistered tool name surfaced by the orchestrator for audit. */
   name: string;
   /** Tool-specific arguments. Shape varies by tool; validated server-side. */
@@ -541,11 +535,65 @@ export interface WineSearchResponse {
 }
 
 export interface WineSearchRequest {
-  query: string;
+  messages: readonly {
+    role: 'system' | 'user' | 'assistant' | 'tool';
+    content: string;
+    name?: string;
+    timestamp?: string;
+    metadata?: Record<string, unknown>;
+  }[];
+  context?: {
+    locale?: string;
+    currency?: string;
+  };
   options?: {
     max_steps?: number;
     per_step_timeout_ms?: number;
     agent_timeout_ms?: number;
     max_total_tokens?: number;
   };
+}
+
+// ── Server-managed agent sessions (POST /v1/agent/sessions*) ──
+
+export type AgentMessageWire = WineSearchRequest['messages'][number];
+
+export interface AgentSessionDescriptor {
+  session_id: string;
+  session_version: number;
+  created_at: string;
+  updated_at: string;
+  expires_at: string;
+}
+
+export interface AgentSessionTurnDescriptor {
+  turn_index: number;
+  client_turn_id: string;
+  created_at: string;
+  replayed: boolean;
+}
+
+export interface AgentSessionCreateRequest {
+  client_session_id?: string;
+  context?: WineSearchRequest['context'];
+  options?: WineSearchRequest['options'];
+}
+
+export interface AgentSessionCreateResponse {
+  session: AgentSessionDescriptor;
+  replayed: boolean;
+}
+
+export interface AgentSessionTurnRequest {
+  client_turn_id: string;
+  messages: WineSearchRequest['messages'];
+  context?: WineSearchRequest['context'];
+  options?: WineSearchRequest['options'];
+  expected_session_version?: number;
+}
+
+export interface AgentSessionTurnResponse extends WineSearchResponse {
+  session: AgentSessionDescriptor;
+  turn: AgentSessionTurnDescriptor;
+  history_applied: readonly AgentMessageWire[];
 }

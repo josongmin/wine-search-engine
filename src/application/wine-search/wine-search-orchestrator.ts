@@ -43,7 +43,7 @@
  */
 
 import type { AgentConfig } from '@domain/agent/model/agent-config.js';
-import { DEFAULT_AGENT_CONFIG } from '@domain/agent/model/agent-config.js';
+import { AGENT_MAX_STEPS_HARD_CAP, DEFAULT_AGENT_CONFIG } from '@domain/agent/model/agent-config.js';
 import type { AgentTerminationReason } from '@domain/agent/model/agent-step.js';
 import type { ToolOutcome } from '@domain/agent/model/tool-outcome.js';
 import { transitionTerminationReason } from '@domain/agent/service/termination-state-machine.js';
@@ -76,9 +76,16 @@ import {
 import type { SynthesisRunner } from './synthesis-runner.js';
 import {
   getCanonicalNormalizedConstraints,
+  latestUserMessageIndex,
+  windowHistory,
+  type AgentMessage,
+  type AgentRequestContext,
+  type AgentRequestOptions,
   type AnalyzerIntent,
   type WineSearchAnalysis,
 } from './wine-search-schemas.js';
+import type { ChatMessage } from '@domain/ai/port/chat-llm.port.js';
+import type { AgentRuntimeSessionState } from './agent-runtime-session-state.js';
 import {
   ORCHESTRATOR_ABORTED_ANSWER_ENGLISH,
   ORCHESTRATOR_ABORTED_ANSWER_KOREAN,
@@ -86,6 +93,7 @@ import {
   ORCHESTRATOR_MAX_QUERY_CHARS,
   ORCHESTRATOR_STEP_SUMMARY_MAX_CHARS,
   ORCHESTRATOR_TOOL_INPUT_MAX_CHARS,
+  ORCHESTRATOR_MAX_HISTORY_APPLIED,
   TERMINATION_KIND_SECURITY_BLOCK,
   TERMINATION_KIND_UNSUPPORTED_INTENT,
   assertWineSearchResult,
@@ -201,14 +209,49 @@ interface WineSearchOrchestratorDeps {
   readonly wineAgentLoopToolBundle?: OrchestratorWineAgentLoopToolBundle | undefined;
 }
 
+/**
+ * Canonical agent input — messages-native (T-MTA-01). `single-shot` and
+ * `turnful` share this exact shape and the same orchestrator; they differ
+ * only in who owns the history (caller vs server), never in planning.
+ *
+ * The latest user message is the planner anchor, but it is NOT the contract:
+ * the whole `messages[]` conversation is threaded into the agent loop and
+ * surfaced verbatim as `historyApplied` on the result.
+ */
 export interface WineSearchInput {
-  readonly query: string;
+  readonly messages: readonly AgentMessage[];
   readonly requestId: string;
-  readonly maxSteps?: number;
-  readonly perStepTimeoutMs?: number;
-  readonly agentTimeoutMs?: number;
-  readonly maxTotalTokens?: number;
-  readonly abortSignal?: AbortSignal;
+  readonly context?: AgentRequestContext | undefined;
+  readonly options?: AgentRequestOptions | undefined;
+  /** Session-scoped runtime state seam (T-MTA-06). Provider continuation /
+   *  prompt-cache / trace state lives HERE (session-owned), never on a
+   *  singleton provider adapter. Optional — absent for a bare single-shot
+   *  run with no session. */
+  readonly runtimeState?: AgentRuntimeSessionState | undefined;
+  readonly abortSignal?: AbortSignal | undefined;
+}
+
+/**
+ * Internal normalized form derived ONCE at the top of `execute()`. Splits the
+ * inbound conversation into the planner `anchor` (latest user message) and
+ * `priorHistory` (everything before it), and flattens `options` so the rest
+ * of the pipeline reads a stable shape. `historyApplied` is the exact
+ * `messages[]` fed to the planner, attached to the result by `execute()`.
+ */
+interface NormalizedWineSearchInput {
+  readonly query: string;
+  readonly messages: readonly AgentMessage[];
+  readonly historyApplied: readonly AgentMessage[];
+  readonly priorHistory: readonly AgentMessage[];
+  readonly requestId: string;
+  readonly context?: AgentRequestContext | undefined;
+  readonly options?: AgentRequestOptions | undefined;
+  readonly runtimeState?: AgentRuntimeSessionState | undefined;
+  readonly maxSteps?: number | undefined;
+  readonly perStepTimeoutMs?: number | undefined;
+  readonly agentTimeoutMs?: number | undefined;
+  readonly maxTotalTokens?: number | undefined;
+  readonly abortSignal?: AbortSignal | undefined;
 }
 
 export {
@@ -341,8 +384,20 @@ export class WineSearchOrchestrator {
    *    fabricates a 200-OK shape from an exception (schema-quality bar).
    */
   async execute(rawInput: WineSearchInput): Promise<WineSearchResult> {
-    // Clone — defensive against caller mutating the input concurrently.
-    const input = freezeInput(rawInput);
+    // Normalize ONCE: derive the planner anchor + prior history, flatten
+    // options. The full applied history is attached to the result below so
+    // it is never hidden from the trace (T-MTA-01).
+    const input = normalizeInput(rawInput);
+    const result = await this.runPipeline(input);
+    // Attach the applied history post-pipeline. The internal finalize helpers
+    // validate against `WineSearchResultSchema` (where `historyApplied` is
+    // optional); we set it here so every return path carries it.
+    return result.historyApplied !== undefined
+      ? result
+      : { ...result, historyApplied: input.historyApplied };
+  }
+
+  private async runPipeline(input: NormalizedWineSearchInput): Promise<WineSearchResult> {
     const startMs = this.clock.now();
     const state = makeInitialState();
 
@@ -351,6 +406,11 @@ export class WineSearchOrchestrator {
     const logCtx = {
       requestId: input.requestId,
       queryPreview: input.query.slice(0, ORCHESTRATOR_LOG_QUERY_SLICE_CHARS),
+      // T-MTA-06: per-session trace correlation flows through the runtime-state
+      // seam (session-owned), not orchestrator-core or singleton-adapter state.
+      ...(input.runtimeState?.sessionId !== undefined
+        ? { sessionId: input.runtimeState.sessionId }
+        : {}),
     };
 
     // ── Phase 0: admit gate. Port semantics from `admitAgentRequest`.
@@ -568,7 +628,7 @@ export class WineSearchOrchestrator {
   private async dispatchPlan(
     plan: ExecutionPlan,
     analysis: WineSearchAnalysis,
-    input: WineSearchInput,
+    input: NormalizedWineSearchInput,
     state: OrchestratorState,
     baseConfig: AgentConfig,
   ): Promise<DispatchOutcome> {
@@ -625,7 +685,7 @@ export class WineSearchOrchestrator {
 
   private async dispatchRunner(
     plan: ExecutionPlan,
-    input: WineSearchInput,
+    input: NormalizedWineSearchInput,
     state: OrchestratorState,
     baseConfig: AgentConfig,
   ): Promise<DispatchOutcome> {
@@ -735,7 +795,7 @@ export class WineSearchOrchestrator {
   private async dispatchMultiStep(
     plan: Extract<ExecutionPlan, { kind: 'multi-step' }>,
     analysis: WineSearchAnalysis,
-    input: WineSearchInput,
+    input: NormalizedWineSearchInput,
     state: OrchestratorState,
     baseConfig: AgentConfig,
   ): Promise<DispatchOutcome> {
@@ -760,6 +820,12 @@ export class WineSearchOrchestrator {
         query: input.query,
         analysis,
         requestId: input.requestId,
+        // Thread the prior conversation into the agent loop so the planner
+        // plans against the real multi-turn context — NOT just the anchor
+        // utterance (T-MTA-01: messages[] is canonical, not a query adapter).
+        ...(input.priorHistory.length > 0
+          ? { priorHistory: toChatHistory(input.priorHistory) }
+          : {}),
         tools: bundle.tools,
         toolPorts: bundle.toolPorts,
         perStepTimeoutMs: baseConfig.perStepTimeoutMs,
@@ -854,7 +920,7 @@ export class WineSearchOrchestrator {
   // analyzer's classifyQueryBudget already runs an adversarial sanitizer.
   // -------------------------------------------------------------------------
 
-  private runAdmitGate(input: WineSearchInput): { readonly reason: 'empty_query' | 'too_long' } | undefined {
+  private runAdmitGate(input: NormalizedWineSearchInput): { readonly reason: 'empty_query' | 'too_long' } | undefined {
     // Strip zero-width characters BEFORE trim — `String.prototype.trim()`
     // removes Unicode WhiteSpace property runs, which excludes ZWSP
     // (U+200B), ZWNJ (U+200C), ZWJ (U+200D), and BOM (U+FEFF). Without
@@ -876,7 +942,7 @@ export class WineSearchOrchestrator {
     startMs: number,
     state: OrchestratorState,
     queryHasHangul: boolean,
-    input: WineSearchInput,
+    input: NormalizedWineSearchInput,
   ): Promise<WineSearchResult> {
     this.appendStep(state, {
       source: 'analyzer',
@@ -962,7 +1028,7 @@ export class WineSearchOrchestrator {
     state: OrchestratorState,
     startMs: number,
     queryHasHangul: boolean,
-    input: WineSearchInput,
+    input: NormalizedWineSearchInput,
     baseConfig: AgentConfig,
   ): Promise<WineSearchResult> {
     // S1 semantic split: `reason === 'blocked'` is the ONLY case set by the
@@ -1171,13 +1237,19 @@ export class WineSearchOrchestrator {
   // Config resolution
   // -------------------------------------------------------------------------
 
-  private resolveAgentConfig(input: WineSearchInput): AgentConfig {
+  private resolveAgentConfig(input: NormalizedWineSearchInput): AgentConfig {
     const defaults = {
       ...DEFAULT_AGENT_CONFIG,
       ...(this.deps.defaultConfig ?? {}),
     };
     return {
-      maxSteps: pickFiniteInt(input.maxSteps, defaults.maxSteps, ORCHESTRATOR_DEFAULT_MAX_STEPS),
+      // Hard-cap maxSteps (SSoT) so every transport inherits the ceiling — the
+      // HTTP edge clamp is defense-in-depth; local CLI / session paths rely on
+      // THIS clamp to avoid a runaway step count (audit T-MTA-07).
+      maxSteps: Math.min(
+        pickFiniteInt(input.maxSteps, defaults.maxSteps, ORCHESTRATOR_DEFAULT_MAX_STEPS),
+        AGENT_MAX_STEPS_HARD_CAP,
+      ),
       agentTimeoutMs: pickFiniteInt(input.agentTimeoutMs, defaults.agentTimeoutMs, ORCHESTRATOR_DEFAULT_AGENT_TIMEOUT_MS),
       perStepTimeoutMs: pickFiniteInt(input.perStepTimeoutMs, defaults.perStepTimeoutMs, ORCHESTRATOR_DEFAULT_PER_STEP_TIMEOUT_MS),
       maxContextChars: defaults.maxContextChars,
@@ -1185,7 +1257,7 @@ export class WineSearchOrchestrator {
     };
   }
 
-  private resolvePerStepTimeoutMs(input: WineSearchInput): number {
+  private resolvePerStepTimeoutMs(input: NormalizedWineSearchInput): number {
     return pickFiniteInt(
       input.perStepTimeoutMs,
       this.deps.defaultConfig?.perStepTimeoutMs ?? DEFAULT_AGENT_CONFIG.perStepTimeoutMs,
@@ -1198,11 +1270,65 @@ export class WineSearchOrchestrator {
 // Pure helpers
 // ---------------------------------------------------------------------------
 
-function freezeInput(input: WineSearchInput): WineSearchInput {
-  // No mutation — produce a shallow clone so the orchestrator does not
-  // depend on caller-side mutability of `input`. The original `query` is a
-  // string (immutable).
-  return { ...input };
+/**
+ * Normalize the canonical messages-native input into the internal pipeline
+ * shape: derive the planner `anchor` (latest user message content) and
+ * `priorHistory` (everything before it), and flatten `options`. `messages`
+ * is shallow-cloned so the orchestrator does not depend on caller-side
+ * mutability. When no user message exists, `query` is `''` — the admit gate
+ * then rejects it as `empty_query` (the orchestrator never throws on input).
+ */
+function normalizeInput(input: WineSearchInput): NormalizedWineSearchInput {
+  // Bound the applied history to the published contract cap. Direct callers
+  // (and the server-managed session path) can present more than the cap; we
+  // keep the MOST RECENT window so the anchor + recent turns survive and
+  // `result.historyApplied` can never violate WineSearchResultSchema's
+  // `.max(ORCHESTRATOR_MAX_HISTORY_APPLIED)` (which the SQLite store + wire
+  // response re-validate on read). The truncation is VISIBLE — the kept window
+  // is exactly what surfaces as `historyApplied` (no hidden stitching).
+  const windowed = windowHistory(input.messages, ORCHESTRATOR_MAX_HISTORY_APPLIED);
+  const messages: readonly AgentMessage[] = Object.freeze([...windowed]);
+  const anchorIdx = latestUserMessageIndex(messages);
+  const query = anchorIdx >= 0 ? (messages[anchorIdx]?.content ?? '') : '';
+  // priorHistory = turns before the anchor. When there is no user message at
+  // all, treat the whole conversation as prior context (the run still rejects
+  // at the admit gate, but the trace stays faithful).
+  const priorHistory: readonly AgentMessage[] = anchorIdx >= 0
+    ? Object.freeze(messages.slice(0, anchorIdx))
+    : messages;
+  const options = input.options;
+  return {
+    query,
+    messages,
+    historyApplied: messages,
+    priorHistory,
+    requestId: input.requestId,
+    ...(input.context !== undefined ? { context: input.context } : {}),
+    ...(input.runtimeState !== undefined ? { runtimeState: input.runtimeState } : {}),
+    ...(options !== undefined ? { options } : {}),
+    ...(options?.maxSteps !== undefined ? { maxSteps: options.maxSteps } : {}),
+    ...(options?.perStepTimeoutMs !== undefined ? { perStepTimeoutMs: options.perStepTimeoutMs } : {}),
+    ...(options?.agentTimeoutMs !== undefined ? { agentTimeoutMs: options.agentTimeoutMs } : {}),
+    ...(options?.maxTotalTokens !== undefined ? { maxTotalTokens: options.maxTotalTokens } : {}),
+    ...(input.abortSignal !== undefined ? { abortSignal: input.abortSignal } : {}),
+  };
+}
+
+/** Map canonical agent messages into the loop's provider-agnostic
+ *  `ChatMessage[]`. The loop runs native `tool_use`, so `tool`-role history
+ *  entries are folded into a tagged `user` line (informational) rather than
+ *  replayed as protocol tool results. */
+function toChatHistory(messages: readonly AgentMessage[]): ChatMessage[] {
+  const out: ChatMessage[] = [];
+  for (const m of messages) {
+    if (m.role === 'tool') {
+      const tag = m.name !== undefined ? `[tool ${m.name}] ` : '[tool] ';
+      out.push({ role: 'user', content: `${tag}${m.content}` });
+    } else {
+      out.push({ role: m.role, content: m.content });
+    }
+  }
+  return out;
 }
 
 /** Read the current aborted state without letting TypeScript narrow the

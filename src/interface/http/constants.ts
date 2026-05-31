@@ -7,6 +7,7 @@
 // Rule 30: time-unit constants must come from the SSoT module, not be recomputed.
 import { HOURS_PER_DAY, MINUTES_PER_HOUR, SECONDS_PER_MINUTE } from '../../domain/shared/utils/time-units.js';
 import { MAX_QUERY_LENGTH } from '../../domain/shared/constants.js';
+import { AGENT_MAX_STEPS_HARD_CAP } from '../../domain/agent/model/agent-config.js';
 
 /** Subject string from X-Authenticated-Subject; matches header/log safety. */
 export const MAX_AUTHENTICATED_SUBJECT_CHARS = 128;
@@ -256,8 +257,10 @@ export const MAX_FEEDBACK_ENTITY_REF_CHARS = 512;
  */
 export const MAX_AGENT_HTTP_QUERY_CHARS = MAX_QUERY_LENGTH;
 
-/** Agent route: hard cap on ReAct steps (matches Zod schema max). */
-export const MAX_AGENT_STEPS_CAP = 10;
+/** Agent route: hard cap on ReAct steps. Defense-in-depth edge mirror of the
+ *  runtime SSoT {@link AGENT_MAX_STEPS_HARD_CAP} (enforced in the orchestrator);
+ *  imported, not re-literalled, so the two layers cannot drift (rule 30). */
+export const MAX_AGENT_STEPS_CAP = AGENT_MAX_STEPS_HARD_CAP;
 
 /**
  * Max keys in a response `stage_timings` map — one entry per instrumented
@@ -274,7 +277,7 @@ export const MAX_STAGE_TIMINGS_KEYS = 64;
  */
 export const MAX_TOOL_CALL_ARGUMENT_KEYS = 64;
 
-/** Claude tool `search_wines` result limit (Zod max, aligns with browse UX). */
+/** Active retrieval tool result limit (Zod max, aligns with browse UX). */
 export const MAX_WINE_TOOL_SEARCH_RESULTS = 50;
 
 // ─── Audit extension bounds ──────────────────────────────────────────────────

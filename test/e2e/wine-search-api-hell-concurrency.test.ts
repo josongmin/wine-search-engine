@@ -170,6 +170,16 @@ function inject(harness: WineSearchTestHarness, opts: InjectOptions = {}) {
   return harness.app.inject({ method, url, headers, payload });
 }
 
+function singleTurnPayload(
+  content: unknown,
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    messages: [{ role: 'user', content }],
+    ...overrides,
+  };
+}
+
 /** Mint a unique marker token per call. Uses a fixed-width 8-hex suffix +
  *  trailing `END` delimiter so no marker is a substring of another. Strict
  *  mode-safe (no module-scope side effects at import time). */
@@ -219,7 +229,7 @@ describe('POST /v1/agent — Hell C1: Parallel request isolation', () => {
     });
     const responses = await Promise.all(
       Array.from({ length: PARALLEL_REQUEST_COUNT }, () =>
-        inject(harness, { payload: { query: 'Cabernet Sauvignon' } }),
+        inject(harness, { payload: singleTurnPayload('Cabernet Sauvignon') }),
       ),
     );
     const requestIds = new Set<string>();
@@ -245,7 +255,7 @@ describe('POST /v1/agent — Hell C1: Parallel request isolation', () => {
     const markers = Array.from({ length: CROSSTALK_REQUEST_COUNT }, () => mintMarker());
     const queries = markers.map((m) => `Cabernet Sauvignon recommendation ${m}`);
 
-    const responses = await Promise.all(queries.map((q) => inject(harness, { payload: { query: q } })));
+    const responses = await Promise.all(queries.map((q) => inject(harness, { payload: singleTurnPayload(q) })));
 
     for (let i = 0; i < responses.length; i++) {
       const res = responses[i];
@@ -277,7 +287,7 @@ describe('POST /v1/agent — Hell C1: Parallel request isolation', () => {
       Array.from({ length: COLLISION_COUNT }, () =>
         inject(harness, {
           headers: { 'content-type': 'application/json', 'x-request-id': sharedId },
-          payload: { query: 'Pinot Noir' },
+          payload: singleTurnPayload('Pinot Noir'),
         }),
       ),
     );
@@ -314,7 +324,7 @@ describe('POST /v1/agent — Hell C1: Parallel request isolation', () => {
     const all: typeof queries = [];
     for (let i = 0; i < 3; i++) for (const q of queries) all.push(q);
 
-    const responses = await Promise.all(all.map((q) => inject(harness, { payload: { query: q } })));
+    const responses = await Promise.all(all.map((q) => inject(harness, { payload: singleTurnPayload(q) })));
     for (const res of responses) {
       expect(res.statusCode).toBe(200);
       const body = parseStrict(res.json());
@@ -334,7 +344,7 @@ describe('POST /v1/agent — Hell C1: Parallel request isolation', () => {
     });
     const responses = await Promise.all(
       Array.from({ length: BURST_REQUEST_COUNT }, (_, i) =>
-        inject(harness, { payload: { query: `wine query ${String(i)}` } }),
+        inject(harness, { payload: singleTurnPayload(`wine query ${String(i)}`) }),
       ),
     );
     let okCount = 0;
@@ -365,7 +375,7 @@ describe('POST /v1/agent — Hell C2: Abort race conditions', () => {
       llmMock: { synthesize: { answer: { answer: 'ok', citations: [] } } },
     });
     const responses = await Promise.all(
-      Array.from({ length: 20 }, () => inject(harness, { payload: { query: 'Bordeaux' } })),
+      Array.from({ length: 20 }, () => inject(harness, { payload: singleTurnPayload('Bordeaux') })),
     );
     for (const res of responses) {
       expect(res.statusCode).toBe(200);
@@ -394,7 +404,7 @@ describe('POST /v1/agent — Hell C2: Abort race conditions', () => {
     });
     const N = 30;
     const responses = await Promise.all(
-      Array.from({ length: N }, (_, i) => inject(harness, { payload: { query: `Wine ${String(i)}` } })),
+      Array.from({ length: N }, (_, i) => inject(harness, { payload: singleTurnPayload(`Wine ${String(i)}`) })),
     );
     for (const res of responses) expect(res.statusCode).toBe(200);
     // Each request gets ONE distinct AbortSignal identity (from its
@@ -426,7 +436,7 @@ describe('POST /v1/agent — Hell C2: Abort race conditions', () => {
     for (let i = 0; i < 100; i++) {
       // Use a wine-domain surface so the analyzer admits and the synth runner
       // calls the LLM (policyBlocked: false → not short-circuited).
-      const res = await inject(harness, { payload: { query: `Cabernet Sauvignon ${String(i)}` } });
+      const res = await inject(harness, { payload: singleTurnPayload(`Cabernet Sauvignon ${String(i)}`) });
       expect(res.statusCode).toBe(200);
     }
     // Every observed signal MUST be aborted (route finally fired).
@@ -451,7 +461,7 @@ describe('POST /v1/agent — Hell C2: Abort race conditions', () => {
       },
     });
     const responses = await Promise.all(
-      Array.from({ length: 10 }, () => inject(harness, { payload: { query: 'Pinot Grigio' } })),
+      Array.from({ length: 10 }, () => inject(harness, { payload: singleTurnPayload('Pinot Grigio') })),
     );
     for (const res of responses) {
       // Synthesizer's layer ladder absorbs the error — final status is 200,
@@ -641,7 +651,7 @@ describe('POST /v1/agent — Hell C5: Resource cleanup', () => {
     // Warm up so V8 inline caches / JIT compilation settle before the
     // baseline.
     for (let i = 0; i < 50; i++) {
-      const res = await inject(harness, { payload: { query: `warmup-${String(i)}` } });
+      const res = await inject(harness, { payload: singleTurnPayload(`warmup-${String(i)}`) });
       expect(res.statusCode).toBe(200);
     }
     // Best-effort GC if exposed (vitest is launched without --expose-gc by
@@ -656,7 +666,7 @@ describe('POST /v1/agent — Hell C5: Resource cleanup', () => {
       const size = Math.min(SUSTAINED_CHUNK_SIZE, SUSTAINED_REQUEST_COUNT - start);
       await Promise.all(
         Array.from({ length: size }, (_, i) =>
-          inject(harness, { payload: { query: `sustained-${String(start + i)}` } }),
+          inject(harness, { payload: singleTurnPayload(`sustained-${String(start + i)}`) }),
         ),
       );
     }
@@ -679,7 +689,7 @@ describe('POST /v1/agent — Hell C5: Resource cleanup', () => {
     });
     const N = 50;
     const responses = await Promise.all(
-      Array.from({ length: N }, () => inject(harness, { payload: { query: 'Sangiovese' } })),
+      Array.from({ length: N }, () => inject(harness, { payload: singleTurnPayload('Sangiovese') })),
     );
     for (const res of responses) expect(res.statusCode).toBe(200);
     expect(harness.llm.observedAbortSignals.length).toBeGreaterThanOrEqual(N);
@@ -689,7 +699,7 @@ describe('POST /v1/agent — Hell C5: Resource cleanup', () => {
     // Every signal MUST be a DISTINCT identity (one per request — no shared
     // module-level signal). Set size === array length proves it.
     const distinct = new Set<AbortSignal>(harness.llm.observedAbortSignals);
-    expect(distinct.size).toBe(harness.llm.observedAbortSignals.length);
+    expect(distinct.size).toBe(N);
   });
 
   it('C5-3: every request completes (no orphan promises) — Promise.all resolves for 100 concurrent', async () => {
@@ -699,7 +709,7 @@ describe('POST /v1/agent — Hell C5: Resource cleanup', () => {
     });
     // Promise.all rejecting OR hanging is detected by the test timeout.
     const responses = await Promise.all(
-      Array.from({ length: 100 }, () => inject(harness, { payload: { query: 'Merlot' } })),
+      Array.from({ length: 100 }, () => inject(harness, { payload: singleTurnPayload('Merlot') })),
     );
     for (const res of responses) expect(res.statusCode).toBe(200);
   });
@@ -717,7 +727,7 @@ describe('POST /v1/agent — Hell C5: Resource cleanup', () => {
     });
     const responses = await Promise.all(
       Array.from({ length: BURST_REQUEST_COUNT }, () =>
-        inject(harness, { payload: { query: 'Cabernet Sauvignon recommendation' } }),
+        inject(harness, { payload: singleTurnPayload('Cabernet Sauvignon recommendation') }),
       ),
     );
     let okCount = 0;
@@ -830,7 +840,7 @@ describe('POST /v1/agent — Hell C7: Server-level isolation', () => {
     });
     const markers = Array.from({ length: 20 }, () => mintMarker());
     const queries = markers.map((m) => `Riesling recommendation ${m}`);
-    const responses = await Promise.all(queries.map((q) => inject(harness, { payload: { query: q } })));
+    const responses = await Promise.all(queries.map((q) => inject(harness, { payload: singleTurnPayload(q) })));
     for (let i = 0; i < responses.length; i++) {
       const res = responses[i];
       const myMarker = markers[i];
@@ -861,8 +871,8 @@ describe('POST /v1/agent — Hell C7: Server-level isolation', () => {
     try {
       // Use a wine-domain query so the analyzer admits and the synth runner
       // calls the LLM (policyBlocked: false → the mock answer surfaces).
-      const r1 = await inject(h1, { payload: { query: 'Cabernet Sauvignon recommendation' } });
-      const r2 = await inject(h2, { payload: { query: 'Pinot Noir Burgundy recommendation' } });
+      const r1 = await inject(h1, { payload: singleTurnPayload('Cabernet Sauvignon recommendation') });
+      const r2 = await inject(h2, { payload: singleTurnPayload('Pinot Noir Burgundy recommendation') });
       expect(r1.statusCode).toBe(200);
       expect(r2.statusCode).toBe(200);
       const b1 = parseStrict(r1.json());
@@ -960,7 +970,7 @@ describe('POST /v1/agent — Hell C9: End-to-end cross-talk + abort interaction'
     });
     const markers = Array.from({ length: 50 }, () => mintMarker());
     const queries = markers.map((m) => `Bordeaux wine ${m}`);
-    const responses = await Promise.all(queries.map((q) => inject(harness, { payload: { query: q } })));
+    const responses = await Promise.all(queries.map((q) => inject(harness, { payload: singleTurnPayload(q) })));
     for (let i = 0; i < responses.length; i++) {
       const res = responses[i];
       const myMarker = markers[i];
@@ -978,7 +988,7 @@ describe('POST /v1/agent — Hell C9: End-to-end cross-talk + abort interaction'
       llmMock: { synthesize: { answer: { answer: 'ok', citations: [] } } },
     });
     const responses = await Promise.all(
-      Array.from({ length: 100 }, () => inject(harness, { payload: { query: 'wine' } })),
+      Array.from({ length: 100 }, () => inject(harness, { payload: singleTurnPayload('wine') })),
     );
     const ids = new Set<string>();
     for (const res of responses) {

@@ -76,6 +76,12 @@ const DOMAIN_ERROR_STATUS_MAP: Readonly<Record<string, number>> = {
   // of a generic 500. Callers (agent/search) can degrade gracefully
   // downstream; the HTTP envelope communicates retryability to clients.
   [CIRCUIT_BREAKER_OPEN_CODE]: HTTP_STATUS_SERVICE_UNAVAILABLE,
+  // Agent session surface fails closed when no persistent store is wired:
+  // `AgentUseCase.requireSessions()` throws `SERVICE_UNAVAILABLE`. The agent
+  // session route contracts declare 503 for this; map it here so it does not
+  // fall through to a generic 500. Not retryable — the store must be
+  // configured (AGENT_SESSION_DB_PATH); a blind retry will not succeed.
+  SERVICE_UNAVAILABLE: HTTP_STATUS_SERVICE_UNAVAILABLE,
 };
 
 const RETRYABLE_DOMAIN_CODES: ReadonlySet<string> = new Set([
@@ -100,6 +106,7 @@ const SAFE_DOMAIN_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   INVARIANT_VIOLATION: 'An internal data consistency error occurred.',
   INTERNAL_INCONSISTENCY: 'An internal consistency check failed.',
   INVALID_REQUEST: 'The request is not valid for this endpoint.',
+  SERVICE_UNAVAILABLE: 'This capability is currently unavailable.',
   [CIRCUIT_BREAKER_OPEN_CODE]: 'A downstream dependency is temporarily degraded. Please retry shortly.',
 };
 

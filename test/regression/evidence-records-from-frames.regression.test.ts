@@ -19,10 +19,10 @@ function makeFrame(overrides: Partial<ToolCallEvidenceFrame> = {}): ToolCallEvid
   return {
     frameSchemaVersion: 'tool_evidence_v1',
     toolCallId: 'tc-1',
-    toolName: 'search_wines',
+    toolName: 'search_hybrid',
     invokedAt: '2026-04-15T00:00:00Z',
     requestId: 'req-1',
-    request: { toolName: 'search_wines', input: {} },
+    request: { toolName: 'search_hybrid', input: {} },
     structuredOutput: { kind: 'no_op', reason: 'stub' },
     observationSnapshot: '',
     observationHash: 'a'.repeat(64),
@@ -343,7 +343,7 @@ describe('buildEvidenceRecordsFromFrames', () => {
     expect(records.map((r) => r['entity_id'])).toEqual(['a-1', 'a-2', 'b-1']);
   });
 
-  it('propagates frame provenance into evidence anchors instead of hardcoding search_wines/0', () => {
+  it('propagates frame provenance into evidence anchors instead of hardcoding search_hybrid/0', () => {
     const frame = makeFrame({
       toolCallId: 'req-compare-s4-p1',
       toolName: 'compare_wines',

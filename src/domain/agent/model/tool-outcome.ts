@@ -84,7 +84,7 @@ export interface ToolOutcome {
  * Used to detect partial_result outcomes.
  */
 export interface ExpectedOutputSchema {
-  /** Minimum number of results the tool must return (for search_wines). */
+  /** Minimum number of results the tool must return (for active search primitives / lookup). */
   readonly minResults?: number | undefined;
   /** Fields that must be non-null on every result item. */
   readonly requiredFields?: readonly string[] | undefined;
@@ -120,4 +120,3 @@ export interface SynthesisContext {
    */
   readonly fallbackApplied: 'layer2' | 'layer3' | 'layer4' | null;
 }
-

@@ -1,9 +1,9 @@
 id: tools.interpret
-name: Interpret Endpoint (Query Interpretation Trace)
+name: Interpret Use Case (Query Interpretation Trace)
 category: tools
 summary: |
-  POST /v1/search/interpret — 입력 쿼리에 대한 NLU/planner 해석 결과 노출 (intent, constraints,
-  anchors, decomposition, situational policy 결과 등). 디버깅 / 사용자 UI 트레이싱 용.
+  입력 쿼리에 대한 NLU/planner 해석 결과를 생성하는 internal use case
+  (intent, constraints, anchors, decomposition, situational policy 결과 등).
 
 maturity: 3
 maturity_rationale: |
@@ -22,19 +22,16 @@ last_reviewed: 2026-05-21
 owner: core
 
 surfaces:
-  - "HTTP: POST /v1/search/interpret"
-  - "HTTP: POST /v1/search/interpret (Accept: application/vnd.cuvee.human+json → V2 explain)"
+  - "Internal interpret use case"
 
 key_files:
   - src/application/search/interpret.usecase.ts
-  - src/interface/http/routes/interpret.route.ts
   - src/interface/http/schemas/search-response.schema.ts
   - src/interface/http/schemas/search-response-v2.schema.ts
 
 tests:
-  integration:
-    - test/integration/http/routes/interpret.route.test.ts
   unit:
+    - test/unit/application/search/interpret.usecase.test.ts
     - src/interface/http/schemas/__tests__/interpret-response.schema.test.ts
 
 depends_on:

@@ -1,9 +1,9 @@
 id: tools.autocomplete
-name: Autocomplete Endpoint (Typeahead)
+name: Autocomplete Use Case (Typeahead)
 category: tools
 summary: |
-  POST /v1/autocomplete — 사용자 typing 중 prefix completion 제안. entity / region /
-  grape / producer 완성 후보 반환. low-latency 핫 패스.
+  사용자 typing 중 prefix completion 제안. entity / region / grape / producer
+  완성 후보를 반환하는 internal autocomplete use case.
 
 maturity: 4
 maturity_rationale: |
@@ -30,15 +30,12 @@ last_reviewed: 2026-05-21
 owner: core
 
 surfaces:
-  - "HTTP: POST /v1/autocomplete"
+  - "Internal autocomplete use case"
 
 key_files:
   - src/application/search/autocomplete.usecase.ts
-  - src/interface/http/routes/autocomplete.route.ts
 
 tests:
-  integration:
-    - test/integration/http/routes/autocomplete.route.test.ts
   unit:
     - test/unit/application/search/autocomplete.usecase.test.ts
     - test/unit/eval/autocomplete-eval.test.ts

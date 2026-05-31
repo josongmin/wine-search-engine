@@ -36,7 +36,7 @@ describe('buildToolCallEvidenceFrame', () => {
   it('same inputs produce byte-identical frames (deterministic except timing)', () => {
     const a = buildToolCallEvidenceFrame({
       toolCallId: 'id',
-      toolName: 'search_wines',
+      toolName: 'search_hybrid',
       requestId: 'rid',
       input: { query: 'opus one' },
       structuredOutput: { kind: 'search_result_set', resultSet: [], resultCount: 0 },
@@ -46,7 +46,7 @@ describe('buildToolCallEvidenceFrame', () => {
     });
     const b = buildToolCallEvidenceFrame({
       toolCallId: 'id',
-      toolName: 'search_wines',
+      toolName: 'search_hybrid',
       requestId: 'rid',
       input: { query: 'opus one' },
       structuredOutput: { kind: 'search_result_set', resultSet: [], resultCount: 0 },
@@ -60,7 +60,7 @@ describe('buildToolCallEvidenceFrame', () => {
   it('different observation → different hash → different frame', () => {
     const base = {
       toolCallId: 'id',
-      toolName: 'search_wines',
+      toolName: 'search_hybrid',
       requestId: 'rid',
       input: {},
       structuredOutput: { kind: 'no_op' as const, reason: 'x' },
@@ -76,7 +76,7 @@ describe('buildToolCallEvidenceFrame', () => {
   it('invokedAt is serialized as ISO-8601 UTC', () => {
     const frame = buildToolCallEvidenceFrame({
       toolCallId: 'x',
-      toolName: 'search_wines',
+      toolName: 'search_hybrid',
       requestId: 'x',
       input: {},
       structuredOutput: { kind: 'no_op', reason: 'x' },

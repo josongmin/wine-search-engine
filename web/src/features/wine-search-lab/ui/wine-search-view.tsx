@@ -54,7 +54,7 @@ export function WineSearchView() {
     setResult(null);
     try {
       const res = await api.wineSearch.execute({
-        query: q,
+        messages: [{ role: 'user', content: q }],
         ...(maxSteps !== DEFAULT_MAX_STEPS ? { options: { max_steps: maxSteps } } : {}),
       });
       setResult(res);

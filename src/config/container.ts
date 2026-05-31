@@ -63,6 +63,12 @@ import type { SearchUseCase } from '../application/search/search.usecase.js';
 import { bootstrapLogger } from '../domain/shared/bootstrap-logger.js';
 import { WineSearchOrchestrator as WineSearchOrchestratorImpl } from '../application/wine-search/wine-search-orchestrator.js';
 import type { WineSearchOrchestratorContract as WineSearchOrchestrator } from '../application/wine-search/wine-search-orchestrator.js';
+import type { AgentSessionStorePort } from '../application/wine-search/port/agent-session-store.port.js';
+import { computeAgentSessionExpiry } from './agent-session-store.js';
+import { createSqliteAgentSessionStore } from '../infrastructure/db/agent-session-store.js';
+import { AgentSessionService } from '../application/wine-search/agent-session-service.js';
+import { AgentUseCase } from '../application/wine-search/agent-usecase.js';
+import type { AgentUseCasePort } from '../application/wine-search/port/agent-usecase.port.js';
 export interface Container extends LearningContainerServices {
   /** Chat LLM when an OpenAI credential pool or Codex ChatGPT login token is available. */
   readonly chatLlm?: ChatLlmPort;
@@ -105,6 +111,19 @@ export interface Container extends LearningContainerServices {
  */
 export interface WineSearchContainerServices {
   readonly wineSearchOrchestrator: WineSearchOrchestrator;
+  /** Persistent session store (SQLite). Absent when no durable backend is
+   *  configured — multi-turn then fails closed rather than falling back to a
+   *  process-local store (T-MTA-03). */
+  readonly agentSessionStore?: AgentSessionStorePort | undefined;
+  /** Owner of server-managed session history custody (T-MTA-02). The HTTP
+   *  session routes delegate to this rather than assembling store +
+   *  orchestrator themselves. Absent (→ 503) when no persistent store is
+   *  wired. */
+  readonly agentSessionService?: AgentSessionService | undefined;
+  /** Single application seam both HTTP routes and the local CLI facade call
+   *  for the agent surface (run + sessions). Always present; session methods
+   *  fail closed (503) internally when no store is wired. */
+  readonly agentUseCase: AgentUseCasePort;
 }
 
 function normalizeRuntimeHandles(
@@ -239,7 +258,43 @@ function buildWineSearchContainerServices(
       logger: bootstrapLogger,
     });
 
-  return { wineSearchOrchestrator };
+  // Persistent multi-turn session store (T-MTA-03). Production wires a durable
+  // SQLite file via `AGENT_SESSION_DB_PATH`. When unset, the session surface
+  // fails CLOSED (no service → 503) rather than silently falling back to a
+  // process-local store that would lose history across restarts/instances.
+  // Single-shot `/v1/agent` runs do NOT need the store and stay available.
+  const sessionDbPath = process.env['AGENT_SESSION_DB_PATH'];
+  let agentSessionStore: AgentSessionStorePort | undefined;
+  let agentSessionService: AgentSessionService | undefined;
+  if (sessionDbPath !== undefined && sessionDbPath.length > 0) {
+    try {
+      agentSessionStore = createSqliteAgentSessionStore({ path: sessionDbPath });
+      agentSessionService = new AgentSessionService({
+        store: agentSessionStore,
+        orchestrator: wineSearchOrchestrator,
+        computeExpiry: (now) => computeAgentSessionExpiry(now),
+      });
+    } catch (err) {
+      bootstrapLogger.error(
+        { err, path: sessionDbPath },
+        '[container] failed to open agent session SQLite store — multi-turn session surface DISABLED (fail-closed)',
+      );
+      agentSessionStore = undefined;
+      agentSessionService = undefined;
+    }
+  }
+
+  const agentUseCase = new AgentUseCase({
+    orchestrator: wineSearchOrchestrator,
+    ...(agentSessionService !== undefined ? { sessionService: agentSessionService } : {}),
+  });
+
+  return {
+    wineSearchOrchestrator,
+    agentUseCase,
+    ...(agentSessionStore !== undefined ? { agentSessionStore } : {}),
+    ...(agentSessionService !== undefined ? { agentSessionService } : {}),
+  };
 }
 
 export async function createContainer(

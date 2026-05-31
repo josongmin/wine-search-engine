@@ -295,7 +295,7 @@ describe('QueryAnalyzerService — LLM fallback', () => {
     expect(result.analysis.preservedSurface).toBe('asdf');
     // Observability: the analyzer records the LLM-fallback outcome so the
     // orchestrator can tell a real LLM rescue apart from a deterministic
-    // analysis or a softened failure. See `llmFallbackOutcome` regression file.
+    // analysis or a preserved-unknown failure. See `llmFallbackOutcome` regression file.
     expect(result.analysis.llmFallbackOutcome).toEqual({ kind: 'success' });
   });
 
@@ -311,22 +311,25 @@ describe('QueryAnalyzerService — LLM fallback', () => {
     expect(stub.analyzeMock).not.toHaveBeenCalled();
   });
 
-  it('falls back to intent=search when LLM call throws', async () => {
+  it('preserves intent=unknown when LLM call throws (no silent soften to search)', async () => {
     const stub = makeStubLlm(() => Promise.reject(new Error('boom')));
     const result = await analyze('asdf', { structuredLlm: stub });
     expect(result.kind).toBe('ok');
     if (result.kind !== 'ok') return;
-    expect(result.analysis.intent).toBe('search');
+    // Honest failure: intent stays 'unknown' so the deterministic-router can
+    // route the ambiguous query through its `unsupported_intent` path instead
+    // of force-routing a search that masquerades an LLM outage as a hit.
+    expect(result.analysis.intent).toBe('unknown');
     expect(result.analysis.callerInterpretation).toEqual({
       authority: 'caller',
       intent: 'semantic_discovery',
       queryClass: 'unknown',
     });
     expect(stub.analyzeMock).toHaveBeenCalledTimes(1);
-    // Failure path must surface the softening trace so observability can
-    // distinguish a real `intent=search` from a synthesized one.
+    // Failure path must surface the trace so observability can distinguish a
+    // real `intent=search` from a preserved-unknown failure.
     expect(result.analysis.llmFallbackOutcome).toEqual({
-      kind: 'failed_softened_to_search',
+      kind: 'failed_preserved_unknown',
       failureReason: 'unknown',
     });
   });

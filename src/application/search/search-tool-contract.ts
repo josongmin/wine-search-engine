@@ -34,7 +34,7 @@ export const FOOD_PAIRING_COLORS = ['red', 'white', 'rosé', 'sparkling', 'both'
 export const SEARCH_TOOL_DESCRIPTION =
   'Search for wines by query. Returns matching wines with scores, attributes, and drinking windows.';
 export const LOOKUP_WINE_TOOL_DESCRIPTION =
-  'Look up a SPECIFIC wine by its name/identity (e.g. "Opus One 2018", "사씨카이아"). Returns the 1-3 most exact matches via high-precision entity resolution. Use this — NOT search_wines — when the user names a particular wine. No constraint filters (price/region/style) — those belong to search_wines.';
+  'Look up a SPECIFIC wine by its name/identity (e.g. "Opus One 2018", "사씨카이아"). Returns the 1-3 most exact matches via high-precision entity resolution. Use this — NOT a discovery search primitive — when the user names a particular wine. No constraint filters (price/region/style) — those belong to search_hybrid/search_semantic/search_lexical.';
 /** Hard cap on lookup_wine results — identity resolution returns a tight set. */
 export const LOOKUP_WINE_LIMIT_MAX = 3;
 export const LOOKUP_WINE_QUERY_DESCRIPTION =
@@ -123,6 +123,8 @@ export const SEARCH_TOOL_TANNIN_MAX_DESCRIPTION =
 export const SEARCH_TOOL_WANT_DIVERSITY_DESCRIPTION =
   'When true, prefer varied grapes, regions, or styles rather than near-duplicates.';
 export const SEARCH_FAMILY_UNSUPPORTED_TOOL_FIELDS = [
+  'mode',
+  'retrieval_mode',
   'drinking_window',
   'drinking_window_target_year',
 ] as const;
@@ -169,7 +171,7 @@ export function buildEntityIdToolField(
   return buildRequiredTrimmedString({
     ...options,
     placeholderMessage: options.placeholderMessage
-      ?? 'entity_id cannot be a placeholder. Copy the canonical entity_id from a prior search_wines result (e.g. "opus-one-2018").',
+      ?? 'entity_id cannot be a placeholder. Copy the canonical entity_id from a prior search_hybrid or lookup_wine result (e.g. "opus-one-2018").',
   });
 }
 
@@ -246,9 +248,9 @@ export function buildSearchToolFieldShape(
 export function buildCompareToolFieldShape(
   options: CompareToolFieldShapeOptions,
 ){
-  // `retrieval_mode` is preserved (parity with `search_wines` — see bench #117
-  // RCA: planner LLMs reasonably mirror the field across search-family tools).
-  // `limit` and `want_diversity` are intentionally dropped — compare_wines is a
+  // `retrieval_mode` is preserved because planner LLMs reasonably mirror the
+  // field across search-family tools (bench #117 RCA).
+  // `limit` and `want_diversity` are intentionally dropped — the comparison tool is a
   // fixed 2-side tool and diversity-shaping is a recommendation concern, not a
   // comparison one.
   const {

@@ -16,8 +16,14 @@ import { clamp01 } from './scorer-aggregation.js';
 import { countSemanticToolInvocations } from './scorer-tool-call-signatures.js';
 import { parseToolCallInput } from './scorer-context-relevance.js';
 
-function isSearchWinesPartitionBatch(calls: readonly ToolCallTrace[]): boolean {
-  if (calls.length < 2 || !calls.every((call) => call.tool === 'search_wines')) {
+const DISCOVERY_SEARCH_TOOLS = new Set([
+  'search_hybrid',
+  'search_semantic',
+  'search_lexical',
+]);
+
+function isDiscoveryPartitionBatch(calls: readonly ToolCallTrace[]): boolean {
+  if (calls.length < 2 || !calls.every((call) => DISCOVERY_SEARCH_TOOLS.has(call.tool))) {
     return false;
   }
   const wineTypes = calls
@@ -28,6 +34,17 @@ function isSearchWinesPartitionBatch(calls: readonly ToolCallTrace[]): boolean {
     return false;
   }
   return new Set(wineTypes).size === calls.length;
+}
+
+function toolCallSatisfiesExpectation(
+  call: ToolCallTrace,
+  expectedTool: NonNullable<ScenarioExpectation['tools']>[number],
+): boolean {
+  if (expectedTool.inputContains === undefined || expectedTool.inputContains.length === 0) {
+    return true;
+  }
+  const input = (call.input ?? '').toLowerCase();
+  return expectedTool.inputContains.every((sub) => input.includes(sub.toLowerCase()));
 }
 
 export function scoreToolAccuracy(
@@ -101,10 +118,16 @@ export function scoreToolAccuracy(
   }
   const expected = exp.tools;
   const expectedNames = expected.map((t) => t.tool);
+  const unmatchedCallsByTool = new Map<string, ToolCallTrace[]>();
+  for (const call of toolsUsed) {
+    const bucket = unmatchedCallsByTool.get(call.tool) ?? [];
+    bucket.push(call);
+    unmatchedCallsByTool.set(call.tool, bucket);
+  }
 
   let matchedCount = 0;
   for (const expTool of expected) {
-    const matchingCalls = toolsUsed.filter((t) => t.tool === expTool.tool);
+    const matchingCalls = unmatchedCallsByTool.get(expTool.tool) ?? [];
     if (matchingCalls.length === 0) {
       diagnostics.push({
         dim: 'toolAccuracy',
@@ -114,21 +137,17 @@ export function scoreToolAccuracy(
       });
       continue;
     }
-    if (expTool.inputContains !== undefined && expTool.inputContains.length > 0) {
-      const argMatch = matchingCalls.some((call) => {
-        const input = (call.input ?? '').toLowerCase();
-        return expTool.inputContains!.every((sub) => input.includes(sub.toLowerCase()));
+    const matchedIdx = matchingCalls.findIndex((call) => toolCallSatisfiesExpectation(call, expTool));
+    if (matchedIdx === -1) {
+      diagnostics.push({
+        dim: 'toolAccuracy',
+        severity: 'warn',
+        code: 'INPUT_CONTAINS_UNSATISFIED',
+        message: `tool ${expTool.tool} called but inputContains unsatisfied`,
       });
-      if (!argMatch) {
-        diagnostics.push({
-          dim: 'toolAccuracy',
-          severity: 'warn',
-          code: 'INPUT_CONTAINS_UNSATISFIED',
-          message: `tool ${expTool.tool} called but inputContains unsatisfied`,
-        });
-        continue;
-      }
+      continue;
     }
+    matchingCalls.splice(matchedIdx, 1);
     matchedCount++;
   }
   let score = matchedCount / expected.length;
@@ -190,7 +209,7 @@ export function scoreToolAccuracy(
   for (const [tool, expReps] of expectedCounts) {
     const actualCalls = actualCallsByTool.get(tool) ?? [];
     const actReps =
-      tool === 'search_wines' && expReps === 1 && isSearchWinesPartitionBatch(actualCalls)
+      DISCOVERY_SEARCH_TOOLS.has(tool) && expReps === 1 && isDiscoveryPartitionBatch(actualCalls)
         ? expReps
         : countSemanticToolInvocations(actualCalls);
     if (actReps > expReps) {

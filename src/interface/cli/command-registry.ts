@@ -6,11 +6,16 @@ import { AuthRefreshCommand } from '../../application/cli/command/auth/refresh.c
 import { AuthDoctorCommand } from '../../application/cli/command/auth/doctor.command.js';
 import { AuthLoginCommand } from '../../application/cli/command/auth/login.command.js';
 import { AuthWhoamiCommand } from '../../application/cli/command/auth/whoami.command.js';
-import { SearchRunCommand } from '../../application/cli/command/search/run.command.js';
-import { WineSearchRunCommand } from '../../application/cli/command/wine-search/run.command.js';
+import { SearchHybridCommand } from '../../application/cli/command/search/hybrid.command.js';
+import { SearchSemanticCommand } from '../../application/cli/command/search/semantic.command.js';
+import { SearchLexicalCommand } from '../../application/cli/command/search/lexical.command.js';
+import { LookupWineCommand } from '../../application/cli/command/lookup/wine.command.js';
+import { AgentRunCommand } from '../../application/cli/command/agent/run.command.js';
+import { AgentSessionStartCommand } from '../../application/cli/command/agent/session-start.command.js';
+import { AgentSessionTurnCommand } from '../../application/cli/command/agent/session-turn.command.js';
 
 /**
- * Resolves a leaf command from its `<group> <name>` path. Registration is the
+ * Resolves a leaf command from its full token path. Registration is the
  * single wiring point where later tickets attach their commands; the registry
  * itself holds no business logic.
  */
@@ -18,19 +23,19 @@ export class CommandRegistry {
   private readonly commands = new Map<string, CliCommand>();
 
   register(command: CliCommand): void {
-    this.commands.set(CommandRegistry.key(command.group, command.name), command);
+    this.commands.set(CommandRegistry.key(command.path), command);
   }
 
-  resolve(group: string, name: string): CliCommand | undefined {
-    return this.commands.get(CommandRegistry.key(group, name));
+  resolve(path: readonly string[]): CliCommand | undefined {
+    return this.commands.get(CommandRegistry.key(path));
   }
 
   list(): readonly CliCommand[] {
     return [...this.commands.values()];
   }
 
-  private static key(group: string, name: string): string {
-    return `${group} ${name}`;
+  private static key(path: readonly string[]): string {
+    return path.join(' ');
   }
 }
 
@@ -46,7 +51,12 @@ export function createDefaultRegistry(): CommandRegistry {
   registry.register(new AuthDoctorCommand());
   registry.register(new AuthLoginCommand());
   registry.register(new AuthWhoamiCommand());
-  registry.register(new SearchRunCommand());
-  registry.register(new WineSearchRunCommand());
+  registry.register(new SearchHybridCommand());
+  registry.register(new SearchSemanticCommand());
+  registry.register(new SearchLexicalCommand());
+  registry.register(new LookupWineCommand());
+  registry.register(new AgentRunCommand());
+  registry.register(new AgentSessionStartCommand());
+  registry.register(new AgentSessionTurnCommand());
   return registry;
 }

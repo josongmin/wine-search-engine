@@ -9,8 +9,8 @@ summary: |
 maturity: 4
 maturity_rationale: |
   Production-wired with feature flag (`WINE_SEARCH_ENABLED`). Full HTTP surface:
-  POST /v1/wine-search 라우트 등록 (server.ts:390-394 + http-route-contract-catalog.ts:69),
-  WineSearchRouteContract + WineSearchRequestSchema (200+ lines Zod-validated),
+  POST /v1/agent 라우트 등록 (single-shot canonical agent surface),
+  WineSearchRouteContract + agent request/response schemas,
   WineSearchOrchestrator class implementation. DI 통합 — buildWineSearchContainerServices가
   feature flag 켜질 때 (`isWineSearchEnabled()`) container에 inject. Test coverage:
   4 e2e files (wine-search-api / -api-hell-http / -api-hell-adversarial /
@@ -30,13 +30,20 @@ maturity_rationale: |
 
   5는 18K bench scenario parity 입증 + ReAct cutover 시 가능.
 
+  2026-05-30 (T-MTA-01..07): orchestrator input을 `query` → `messages[]`-native로
+  전환 (legacy query adapter 제거), 결과 trace에 `history_applied` 추가, planner(loop)에
+  prior history 주입. 단일 dead `wine-search.route.ts`(legacy query-contract) 제거 —
+  canonical single-shot front door는 `POST /v1/agent`로 통일. server-managed 멀티턴은
+  새 `agent.multi-turn-session` feature로 분리 (AgentSessionService + SQLite store).
+  integration rail은 `agent.route.test.ts`로 정렬.
+
 status: active
 since: 2026-04
-last_reviewed: 2026-05-26
+last_reviewed: 2026-05-30
 owner: core
 
 surfaces:
-  - "HTTP: POST /v1/wine-search (flag-gated by WINE_SEARCH_ENABLED)"
+  - "HTTP: POST /v1/agent (flag-gated by WINE_SEARCH_ENABLED)"
 
 key_files:
   - src/application/wine-search/query-analyzer.ts
@@ -56,7 +63,8 @@ tests:
     - test/e2e/wine-search-api-hell-http.test.ts
     - test/e2e/wine-search-api-hell-adversarial.test.ts
   integration:
-    - test/integration/http/routes/wine-search.route.test.ts
+    - test/integration/http/routes/agent.route.test.ts
+    - test/integration/wine-search-anthropic-wire-contract.test.ts
   unit:
     - src/config/__tests__/wine-search-tool-bundle-wiring.test.ts
   regression:
@@ -80,7 +88,7 @@ known_limitations:
 next_steps:
   - "Shadow mode 위에서 18K scenario parity 검증"
   - "1% → 10% → 50% → 100% rollout"
-  - "ReAct cutover (legacy /v1/agent 삭제)"
+  - "messages-native run + server-managed session (agent.multi-turn-session) 통합 완료 — bench parity 재측정"
 
 tags:
   - orchestration

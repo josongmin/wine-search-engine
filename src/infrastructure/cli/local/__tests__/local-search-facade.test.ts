@@ -17,7 +17,7 @@ describe('LocalSearchFacade', () => {
         } as never),
     });
 
-    const result = await facade.run(
+    const result = await facade.hybrid(
       { query: 'opus one 2018' },
       { requestId: 'req-1' },
     );
@@ -27,6 +27,29 @@ describe('LocalSearchFacade', () => {
       engine_decision: { runtime_correlation_ref: 'runtime-1' },
       meta: { authority_trace_ref: 'authority-1' },
       results: [],
+    });
+  });
+
+  it('lookupWine injects entity retrieval semantics into the local use case input', async () => {
+    const seen: unknown[] = [];
+    const facade = new LocalSearchFacade({
+      withContainer: async (work) =>
+        await work({
+          searchUseCase: {
+            execute: async (input: unknown) => {
+              seen.push(input);
+              return { queryType: 'search', results: [] };
+            },
+          },
+        } as never),
+    });
+
+    await facade.lookupWine({ query: 'opus one 2018' }, { requestId: 'req-2' });
+
+    expect(seen[0]).toEqual({
+      query: 'opus one 2018',
+      options: { mode: 'auto', explain: false, clarification: false },
+      retrieval_mode: 'entity',
     });
   });
 });

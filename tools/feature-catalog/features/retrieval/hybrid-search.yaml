@@ -2,9 +2,9 @@ id: retrieval.hybrid-search
 name: Hybrid Search (BM25 + Dense + Entity)
 category: retrieval
 summary: |
-  Vespa 기반 BM25/ANN/Entity 융합 검색. retrieval_mode로 entity/hybrid/mixed/
-  dense/sparse 모드 선택. 한국어 query에 대해 Hangul threshold 적용 +
-  entity boost. 단발 검색 핫패스.
+  Vespa 기반 BM25/ANN/Entity 융합 검색. active hybrid primitive의 retrieval
+  core이며, 한국어 query에 대해 Hangul threshold 적용 + entity boost를 수행한다.
+  단발 검색 핫패스.
 
 maturity: 4
 maturity_rationale: |
@@ -32,8 +32,8 @@ last_reviewed: 2026-05-21
 owner: core
 
 surfaces:
-  - "HTTP: POST /v1/search"
-  - "Agent tool: search_wines"
+  - "HTTP: POST /v1/search/hybrid"
+  - "Agent tool: search_hybrid"
 
 key_files:
   - src/application/search/search.usecase.ts

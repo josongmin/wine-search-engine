@@ -22,6 +22,7 @@
 
 import { z } from 'zod';
 import type { TokenUsage, ToolDefinition } from '@domain/ai/port/structured-llm.port.js';
+import type { ChatMessage } from '@domain/ai/port/chat-llm.port.js';
 import type { AgentTerminationReason } from '@domain/agent/model/agent-step.js';
 import type { AgentToolName } from '@domain/agent/model/tool-outcome.js';
 import type { ToolOutcome } from '@domain/agent/model/tool-outcome.js';
@@ -222,6 +223,11 @@ export interface WineAgentLoopToolPorts {
 
 export interface WineAgentLoopInput {
   readonly query: string;
+  /** Prior conversation turns (server- or caller-managed), seeded into the
+   *  loop's rolling chat history BEFORE the anchor `query` so the agent LLM
+   *  plans against the real multi-turn context. Empty/absent for a fresh
+   *  single-turn run (T-MTA-01). */
+  readonly priorHistory?: readonly ChatMessage[] | undefined;
   readonly analysis: WineSearchAnalysis;
   /** Directive seeded by `DeterministicRouter` when applicable. Optional —
    *  if absent the runner starts with no directive and recomputes after the

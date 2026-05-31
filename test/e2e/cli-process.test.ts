@@ -50,7 +50,7 @@ describe('wine CLI (process boundary, offline)', () => {
     expect(r.code).toBe(0);
     expect(r.stdout).toContain('Usage:');
     expect(r.stdout).toContain('Global options:');
-    for (const cmd of ['auth status', 'search run', 'wine-search run']) {
+    for (const cmd of ['auth status', 'search hybrid', 'lookup wine', 'agent run']) {
       expect(r.stdout).toContain(cmd);
     }
     // hidden kernel self-test must not surface in the help tree
@@ -106,8 +106,8 @@ describe.skipIf(!LIVE_E2E)('wine CLI live (gated: WINE_CLI_LIVE_E2E=1, needs rea
   // the Vespa retrieval channel — keeping this case fast and robust to the
   // Vespa SG allowlist state. (The hybrid/Vespa retrieval path is verified
   // manually when the runner IP is allowlisted; see tools.product-cli catalog.)
-  it('search run --target local resolves a known wine end-to-end', async () => {
-    const r = await runCli(['search', 'run', '--target', 'local', '--q', 'opus one 2018', '--json']);
+  it('lookup wine --target local resolves a known wine end-to-end', async () => {
+    const r = await runCli(['lookup', 'wine', '--target', 'local', '--q', 'opus one 2018', '--json']);
     expect(r.code).toBe(0);
     const payload = JSON.parse(r.stdout) as { query_type: string; result_type?: string };
     expect(payload.query_type).toBe('search');

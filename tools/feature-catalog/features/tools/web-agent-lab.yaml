@@ -2,25 +2,26 @@ id: tools.web-agent-lab
 name: Web Agent Lab (Debug UI)
 category: tools
 summary: |
-  Agent 응답 디버깅용 UI. /v1/agent 호출 + step trace 시각화 + tool call evidence
-  frame 표시 + termination reason / fallback 상태 확인.
+  Agent 응답 디버깅용 UI. legacy `/agent-lab` page는 제거되었고, 현재는
+  `wine-search-lab` 화면이 step trace / tool call evidence 확인을 담당한다.
 
 maturity: 3
 maturity_rationale: |
   Internal debug 용도, 개발자 도구. raw JSON debug 패널 + step viewer. 그러나 production
   release 용도 아님 (개발자 전용).
 
-status: active
+status: deprecated
 since: 2025-10
 last_reviewed: 2026-05-21
 owner: core
 
 surfaces:
-  - "Web: /agent-lab"
+  - "Removed web route: /agent-lab"
+  - "Replacement debug UI: /wine-search-lab"
 
 key_files:
-  - web/src/app/agent-lab/page.tsx
-  - web/src/features/agent-lab
+  - web/src/features/wine-search-lab/index.ts
+  - web/src/features/wine-search-lab/ui/wine-search-view.tsx
 
 tests: {}
 

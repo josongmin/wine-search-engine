@@ -489,7 +489,7 @@ describe('ClaudeStructuredLlmAdapter', () => {
               {
                 type: 'tool_use',
                 id: 'toolu_1',
-                name: 'search_wines',
+                name: 'search_hybrid',
                 input: { region: 'Burgundy', vintage: 2018 },
               },
             ],
@@ -504,7 +504,7 @@ describe('ClaudeStructuredLlmAdapter', () => {
         messages: [{ role: 'user', content: 'find me wines' }],
         tools: [
           {
-            name: 'search_wines',
+            name: 'search_hybrid',
             description: 'Search the wine catalog',
             inputSchema: z.object({
               region: z.string(),
@@ -521,7 +521,7 @@ describe('ClaudeStructuredLlmAdapter', () => {
       expect(result.kind).toBe('tool_use');
       if (result.kind !== 'tool_use') throw new Error('typeguard');
       expect(result.calls).toHaveLength(1);
-      expect(result.calls[0]?.name).toBe('search_wines');
+      expect(result.calls[0]?.name).toBe('search_hybrid');
       expect(result.calls[0]?.input).toEqual({ region: 'Burgundy', vintage: 2018 });
       expect(result.stopReason).toBe('tool_use');
       expect(result.usage.inputTokens).toBe(7);
@@ -674,7 +674,7 @@ describe('ClaudeStructuredLlmAdapter', () => {
         messages: [{ role: 'user', content: 'find me wines' }],
         tools: [
           {
-            name: 'search_wines',
+            name: 'search_hybrid',
             description: 'd',
             inputSchema: z.object({
               region: z.string(),

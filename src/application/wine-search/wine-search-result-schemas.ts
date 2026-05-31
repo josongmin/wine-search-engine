@@ -7,7 +7,7 @@
  *   and map 1:1 to the SNAKE-cased wire fields in
  *   `@interface/http/schemas/wine-search.schema.ts` (`tool_call_count`,
  *   `token_usage`, `intent`). The HTTP boundary performs a thin case-only
- *   transform (`mapResultToResponse` in `wine-search.route.ts`) — there is
+ *   transform (`mapWineSearchResultToResponse` in `presentation/agent-presentation.ts`) — there is
  *   NO field-rename adapter at the container layer. Anthropic / OpenAI
  *   tool-use blocks use `name`/`arguments`, so the internal `toolCalls[i]`
  *   shape mirrors that convention (`{ name, arguments }`).
@@ -62,9 +62,11 @@ import type { AgentTerminationReason } from '@domain/agent/model/agent-step.js';
 import type { ToolOutcome } from '@domain/agent/model/tool-outcome.js';
 import type { TokenUsage } from '@domain/ai/port/structured-llm.port.js';
 import {
+  AgentMessageSchema,
   AnalyzerIntentSchema,
   WINE_SEARCH_MAX_CONSTRAINTS,
   WINE_SEARCH_MAX_QUERY_CHARS,
+  type AgentMessage,
   type AnalyzerIntent,
 } from './wine-search-schemas.js';
 import {
@@ -99,6 +101,13 @@ export const ORCHESTRATOR_MAX_QUERY_CHARS = WINE_SEARCH_MAX_QUERY_CHARS;
  *  inner steps gives a worst-case ≤ 32 for the deepest legitimate plan
  *  (wine-agent-loop 3 steps × 8 anchor drinkability fan-outs). */
 const ORCHESTRATOR_MAX_EXECUTION_STEPS = 64;
+
+/** Hard cap on `historyApplied` length. The HTTP surface caps inbound
+ *  `messages[]` at 64; a server-managed turn stitches prior turns + this
+ *  turn, so the applied history can be up to ~2× the inbound cap. Mirrors
+ *  the `MAX_AGENT_MESSAGES * 2` bound on the HTTP `history_applied` field so
+ *  the two layers cannot drift (CLAUDE.md rule 13). */
+export const ORCHESTRATOR_MAX_HISTORY_APPLIED = 128;
 
 /** Soft cap on the tool-call set inside a single ExecutionStep. Aligned with
  *  `WINE_SEARCH_MAX_CONSTRAINTS` (32) so a single wine-agent-loop turn cannot
@@ -339,6 +348,13 @@ export const WineSearchResultSchema = z.object({
    *  appended for analyzer-refused queries. */
   intent: ResultIntentSchema,
   planKind: PlanKindSchema,
+  /** The exact conversational history fed to the planner for this run
+   *  (prior turns + the anchor user message). Surfaced into the trace so a
+   *  multi-turn run is auditable — prior history is never hidden (T-MTA-01).
+   *  Optional only so the internal finalize helpers can validate before the
+   *  public `execute()` attaches it; it is always populated on the returned
+   *  result. */
+  historyApplied: z.array(AgentMessageSchema).max(ORCHESTRATOR_MAX_HISTORY_APPLIED).optional(),
 }).strict();
 
 // We intentionally export the *interface* form (not z.infer) so callers see
@@ -360,6 +376,9 @@ export interface WineSearchResult {
   readonly degradedReason?: AnswerResult['degradedReason'];
   readonly intent: AnalyzerIntent | 'rejected';
   readonly planKind: ExecutionPlan['kind'];
+  /** Conversational history actually applied to the planner (prior turns +
+   *  anchor). Always populated by `WineSearchOrchestrator.execute()`. */
+  readonly historyApplied?: readonly AgentMessage[] | undefined;
 }
 
 // ---------------------------------------------------------------------------

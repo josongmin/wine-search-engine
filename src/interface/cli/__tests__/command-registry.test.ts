@@ -4,27 +4,26 @@ import type { CliCommand } from '../../../application/cli/command/cli-command.js
 import type { CommandContext } from '../../../application/cli/context/command-context.js';
 import type { CommandResult } from '../../../application/cli/context/command-result.js';
 
-function stubCommand(group: string, name: string): CliCommand {
+function stubCommand(...path: [string, string, ...string[]]): CliCommand {
   return {
-    group,
-    name,
-    summary: `${group} ${name}`,
+    path,
+    summary: path.join(' '),
     parseArgs: () => ({}),
     run: (_ctx: CommandContext): Promise<CommandResult> => Promise.resolve({ data: null }),
   };
 }
 
 describe('CommandRegistry', () => {
-  it('registers and resolves a command by group + name', () => {
+  it('registers and resolves a command by full path', () => {
     const registry = new CommandRegistry();
-    const command = stubCommand('search', 'run');
+    const command = stubCommand('search', 'hybrid');
     registry.register(command);
-    expect(registry.resolve('search', 'run')).toBe(command);
+    expect(registry.resolve(['search', 'hybrid'])).toBe(command);
   });
 
   it('returns undefined for an unregistered command', () => {
     const registry = new CommandRegistry();
-    expect(registry.resolve('search', 'run')).toBeUndefined();
+    expect(registry.resolve(['search', 'hybrid'])).toBeUndefined();
   });
 
   it('lists all registered commands', () => {
@@ -36,7 +35,7 @@ describe('CommandRegistry', () => {
 
   it('default registry wires the hidden system ping self-test', () => {
     const registry = createDefaultRegistry();
-    const ping = registry.resolve('system', 'ping');
+    const ping = registry.resolve(['system', 'ping']);
     expect(ping).toBeDefined();
     expect(ping?.hidden).toBe(true);
   });

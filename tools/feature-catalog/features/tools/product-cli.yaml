@@ -52,7 +52,6 @@ tests:
     - src/infrastructure/cli/__tests__/local-remote-parity.test.ts
     - src/infrastructure/cli/auth/__tests__/codex-auth-facade.test.ts
     - src/infrastructure/cli/remote/__tests__/remote-http-client.test.ts
-    - src/application/cli/command/__tests__/api-call-command.test.ts
   e2e:
     - test/e2e/cli-process.test.ts
 

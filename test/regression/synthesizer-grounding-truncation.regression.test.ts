@@ -146,7 +146,7 @@ function makeHeavySearchOutcome(): ToolOutcome {
   }));
   return {
     stepId: 'q:0:0',
-    tool: 'search_wines',
+    tool: 'search_hybrid',
     kind: 'success',
     durationMs: 12,
     result: {
@@ -239,7 +239,7 @@ describe('buildSynthesisGroundingPayload — bench v14 truncation RCA', () => {
   it('emits grounded_wines (0) and tool_outcomes (M) header even with no usable results', () => {
     const outcome: ToolOutcome = {
       stepId: 'q:0:0',
-      tool: 'search_wines',
+      tool: 'search_hybrid',
       kind: 'tool_error',
       durationMs: 12,
       errorMessage: 'Vespa unreachable',
@@ -262,7 +262,7 @@ describe('buildSynthesisGroundingPayload — bench v14 truncation RCA', () => {
   it('preserves Korean canonical labels intact (CLAUDE.md rule 5)', () => {
     const outcome: ToolOutcome = {
       stepId: 'q:0:0',
-      tool: 'search_wines',
+      tool: 'search_hybrid',
       kind: 'success',
       durationMs: 12,
       result: {
@@ -279,7 +279,7 @@ describe('buildSynthesisGroundingPayload — bench v14 truncation RCA', () => {
   it('preserves accented-Latin labels (CLAUDE.md rule 5)', () => {
     const outcome: ToolOutcome = {
       stepId: 'q:0:0',
-      tool: 'search_wines',
+      tool: 'search_hybrid',
       kind: 'success',
       durationMs: 12,
       result: {
@@ -428,7 +428,7 @@ describe('SynthesisRunner — bench v14 RCA: contract violation guard', () => {
     }));
     const noMatchOutcome: ToolOutcome = {
       stepId: 'q:0:0',
-      tool: 'search_wines',
+      tool: 'search_hybrid',
       kind: 'success',
       durationMs: 12,
       result: { queryType: 'search', results: [] },

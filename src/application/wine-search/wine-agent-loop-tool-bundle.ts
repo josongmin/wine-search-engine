@@ -29,9 +29,10 @@
  *
  * Tool input contracts:
  *  - Schemas align with what `WineAgentLoopRunner`'s `invokeToolPort` dispatcher
- *    accepts. `search_wines` supports both direct `filters/preferences` and
- *    the richer structured field surface (`max_alcohol_pct`, `occasion`,
- *    `styles`, `wine_type`, `country`, ...), matching the agent-tools path.
+ *    accepts. The active retrieval primitives support both direct
+ *    `filters/preferences` and the richer structured field surface
+ *    (`max_alcohol_pct`, `occasion`, `styles`, `wine_type`, `country`, ...),
+ *    matching the agent-tools path.
  *
  * Korean discipline: all string fields use plain `z.string().min(1)` — no
  * ASCII-only constraints anywhere. Korean queries (e.g. "부르고뉴 피노누아")

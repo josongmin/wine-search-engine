@@ -49,14 +49,16 @@ describe('SSoT: KOREAN_GRAPE_ALIASES merged superset', () => {
   });
 
   // Grapes present in BOTH prior copies.
-  // NOTE on Cabernet Franc: the bare Korean surface `카베르네` is caught by the
-  // broader Cabernet Sauvignon alternative (`까?베르네`) FIRST in iteration
-  // order — this matches the ORIGINAL search-constraint-extractor behavior
-  // (verified pre-merge), so Cabernet Franc is reachable only via the Latin
-  // surface `cab(ernet) franc`. Asserting that preserved behavior here rather
-  // than "fixing" it (out of scope; would change retrieval semantics).
+  // Cabernet Franc — the Korean surface `카베르네 프랑` MUST resolve to Cabernet
+  // Franc, NOT Cabernet Sauvignon. The Cabernet Sauvignon entry's bare
+  // `까?베르네` alternative is constrained by a negative lookahead `(?!\s*프랑)`
+  // so it cannot swallow the Franc surface, regardless of iteration order.
+  // (Drift-guard: pre-fix the merged W2 table misclassified `카베르네 프랑` as
+  // Cabernet Sauvignon via first-match-wins — this case exposes that regression.)
   it.each([
     ['카베르네 소비뇽', 'Cabernet Sauvignon'],
+    ['카베르네 프랑', 'Cabernet Franc'],
+    ['카베르네프랑', 'Cabernet Franc'],
     ['cabernet franc', 'Cabernet Franc'],
     ['cab franc', 'Cabernet Franc'],
     ['메를로', 'Merlot'],

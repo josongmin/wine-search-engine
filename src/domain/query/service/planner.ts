@@ -1239,9 +1239,11 @@ export class Planner {
         throw error;
       }
       log.warn(
-        {
-          err: error instanceof Error ? error.message : String(error),
-        },
+        // Pass the raw error so the pino `err` serializer scrubs PII and
+        // preserves the stack — consistent with the other W0 constraint/anchor
+        // failure logs ({ err }). Passing `error.message` here dropped the
+        // stack and split diagnostics from the sibling sites.
+        { err: error },
         '[Planner] constraint compiler failed; falling back to deterministic constraint compiler',
       );
       return this.fallbackConstraintCompiler.compile(normalizedQuery, abortSignal);

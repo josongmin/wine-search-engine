@@ -198,7 +198,7 @@ describe('WineSearchView', () => {
               duration_ms: 80,
               tool_calls: [
                 {
-                  name: 'search_wines',
+                  name: 'search_hybrid',
                   arguments: { query: '부르고뉴 피노누아', max_results: 5 },
                 },
               ],
@@ -217,7 +217,7 @@ describe('WineSearchView', () => {
     expect(screen.getByTestId('step-0-source')).toHaveTextContent('analyzer');
     expect(screen.getByTestId('step-1-source')).toHaveTextContent('runner');
     const toolCall = screen.getByTestId('tool-call-1-0');
-    expect(toolCall).toHaveTextContent('search_wines');
+    expect(toolCall).toHaveTextContent('search_hybrid');
     expect(toolCall).toHaveTextContent('부르고뉴 피노누아');
     expect(screen.getByTestId('meta-tool-call-count')).toHaveTextContent('tools: 1');
   });
@@ -238,10 +238,10 @@ describe('WineSearchView', () => {
     const [url, init] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(String(url)).toContain('/v1/agent');
     const body = JSON.parse((init as { body: string }).body) as {
-      query: string;
+      messages: Array<{ role: string; content: string }>;
       options?: { max_steps?: number };
     };
-    expect(body.query).toBe('레드 와인');
+    expect(body.messages).toEqual([{ role: 'user', content: '레드 와인' }]);
     expect(body.options?.max_steps).toBe(7);
   });
 });

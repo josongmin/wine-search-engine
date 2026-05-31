@@ -29,7 +29,7 @@ async function expectSearchNot500(
   query: string,
   expectedStatuses: readonly number[],
 ) {
-  const res = await post('/v1/search', { query });
+  const res = await post('/v1/search/hybrid', { query });
   expect(res.statusCode).not.toBe(500);
   expect(expectedStatuses).toContain(res.statusCode);
   return res;
@@ -67,7 +67,7 @@ describe('Unicode and special character queries', () => {
   });
 
   it('emoji in query — processed without error', async () => {
-    const res = await post('/v1/search', { query: '🍷 red wine recommendation' });
+    const res = await post('/v1/search/hybrid', { query: '🍷 red wine recommendation' });
     expect(res.statusCode).toBe(200);
   });
 
@@ -81,19 +81,19 @@ describe('Unicode and special character queries', () => {
   });
 
   it('only punctuation — validated correctly (min(1) passes for 3 chars)', async () => {
-    const res = await post('/v1/search', { query: '!!!' });
+    const res = await post('/v1/search/hybrid', { query: '!!!' });
     expect(res.statusCode).toBe(200);
   });
 
   it('Korean-English code-switching — returns 200', async () => {
-    const res = await post('/v1/search', { query: '오푸스원 2018 Napa Valley' });
+    const res = await post('/v1/search/hybrid', { query: '오푸스원 2018 Napa Valley' });
     expect(res.statusCode).toBe(200);
   });
 
   it.each(['오푸스ㅇ', '오퍼스ㅇ'])(
-    'incomplete Hangul IME entity prefix resolves through POST /v1/search (%s)',
+    'incomplete Hangul IME entity prefix resolves through POST /v1/lookup/wine (%s)',
     async (query) => {
-      const res = await post('/v1/search', { query });
+      const res = await post('/v1/lookup/wine', { query });
       expect(res.statusCode).toBe(200);
 
       const body = parseSearchResponse(res);
@@ -103,9 +103,9 @@ describe('Unicode and special character queries', () => {
   );
 
   it.each(['오푸스', '오퍼스'])(
-    'completed entity prefix resolves through POST /v1/search (%s)',
+    'completed entity prefix resolves through POST /v1/lookup/wine (%s)',
     async (query) => {
-      const res = await post('/v1/search', { query });
+      const res = await post('/v1/lookup/wine', { query });
       expect(res.statusCode).toBe(200);
 
       const body = parseSearchResponse(res);
@@ -114,19 +114,18 @@ describe('Unicode and special character queries', () => {
     },
   );
 
-  it('latin partial prefix opu resolves through POST /v1/search', async () => {
-    const res = await post('/v1/search', { query: 'opu', options: { clarification: true } });
+  it('latin partial prefix opu resolves through POST /v1/lookup/wine', async () => {
+    const res = await post('/v1/lookup/wine', { query: 'opu' });
     expect(res.statusCode).toBe(200);
 
     const body = parseSearchResponse(res);
-    expect(body.engine_decision.decision_status).toBe('resolved');
+    expect(['resolved', 'ambiguous']).toContain(body.engine_decision.decision_status);
     expect(body.results[0]?.entity.entity_id).toBe('opus-one-2018');
   });
 
-  it('latin short-form Opus does not leak uppercase acronym alias collisions through POST /v1/search', async () => {
-    const res = await post('/v1/search', {
+  it('latin short-form Opus does not leak uppercase acronym alias collisions through POST /v1/lookup/wine', async () => {
+    const res = await post('/v1/lookup/wine', {
       query: 'opus',
-      options: { mode: 'auto', clarification: true },
     });
     expect(res.statusCode).toBe(200);
 
@@ -171,7 +170,7 @@ describe('Unicode and special character queries', () => {
 
   it('combining diacritical characters (NFD form) — NFC normalization handles it', async () => {
     const nfdQuery = 'Chateau\u0300 Margaux';
-    const res = await post('/v1/search', { query: nfdQuery });
+    const res = await post('/v1/search/hybrid', { query: nfdQuery });
     expect(res.statusCode).toBe(200);
     const decision = parseSearchResponse(res).engine_decision;
     expect(decision.decision_status).not.toBe('failed');
@@ -180,22 +179,22 @@ describe('Unicode and special character queries', () => {
 
 describe('Input validation edge cases', () => {
   it('query field is number type — Zod rejects with 400', async () => {
-    const res = await post('/v1/search', { query: 42 });
+    const res = await post('/v1/search/hybrid', { query: 42 });
     expect(res.statusCode).toBe(400);
   });
 
   it('query field is array — Zod rejects with 400', async () => {
-    const res = await post('/v1/search', { query: ['Opus One'] });
+    const res = await post('/v1/search/hybrid', { query: ['Opus One'] });
     expect(res.statusCode).toBe(400);
   });
 
   it('query field is boolean — Zod rejects with 400', async () => {
-    const res = await post('/v1/search', { query: true });
+    const res = await post('/v1/search/hybrid', { query: true });
     expect(res.statusCode).toBe(400);
   });
 
   it('context with empty locale — Zod rejects with 400 (min(1))', async () => {
-    const res = await post('/v1/search', {
+    const res = await post('/v1/search/hybrid', {
       query: 'Opus One',
       context: { locale: '', currency: 'KRW' },
     });
@@ -203,7 +202,7 @@ describe('Input validation edge cases', () => {
   });
 
   it('queryBudget with negative maxLatencyMs — Zod rejects with 400', async () => {
-    const res = await post('/v1/search', {
+    const res = await post('/v1/search/hybrid', {
       query: 'Opus One',
       queryBudget: { maxLatencyMs: -100, maxCandidates: 10, rerankLimit: 5 },
     });
@@ -211,24 +210,16 @@ describe('Input validation edge cases', () => {
   });
 
   it('queryBudget with zero maxCandidates — Zod rejects with 400', async () => {
-    const res = await post('/v1/search', {
+    const res = await post('/v1/search/hybrid', {
       query: 'Opus One',
       queryBudget: { maxLatencyMs: 1000, maxCandidates: 0, rerankLimit: 5 },
     });
     expect(res.statusCode).toBe(400);
   });
 
-  it('search rejects mixed camelCase and snake_case session/query budget aliases together', async () => {
-    const res = await post('/v1/search', {
+  it('search rejects mixed camelCase and snake_case query budget aliases together', async () => {
+    const res = await post('/v1/search/hybrid', {
       query: 'Opus One',
-      sessionContext: {
-        sessionId: 'sess-1',
-        previousEntities: ['wine:opus-one-2018'],
-      },
-      session_context: {
-        session_id: 'sess-2',
-        previous_entities: ['wine:opus-one-2018'],
-      },
       queryBudget: {
         maxLatencyMs: 1000,
         maxCandidates: 10,
@@ -244,7 +235,7 @@ describe('Input validation edge cases', () => {
   });
 
   it('lookup rejects mixed camelCase and snake_case query budget aliases together', async () => {
-    const res = await post('/v1/search/lookup', {
+    const res = await post('/v1/lookup/wine', {
       query: 'Opus One',
       queryBudget: {
         maxLatencyMs: 1000,

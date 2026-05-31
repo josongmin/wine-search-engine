@@ -11,8 +11,7 @@ import type { CommandResult } from '../context/command-result.js';
  * {@link CommandResult} and throws `CliError` for failures.
  */
 export interface CliCommand<TArgs = unknown> {
-  readonly group: string;
-  readonly name: string;
+  readonly path: readonly [string, string, ...string[]];
   /** One-line summary used by `--help`. */
   readonly summary: string;
   /**
@@ -20,7 +19,7 @@ export interface CliCommand<TArgs = unknown> {
    * Used for kernel self-test/diagnostic commands.
    */
   readonly hidden?: boolean;
-  /** Parses command-local args (everything after `<group> <name>`). */
+  /** Parses command-local args (everything after the resolved command path). */
   parseArgs(rawArgs: readonly string[]): TArgs;
   run(ctx: CommandContext, args: TArgs): Promise<CommandResult>;
 }

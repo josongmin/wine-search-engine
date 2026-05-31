@@ -22,7 +22,7 @@ describe('ToolCallEvidenceFrame schema', () => {
     const obs = '결과: 오푸스 원 2018, 가격 $450';
     const frame = buildToolCallEvidenceFrame({
       toolCallId: 'req-1-s0',
-      toolName: 'search_wines',
+      toolName: 'search_hybrid',
       requestId: 'req-1',
       input: { query: 'opus one' },
       structuredOutput: { kind: 'search_result_set', resultSet: [], resultCount: 0 },
@@ -38,10 +38,10 @@ describe('ToolCallEvidenceFrame schema', () => {
   it('rejects frame without frameSchemaVersion', () => {
     const bad = {
       toolCallId: 'x',
-      toolName: 'search_wines',
+      toolName: 'search_hybrid',
       invokedAt: '2026-04-15T00:00:00.000Z',
       requestId: 'x',
-      request: { toolName: 'search_wines', input: {} },
+      request: { toolName: 'search_hybrid', input: {} },
       structuredOutput: { kind: 'no_op', reason: 'test' },
       observationSnapshot: 'x',
       observationHash: 'a'.repeat(64),
@@ -53,7 +53,7 @@ describe('ToolCallEvidenceFrame schema', () => {
   it('rejects frame with observationHash of wrong length', () => {
     const frame = buildToolCallEvidenceFrame({
       toolCallId: 'x',
-      toolName: 'search_wines',
+      toolName: 'search_hybrid',
       requestId: 'x',
       input: {},
       structuredOutput: { kind: 'no_op', reason: 'test' },
@@ -75,7 +75,7 @@ describe('ToolCallEvidenceFrame schema', () => {
     for (const structuredOutput of kinds) {
       const frame = buildToolCallEvidenceFrame({
         toolCallId: 'x',
-        toolName: 'search_wines',
+        toolName: 'search_hybrid',
         requestId: 'x',
         input: {},
         structuredOutput,
@@ -90,7 +90,7 @@ describe('ToolCallEvidenceFrame schema', () => {
   it('rejects frame with an unknown structuredOutput.kind', () => {
     const frame = buildToolCallEvidenceFrame({
       toolCallId: 'x',
-      toolName: 'search_wines',
+      toolName: 'search_hybrid',
       requestId: 'x',
       input: {},
       structuredOutput: { kind: 'no_op', reason: 'test' },

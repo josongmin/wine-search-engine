@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { RemoteSearchFacade } from '../remote-search-facade.js';
 
 describe('RemoteSearchFacade', () => {
-  it('posts the typed search body to /v1/search', async () => {
+  it('posts the primitive search body to /v1/search/hybrid', async () => {
     const calls: Array<{ input: string; init?: RequestInit }> = [];
     const facade = new RemoteSearchFacade(
       {
@@ -23,24 +23,17 @@ describe('RemoteSearchFacade', () => {
       },
     );
 
-    const result = await facade.run(
-      {
-        query: 'opus one 2018',
-        retrievalMode: 'entity',
-      },
-      { requestId: 'req-1' },
-    );
+    const result = await facade.hybrid({ query: 'opus one 2018' }, { requestId: 'req-1' });
 
     expect(result).toEqual({ ok: true });
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.input).toBe('https://api.example.com/v1/search');
+    expect(calls[0]?.input).toBe('https://api.example.com/v1/search/hybrid');
     expect(calls[0]?.init?.method).toBe('POST');
     expect(calls[0]?.init?.headers).toBeInstanceOf(Headers);
     const body = calls[0]?.init?.body;
     expect(typeof body).toBe('string');
     expect(JSON.parse(body as string)).toEqual({
       query: 'opus one 2018',
-      retrieval_mode: 'entity',
     });
   });
 });

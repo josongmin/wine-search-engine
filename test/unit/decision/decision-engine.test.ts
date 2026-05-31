@@ -325,6 +325,101 @@ describe('DecisionEngine', () => {
     expect(output.decisionTrace.thresholds.numericGateMode).toBe('preference');
   });
 
+  it('semantic_preference preserves numericGateMode through clarificationBias spread (no strict gate)', async () => {
+    // Reproduction: when clarificationBias > 0, effectiveThresholds was rebuilt
+    // with a partial object literal that dropped numericGateMode (and any other
+    // ThresholdEntry field). That coerced numericGateMode to 'strict' via the
+    // `?? 'strict'` default in applyNumericGate, sending a recommendation-style
+    // query through the strict Gate 2 → clarify instead of preference-mode resolve.
+    // effectiveRetrievalMode is 'hybrid' (NON-exploratory) on purpose: that
+    // isolates numericGateMode as the ONLY signal keeping the gate in
+    // preference-mode. If the spread drops it, exploratoryListMode=false too,
+    // so the query falls through to strict Gate 2 → ambiguous/clarify.
+    const input = makeDecisionInput({
+      queryPlan: makeQueryPlan({
+        queryClass: 'semantic_preference',
+        intent: 'pairing_search',
+        route: 'hybrid',
+        retrievalMode: 'hybrid',
+        // clarificationBias > 0 forces the (previously buggy) spread branch.
+        policy: makePolicy({ allowApproximate: true, clarificationBias: 0.10 }),
+      }),
+      effectiveRoute: 'hybrid',
+      effectiveRetrievalMode: 'hybrid',
+      resolveResult: makeResolverResult({
+        // C must clear resolveTau (0.35) + clarificationBias (0.10) = 0.45.
+        C: 0.52,
+        gap: 0.0001,
+        ambiguityDetected: true,
+        conformalSetSize: 10,
+      }),
+      policy: makePolicy({ allowApproximate: true, clarificationBias: 0.10 }),
+      evidenceSummary: {
+        identityEvidencePresent: true,
+        identityEvidence: {
+          source: 'identity_artifact',
+          resolveTopEntityPresent: true,
+          winnerIdentityArtifactPresent: true,
+          winnerIdentityArtifactMatchesResolveResult: true,
+          exactnessTier: 'alias_exact',
+          identityEvidenceRefCount: 1,
+        },
+      },
+    });
+    const output = await engine.decide(input, snapshot);
+    // numericGateMode must survive the clarificationBias spread so the gate
+    // routes through preference-mode (confidence-only), not strict Gate 2.
+    expect(output.decisionTrace.rulesApplied).toContain('NUMERIC_GATE_PREFERENCE_MODE');
+    expect(output.decisionStatus).toBe('resolved');
+  });
+
+  it('clarificationBias spread preserves numericGateMode AND raises resolveTau (regression)', async () => {
+    // Adjacent case: same bias path, but C sits between the base resolveTau
+    // (0.35) and the biased resolveTau (0.45). The bias must still apply (low
+    // confidence → fallback), proving resolveTau is raised while numericGateMode
+    // is preserved (preference-mode fallback rule, not strict Gate 3).
+    const input = makeDecisionInput({
+      queryPlan: makeQueryPlan({
+        queryClass: 'semantic_preference',
+        intent: 'pairing_search',
+        route: 'hybrid',
+        retrievalMode: 'hybrid',
+        policy: makePolicy({ allowApproximate: true, clarificationBias: 0.10 }),
+      }),
+      effectiveRoute: 'hybrid',
+      effectiveRetrievalMode: 'hybrid',
+      resolveResult: makeResolverResult({
+        // 0.35 (base) < C=0.40 < 0.45 (base + bias) → below biased resolveTau.
+        // Tiny gap + conformal=2 would trip strict Gate 2 (ambiguous) if
+        // numericGateMode were lost; preference-mode treats gap as advisory and
+        // falls through to LOW_CONFIDENCE because C is below the BIASED tau.
+        C: 0.40,
+        gap: 0.0001,
+        ambiguityDetected: false,
+        conformalSetSize: 2,
+      }),
+      // No categoriesCovered → preference-mode low-confidence fallback path.
+      policy: makePolicy({ allowApproximate: true, clarificationBias: 0.10, fallbackMode: 'clarify' }),
+      evidenceSummary: {
+        identityEvidencePresent: true,
+        identityEvidence: {
+          source: 'identity_artifact',
+          resolveTopEntityPresent: true,
+          winnerIdentityArtifactPresent: true,
+          winnerIdentityArtifactMatchesResolveResult: true,
+          exactnessTier: 'alias_exact',
+          identityEvidenceRefCount: 1,
+        },
+      },
+    });
+    const output = await engine.decide(input, snapshot);
+    // Bias raised the bar so C=0.40 is "low confidence", but the preference-mode
+    // branch (not strict Gate 3) handled it — confirming both fields survived.
+    expect(output.decisionTrace.rulesApplied).toContain('CLARIFICATION_BIAS_0.10');
+    expect(output.decisionTrace.rulesApplied).toContain('NUMERIC_GATE_LOW_CONFIDENCE');
+    expect(output.decisionTrace.rulesApplied).not.toContain('NUMERIC_GATE_AMBIGUOUS');
+  });
+
   it('C >= T_resolve, gap >= T_gap, but NO identity evidence → downgrade to ambiguous', async () => {
     const input = makeDecisionInput({
       resolveResult: makeResolverResult({ C: 0.80, gap: 0.20, ambiguityDetected: false }),

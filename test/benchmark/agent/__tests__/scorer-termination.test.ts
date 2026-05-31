@@ -76,7 +76,7 @@ describe('blocked termination reason — security gate correct behavior', () => 
 
   it('terminationReason=blocked with expectedBlocked=true → still 1 (explicit expectation)', () => {
     const r = scoreScenario(
-      makeScenario({ maxSteps: 2, expectedBlocked: true, mustNotCallTools: ['search_wines'] }),
+      makeScenario({ maxSteps: 2, expectedBlocked: true, mustNotCallTools: ['search_hybrid'] }),
       makeExecution({
         answer: '처리 불가',
         stepCount: 0,
@@ -127,7 +127,7 @@ describe('refusalExpected + blocked — rubric-correct rejection (empty/off-doma
       makeScenario({
         maxSteps: 0,
         refusalExpected: true,
-        mustNotCallTools: ['search_wines'],
+        mustNotCallTools: ['search_hybrid'],
         rubric: 'Agent must reject empty input.',
       }),
       makeExecution({
@@ -152,7 +152,7 @@ describe('refusalExpected + blocked — rubric-correct rejection (empty/off-doma
       makeScenario({
         maxSteps: 0,
         refusalExpected: true,
-        mustNotCallTools: ['search_wines'],
+        mustNotCallTools: ['search_hybrid'],
         judgeRequired: true,
       }),
       makeExecution({

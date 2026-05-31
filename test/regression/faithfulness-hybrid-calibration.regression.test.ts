@@ -58,7 +58,7 @@ function groundingOutcome(wines: ReadonlyArray<Record<string, unknown>>): ToolOu
   const envelope = `검색 결과입니다.\nGROUNDING_JSON: ${JSON.stringify({ queryType: 'search', wines })}`;
   return {
     stepId: 'step-0:0',
-    tool: 'search_wines',
+    tool: 'search_hybrid',
     kind: 'success',
     result: envelope,
     durationMs: 10,
@@ -106,7 +106,7 @@ describe('LLM partial-credit parser (graded support)', () => {
     // partial claim), score = (1*1 + 0.5*2) / (1+2+0) = 2/3 ≈ 0.67.
     const outcome: ToolOutcome = {
       stepId: 'step-0:0',
-      tool: 'search_wines',
+      tool: 'search_hybrid',
       kind: 'success',
       result: '검색 수행됨. (no GROUNDING_JSON envelope here.)',
       durationMs: 5,
@@ -143,7 +143,7 @@ describe('LLM partial-credit parser (graded support)', () => {
     // 2 fully + 2 partial + 0 contradicted → (2 + 0.5*2) / 4 = 0.75
     const outcome: ToolOutcome = {
       stepId: 'step-0:0',
-      tool: 'search_wines',
+      tool: 'search_hybrid',
       kind: 'success',
       result: '검색 수행됨. (no GROUNDING_JSON envelope here.)',
       durationMs: 5,
@@ -173,7 +173,7 @@ describe('LLM partial-credit parser (graded support)', () => {
   it('all-contradicted graded breakdown stays at 0 (no whitewashing)', async () => {
     const outcome: ToolOutcome = {
       stepId: 'step-0:0',
-      tool: 'search_wines',
+      tool: 'search_hybrid',
       kind: 'success',
       result: '검색 수행됨. (no GROUNDING_JSON envelope here.)',
       durationMs: 5,
@@ -202,7 +202,7 @@ describe('LLM partial-credit parser (graded support)', () => {
     // RAGAS: if no verifiable factual claims exist (only stylistic prose), score 1.0.
     const outcome: ToolOutcome = {
       stepId: 'step-0:0',
-      tool: 'search_wines',
+      tool: 'search_hybrid',
       kind: 'success',
       result: '검색 수행됨.',
       durationMs: 5,

@@ -31,7 +31,6 @@ key_files:
   - src/config/container-features.ts
   - src/config/container-usecases.ts
   - src/config/container-search-contracts.ts
-  - src/config/container-tool-contracts.ts
   - src/config/container-eval-contracts.ts
   - src/config/container-learning.ts
   - src/config/container-watchlist.ts

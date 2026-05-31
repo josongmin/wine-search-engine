@@ -58,6 +58,7 @@ import {
   type OrchestratorWineAgentLoopToolBundle,
   type WineSearchInput,
 } from '../wine-search-orchestrator.js';
+import type { AgentMessage } from '../wine-search-schemas.js';
 import {
   ORCHESTRATOR_MAX_QUERY_CHARS,
   WineSearchResultSchema,
@@ -201,14 +202,39 @@ function buildOrchestrator(opts?: {
   return { orchestrator, logger, llm };
 }
 
-function runInput(overrides?: Partial<WineSearchInput>): WineSearchInput {
-  return {
-    query: overrides?.query ?? '부르고뉴 피노누아 추천',
-    requestId: overrides?.requestId ?? REQUEST_ID,
+/** Legacy-style override bag — `query` is mapped to a single-user-message
+ *  `messages[]` so the orchestrator tests stay terse while exercising the
+ *  canonical messages-native input (T-MTA-01). Pass `messages`/`priorMessages`
+ *  to exercise true multi-turn history. */
+interface RunInputOverrides {
+  readonly query?: string;
+  readonly messages?: readonly AgentMessage[];
+  readonly priorMessages?: readonly AgentMessage[];
+  readonly requestId?: string;
+  readonly maxSteps?: number;
+  readonly perStepTimeoutMs?: number;
+  readonly agentTimeoutMs?: number;
+  readonly maxTotalTokens?: number;
+  readonly abortSignal?: AbortSignal;
+}
+
+function runInput(overrides?: RunInputOverrides): WineSearchInput {
+  const anchor = overrides?.query ?? '부르고뉴 피노누아 추천';
+  const messages: readonly AgentMessage[] = overrides?.messages
+    ?? [
+      ...(overrides?.priorMessages ?? []),
+      { role: 'user', content: anchor },
+    ];
+  const options = {
     ...(overrides?.maxSteps !== undefined ? { maxSteps: overrides.maxSteps } : {}),
     ...(overrides?.perStepTimeoutMs !== undefined ? { perStepTimeoutMs: overrides.perStepTimeoutMs } : {}),
     ...(overrides?.agentTimeoutMs !== undefined ? { agentTimeoutMs: overrides.agentTimeoutMs } : {}),
     ...(overrides?.maxTotalTokens !== undefined ? { maxTotalTokens: overrides.maxTotalTokens } : {}),
+  };
+  return {
+    messages,
+    requestId: overrides?.requestId ?? REQUEST_ID,
+    ...(Object.keys(options).length > 0 ? { options } : {}),
     ...(overrides?.abortSignal !== undefined ? { abortSignal: overrides.abortSignal } : {}),
   };
 }
@@ -620,6 +646,105 @@ describe('WineSearchOrchestrator — result schema', () => {
       }
       expect(parse.success).toBe(true);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T-MTA-01 — messages-native input + history_applied trace
+// ---------------------------------------------------------------------------
+
+describe('WineSearchOrchestrator — messages-native history (T-MTA-01)', () => {
+  it('surfaces the exact applied conversation on result.historyApplied', async () => {
+    const llm = makeStubLlm({
+      synthesize: () =>
+        Promise.resolve({
+          data: { answer: 'A grounded recommendation.' },
+          usage: makeTokenUsage(5, 3),
+          durationMs: 2,
+        }),
+    });
+    const searchPort = makeSearchPort(() => Promise.resolve(makeSearchResponse(['w'])));
+    const { orchestrator } = buildOrchestrator({ llm, searchPort });
+
+    const messages: readonly AgentMessage[] = [
+      { role: 'user', content: 'Recommend a Burgundy Pinot Noir' },
+      { role: 'assistant', content: 'How about a Gevrey-Chambertin?' },
+      { role: 'user', content: 'Something under $50 instead' },
+    ];
+    const result = await orchestrator.execute({ messages, requestId: REQUEST_ID });
+
+    // The applied history is the full conversation, verbatim and in order —
+    // prior turns are NOT hidden from the trace.
+    expect(result.historyApplied).toEqual(messages);
+    // And it parses against the strict result schema with the new field.
+    expect(WineSearchResultSchema.safeParse(result).success).toBe(true);
+  });
+
+  it('derives the planner anchor from the LATEST user message (not the first)', async () => {
+    // The anchor drives the analyzer; a Korean latest message must route the
+    // Korean synthesis template even when earlier turns were English.
+    const llm = makeStubLlm({
+      synthesize: () =>
+        Promise.resolve({
+          data: { answer: '추천 결과입니다.' },
+          usage: makeTokenUsage(5, 3),
+          durationMs: 2,
+        }),
+    });
+    const searchPort = makeSearchPort(() => Promise.resolve(makeSearchResponse(['w'])));
+    const { orchestrator } = buildOrchestrator({ llm, searchPort });
+
+    const result = await orchestrator.execute(
+      runInput({
+        priorMessages: [
+          { role: 'user', content: 'Tell me about Bordeaux' },
+          { role: 'assistant', content: 'Bordeaux is a region in France.' },
+        ],
+        query: '나파 카베르네 추천',
+      }),
+    );
+    expect(result.intent).not.toBe('rejected');
+    expect(result.historyApplied?.length).toBe(3);
+    expect(result.historyApplied?.[2]).toEqual({ role: 'user', content: '나파 카베르네 추천' });
+  });
+
+  it('clips historyApplied to the published cap so result.historyApplied never overflows the schema', async () => {
+    const llm = makeStubLlm({
+      synthesize: () =>
+        Promise.resolve({
+          data: { answer: 'bounded.' },
+          usage: makeTokenUsage(5, 3),
+          durationMs: 2,
+        }),
+    });
+    const searchPort = makeSearchPort(() => Promise.resolve(makeSearchResponse(['w'])));
+    const { orchestrator } = buildOrchestrator({ llm, searchPort });
+
+    // 400 messages — far over ORCHESTRATOR_MAX_HISTORY_APPLIED (128).
+    const messages: AgentMessage[] = [];
+    for (let i = 0; i < 200; i += 1) {
+      messages.push({ role: 'user', content: `q${String(i)}` });
+      messages.push({ role: 'assistant', content: `a${String(i)}` });
+    }
+    const result = await orchestrator.execute({ messages, requestId: REQUEST_ID });
+
+    expect(result.historyApplied?.length).toBe(128);
+    // The kept window is the MOST RECENT — last message is the latest assistant.
+    expect(result.historyApplied?.[127]).toEqual({ role: 'assistant', content: 'a199' });
+    // Still parses against the strict result schema (the cap is enforced).
+    expect(WineSearchResultSchema.safeParse(result).success).toBe(true);
+  });
+
+  it('rejects a conversation with no user message at the admit gate (empty_query, no throw)', async () => {
+    const { orchestrator } = buildOrchestrator({});
+    const result = await orchestrator.execute({
+      messages: [{ role: 'assistant', content: 'I am ready to help.' }],
+      requestId: REQUEST_ID,
+    });
+    expect(result.terminationReason).toBe('blocked');
+    expect(result.intent).toBe('rejected');
+    // The applied history is still surfaced faithfully.
+    expect(result.historyApplied?.length).toBe(1);
   });
 });
 

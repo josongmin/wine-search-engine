@@ -13,7 +13,7 @@ maturity_rationale: |
   contract: totality (never throws on arbitrary string / Korean / accented /
   emoji input), determinism (same input → identical output), mutual-exclusion
   of {answer, action, actions} on the success path, Unicode preservation
-  byte-for-byte for Korean / 한글 query through the typed `search_wines.input`
+  byte-for-byte for Korean / 한글 query through the typed active retrieval-tool input
   path, schema strictness (unknown keys on KNOWN tools surface as
   `plannerRepair.repairedCandidates[*].removedUnknownKeys` — never silently
   accepted), parallel-batch totality (`actions` returned ⇒ length>0 ∧ no

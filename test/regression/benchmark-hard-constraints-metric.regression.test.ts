@@ -55,7 +55,7 @@ function makeSearchResponse(hardCount: number): SearchResponseV1 {
   };
 }
 
-function makeSearchOutcome(hardCount: number, tool: string = 'search_wines'): ToolOutcome {
+function makeSearchOutcome(hardCount: number, tool: string = 'search_hybrid'): ToolOutcome {
   return {
     stepId: `step-${tool}-${hardCount}`,
     tool,
@@ -140,7 +140,7 @@ describe('Bench hard-constraints metric — planner-emitted aggregation', () => 
     };
     const outcome: ToolOutcome = {
       stepId: 'no-parsed',
-      tool: 'search_wines',
+      tool: 'search_hybrid',
       kind: 'success',
       result: responseWithoutParsed,
       durationMs: 5,
@@ -151,7 +151,7 @@ describe('Bench hard-constraints metric — planner-emitted aggregation', () => 
   it('R-BENCH-HC-10: outcome whose result is not a SearchResponseV1 (queryType mismatch) → 0', () => {
     const outcome: ToolOutcome = {
       stepId: 'bad-shape',
-      tool: 'search_wines',
+      tool: 'search_hybrid',
       kind: 'success',
       result: { queryType: 'comparison', foo: 'bar' },
       durationMs: 5,

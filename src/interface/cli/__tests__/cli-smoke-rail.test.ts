@@ -36,7 +36,7 @@ function fakeContext(
     facades: {
       auth: auth as AuthFacadePort,
       search: { __facade: 'search' } as never,
-      wineSearch: { __facade: 'wine-search' } as never,
+      agent: { __facade: 'agent' } as never,
     },
   };
 }
@@ -51,15 +51,20 @@ describe('CLI smoke proof rail', () => {
     // Structural help anchors — accidental rewording must surface in CI.
     expect(out).toContain('Usage:');
     expect(out).toContain('Global options:');
-    expect(out).toContain('wine <group> <command>');
+    expect(out).toContain('wine <command path...>');
     expect(out).toContain('--json');
     expect(out).toContain('--target local|remote');
 
     // Registered command summaries — proves help/registry integration didn't drift.
     expect(out).toContain('auth status');
     expect(out).toContain('auth doctor');
-    expect(out).toContain('search run');
-    expect(out).toContain('wine-search run');
+    expect(out).toContain('search hybrid');
+    expect(out).toContain('search semantic');
+    expect(out).toContain('search lexical');
+    expect(out).toContain('lookup wine');
+    expect(out).toContain('agent run');
+    expect(out).toContain('agent session start');
+    expect(out).toContain('agent session turn');
 
     // The hidden kernel self-test must NOT appear in the documented surface.
     expect(out).not.toContain('system ping');

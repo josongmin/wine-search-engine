@@ -559,14 +559,24 @@ export default tseslint.config(
       'no-restricted-imports': [
         'error',
         {
+          // NOTE: src/domain/shared/** also matches the src/domain/** block above.
+          // Flat-config does NOT deep-merge same-key rules — the later block wins
+          // wholesale — so this block must re-list EVERY restriction (fastify +
+          // relative-path groups), or shared silently loses them. (self-audit R1)
           patterns: [
             {
               group: [
                 '@domain', '@domain/*', '@app', '@app/*', '@infra', '@infra/*',
                 '@interface', '@interface/*', '@config', '@config/*',
+                'fastify', 'fastify/*',
               ],
               message:
-                'domain/shared is the composite leaf — it must not import from any other layer, including the rest of domain (@domain). Keep it self-contained. (CLAUDE.md: domain/shared/** must not import anything outside itself)',
+                'domain/shared is the composite leaf — it must not import from any other layer, including the rest of domain (@domain) or web-framework types. Keep it self-contained. (CLAUDE.md: domain/shared/** must not import anything outside itself)',
+            },
+            {
+              group: ['**/application/**', '**/infrastructure/**', '**/interface/**'],
+              message:
+                'domain/shared must not reach into application/infrastructure/interface via relative paths. (CLAUDE.md layer rules)',
             },
           ],
         },
@@ -582,6 +592,10 @@ export default tseslint.config(
       // interface-layer wire schemas / presentation types.
       'src/application/wine-search/presentation/agent-presentation.ts',
       'src/application/wine-search/wine-search-result-schemas.ts',
+      // Relative-path imports into interface (surfaced once the relative-path
+      // group was added — self-audit R1). Both pull HTTP wire schemas down.
+      'src/application/search/interpret-explain-adapter-v2.ts',
+      'src/application/search/interpret.usecase.ts',
     ],
     rules: {
       'no-restricted-imports': [
@@ -592,6 +606,11 @@ export default tseslint.config(
               group: ['@interface', '@interface/*'],
               message:
                 'application/** must not import from the interface (HTTP/CLI) layer. Move the shared shape down to application/domain and have interface depend on it. (CLAUDE.md layer rules)',
+            },
+            {
+              group: ['**/interface/**'],
+              message:
+                'application/** must not reach into the interface layer via relative paths. (CLAUDE.md layer rules)',
             },
           ],
         },

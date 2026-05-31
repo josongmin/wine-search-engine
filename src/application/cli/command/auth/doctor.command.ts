@@ -4,8 +4,7 @@ import type { CommandResult } from '../../context/command-result.js';
 import { EXIT_PROBE } from '../exit-code.js';
 
 export class AuthDoctorCommand implements CliCommand {
-  readonly group = 'auth';
-  readonly name = 'doctor';
+  readonly path = ['auth', 'doctor'] as const;
   readonly summary = 'Diagnose Codex auth: file, mode, tokens, model-catalog probe.';
 
   parseArgs(): Record<string, never> {

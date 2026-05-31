@@ -3,11 +3,13 @@
  * trace on its result so the orchestrator can distinguish:
  *   (a) deterministic-only analyses (LLM not attempted),
  *   (b) genuine LLM successes,
- *   (c) LLM failures that were silently softened to `intent='search'`.
+ *   (c) LLM failures that PRESERVE `intent='unknown'` (no silent soften).
  *
- * Before this trace existed, branch (c) was indistinguishable from a
- * confident `intent='search'`, hiding LLM outages from downstream metrics
- * and logs. See `src/application/wine-search/query-analyzer.ts`.
+ * Before this trace existed, branch (c) silently softened `intent='unknown'`
+ * to `intent='search'`, masquerading an LLM outage as a confident search and
+ * bypassing the deterministic-router's `unsupported_intent` reject. The
+ * analyzer now keeps `intent='unknown'` and records the failure as
+ * `failed_preserved_unknown`. See `src/application/wine-search/query-analyzer.ts`.
  *
  * This test is append-only per repo policy (CLAUDE.md "Test discipline").
  */
@@ -29,6 +31,7 @@ import {
   type SynthesizeResult,
 } from '@domain/ai/port/structured-llm.port.js';
 import { QueryAnalyzerService } from '@app/wine-search/query-analyzer.js';
+import { DeterministicRouter } from '@app/wine-search/deterministic-router.js';
 import {
   WineSearchAnalysisSchema,
   type WineSearchAnalysis,
@@ -178,18 +181,19 @@ describe('regression: query-analyzer LLM-fallback observability trace', () => {
       reason: 'unknown',
     },
   ])(
-    'emits outcome=failed_softened_to_search with reason=$reason for $label',
+    'emits outcome=failed_preserved_unknown with reason=$reason for $label',
     async ({ err, reason }) => {
       const stub = makeStubLlm(() => Promise.reject(err));
       const { logger } = makeLogger();
       const { out } = await runAnalyze('asdf', { structuredLlm: stub, logger });
       expect(out.kind).toBe('ok');
       if (out.kind !== 'ok') return;
-      // Intent is softened to 'search' so downstream still has a routing target.
-      expect(out.analysis.intent).toBe('search');
+      // Intent is PRESERVED as 'unknown' (no silent soften to 'search') so the
+      // deterministic-router can route the ambiguous query honestly.
+      expect(out.analysis.intent).toBe('unknown');
       // Outcome must record the failure + reason — this is the observability contract.
       expect(out.analysis.llmFallbackOutcome).toEqual({
-        kind: 'failed_softened_to_search',
+        kind: 'failed_preserved_unknown',
         failureReason: reason,
       });
       // Structured log emits the canonical event name + reason for grep-ability.
@@ -240,8 +244,9 @@ describe('regression: query-analyzer LLM-fallback observability trace', () => {
       hangulDominant,
       preservedSurface,
     } = out.analysis;
-    // All the legacy fields are still present and well-typed.
-    expect(intent).toBe('search');
+    // All the legacy fields are still present and well-typed. Intent is now
+    // PRESERVED as 'unknown' on fallback failure (no silent soften to 'search').
+    expect(intent).toBe('unknown');
     expect(anchors).toEqual([]);
     expect(normalizedConstraints).toEqual([]);
     expect(contract.requiresDrinkabilityCheck).toBe(false);
@@ -249,5 +254,24 @@ describe('regression: query-analyzer LLM-fallback observability trace', () => {
     expect(typeof recommendedBudget.maxSteps).toBe('number');
     expect(typeof hangulDominant).toBe('boolean');
     expect(preservedSurface).toBe('asdf');
+  });
+
+  it('routing consequence: preserved-unknown fallback failure reaches the router unsupported_intent reject', async () => {
+    // The whole point of preserving intent='unknown' instead of softening to
+    // 'search': a fully-ambiguous query whose LLM disambiguation failed must
+    // be honestly rejected by the deterministic-router (no anchors, no
+    // constraints, no wine-domain keyword), NOT force-routed into a search
+    // that masquerades the LLM outage as a confident hit.
+    const stub = makeStubLlm(() => Promise.reject(new Error('boom')));
+    const { out } = await runAnalyze('asdf', { structuredLlm: stub });
+    expect(out.kind).toBe('ok');
+    if (out.kind !== 'ok') return;
+    expect(out.analysis.intent).toBe('unknown');
+
+    const router = new DeterministicRouter();
+    const plan = router.route(out.analysis);
+    expect(plan.kind).toBe('reject');
+    if (plan.kind !== 'reject') return;
+    expect(plan.reason).toBe('unsupported_intent');
   });
 });

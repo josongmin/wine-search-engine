@@ -71,6 +71,8 @@ import {
  */
 export type EvidenceRecord = Readonly<Record<string, string | number | readonly string[] | null | undefined>>;
 
+const DEFAULT_EVIDENCE_SOURCE_TOOL = 'search_hybrid' as const;
+
 function buildEvidenceAnchorSource(evidence: EvidenceRecord): FieldAnchor['source'] {
   const toolName = evidence['__source_tool_name'];
   const stepIndex = evidence['__source_step_index'];
@@ -83,7 +85,7 @@ function buildEvidenceAnchorSource(evidence: EvidenceRecord): FieldAnchor['sourc
       toolName,
     };
   }
-  return { type: 'tool_observation', stepIndex: 0, toolName: 'search_wines' };
+  return { type: 'tool_observation', stepIndex: 0, toolName: DEFAULT_EVIDENCE_SOURCE_TOOL };
 }
 
 /**

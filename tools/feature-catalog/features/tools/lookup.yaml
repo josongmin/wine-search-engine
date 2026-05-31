@@ -2,7 +2,7 @@ id: tools.lookup
 name: Lookup Endpoint (Direct Entity Fetch)
 category: tools
 summary: |
-  POST /v1/search/lookup — entity-only (exact match) 검색. detail page,
+  POST /v1/lookup/wine — entity-only (exact match) 검색. detail page,
   evidence 확장, agent grounding 용. retrieval_mode은 항상 'entity'로
   강제되며 caller 가 override 할 수 없다.
 
@@ -28,12 +28,12 @@ last_reviewed: 2026-05-21
 owner: core
 
 surfaces:
-  - "HTTP: POST /v1/search/lookup"
+  - "HTTP: POST /v1/lookup/wine"
 
 key_files:
-  - src/interface/http/routes/lookup.route.ts
+  - src/interface/http/routes/primitive-search.route.ts
   - src/interface/http/routes/search-request-mappers.ts
-  - src/interface/http/schemas/search-request.schema.ts
+  - src/interface/http/schemas/primitive-search.schema.ts
 
 tests:
   integration:

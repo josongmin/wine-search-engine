@@ -240,9 +240,19 @@ export class WineAgentLoopRunner {
 
     let pendingDirective: WineAgentLoopDirective | undefined = input.initialDirective;
     // History grows with one entry per turn — kept short because the
-    // adapter handles prompt caching of the static system prompt.
+    // adapter handles prompt caching of the static system prompt. Prior
+    // conversation turns (multi-turn / session history) are seeded BEFORE
+    // the anchor query so the agent LLM plans against the real context
+    // (T-MTA-01: planner receives the full applied history, not just the
+    // latest utterance).
+    // The anchor is the CURRENT user query. We hold its reference so the
+    // history trim can preserve it by identity — after the loop appends
+    // tool-result `user` messages, "the last user message" is no longer the
+    // anchor, so an index-based rule would evict the wrong one (T-MTA-07).
+    const anchorMessage: ChatMessage = { role: 'user', content: input.query };
     const history: ChatMessage[] = [
-      { role: 'user', content: input.query },
+      ...(input.priorHistory ?? []),
+      anchorMessage,
     ];
 
     // ── Main loop. Single `for(;;)` with explicit `break`s on terminal
@@ -379,7 +389,7 @@ export class WineAgentLoopRunner {
         // on multi-tool LLM turns (e.g. compare + 2× drinking_window).
         // Ordering of observations/toolOutcomes is preserved by index so
         // the chat-history append step downstream remains deterministic.
-        // Adaptive retrieval k — feeds `search_wines` as the DEFAULT `limit`
+        // Adaptive retrieval k — feeds the active discovery primitives as the DEFAULT `limit`
         // when the LLM does not specify one. Sourced from
         // `analysis.recommendedBudget.retrievalK` which the query-analyzer
         // populated via `RETRIEVAL_K_BY_INTENT` (SSoT —
@@ -428,7 +438,7 @@ export class WineAgentLoopRunner {
         // 7c. Extend chat history so the next turn sees the tool result.
         history.push({ role: 'assistant', content: serializeAssistantToolCalls(stepResult.toolCalls) });
         history.push({ role: 'user', content: serializeToolResults(stepResult.toolCalls, observations) });
-        trimHistoryInPlace(history);
+        trimHistoryInPlace(history, anchorMessage);
 
         // 7d. Recompute the next directive FUNCTIONALLY from state +
         // analysis. This is the architectural fix — there's no sticky
@@ -472,7 +482,7 @@ export class WineAgentLoopRunner {
       if (trimmedAnswer.length > 0) {
         history.push({ role: 'assistant', content: trimmedAnswer });
       }
-      trimHistoryInPlace(history);
+      trimHistoryInPlace(history, anchorMessage);
 
       if (pendingDirective === undefined) {
         // Empty text AND no directive — there's nothing more to do.
@@ -811,8 +821,8 @@ function invalidToolInputObservation(
 /**
  * `adaptiveRetrievalKDefault` — the per-intent retrieval `k` derived from
  * `analysis.recommendedBudget.retrievalK` (SSoT `RETRIEVAL_K_BY_INTENT`
- * in `adaptive-budget.ts`). Applied as the DEFAULT `limit` for
- * `search_wines` ONLY when the LLM-emitted tool input does NOT specify
+ * in `adaptive-budget.ts`). Applied as the DEFAULT `limit` for the
+ * discovery primitives ONLY when the LLM-emitted tool input does NOT specify
  * its own `limit`. The LLM may intentionally use a different value for a
  * multi-hop reasoning step — we never override.
  *
@@ -900,7 +910,7 @@ async function invokeToolPort(
 }
 
 /**
- * Wine-agent-loop's tool-input adapter for `search_wines`. Exported for direct
+ * Wine-agent-loop's tool-input adapter for the discovery search primitives. Exported for direct
  * regression testing of the adaptive-k vs LLM-limit precedence rule. The
  * function is otherwise an implementation detail of `invokeToolPort` and
  * callers outside the runner SHOULD NOT depend on it.
@@ -917,10 +927,11 @@ export function adaptSearchInput(
     adaptiveRetrievalKDefault,
     includeCallerInterpretation: true,
   });
+  const { mode: _mode, ...laneScoped } = built;
   return {
-    ...built,
-    ...(built.filters !== undefined ? { filters: [...built.filters] } : {}),
-    ...(built.preferences !== undefined ? { preferences: [...built.preferences] } : {}),
+    ...laneScoped,
+    ...(laneScoped.filters !== undefined ? { filters: [...laneScoped.filters] } : {}),
+    ...(laneScoped.preferences !== undefined ? { preferences: [...laneScoped.preferences] } : {}),
     // T-IR-05: the discovery primitive (search_hybrid/semantic/lexical) sets
     // the lane; the candidate pool gates channels accordingly. Omitted for
     // legacy/test callers that pass no lane (full hybrid mix).
@@ -1210,7 +1221,7 @@ function appendDirectiveMessage(
   return [...history, { role: 'user', content: `[directive] ${directive.instruction}` }];
 }
 
-function trimHistoryInPlace(history: ChatMessage[]): void {
+function trimHistoryInPlace(history: ChatMessage[], anchor: ChatMessage): void {
   // Drop the oldest non-initial user message when total chars overflow.
   // First message (the user's original query) is preserved as the loop's
   // anchor.
@@ -1224,23 +1235,26 @@ function trimHistoryInPlace(history: ChatMessage[]): void {
   for (const m of history) total += m.content.length;
   if (total <= WINE_AGENT_LOOP_MAX_HISTORY_CHARS) return;
 
-  const head = history[0];
-  if (head === undefined) return;
+  if (history[0] === undefined) return;
 
-  // Walk from index 1 onward; advance the cut point until the budget fits.
-  let cutFrom = 1;
-  while (cutFrom < history.length && total > WINE_AGENT_LOOP_MAX_HISTORY_CHARS) {
-    const m = history[cutFrom];
-    if (m === undefined) break;
-    total -= m.content.length;
-    cutFrom += 1;
+  // ALWAYS retain `head` (index 0) and the `anchor` (the current user query,
+  // identified BY REFERENCE — its index shifts as the loop appends tool-result
+  // `user` messages, so a positional "last user message" rule would pin the
+  // wrong one, T-MTA-07). Evict the oldest OTHER messages first (prior turns
+  // before the recent tail). In the single-turn case the anchor IS the head,
+  // so this degrades to the original "keep head + recent".
+  const evicted = new Set<number>();
+  for (let i = 1; i < history.length && total > WINE_AGENT_LOOP_MAX_HISTORY_CHARS; i += 1) {
+    if (history[i] === anchor) continue; // never evict the anchor
+    total -= history[i]!.content.length;
+    evicted.add(i);
   }
 
-  // Materialise the kept range once.
-  const kept = cutFrom < history.length ? history.slice(cutFrom) : [];
-  history.length = 0;
-  history.push(head);
-  for (const m of kept) history.push(m);
+  if (evicted.size > 0) {
+    const kept = history.filter((_, i) => !evicted.has(i));
+    history.length = 0;
+    for (const m of kept) history.push(m);
+  }
   if (history.length === 1) {
     history.push({ role: 'user', content: WINE_AGENT_LOOP_HISTORY_TRUNCATION_TAIL });
   }

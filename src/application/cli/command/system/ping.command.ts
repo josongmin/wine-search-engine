@@ -14,8 +14,7 @@ export interface PingArgs {
  * faithful to the RFC.
  */
 export class PingCommand implements CliCommand<PingArgs> {
-  readonly group = 'system';
-  readonly name = 'ping';
+  readonly path = ['system', 'ping'] as const;
   readonly summary = 'Kernel self-test: echoes the resolved context.';
   readonly hidden = true;
 

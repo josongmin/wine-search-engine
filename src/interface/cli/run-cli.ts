@@ -1,5 +1,5 @@
 import { parseGlobalArgs } from './argv/parse-global-args.js';
-import { parseCommandPath } from './argv/parse-command-path.js';
+import { hasCommandPathPrefix, parseCommandPath } from './argv/parse-command-path.js';
 import { createDefaultRegistry, type CommandRegistry } from './command-registry.js';
 import { renderCommandResult } from './render/render-command-result.js';
 import { renderHelp } from './render/render-help.js';
@@ -34,7 +34,8 @@ export async function runCli(
   const buildContext = deps.buildContext ?? ((args: GlobalArgs) => buildCommandContext(args));
   try {
     const { global, rest } = parseGlobalArgs(argv);
-    const commandPath = parseCommandPath(rest);
+    const registeredPaths = registry.list().map((command) => command.path);
+    const commandPath = parseCommandPath(rest, registeredPaths);
 
     if (global.help || (commandPath === null && rest.length === 0)) {
       renderHelp(registry, io);
@@ -42,14 +43,15 @@ export async function runCli(
     }
 
     if (commandPath === null) {
-      throw CliError.usage('Incomplete command. Run "wine --help" to see available commands.');
+      if (hasCommandPathPrefix(rest, registeredPaths)) {
+        throw CliError.usage('Incomplete command. Run "wine --help" to see available commands.');
+      }
+      throw CliError.usage(`Unknown command "${rest.join(' ')}". Run "wine --help".`);
     }
 
-    const command = registry.resolve(commandPath.group, commandPath.name);
+    const command = registry.resolve(commandPath.path);
     if (command === undefined) {
-      throw CliError.usage(
-        `Unknown command "${commandPath.group} ${commandPath.name}". Run "wine --help".`,
-      );
+      throw CliError.usage(`Unknown command "${commandPath.path.join(' ')}". Run "wine --help".`);
     }
 
     const ctx = buildContext(global);

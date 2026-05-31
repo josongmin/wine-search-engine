@@ -49,7 +49,7 @@ function makeExecution(overrides: Partial<ScenarioExecution> = {}): ScenarioExec
     answer: 'A grounded answer drawn from the tool results.',
     stepCount: 2,
     toolCallCount: 1,
-    toolsUsed: [{ tool: 'search_wines', input: '{"query":"test"}' }],
+    toolsUsed: [{ tool: 'search_hybrid', input: '{"query":"test"}' }],
     observations: ['Found wines matching the query.'],
     terminationReason: 'answer',
     totalDurationMs: 1_000,

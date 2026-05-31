@@ -1,5 +1,6 @@
 import type { ExpectedOutputSchema, ToolOutcome, ToolOutcomeKind } from '../../domain/agent/model/tool-outcome.js';
 import { isAgentToolName } from '../../domain/agent/model/tool-outcome.js';
+import { isSearchPrimitiveToolName } from '../../domain/agent/model/agent-tool-attempt-schema.js';
 
 function classifyToolOutcomeKind(
   observation: string,
@@ -29,21 +30,10 @@ function buildToolOutcomeStepId(
 }
 
 function getExpectedOutputSchema(tool: string): ExpectedOutputSchema | undefined {
-  if (tool === 'search_wines' || tool === 'get_food_pairings') {
+  if (isSearchPrimitiveToolName(tool) || tool === 'lookup_wine') {
     return {
       minResults: 1,
       requiredFields: ['entity.entityId', 'entity.canonicalLabel'],
-    };
-  }
-  if (tool === 'compare_wines') {
-    return {
-      minResults: 2,
-      requiredFields: ['topResult.entity.entityId', 'topResult.entity.canonicalLabel'],
-    };
-  }
-  if (tool === 'check_drinking_window') {
-    return {
-      requiredFields: ['drinkingWindowStart', 'drinkingWindowEnd', 'currentlyDrinkable'],
     };
   }
   return undefined;
@@ -55,19 +45,11 @@ function getComparableResultItems(tool: string, rawResult: unknown): readonly un
   }
   const record = rawResult as Record<string, unknown>;
   if (
-    (tool === 'search_wines' || tool === 'get_food_pairings') &&
+    (isSearchPrimitiveToolName(tool) || tool === 'lookup_wine') &&
     record['queryType'] === 'search' &&
     Array.isArray(record['results'])
   ) {
     return record['results'] as unknown[];
-  }
-  if (tool === 'compare_wines' && record['queryType'] === 'comparison' && Array.isArray(record['entities'])) {
-    return record['entities']
-      .filter((entity): entity is Record<string, unknown> => typeof entity === 'object' && entity !== null)
-      .filter((entity) => entity['topResult'] !== null);
-  }
-  if (tool === 'check_drinking_window') {
-    return [record];
   }
   return undefined;
 }
@@ -169,6 +151,5 @@ export async function withTimeout<T>(work: Promise<T>, timeoutMs: number, messag
     if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
   }
 }
-
 
 

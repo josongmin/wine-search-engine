@@ -39,6 +39,88 @@ import {
 // continues to expose it under its historical import path.
 export { NormalizedConstraintSchema };
 
+// ---------------------------------------------------------------------------
+// Canonical agent conversational input (messages-native core, T-MTA-01)
+//
+// The agent surface — both single-shot `run` and server-managed session
+// `turn` — speaks `messages[]`. The latest user message is the planner
+// ANCHOR (architecture-decision §3.2), but the prior turns remain canonical
+// contract: they are threaded into the agent loop, never discarded. These
+// types live in the application layer so the orchestrator owns its own input
+// shape and does NOT depend on the HTTP interface schema (layer rule). The
+// HTTP `AgentMessage` (z.infer) is structurally compatible and passes
+// straight through with no `query` adapter.
+// ---------------------------------------------------------------------------
+
+export const AGENT_MESSAGE_ROLES = ['system', 'user', 'assistant', 'tool'] as const;
+export type AgentMessageRole = (typeof AGENT_MESSAGE_ROLES)[number];
+
+export interface AgentMessage {
+  readonly role: AgentMessageRole;
+  readonly content: string;
+  readonly name?: string | undefined;
+  readonly timestamp?: string | undefined;
+  readonly metadata?: Readonly<Record<string, unknown>> | undefined;
+}
+
+/**
+ * Canonical Zod mirror of {@link AgentMessage} for ALREADY-VALIDATED data
+ * (persisted rows, result-trace history). SSoT (rule 25/30): the result schema
+ * and the SQLite store both import this instead of re-declaring the shape, so
+ * the three copies cannot drift. Inbound HTTP request messages keep their own
+ * tighter schema (`agent.schema.ts`) — this one intentionally leaves `content`
+ * unbounded because it also carries the synthesized assistant answer. `.strict()`
+ * fails closed on unknown keys. */
+export const AgentMessageSchema = z.object({
+  role: z.enum(AGENT_MESSAGE_ROLES),
+  content: z.string(),
+  name: z.string().optional(),
+  timestamp: z.string().optional(),
+  metadata: z.record(z.unknown()).optional(),
+}).strict();
+
+/** Per-request execution knobs. Camel-cased mirror of the HTTP
+ *  `AgentOptionsSchema` (snake_case); the route maps one to the other. */
+export interface AgentRequestOptions {
+  readonly maxSteps?: number | undefined;
+  readonly perStepTimeoutMs?: number | undefined;
+  readonly agentTimeoutMs?: number | undefined;
+  readonly maxTotalTokens?: number | undefined;
+}
+
+/** Optional request-wide context (locale/currency). Not session/history. */
+export interface AgentRequestContext {
+  readonly locale?: string | undefined;
+  readonly currency?: string | undefined;
+}
+
+/** Index of the latest user-role message, or `-1` when none exists. Used to
+ *  split the conversation into `priorHistory` (everything before the anchor)
+ *  and the anchor itself. */
+export function latestUserMessageIndex(messages: readonly AgentMessage[]): number {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === 'user') return i;
+  }
+  return -1;
+}
+
+/** True when the conversation has at least one user-role message — the planner
+ *  anchor. SSoT for the "needs a user message" guard shared by every agent
+ *  transport (HTTP route, CLI facade) so the check cannot drift. */
+export function hasUserMessage(messages: readonly AgentMessage[]): boolean {
+  return latestUserMessageIndex(messages) >= 0;
+}
+
+/** Window a conversation to its most-recent `max` messages. Single source of
+ *  truth for history bounding — both the orchestrator (inbound clip) and the
+ *  session service (stitched-transcript clip) call this so the windowing logic
+ *  cannot diverge. The kept window is VISIBLE (surfaced as `historyApplied`),
+ *  not hidden truncation. */
+export function windowHistory<T>(messages: readonly T[], max: number): readonly T[] {
+  if (messages.length <= max) return messages;
+  return messages.slice(Math.max(0, messages.length - max));
+}
+
 /** Matches `MAX_AGENT_HTTP_QUERY_CHARS` in `src/interface/http/constants.ts`.
  *  Re-declared at module scope to keep this contract independent of the
  *  HTTP interface layer (domain ports must not depend on interface code).
@@ -238,10 +320,13 @@ export type ConstraintTierBundle = z.infer<typeof ConstraintTierBundleSchema>;
  * partial / circuit-open / unknown), or be skipped outright.
  *
  * Before this field existed, a fallback failure was silently "softened" to
- * `intent='search'` without any downstream signal — orchestrator metrics and
- * logs could not distinguish a confident `intent=search` from a deterministic
- * `unknown` that got promoted only because the LLM blew up. This flag closes
- * that observability gap. It is optional (omitted in legacy fixtures and
+ * `intent='search'` — masquerading an LLM outage as a confident search and
+ * bypassing the router's `unsupported_intent` reject for fully-ambiguous
+ * queries. The analyzer now PRESERVES `intent='unknown'` on failure (the
+ * deterministic-router handles that case explicitly) and records the failure
+ * here as `failed_preserved_unknown`, so orchestrator metrics and logs can
+ * distinguish a confident `intent=search` from an ambiguous query whose LLM
+ * disambiguation blew up. It is optional (omitted in legacy fixtures and
  * direct schema-parse round-trips that don't go through the analyzer) so
  * existing callers remain unaffected.
  *
@@ -258,7 +343,7 @@ export const LlmFallbackOutcomeSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('not_attempted') }).strict(),
   z.object({ kind: z.literal('success') }).strict(),
   z.object({
-    kind: z.literal('failed_softened_to_search'),
+    kind: z.literal('failed_preserved_unknown'),
     failureReason: z.enum([
       'timeout',
       'refusal',

@@ -59,8 +59,8 @@ describe('HTTP route contract registry', () => {
       },
       {
         method: 'POST',
-        url: '/v1/search',
-        operationId: 'search.execute',
+        url: '/v1/search/hybrid',
+        operationId: 'search.hybrid',
         hasBody: true,
         hasParams: false,
         responseStatusCodes: [200, 400, 403, 408, 429, 500, 503],
@@ -69,8 +69,28 @@ describe('HTTP route contract registry', () => {
       },
       {
         method: 'POST',
-        url: '/v1/search/lookup',
-        operationId: 'search.lookup',
+        url: '/v1/search/semantic',
+        operationId: 'search.semantic',
+        hasBody: true,
+        hasParams: false,
+        responseStatusCodes: [200, 400, 403, 408, 429, 500, 503],
+        successStatusCodes: [200],
+        errorStatusCodes: [400, 403, 408, 429, 500, 503],
+      },
+      {
+        method: 'POST',
+        url: '/v1/search/lexical',
+        operationId: 'search.lexical',
+        hasBody: true,
+        hasParams: false,
+        responseStatusCodes: [200, 400, 403, 408, 429, 500, 503],
+        successStatusCodes: [200],
+        errorStatusCodes: [400, 403, 408, 429, 500, 503],
+      },
+      {
+        method: 'POST',
+        url: '/v1/lookup/wine',
+        operationId: 'lookup.wine',
         hasBody: true,
         hasParams: false,
         responseStatusCodes: [200, 400, 403, 408, 429, 500, 503],
@@ -146,7 +166,8 @@ describe('HTTP route contract registry', () => {
       expect.objectContaining({ url: '/v1/search/interpret' }),
       expect.objectContaining({ url: '/v1/entity/resolve' }),
       expect.objectContaining({ url: '/v1/entity/autocomplete' }),
-      expect.objectContaining({ url: '/v1/search/hybrid' }),
+      expect.objectContaining({ url: '/v1/search' }),
+      expect.objectContaining({ url: '/v1/search/lookup' }),
     ]));
   });
 });

@@ -283,7 +283,7 @@ function buildPositiveScenario(row: PositiveExactLookupRow, index: number): Agen
     query,
     description: `Large Korean transliteration exact lookup positive: ${canonicalEn} (${difficulty})`,
     expectation: {
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'lookup_wine' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 7_000,
@@ -306,8 +306,7 @@ function buildPositiveScenario(row: PositiveExactLookupRow, index: number): Agen
         phenomena,
       },
       expectedToolArgs: [
-        { tool: 'search_wines', argPath: 'query', predicate: 'contains_any', value: acceptedAliases },
-        { tool: 'search_wines', argPath: 'retrieval_mode', predicate: 'equals', value: 'entity' },
+        { tool: 'lookup_wine', argPath: 'query', predicate: 'contains_any', value: acceptedAliases },
       ],
       rubric:
         `Must treat "${query}" as an exact Korean transliteration lookup for ${canonicalEn}. `

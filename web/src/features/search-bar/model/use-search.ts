@@ -34,17 +34,11 @@ function sanitizeQuery(input: string): string {
 export function useSearch(query: string, enabled = true) {
   const safeQuery = sanitizeQuery(query);
   return useQuery<SearchResponse>({
-    // Endpoint + mode are part of the cache key so different search modes
-    // never share cached results accidentally.
-    queryKey: ['search', '/v1/search', 'auto', safeQuery],
+    // Endpoint is part of the cache key so primitive routes never alias.
+    queryKey: ['search', '/v1/search/hybrid', safeQuery],
     queryFn: ({ signal }) => {
       const body: SearchRequest = {
         query: safeQuery,
-        // T-E9-02: explain defaults to false — opt-in only.
-        // explain=true adds significant payload (evidence, decomposition, counterfactuals)
-        // that is only useful in dev/debug mode. Production clients should not pay
-        // the serialization + transfer cost unless explicitly requesting it.
-        options: { mode: 'auto', clarification: true },
       };
       return api.search(body, { signal });
     },

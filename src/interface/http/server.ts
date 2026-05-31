@@ -14,8 +14,6 @@ import { registerHttpDebugMode } from './middleware/http-debug-mode.js';
 import { registerRequestContext } from './middleware/request-context.js';
 import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
 import { deepKeysToSnake } from './middleware/snake-case-hook.js';
-import { registerSearchRoute } from './routes/search.route.js';
-import { registerLookupRoute } from './routes/lookup.route.js';
 import {
   registerHybridSearchRoute,
   registerLexicalSearchRoute,
@@ -29,8 +27,11 @@ import {
 } from './routes/health.route.js';
 import { registerWatchlistRoute } from './routes/watchlist.route.js';
 import { registerFeedbackRoute } from './routes/feedback.route.js';
-import { registerWineSearchRoute } from './routes/wine-search.route.js';
-import { registerAgentRunRoute } from './routes/agent.route.js';
+import {
+  registerAgentRunRoute,
+  registerAgentSessionCreateRoute,
+  registerAgentSessionTurnRoute,
+} from './routes/agent.route.js';
 import { registerOpenApiRoute } from './routes/openapi.route.js';
 import type { HttpServerDeps } from './routes/route-deps.js';
 import { getRequestId, resolveIncomingRequestId } from './request-id.js';
@@ -384,16 +385,8 @@ export async function createServer(
       ? { metricsDebugSecret: resolvedMetricsDebugSecret }
       : {}),
   });
-  registerSearchRoute(app, {
-    ...deps,
-    wineSearchOrchestrator: deps.wineSearch?.wineSearchOrchestrator,
-  });
-  registerLookupRoute(app, deps);
-  // T-IR-01 primitive surface — path-authoritative replacements for the
-  // mode-monolith `/v1/search` and the namespace-stuffed `/v1/search/lookup`.
-  // Registered alongside the legacy routes during the migration program;
-  // T-IR-07 deletes the legacy registrations once every internal and external
-  // consumer has cut over.
+  // Path-authoritative primitive search surface. Public search is no longer a
+  // mode-monolith — callers pick the retrieval primitive by URL.
   registerHybridSearchRoute(app, deps);
   registerSemanticSearchRoute(app, deps);
   registerLexicalSearchRoute(app, deps);
@@ -401,17 +394,12 @@ export async function createServer(
   registerWatchlistRoute(app, deps);
   registerFeedbackRoute(app, deps);
   if (deps.wineSearch !== undefined) {
-    // Plan-then-Execute `/v1/agent` — the canonical agentic entry point.
-    // Registration requires an Anthropic credential at startup.
-    registerWineSearchRoute(app, {
-      wineSearchOrchestrator: deps.wineSearch.wineSearchOrchestrator,
-    });
-    // T-IR-02 single-shot agent surface — `POST /v1/agent/run`. Accepts the
-    // canonical `messages[]` body; session-managed `/v1/agent/sessions*`
-    // endpoints land with T-IR-03 alongside the persistent session store.
-    registerAgentRunRoute(app, {
-      wineSearchOrchestrator: deps.wineSearch.wineSearchOrchestrator,
-    });
+    // Canonical agent surface — `POST /v1/agent` for caller-managed history,
+    // plus `POST /v1/agent/sessions*` for server-managed history custody.
+    const agentRouteDeps = { agentUseCase: deps.wineSearch.agentUseCase };
+    registerAgentRunRoute(app, agentRouteDeps);
+    registerAgentSessionCreateRoute(app, agentRouteDeps);
+    registerAgentSessionTurnRoute(app, agentRouteDeps);
   }
   registerOpenApiRoute(app);
 

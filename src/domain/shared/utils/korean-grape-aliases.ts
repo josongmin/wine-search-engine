@@ -34,7 +34,9 @@
  *    case is therefore the only value shape safe for BOTH callers.
  *  - Order matters: more specific Cabernet Sauvignon precedes Cabernet Franc,
  *    and the first matching pattern wins (both consumers iterate in order and
- *    return on first hit).
+ *    return on first hit). To keep that ordering safe, the Cabernet Sauvignon
+ *    entry's bare `까?베르네` alternative uses a negative lookahead `(?!\s*프랑)`
+ *    so it cannot pre-empt the Korean Cabernet *Franc* surface `카베르네 프랑`.
  *
  * Each pattern carries the `/iu` flags (case-insensitive + Unicode) so the
  * non-ASCII Korean alternations are evaluated correctly (CLAUDE.md non-ASCII
@@ -42,8 +44,11 @@
  */
 export const KOREAN_GRAPE_ALIASES: ReadonlyArray<readonly [RegExp, string]> = [
   // Cabernet Sauvignon — `까?베르네` covers 카베르네/까베르네; `까쇼` is the
-  // common Korean shorthand merged in from claim-extractor.
-  [/까?베르네\s*소비뇽|까?베르네소비뇽|까?베르네|까쇼|cab(?:ernet)?\s*sauv(?:ignon)?/iu, 'Cabernet Sauvignon'],
+  // common Korean shorthand merged in from claim-extractor. The bare
+  // `까?베르네` alternative carries a negative lookahead `(?!\s*프랑)` so it does
+  // NOT swallow the Korean Cabernet *Franc* surface `카베르네 프랑` (W2 merge
+  // regression: first-match-wins previously misclassified Franc as Sauvignon).
+  [/까?베르네\s*소비뇽|까?베르네소비뇽|까?베르네(?!\s*프랑)|까쇼|cab(?:ernet)?\s*sauv(?:ignon)?/iu, 'Cabernet Sauvignon'],
   [/카베르네\s*프랑|cab(?:ernet)?\s*franc/iu, 'Cabernet Franc'],
   [/메를로|merlot/iu, 'Merlot'],
   [/피노\s*누아르?|피노누아|pinot\s*noir/iu, 'Pinot Noir'],

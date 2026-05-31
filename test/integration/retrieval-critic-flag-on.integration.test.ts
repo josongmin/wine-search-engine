@@ -414,7 +414,7 @@ describe('retrieval critic flag-on integration (ADR-015 Axis 2, Wave B2)', () =>
   it('scenario 5 — ToolCallEvidenceFrame observationHash includes retryCount', () => {
     const baseInput = {
       toolCallId: 'req-1-s0',
-      toolName: 'search_wines',
+      toolName: 'search_hybrid',
       requestId: 'req-1',
       input: { q: 'red napa' } as Readonly<Record<string, unknown>>,
       structuredOutput: {

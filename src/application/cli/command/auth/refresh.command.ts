@@ -3,8 +3,7 @@ import type { CommandContext } from '../../context/command-context.js';
 import type { CommandResult } from '../../context/command-result.js';
 
 export class AuthRefreshCommand implements CliCommand {
-  readonly group = 'auth';
-  readonly name = 'refresh';
+  readonly path = ['auth', 'refresh'] as const;
   readonly summary = 'Refresh the Codex access token using the stored refresh token.';
 
   parseArgs(): Record<string, never> {

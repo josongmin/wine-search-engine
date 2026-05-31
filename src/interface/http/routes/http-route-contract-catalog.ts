@@ -1,17 +1,18 @@
 import { createHash } from 'node:crypto';
 import type { HttpRouteContract } from './route-contracts.js';
-import { WineSearchRouteContract } from './wine-search.contract.js';
-import { AgentRunRouteContract } from './agent.contract.js';
+import {
+  AgentRunRouteContract,
+  AgentSessionCreateRouteContract,
+  AgentSessionTurnRouteContract,
+} from './agent.contract.js';
 import {
   AgentMetricsRouteContract,
   HealthRouteContract,
   HybridSearchRouteContract,
   LexicalSearchRouteContract,
-  LookupRouteContract,
   LookupWineRouteContract,
   ReadyRouteContract,
   RetrievalDegradationMetricsRouteContract,
-  SearchRouteContract,
   SemanticSearchRouteContract,
   WatchlistListRouteContract,
   WatchlistCreateRouteContract,
@@ -68,21 +69,27 @@ interface DeclaredHttpRouteContract {
  *           Legacy `/v1/search` and `/v1/search/lookup` are kept until
  *           T-IR-07 removes them, at which point this bumps to 5.0.0.
  *           Remaining: 17.
- *   4.2.0 — T-IR-02 step 1: add `POST /v1/agent/run` with `messages[]`
- *           canonical body (2026-05-29). MINOR bump — additive only.
- *           Session-managed `/v1/agent/sessions*` endpoints land with
- *           T-IR-03; legacy `/v1/agent` stays until T-IR-07 removes it.
- *           Remaining: 18.
+ *   5.0.0 — break the legacy monolith surfaces (2026-05-30):
+ *           remove `POST /v1/search` and `POST /v1/search/lookup` from the
+ *           declared public catalog. Public retrieval is now only
+ *           path-authoritative primitive search plus `POST /v1/lookup/wine`.
+ *           `POST /v1/agent/run` remains temporarily while `/v1/agent`
+ *           becomes the canonical single-shot front door.
+ *   6.0.0 — canonicalize the single-shot agent front door (2026-05-30):
+ *           `POST /v1/agent` now owns the `messages[]` contract directly and
+ *           the duplicate `POST /v1/agent/run` entry is removed.
+ *           Session surfaces remain:
+ *           `POST /v1/agent/sessions` and
+ *           `POST /v1/agent/sessions/:sessionId/turns`.
+ *           Remaining: 17.
  */
-export const HTTP_CONTRACT_CATALOG_VERSION = '4.2.0';
+export const HTTP_CONTRACT_CATALOG_VERSION = '6.0.0';
 
 export const DeclaredHttpRouteContractCatalog: readonly DeclaredHttpRouteContract[] = [
   { method: 'GET', url: '/health', contract: HealthRouteContract },
   { method: 'GET', url: '/ready', contract: ReadyRouteContract },
   { method: 'GET', url: '/metrics/agent', contract: AgentMetricsRouteContract },
   { method: 'GET', url: '/metrics/retrieval-degradation', contract: RetrievalDegradationMetricsRouteContract },
-  { method: 'POST', url: '/v1/search', contract: SearchRouteContract },
-  { method: 'POST', url: '/v1/search/lookup', contract: LookupRouteContract },
   { method: 'POST', url: '/v1/search/hybrid', contract: HybridSearchRouteContract },
   { method: 'POST', url: '/v1/search/semantic', contract: SemanticSearchRouteContract },
   { method: 'POST', url: '/v1/search/lexical', contract: LexicalSearchRouteContract },
@@ -93,8 +100,9 @@ export const DeclaredHttpRouteContractCatalog: readonly DeclaredHttpRouteContrac
   { method: 'DELETE', url: '/v1/watchlist/:id', contract: WatchlistDeleteRouteContract },
   { method: 'GET', url: '/v1/watchlist/:id/deliveries', contract: WatchlistDeliveriesRouteContract },
   { method: 'POST', url: '/v1/feedback', contract: FeedbackSubmitRouteContract },
-  { method: 'POST', url: '/v1/agent', contract: WineSearchRouteContract },
-  { method: 'POST', url: '/v1/agent/run', contract: AgentRunRouteContract },
+  { method: 'POST', url: '/v1/agent', contract: AgentRunRouteContract },
+  { method: 'POST', url: '/v1/agent/sessions', contract: AgentSessionCreateRouteContract },
+  { method: 'POST', url: '/v1/agent/sessions/:sessionId/turns', contract: AgentSessionTurnRouteContract },
 ] as const;
 
 function compareContracts(
@@ -200,7 +208,7 @@ export function computeHttpContractCatalogFingerprint(
  * failing test.
  */
 export const HTTP_CONTRACT_CATALOG_FINGERPRINT =
-  '8818a6e1f257d33cb342cf38e019dccc6784f4cc83a27da37208b4357bdb20d5';
+  '2770fa94d973e6b4e1d372f3e456677763bb5c14d11651fa150f844e246b0afb';
 
 export function buildDeclaredHttpRouteContractManifest(): HttpRouteContractManifest {
   const routes: RegisteredHttpRouteContract[] = DeclaredHttpRouteContractCatalog.map((entry) => {

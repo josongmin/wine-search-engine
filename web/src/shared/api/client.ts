@@ -9,6 +9,10 @@ import type {
   WatchlistListResponse,
   WineSearchRequest,
   WineSearchResponse,
+  AgentSessionCreateRequest,
+  AgentSessionCreateResponse,
+  AgentSessionTurnRequest,
+  AgentSessionTurnResponse,
 } from './types';
 import { getSubjectId } from '@/shared/lib/subject';
 
@@ -126,7 +130,7 @@ interface ApiCallOptions {
 
 export const api = {
   search(body: SearchRequest, opts: ApiCallOptions = {}) {
-    return request<SearchResponse>('/v1/search', {
+    return request<SearchResponse>('/v1/search/hybrid', {
       method: 'POST',
       body: JSON.stringify(body),
       externalSignal: opts.signal,
@@ -134,7 +138,7 @@ export const api = {
   },
 
   async lookupEntity(body: SearchRequest, opts: ApiCallOptions = {}) {
-    const response = await request<SearchResponse>('/v1/search/lookup', {
+    const response = await request<SearchResponse>('/v1/lookup/wine', {
       method: 'POST',
       body: JSON.stringify(body),
       externalSignal: opts.signal,
@@ -184,6 +188,38 @@ export const api = {
         },
         WINE_SEARCH_EXECUTE_TIMEOUT_MS,
       );
+    },
+  },
+
+  /**
+   * Server-managed agent sessions (POST /v1/agent/sessions*).
+   * Unlike `wineSearch.execute` (caller-managed history), the server stitches
+   * prior turns; the caller sends only the new turn's messages.
+   */
+  agent: {
+    sessions: {
+      create(body: AgentSessionCreateRequest = {}, opts: ApiCallOptions = {}) {
+        return request<AgentSessionCreateResponse>(
+          '/v1/agent/sessions',
+          {
+            method: 'POST',
+            body: JSON.stringify(body),
+            externalSignal: opts.signal,
+          },
+          WINE_SEARCH_EXECUTE_TIMEOUT_MS,
+        );
+      },
+      turn(sessionId: string, body: AgentSessionTurnRequest, opts: ApiCallOptions = {}) {
+        return request<AgentSessionTurnResponse>(
+          `/v1/agent/sessions/${encodeURIComponent(sessionId)}/turns`,
+          {
+            method: 'POST',
+            body: JSON.stringify(body),
+            externalSignal: opts.signal,
+          },
+          WINE_SEARCH_EXECUTE_TIMEOUT_MS,
+        );
+      },
     },
   },
 

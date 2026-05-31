@@ -407,8 +407,8 @@ function countResultRows(outcome: ToolOutcome): number | undefined {
  *   - label="..." producer="..." region="..." vintage=2018 grapes=["..."] price="$25"
  *   - ...
  * tool_outcomes (M):
- *   - tool=search_wines kind=success stepId=q:0:0 resultCount=5
- *   - tool=search_wines kind=partial_result errorMessage="..."
+ *   - tool=search_hybrid kind=success stepId=q:0:0 resultCount=5
+ *   - tool=search_hybrid kind=partial_result errorMessage="..."
  * ```
  *
  * When the entire payload would exceed {@link

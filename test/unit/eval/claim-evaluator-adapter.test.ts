@@ -20,11 +20,11 @@ function makeNoEvidenceFrame(): ToolCallEvidenceFrame {
   return {
     frameSchemaVersion: 'tool_evidence_v1',
     toolCallId: 'req-1-s0',
-    toolName: 'search_wines',
+    toolName: 'search_hybrid',
     invokedAt: '2026-04-22T00:00:00Z',
     requestId: 'req-1',
     request: {
-      toolName: 'search_wines',
+      toolName: 'search_hybrid',
       input: { query: 'opus one' },
     },
     structuredOutput: {
@@ -42,7 +42,7 @@ function makeExecution(): ScenarioExecution {
     answer: 'Opus One 2018',
     stepCount: 1,
     toolCallCount: 1,
-    toolsUsed: [{ tool: 'search_wines', input: '{"query":"opus one"}' }],
+    toolsUsed: [{ tool: 'search_hybrid', input: '{"query":"opus one"}' }],
     observations: ['Found 1 result: Opus One 2018 | producer: Opus One Winery | vintage: 2018'],
     evidenceFrames: [makeNoEvidenceFrame()],
     terminationReason: 'answer',

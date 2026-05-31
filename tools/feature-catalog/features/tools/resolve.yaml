@@ -1,9 +1,9 @@
 id: tools.resolve
-name: Resolve Endpoint (Entity Disambiguation)
+name: Resolve Use Case (Entity Disambiguation)
 category: tools
 summary: |
-  POST /v1/resolve — 쿼리의 entity 후보를 confidence + abstention 결정과 함께 반환.
-  conformal prediction set로 70% coverage guarantee + 명시적 ambiguity hint.
+  쿼리의 entity 후보를 confidence + abstention 결정과 함께 반환하는 internal
+  resolve use case. dedicated HTTP route는 제거되었다.
 
 maturity: 4
 maturity_rationale: |
@@ -25,15 +25,14 @@ last_reviewed: 2026-05-22
 owner: core
 
 surfaces:
-  - "HTTP: POST /v1/resolve"
+  - "Internal resolve use case"
 
 key_files:
   - src/application/search/resolve.usecase.ts
-  - src/interface/http/routes/resolve.route.ts
 
 tests:
-  integration:
-    - test/integration/http/routes/resolve.route.test.ts
+  unit:
+    - test/unit/application/search/resolve.usecase.test.ts
   regression:
     - test/regression/resolve-tool-properties.regression.test.ts
 

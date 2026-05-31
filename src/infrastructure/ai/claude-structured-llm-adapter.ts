@@ -827,7 +827,14 @@ export class ClaudeStructuredLlmAdapter implements StructuredLlmPort {
         turns.push({ role: msg.role, content: msg.content });
       }
     }
-    // Anthropic requires the first turn to be `user` and at least one to exist.
+    // Anthropic requires the FIRST turn to be `user` and at least one to exist.
+    // After multi-turn history WINDOWING (T-MTA-07) a conversation can be cut so
+    // its earliest retained turn is `assistant` — drop leading non-user turns
+    // (oldest post-window context) so the request stays provider-valid instead
+    // of 400-ing. Falls back to a synthetic `(continue)` if nothing remains.
+    while (turns.length > 0 && turns[0]?.role !== 'user') {
+      turns.shift();
+    }
     if (turns.length === 0) {
       turns.push({ role: 'user', content: '(continue)' });
     }

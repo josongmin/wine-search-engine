@@ -383,16 +383,21 @@ const UNKNOWN_PREFERENCE_RECIPIENT_QUERY_SIGNALS: readonly string[] = [
   'safe',
   'universal',
   'easy drinking',
-  'pinot grigio',
-  'pinot gris',
+  // Style / category cues only: 'prosecco' and 'cava' name a crowd-pleasing
+  // SPARKLING-WINE STYLE / appellation (not a grape), so naming one for an
+  // unknown recipient is a genuine crowd-pleaser cue.
   'prosecco',
   'cava',
-  // NOTE: specific grape varieties (merlot / pinot noir) are intentionally
-  // NOT signals here. Naming a grape in the QUERY is a *preference
-  // expression* — the opposite of "I don't know their preference" — so it must
-  // not trigger the unknown-preference recipient profile. (Crowd-pleasing reds
-  // still surface candidate-side via `crowd_pleasing_red` and in the retrieval
-  // term expansion, which operate on wine attributes, not user intent.)
+  // NOTE: specific GRAPE VARIETIES are intentionally NOT signals here —
+  // including 'merlot', 'pinot noir', 'pinot grigio', and 'pinot gris'. Naming
+  // a grape in the QUERY is a *preference expression* — the opposite of "I
+  // don't know their preference" — so it must not trigger the unknown-
+  // preference recipient profile. The grape/style distinction is the rule:
+  // a grape name = stated varietal preference (excluded); a wine-style /
+  // category name (prosecco, cava) = "safe crowd-pleaser" cue (kept).
+  // Crowd-pleasing varietals still surface CANDIDATE-side via the
+  // `crowd_pleasing_white` / `crowd_pleasing_red` axes and in the retrieval-
+  // term expansion, which operate on wine attributes, not user intent.
 ];
 
 const QUERY_PROFILE_SIGNAL_MAP: Readonly<Record<RecipientProfileValue, readonly string[]>> = {

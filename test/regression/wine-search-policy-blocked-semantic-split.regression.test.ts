@@ -136,7 +136,9 @@ function buildOrchestrator() {
 }
 
 function runInput(query: string, overrides?: Partial<WineSearchInput>): WineSearchInput {
-  return { query, requestId: REQUEST_ID, ...overrides };
+  // T-MTA-01: the orchestrator is messages-native — wrap the single query as
+  // one user message (the admit-gate / anchor semantics are unchanged).
+  return { messages: [{ role: 'user', content: query }], requestId: REQUEST_ID, ...overrides };
 }
 
 // ---------------------------------------------------------------------------

@@ -7,7 +7,7 @@ import type { CommandContext } from '../../../application/cli/context/command-co
 import type { CommandResult } from '../../../application/cli/context/command-result.js';
 import type { AuthFacadePort } from '../../../application/cli/port/auth-facade.port.js';
 import type { SearchFacadePort } from '../../../application/cli/port/search-facade.port.js';
-import type { WineSearchFacadePort } from '../../../application/cli/port/wine-search-facade.port.js';
+import type { AgentFacadePort } from '../../../application/cli/port/agent-facade.port.js';
 import { CliError } from '../../../application/cli/command/cli-error.js';
 import {
   EXIT_AUTH,
@@ -32,9 +32,8 @@ function makeCapture(): { io: CliIo; stdout: () => string; stderr: () => string 
 
 function throwingCommand(group: string, name: string, error: Error): CliCommand {
   return {
-    group,
-    name,
-    summary: 'throws',
+    path: [group, name],
+    summary: `${group} ${name}`,
     parseArgs: () => ({}),
     run: (_ctx: CommandContext): Promise<CommandResult> => Promise.reject(error),
   };
@@ -44,7 +43,7 @@ function fakeContext(
   auth: Partial<AuthFacadePort>,
   overrides: Partial<{
     search: SearchFacadePort;
-    wineSearch: WineSearchFacadePort;
+    agent: AgentFacadePort;
     readTextFile: (path: string) => Promise<string>;
   }> = {},
 ): CommandContext {
@@ -61,13 +60,18 @@ function fakeContext(
       search:
         overrides.search
         ?? ({
-          run: () => Promise.resolve({ ok: true }),
+          hybrid: () => Promise.resolve({ ok: true }),
+          semantic: () => Promise.resolve({ ok: true }),
+          lexical: () => Promise.resolve({ ok: true }),
+          lookupWine: () => Promise.resolve({ ok: true }),
         } as SearchFacadePort),
-      wineSearch:
-        overrides.wineSearch
+      agent:
+        overrides.agent
         ?? ({
           run: () => Promise.resolve({ answer: 'ok' }),
-        } as WineSearchFacadePort),
+          startSession: () => Promise.resolve({ session_id: 'sess_1' }),
+          turnSession: () => Promise.resolve({ answer: 'ok' }),
+        } as AgentFacadePort),
     },
   };
 }
@@ -155,9 +159,9 @@ describe('runCli', () => {
 
   it('maps an unexpected error to the execution exit code', async () => {
     const registry = new CommandRegistry();
-    registry.register(throwingCommand('search', 'run', new Error('boom')));
+    registry.register(throwingCommand('search', 'hybrid', new Error('boom')));
     const cap = makeCapture();
-    const code = await runCli(['search', 'run'], { io: cap.io, registry });
+    const code = await runCli(['search', 'hybrid'], { io: cap.io, registry });
     expect(code).toBe(EXIT_EXECUTION);
     expect(cap.stderr()).toContain('boom');
   });
@@ -197,16 +201,19 @@ describe('runCli', () => {
     expect(code).toBe(EXIT_PROBE);
   });
 
-  it('runs search run through the shell with an injected typed facade', async () => {
+  it('runs search hybrid through the shell with an injected typed facade', async () => {
     const cap = makeCapture();
-    const code = await runCli(['search', 'run', '--q', 'opus one 2018', '--json'], {
+    const code = await runCli(['search', 'hybrid', '--q', 'opus one 2018', '--json'], {
       io: cap.io,
       buildContext: () =>
         fakeContext(
           {},
           {
             search: {
-              run: (input) => Promise.resolve({ echoed_query: input.query }),
+              hybrid: (input) => Promise.resolve({ echoed_query: input.query }),
+              semantic: () => Promise.resolve({ ok: true }),
+              lexical: () => Promise.resolve({ ok: true }),
+              lookupWine: () => Promise.resolve({ ok: true }),
             },
           },
         ),

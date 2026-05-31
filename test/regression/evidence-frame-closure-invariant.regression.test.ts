@@ -53,7 +53,7 @@ describe('Property: ToolCallEvidenceFrame shape determinism', () => {
       fc.property(
         fc.record({
           toolCallId: fc.string({ minLength: 1, maxLength: 32 }).filter((s) => s.length > 0),
-          toolName: fc.constantFrom('search_wines', 'compare_wines', 'pair_food'),
+          toolName: fc.constantFrom('search_hybrid', 'compare_wines', 'pair_food'),
           requestId: fc.string({ minLength: 1, maxLength: 32 }).filter((s) => s.length > 0),
           observation: fc.string({ maxLength: 200 }),
           durationMs: fc.integer({ min: 0, max: 60_000 }),
@@ -101,7 +101,7 @@ describe('Property: timestamp monotonicity within a request', () => {
           const frames = sorted.map((ts, i) =>
             buildToolCallEvidenceFrame({
               toolCallId: `req-1-s${i}`,
-              toolName: 'search_wines',
+              toolName: 'search_hybrid',
               requestId: 'req-1',
               input: {},
               structuredOutput: STRUCTURED_NOOP,
@@ -162,7 +162,7 @@ describe('Property: JSON round-trip preserves frame', () => {
         (seed) => {
           const frame = buildToolCallEvidenceFrame({
             toolCallId: seed.toolCallId,
-            toolName: 'search_wines',
+            toolName: 'search_hybrid',
             requestId: seed.requestId,
             input: { query: 'test' },
             structuredOutput: STRUCTURED_NOOP,
@@ -191,7 +191,7 @@ describe('Property: frame serialized size is bounded', () => {
         (observation) => {
           const frame = buildToolCallEvidenceFrame({
             toolCallId: 'rid-s0',
-            toolName: 'search_wines',
+            toolName: 'search_hybrid',
             requestId: 'rid',
             input: { q: 'x'.repeat(100) },
             structuredOutput: STRUCTURED_NOOP,
@@ -230,7 +230,7 @@ describe('Property: schema strictness rejects extra keys', () => {
           fc.pre(!reserved.has(extraKey));
           const frame = buildToolCallEvidenceFrame({
             toolCallId: 'rid-s0',
-            toolName: 'search_wines',
+            toolName: 'search_hybrid',
             requestId: 'rid',
             input: {},
             structuredOutput: STRUCTURED_NOOP,
@@ -250,7 +250,7 @@ describe('Property: schema strictness rejects extra keys', () => {
   it('explicit extra key "x" is rejected (regression anchor)', () => {
     const frame = buildToolCallEvidenceFrame({
       toolCallId: 'rid-s0',
-      toolName: 'search_wines',
+      toolName: 'search_hybrid',
       requestId: 'rid',
       input: {},
       structuredOutput: STRUCTURED_NOOP,
@@ -276,7 +276,7 @@ describe('Property: schema strictness rejects extra keys', () => {
 function makeFrame(observation: string, extra?: Partial<ToolCallEvidenceFrame>): ToolCallEvidenceFrame {
   const base = buildToolCallEvidenceFrame({
     toolCallId: 'rid-s0',
-    toolName: 'search_wines',
+    toolName: 'search_hybrid',
     requestId: 'rid',
     input: {},
     structuredOutput: STRUCTURED_NOOP,

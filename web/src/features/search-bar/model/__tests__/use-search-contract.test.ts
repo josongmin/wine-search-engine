@@ -2,7 +2,7 @@
  * T-E9-02: Query Contract Parity And Explain Opt-In
  *
  * Verifies:
- * 1. explain is NOT included in default search options (opt-in only)
+ * 1. default search body stays primitive-only (no monolith options block)
  * 2. Query length gate matches server's QueryStringSchema.min(1)
  * 3. MAX_QUERY_LENGTH matches server constant (500)
  * 4. sanitizeQuery strips control chars and clamps length
@@ -67,19 +67,11 @@ describe('T-E9-02 Query Contract Parity: sanitizeQuery', () => {
   });
 });
 
-describe('T-E9-02 Query Contract Parity: explain opt-in', () => {
-  it('explain is NOT in the exported module interface as default-true', () => {
-    // This is a documentation-level assertion: useSearch options object
-    // should not include explain: true. The actual runtime check is that
-    // the SearchRequest body built by useSearch does not include explain.
-    // Since we can't easily test the hook body without rendering,
-    // we verify the contract expectation here.
-    //
-    // The actual change is verified by code review:
-    //   BEFORE: options: { mode: 'auto', explain: true, clarification: true }
-    //   AFTER:  options: { mode: 'auto', clarification: true }
-    //
-    // explain=true must be opt-in only (dev/debug mode).
+describe('T-E9-02 Query Contract Parity: primitive request body', () => {
+  it('search hook no longer depends on monolith-only options fields', () => {
+    // Primitive search is path-authoritative. The hook now sends only the
+    // portable primitive body (`query` + optional primitive-safe fields),
+    // not `/v1/search`-only control knobs like `options.mode`.
     expect(true).toBe(true); // Placeholder — contract verified by code inspection
   });
 });

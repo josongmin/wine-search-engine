@@ -10,13 +10,13 @@ export function renderHelp(registry: CommandRegistry, io: CliIo): void {
   const visible = registry
     .list()
     .filter((command) => command.hidden !== true)
-    .sort((a, b) => `${a.group} ${a.name}`.localeCompare(`${b.group} ${b.name}`));
+    .sort((a, b) => a.path.join(' ').localeCompare(b.path.join(' ')));
 
   const lines: string[] = [
     'wine — wine search engine CLI',
     '',
     'Usage:',
-    '  wine <group> <command> [options]',
+    '  wine <command path...> [options]',
     '',
     'Commands:',
   ];
@@ -25,7 +25,7 @@ export function renderHelp(registry: CommandRegistry, io: CliIo): void {
     lines.push('  (none registered yet)');
   } else {
     for (const command of visible) {
-      lines.push(`  ${command.group} ${command.name}  —  ${command.summary}`);
+      lines.push(`  ${command.path.join(' ')}  —  ${command.summary}`);
     }
   }
 
@@ -47,9 +47,10 @@ export function renderHelp(registry: CommandRegistry, io: CliIo): void {
     '',
     'Examples:',
     '  wine auth doctor --json',
-    '  wine search run --q "opus one 2018" --target local --json',
-    '  wine search run --q "barolo" --retrieval-mode hybrid --target remote --json',
-    '  wine wine-search run --q "스테이크랑 마실 와인 추천해줘" --json',
+    '  wine search hybrid --q "barolo" --target remote --json',
+    '  wine lookup wine --q "opus one 2018" --target local --json',
+    '  wine agent run --q "스테이크랑 마실 와인 추천해줘" --json',
+    '  wine agent session turn --session-id sess_123 --q "비슷한 스타일로 더 추천해줘" --json',
   );
 
   io.write(`${lines.join('\n')}\n`);

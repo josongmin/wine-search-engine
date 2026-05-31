@@ -6,7 +6,8 @@ import { z } from 'zod';
  * and `/v1/lookup/wine` HTTP surface. The convenience tools
  * (`get_food_pairings`, `check_drinking_window`, `compare_wines`) were removed
  * from the active loop — the agent composes those capabilities from primitive
- * retrieval + synthesis (architecture-decision §5). `search_wines(mode=...)`
+ * retrieval + synthesis (architecture-decision §5). The legacy single search
+ * tool with an in-body lane selector
  * is gone; the lane is selected by the tool NAME, not a body field.
  */
 export const KNOWN_AGENT_TOOL_NAMES = [
@@ -99,11 +100,12 @@ export const DrinkingWindowAttemptInputSchema = z.object({
 export const CompareWinesAttemptInputSchema = z.object({
   query_a: AttemptStringSchema.optional(),
   query_b: AttemptStringSchema.optional(),
-  // Parity with `search_wines`: the planner reasonably mirrors `retrieval_mode`
-  // across the search-family tools. Previously stripped via the strict-parse
+  // Historical parity with the search-family tools: the planner reasonably
+  // mirrors `retrieval_mode` across sibling retrieval calls. Previously stripped via the strict-parse
   // repair pass, which left the planner unable to ever pass the field — see
   // bench #117 RCA (compare-wines-retrieval-mode-and-two-sided-constraints.regression).
-  // The enum source MUST stay shared with `search_wines` (SSoT — CLAUDE.md #25/#30).
+  // The enum source MUST stay shared with the search-family attempt schemas
+  // (SSoT — CLAUDE.md #25/#30).
   retrieval_mode: AttemptStringSchema.optional(),
   exclude_grapes: AttemptStringArraySchema.optional(),
   exclude_regions: AttemptStringArraySchema.optional(),

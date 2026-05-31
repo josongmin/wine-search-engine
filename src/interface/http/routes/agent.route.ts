@@ -1,97 +1,253 @@
-/**
- * Agent surface — T-IR-02 single-shot endpoint.
- *
- * `POST /v1/agent/run` — caller-managed history. The caller submits the
- * full `messages[]` slice it wants the planner to see; the server retains
- * no state between calls (architecture-decision §3.1).
- *
- * During the T-IR-02 → T-IR-03 transition the orchestrator still consumes a
- * single `query` string. The route handler extracts the latest USER message
- * content as that string and passes the prior messages along as
- * orchestrator-visible context. When the orchestrator gains native
- * `messages[]` support (T-IR-03), this adapter collapses to a pass-through.
- *
- * Session-managed endpoints (`/v1/agent/sessions`,
- * `/v1/agent/sessions/:sessionId/turns`) are declared in
- * `agent.schema.ts` but their route registration lands with T-IR-03 alongside
- * the persistent session store.
- */
-
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { registerContractRoute } from './register-contract-route.js';
-import { parseContractBody } from './contract-response.js';
-import { AgentRunRouteContract } from './agent.contract.js';
+import { parseContractBody, sendRouteContractResponse } from './contract-response.js';
+import {
+  AgentRunRouteContract,
+  AgentSessionCreateRouteContract,
+  AgentSessionTurnRouteContract,
+} from './agent.contract.js';
 import type {
-  WineSearchOrchestratorContract as WineSearchOrchestrator,
-} from '@app/wine-search/wine-search-orchestrator.js';
-import { executeWineSearchHttpRequest } from './wine-search-route-support.js';
-import type { AgentMessage, AgentRunRequestBody } from '../schemas/agent.schema.js';
-import { DomainError } from '../../../domain/shared/error/domain-error.js';
+  AgentOptions,
+  AgentSessionCreateResponseBody,
+  AgentSessionTurnParams,
+} from '../schemas/agent.schema.js';
+import {
+  mapWineSearchResultToResponse,
+  buildSessionDescriptor,
+  buildTurnResponse,
+} from '@app/wine-search/presentation/agent-presentation.js';
+import {
+  HTTP_STATUS_CONFLICT,
+  HTTP_STATUS_CREATED,
+  HTTP_STATUS_NOT_FOUND,
+  HTTP_STATUS_OK,
+  MAX_AGENT_STEPS_CAP,
+} from '../constants.js';
+import { buildSearchErrorResponse, sendSearchErrorResponse } from '../errors/error-response.js';
+import { getRequestId } from '../request-id.js';
+import { abortSignalFromFastifyRequest, raceWithRequestAbort } from '../request-abort-signal.js';
+import type { AgentRequestOptions } from '@app/wine-search/wine-search-schemas.js';
+import type { AgentUseCasePort } from '@app/wine-search/port/agent-usecase.port.js';
 
+/**
+ * Agent HTTP surface — `POST /v1/agent` (run), `POST /v1/agent/sessions`
+ * (create), `POST /v1/agent/sessions/:sessionId/turns` (turn).
+ *
+ * These handlers are THIN: parse the wire body → map snake_case → the single
+ * {@link AgentUseCasePort} → shape the response (presentation) / map the
+ * outcome union to a status. ALL business logic (validation, history custody,
+ * planning, store availability) lives behind the use case. The local CLI
+ * facade calls the SAME use case, so the two transports cannot drift.
+ */
 export interface AgentRouteDeps {
-  readonly wineSearchOrchestrator: WineSearchOrchestrator;
+  readonly agentUseCase: AgentUseCasePort;
 }
 
-/**
- * Pulls the most recent `role: 'user'` message content. The planner needs a
- * single anchor utterance — the last user message is the canonical choice
- * (matches both Anthropic Messages API semantics and the way a session turn
- * sandwiches prior context around a new user prompt). Throws a 400 if the
- * caller submitted a `messages` array with no user role — a system-only or
- * assistant-echo-only payload has nothing to plan on.
- */
-function extractLatestUserMessage(messages: readonly AgentMessage[]): string {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const msg = messages[i];
-    if (msg !== undefined && msg.role === 'user') {
-      return msg.content;
-    }
+/** Clamp inbound `max_steps` to the hard cap as defense-in-depth at the edge.
+ *  The orchestrator re-clamps (the runtime SSoT); this just rejects an absurd
+ *  request shape early. */
+function clampMaxSteps(requested: number | undefined): number {
+  if (requested === undefined) {
+    return MAX_AGENT_STEPS_CAP;
   }
-  throw new DomainError(
-    'INVALID_REQUEST',
-    'agent run requires at least one message with role="user"',
+  const floored = Math.floor(requested);
+  if (!Number.isFinite(floored) || floored < 1) {
+    return MAX_AGENT_STEPS_CAP;
+  }
+  return Math.min(floored, MAX_AGENT_STEPS_CAP);
+}
+
+/** Map the HTTP snake_case options bag → the application's camelCase
+ *  {@link AgentRequestOptions}. The SINGLE option-mapping site on the HTTP
+ *  edge (run + sessions share it). Returns `undefined` when nothing is set so
+ *  the use case / service can layer defaults. */
+function toAgentRequestOptions(options: AgentOptions | undefined): AgentRequestOptions | undefined {
+  if (options === undefined) {
+    return undefined;
+  }
+  const mapped: AgentRequestOptions = {
+    ...(options.max_steps !== undefined ? { maxSteps: clampMaxSteps(options.max_steps) } : {}),
+    ...(options.per_step_timeout_ms !== undefined ? { perStepTimeoutMs: options.per_step_timeout_ms } : {}),
+    ...(options.agent_timeout_ms !== undefined ? { agentTimeoutMs: options.agent_timeout_ms } : {}),
+    ...(options.max_total_tokens !== undefined ? { maxTotalTokens: options.max_total_tokens } : {}),
+  };
+  return Object.keys(mapped).length > 0 ? mapped : undefined;
+}
+
+function sendSessionNotFound(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  sessionId: string,
+): void {
+  sendSearchErrorResponse(
+    request,
+    reply,
+    HTTP_STATUS_NOT_FOUND,
+    buildSearchErrorResponse(
+      getRequestId(request),
+      'NOT_FOUND',
+      `agent session "${sessionId}" was not found`,
+      'session_not_found',
+      false,
+    ),
   );
 }
 
-/**
- * Reshapes the new `messages[]` body into the legacy `query` field the
- * orchestrator currently expects. The mapping is intentionally narrow:
- *
- *   - `query`             ← latest user-message content
- *   - `options.*`         ← per-request budget overrides (snake_case keys
- *                           identical to the legacy `WineSearchRequestSchema`)
- *
- * Prior assistant / tool / system messages are not yet fed to the planner —
- * native history support lands with T-IR-03. The fact that we accept them
- * here lets clients write the canonical `messages[]` payload today without
- * waiting for T-IR-03 to ship.
- */
-function adaptAgentRunBodyToWineSearch(body: AgentRunRequestBody): {
-  readonly query: string;
-  readonly options?: AgentRunRequestBody['options'];
-} {
-  const query = extractLatestUserMessage(body.messages);
-  return {
-    query,
-    ...(body.options !== undefined ? { options: body.options } : {}),
-  };
+function sendSessionVersionConflict(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  currentVersion: number,
+): void {
+  sendSearchErrorResponse(
+    request,
+    reply,
+    HTTP_STATUS_CONFLICT,
+    buildSearchErrorResponse(
+      getRequestId(request),
+      'CONFLICT',
+      `agent session version conflict; current version is ${String(currentVersion)}`,
+      'version_conflict',
+      false,
+    ),
+  );
+}
+
+/** Run the use-case call under a request-scoped abort lifecycle: the execution
+ *  signal is the union of the inbound request abort + a lifecycle controller
+ *  that is always aborted in `finally` (no orphaned work). Shared by run + turn
+ *  so the lifecycle pattern is written once. */
+async function withAbortLifecycle<T>(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  message: string,
+  run: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const requestAbortSignal = abortSignalFromFastifyRequest(request, reply);
+  const lifecycleController = new AbortController();
+  const executionAbortSignal = AbortSignal.any([requestAbortSignal, lifecycleController.signal]);
+  try {
+    return await raceWithRequestAbort(run(executionAbortSignal), executionAbortSignal, message);
+  } finally {
+    lifecycleController.abort();
+  }
 }
 
 export function registerAgentRunRoute(app: FastifyInstance, deps: AgentRouteDeps): void {
   registerContractRoute(app, {
     method: 'POST',
-    url: '/v1/agent/run',
+    url: '/v1/agent',
     contract: AgentRunRouteContract,
     handler: async (request, reply) => {
       const parsed = parseContractBody(request, AgentRunRouteContract);
-      const adapted = adaptAgentRunBodyToWineSearch(parsed);
-      await executeWineSearchHttpRequest(
+      const requestId = getRequestId(request);
+      const options = toAgentRequestOptions(parsed.options);
+      const result = await withAbortLifecycle(
         request,
         reply,
-        adapted,
-        AgentRunRouteContract,
-        deps.wineSearchOrchestrator,
+        'Wine search request aborted',
+        (signal) =>
+          deps.agentUseCase.run({
+            messages: parsed.messages,
+            requestId,
+            ...(parsed.context !== undefined ? { context: parsed.context } : {}),
+            ...(options !== undefined ? { options } : {}),
+            abortSignal: signal,
+          }),
       );
+      sendRouteContractResponse(
+        request,
+        reply,
+        AgentRunRouteContract,
+        HTTP_STATUS_OK,
+        mapWineSearchResultToResponse(result, requestId),
+      );
+    },
+  });
+}
+
+export function registerAgentSessionCreateRoute(
+  app: FastifyInstance,
+  deps: AgentRouteDeps,
+): void {
+  registerContractRoute(app, {
+    method: 'POST',
+    url: '/v1/agent/sessions',
+    contract: AgentSessionCreateRouteContract,
+    handler: async (request, reply) => {
+      const parsed = parseContractBody(request, AgentSessionCreateRouteContract);
+      const options = toAgentRequestOptions(parsed.options);
+      const created = await deps.agentUseCase.createSession({
+        ...(parsed.client_session_id !== undefined ? { clientSessionId: parsed.client_session_id } : {}),
+        ...(parsed.context !== undefined ? { context: parsed.context } : {}),
+        ...(options !== undefined ? { options } : {}),
+      });
+      const body: AgentSessionCreateResponseBody = {
+        session: buildSessionDescriptor(created.session),
+        replayed: created.kind === 'idempotent_replay',
+      };
+      sendRouteContractResponse(
+        request,
+        reply,
+        AgentSessionCreateRouteContract,
+        created.kind === 'created' ? HTTP_STATUS_CREATED : HTTP_STATUS_OK,
+        body,
+      );
+    },
+  });
+}
+
+export function registerAgentSessionTurnRoute(
+  app: FastifyInstance,
+  deps: AgentRouteDeps,
+): void {
+  registerContractRoute(app, {
+    method: 'POST',
+    url: '/v1/agent/sessions/:sessionId/turns',
+    contract: AgentSessionTurnRouteContract,
+    handler: async (request, reply) => {
+      const params: AgentSessionTurnParams = AgentSessionTurnRouteContract.params.parse(request.params);
+      const parsed = parseContractBody(request, AgentSessionTurnRouteContract);
+      const requestId = getRequestId(request);
+      const options = toAgentRequestOptions(parsed.options);
+
+      const outcome = await withAbortLifecycle(
+        request,
+        reply,
+        'Wine search request aborted',
+        (signal) =>
+          deps.agentUseCase.runTurn({
+            sessionId: params.sessionId,
+            clientTurnId: parsed.client_turn_id,
+            messages: parsed.messages,
+            requestId,
+            abortSignal: signal,
+            ...(parsed.expected_session_version !== undefined
+              ? { expectedSessionVersion: parsed.expected_session_version }
+              : {}),
+            ...(options !== undefined ? { options } : {}),
+          }),
+      );
+
+      switch (outcome.kind) {
+        case 'appended':
+        case 'idempotent_replay': {
+          const response = mapWineSearchResultToResponse(outcome.result, requestId);
+          sendRouteContractResponse(
+            request,
+            reply,
+            AgentSessionTurnRouteContract,
+            outcome.replayed ? HTTP_STATUS_OK : HTTP_STATUS_CREATED,
+            buildTurnResponse(response, outcome.session, outcome.turn, outcome.replayed),
+          );
+          return;
+        }
+        case 'version_conflict':
+          sendSessionVersionConflict(request, reply, outcome.currentVersion);
+          return;
+        case 'session_not_found':
+          sendSessionNotFound(request, reply, params.sessionId);
+          return;
+      }
     },
   });
 }

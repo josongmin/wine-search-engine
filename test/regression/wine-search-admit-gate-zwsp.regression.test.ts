@@ -128,7 +128,9 @@ function buildOrchestrator() {
 }
 
 function runInput(query: string): WineSearchInput {
-  return { query, requestId: REQUEST_ID };
+  // T-MTA-01: messages-native input — the single query becomes one user
+  // message; the admit-gate ZWSP-strip semantics apply to the anchor.
+  return { messages: [{ role: 'user', content: query }], requestId: REQUEST_ID };
 }
 
 // ---------------------------------------------------------------------------

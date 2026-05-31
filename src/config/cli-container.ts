@@ -12,9 +12,9 @@ import { CodexAuthStoreAdapter } from '../infrastructure/cli/auth/codex-auth-sto
 import { ChatGptModelCatalogProbeAdapter } from '../infrastructure/cli/auth/chatgpt-model-catalog-probe.js';
 import { CodexLoginDelegateAdapter } from '../infrastructure/cli/auth/codex-login-delegate.js';
 import { LocalSearchFacade } from '../infrastructure/cli/local/local-search-facade.js';
-import { LocalWineSearchFacade } from '../infrastructure/cli/local/local-wine-search-facade.js';
+import { LocalAgentFacade } from '../infrastructure/cli/local/local-agent-facade.js';
 import { RemoteSearchFacade } from '../infrastructure/cli/remote/remote-search-facade.js';
-import { RemoteWineSearchFacade } from '../infrastructure/cli/remote/remote-wine-search-facade.js';
+import { RemoteAgentFacade } from '../infrastructure/cli/remote/remote-agent-facade.js';
 
 /**
  * CLI composition root. Its ONLY job is to turn resolved global args into a
@@ -42,13 +42,13 @@ function resolveFacadeRegistry(env: EnvLike, profile: ResolvedCliProfile): CliFa
     return {
       auth: buildAuthFacade(env),
       search: new LocalSearchFacade(),
-      wineSearch: new LocalWineSearchFacade(),
+      agent: new LocalAgentFacade(),
     };
   }
   return {
     auth: buildAuthFacade(env),
     search: new RemoteSearchFacade(profile),
-    wineSearch: new RemoteWineSearchFacade(profile),
+    agent: new RemoteAgentFacade(profile),
   };
 }
 

@@ -55,7 +55,7 @@ function groundingOutcome(wines: ReadonlyArray<Record<string, unknown>>): ToolOu
   const envelope = `검색 결과입니다.\nGROUNDING_JSON: ${JSON.stringify({ queryType: 'search', wines })}`;
   return {
     stepId: 'step-0:0',
-    tool: 'search_wines',
+    tool: 'search_hybrid',
     kind: 'success',
     result: envelope,
     durationMs: 10,
@@ -172,7 +172,7 @@ describe('faithfulness measurement anchors — no grounding facts falls to LLM',
     // A non-grounding observation (no envelope, no structured wines).
     const outcome: ToolOutcome = {
       stepId: 'step-0:0',
-      tool: 'search_wines',
+      tool: 'search_hybrid',
       kind: 'success',
       result: '검색을 수행했지만 구조화된 결과가 없습니다.',
       durationMs: 5,

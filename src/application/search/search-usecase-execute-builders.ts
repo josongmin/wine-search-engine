@@ -24,14 +24,19 @@ const ENTROPY_SNAPSHOT_REASON_FRACTION_DIGITS = 4;
 const ENTROPY_CLARIFICATION_REASON_FRACTION_DIGITS = 3;
 
 /**
- * Max disambiguation candidates surfaced in a clarification payload (top labels,
- * option entities, and the `candidates` array). Bounded to 3 so the clarify UI
- * presents a short, scannable choice set rather than the full ranked pool — a
- * "did you mean A / B / C?" prompt, not a result list. Applied identically to
- * every clarification slice so the label list, optionEntities, and candidates
- * stay in lockstep.
+ * Number of disambiguation candidates previewed in a clarification payload (top
+ * labels, option entities, and the `candidates` array). Bounded to 3 so the
+ * clarify UI presents a short, scannable choice set rather than the full ranked
+ * pool — a "did you mean A / B / C?" prompt, not a result list. Applied
+ * identically to every clarification slice so the label list, optionEntities,
+ * and candidates stay in lockstep.
+ *
+ * NOTE: distinct from the HTTP array bound `MAX_CLARIFICATION_CANDIDATES`
+ * (=20) in `interface/http/constants.ts`, which is the schema MAX a response
+ * may carry. This is the much smaller presentation top-N we actually emit;
+ * named differently on purpose to avoid same-name/different-value drift.
  */
-const MAX_CLARIFICATION_CANDIDATES = 3;
+const CLARIFICATION_PREVIEW_TOP_N = 3;
 
 function buildAbstainDecisionTraceReason(
   abstainDecision: TypedAbstainDecision,
@@ -263,7 +268,7 @@ function buildStructuredClarifyPayload(
   const topLabels = shouldFailClosedIdentityClarification(plan, abstainDecision)
     ? []
     : rankedResults
-      .slice(0, MAX_CLARIFICATION_CANDIDATES)
+      .slice(0, CLARIFICATION_PREVIEW_TOP_N)
       .map((result) => result.canonicalLabel)
       .filter((label) => label.trim().length > 0);
   const topAmbiguousEntityHint = plan.expansions.ambiguousEntityHints?.[0];
@@ -306,13 +311,13 @@ function buildStructuredClarifyPayload(
           ? {
               options: topLabels,
               optionEntities: rankedResults
-                .slice(0, MAX_CLARIFICATION_CANDIDATES)
+                .slice(0, CLARIFICATION_PREVIEW_TOP_N)
                 .map((result): StructuredClarifyOptionEntity => ({
                   entityId: result.entityId,
                   label: result.canonicalLabel,
                   distinguishingFeatures: buildClarificationDistinguishingFeatures(
                     result,
-                    rankedResults.slice(0, MAX_CLARIFICATION_CANDIDATES),
+                    rankedResults.slice(0, CLARIFICATION_PREVIEW_TOP_N),
                   ),
                 })),
             }
@@ -521,12 +526,12 @@ export function buildEntropyAbstainResponseParams(options: {
       structuredPayload: buildStructuredClarifyPayload(plan, abstainDecision, presentationRankedResults),
       candidates: failClosedIdentityClarification
         ? []
-        : presentationRankedResults.slice(0, MAX_CLARIFICATION_CANDIDATES).map((r) => ({
+        : presentationRankedResults.slice(0, CLARIFICATION_PREVIEW_TOP_N).map((r) => ({
           entityId: r.entityId,
           label: r.canonicalLabel,
           distinguishingFeatures: buildClarificationDistinguishingFeatures(
             r,
-            presentationRankedResults.slice(0, MAX_CLARIFICATION_CANDIDATES),
+            presentationRankedResults.slice(0, CLARIFICATION_PREVIEW_TOP_N),
           ),
         })),
       suggestionType: 'disambiguation',
