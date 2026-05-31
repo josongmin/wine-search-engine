@@ -1,15 +1,10 @@
 import type { SearchIndexPort, DenseHit, SparseHit } from '../port/search-index.port.js';
 import type { EmbeddingServicePort } from '../port/embedding-service.port.js';
 import type { HybridRetrievalInput } from '../model/retrieval-input.js';
-import type { HybridCandidate } from '../model/hybrid-candidate.js';
-import type { NormalizedConstraint } from '../../shared/types/index.js';
 import type { ExecutionRetrievalMode } from '../../query/model/engine-execution-contract.js';
 import type {
-  CandidateEnvelope,
   CandidateChannel,
   CandidateDropRecord,
-  QueryViewMatch,
-  RetrievalChannelFiringState,
   RetrievalChannelTrace,
   RrfFusionTrace,
 } from '../model/candidate-envelope.js';
@@ -22,19 +17,15 @@ import type {
   RetrievalLaneStatus,
 } from '../model/retrieval-execution-result.js';
 import { buildRetrievalExecutionResult } from '../model/retrieval-execution-result.js';
-import { CandidateProvenanceV2Schema } from '../model/retrieval-contract-v2.js';
 import {
   RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY,
   RETRIEVAL_CHANNEL_DENSE_SEMANTIC,
   RETRIEVAL_CHANNEL_LEARNED_SPARSE,
   RETRIEVAL_CHANNEL_RELATIVE_FILTER,
   RETRIEVAL_CHANNEL_SPARSE_BM25,
-  preferCanonicalRetrievalChannelLabels,
-  toCanonicalCandidateChannel,
   type RetrievalChannel,
 } from '../model/retrieval-channel.js';
 
-import { rrfContribution } from '../../shared/utils/rrf.js';
 import { EMBEDDING_MODEL } from '../../shared/constants/embedding.js';
 import { type FusionService, NEUTRAL_FUSION_WEIGHTS, type FusionWeights } from './fusion.js';
 import { RetrievalProfileService } from './retrieval-profile.js';
@@ -52,12 +43,24 @@ import {
   validateConstraintBundle,
   emitConstraintValidationTelemetry,
 } from './constraint-validator.js';
-import {
-  extractSearchConstraints,
-  krwToUsd,
-} from '../../query/service/search-constraint-extractor.js';
 import { annotateCandidateConstraintEvidenceBatch } from './candidate-constraint-evidence.js';
-import { CandidateAssembler, type AssemblyPolicy } from './candidate-assembly.js';
+import { CandidateAssembler } from './candidate-assembly.js';
+import {
+  hasStructuredPriceConstraint,
+  buildRawQueryPriceConstraints,
+} from './candidate-pool-price-constraints.js';
+import {
+  resolveVespaRankProfile,
+  buildAssemblyPolicy,
+  resolveExplorationTopN,
+} from './candidate-pool-rank-profile.js';
+import {
+  classifyChannelError,
+  buildChannelTrace,
+  toExecutionLane,
+} from './candidate-pool-channel-trace.js';
+import { buildLearnedSparseQueryWeights } from './candidate-pool-learned-sparse-query.js';
+import { hybridCandidateToEnvelope } from './candidate-pool-provenance.js';
 import { applyProtectedRecallPolicy } from './protected-recall-policy.js';
 import { accumulateEvidence } from './evidence-accumulator.js';
 import { applyRelativeFilter } from './relative-filter-policy.js';
@@ -73,24 +76,6 @@ import type { RetrievalExecutorV2Port } from '../port/retrieval-executor-v2.port
 import { bootstrapLogger } from '../../shared/bootstrap-logger.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 import { deriveQueryFamily } from '../../query/model/query-observability-vocab.js';
-import { CircuitBreakerOpenError } from '../../shared/error/circuit-breaker-open-error.js';
-
-/**
- * Wave 2 — classify a thrown error into the per-channel telemetry
- * firing-state bucket. The buckets are deliberately narrow so dashboards
- * can colour-code "expected dormant" vs "real infra failure" without
- * inspecting log strings.
- *
- * Heuristic-free: every branch is driven by a typed class / standard
- * DOM contract (CircuitBreakerOpenError, AbortError, plain Error).
- */
-function classifyChannelError(err: unknown): 'circuit_breaker_open' | 'timeout' | 'error' {
-  if (err instanceof CircuitBreakerOpenError) return 'circuit_breaker_open';
-  // AbortError is the canonical Web-standard timeout marker — fetch + AbortSignal
-  // both surface `name === 'AbortError'` when the per-channel deadline fires.
-  if (err instanceof Error && err.name === 'AbortError') return 'timeout';
-  return 'error';
-}
 
 function isSearchSubstrateUnavailable(searchIndex: SearchIndexPort): boolean {
   return searchIndex.getSearchAvailabilityState?.() === 'unavailable';
@@ -122,65 +107,6 @@ const HYBRID_ANCHOR_CONFIDENCE_DEFAULT = 0.5;
  * TRACK-A A4: runtimeMode 'entity_anchor_first' overrides to 'entity_exact'
  * so the anchor-dominant fusion config is used instead of specific_wine.
  */
-/** Max expansion terms fed into retrieval query views. */
-const QUERY_EXPANSION_MAX_TERMS = 32;
-/** Weight increment per repeated token occurrence in expansion stats. */
-const QUERY_EXPANSION_TERM_WEIGHT_STEP = 0.25;
-
-const PRICE_CONSTRAINT_ATTRIBUTES: ReadonlySet<string> = new Set([
-  'price',
-  'price_usd',
-]);
-
-function hasStructuredPriceConstraint(constraints: readonly NormalizedConstraint[]): boolean {
-  return constraints.some((constraint) =>
-    PRICE_CONSTRAINT_ATTRIBUTES.has(constraint.attribute)
-    && constraint.soft_promotion_authority === 'allow'
-  );
-}
-
-function buildRawQueryPriceConstraints(rawQuery: string): readonly NormalizedConstraint[] {
-  if (rawQuery.length === 0) {
-    return [];
-  }
-  const extracted = extractSearchConstraints(rawQuery);
-  const constraints: NormalizedConstraint[] = [];
-  if (extracted.minPriceKrw !== undefined && extracted.maxPriceKrw !== undefined) {
-    constraints.push({
-      attribute: 'price_usd',
-      operator: 'range',
-      value: {
-        min: krwToUsd(extracted.minPriceKrw),
-        max: krwToUsd(extracted.maxPriceKrw),
-      },
-      source_phrase: 'raw_query_price_extractor',
-      confidence: 1,
-      mapping_version: 'raw-query-price-extractor-v1',
-    });
-    return constraints;
-  }
-  if (extracted.minPriceKrw !== undefined) {
-    constraints.push({
-      attribute: 'price_usd',
-      operator: '>=',
-      value: krwToUsd(extracted.minPriceKrw),
-      source_phrase: 'raw_query_price_extractor',
-      confidence: 1,
-      mapping_version: 'raw-query-price-extractor-v1',
-    });
-  }
-  if (extracted.maxPriceKrw !== undefined) {
-    constraints.push({
-      attribute: 'price_usd',
-      operator: '<=',
-      value: krwToUsd(extracted.maxPriceKrw),
-      source_phrase: 'raw_query_price_extractor',
-      confidence: 1,
-      mapping_version: 'raw-query-price-extractor-v1',
-    });
-  }
-  return constraints;
-}
 // W0-2: Removed LEARNED_SPARSE_CHANNEL_ENABLED compile-time flag.
 // The single source of truth is now `killSwitchLearning` (constructor arg) wired
 // from `config.killSwitch.learning`. This enables SPLADE / learned_sparse
@@ -1459,444 +1385,4 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       anchorConfidence: input.queryPlan.anchors[0]?.confidence ?? HYBRID_ANCHOR_CONFIDENCE_DEFAULT,
     };
   }
-}
-
-/**
- * Wave 2 — derive a single `RetrievalChannelTrace` row from a channel's
- * lane result. The mapping is deterministic and documented:
- *
- *  - When the channel was not selected for this request (`active=false`)
- *    AND the lane was not invoked → `dormant`. This is the EXPECTED off
- *    state; operators do NOT alert on it.
- *  - When the lane reported `infra_failure` AND classified its error as
- *    `circuit_breaker_open` / `timeout` → surface that exact kind.
- *  - When the lane reported `infra_failure` from any other class →
- *    `error` (still degraded, but not breaker-open / timeout).
- *  - Otherwise (`ok` / `empty` / `disabled` with active=true and no
- *    degradation) → `active`. `disabled` happens when the channel is
- *    administratively gated (e.g. dense kill switch); we map it to
- *    `dormant` so dashboards don't read "active 0 hits" for an
- *    operator-disabled channel.
- */
-function buildChannelTrace(input: {
-  readonly channel: CandidateChannel;
-  readonly active: boolean;
-  readonly result: {
-    readonly status: RetrievalLaneStatus;
-    readonly degraded: boolean;
-    readonly degradation?: {
-      readonly errorKind?: 'circuit_breaker_open' | 'timeout' | 'error' | undefined;
-    } | undefined;
-  };
-  readonly hits: ReadonlyArray<unknown>;
-  readonly topKInput: number;
-  readonly fusionContribution: number;
-}): RetrievalChannelTrace {
-  let firingState: RetrievalChannelFiringState;
-  if (input.result.status === 'disabled' || !input.active) {
-    firingState = 'dormant';
-  } else if (input.result.status === 'infra_failure') {
-    const kind = input.result.degradation?.errorKind ?? 'error';
-    firingState = kind;
-  } else {
-    firingState = 'active';
-  }
-  return {
-    channel: input.channel,
-    firingState,
-    hitCount: input.hits.length,
-    // When the channel did not run, the top-K it WOULD have used is
-    // meaningless to operators — report 0 to keep the row truthful.
-    topKInput: firingState === 'dormant' ? 0 : input.topKInput,
-    fusionContribution: input.fusionContribution,
-  };
-}
-
-function toExecutionLane<THit>(
-  lane: {
-    readonly status: RetrievalLaneStatus;
-    readonly hits: readonly THit[];
-    readonly degraded: boolean;
-    readonly degradation?: { readonly reason: string } | undefined;
-  },
-): RetrievalExecutionLane<THit> {
-  return {
-    status: lane.status,
-    hits: lane.hits,
-    degraded: lane.degraded,
-    error: lane.degradation?.reason,
-  };
-}
-
-/**
- * Maps a retrieval mode to the Vespa rank profile that best serves it.
- *
- * - producer_browse / region_browse → `prestige_hybrid`: blends BM25+ANN with
- *   critic score (35%) and producer prestige (25%), surfacing quality-first results
- *   without a second post-retrieval rerank pass.
- * - compare_candidates / relative → `prestige_hybrid`: head-to-head comparisons
- *   benefit from the same quality-first signal set.
- * - discovery / recommendation / occasion → `wine_aware`: full domain signals with
- *   2-phase reranking; adds availability boost, critic score, vintage freshness,
- *   and drinking-window proximity on top of hybrid phase-1. Best for "find me a wine"
- *   queries where domain quality signals matter most.
- * - everything else → `hybrid`: normalized BM25+ANN+popularity for standard search.
- */
-function resolveVespaRankProfile(retrievalMode: string | undefined): string {
-  switch (retrievalMode) {
-    case 'producer_browse':
-    case 'region_browse':
-    case 'compare_candidates':
-    case 'relative':
-      return 'prestige_hybrid';
-    case 'discovery':
-    case 'recommendation':
-    case 'occasion':
-      return 'wine_aware';
-    default:
-      return 'hybrid';
-  }
-}
-
-function buildAssemblyPolicy(maxTotal: number): AssemblyPolicy {
-  return {
-    maxTotal,
-    protectExactMatches: true,
-    protectAnchorConditioned: true,
-  };
-}
-
-function resolveExplorationTopN(
-  profileTopN: number,
-  executionBudgetMaxCandidates?: number,
-): number {
-  if (
-    executionBudgetMaxCandidates === undefined
-    || !Number.isFinite(executionBudgetMaxCandidates)
-    || executionBudgetMaxCandidates <= 0
-  ) {
-    return profileTopN;
-  }
-  return Math.min(profileTopN, Math.trunc(executionBudgetMaxCandidates));
-}
-
-function toCandidateChannels(candidate: HybridCandidate): CandidateChannel[] {
-  const channels: CandidateChannel[] = [];
-  const seenChannels = new Set<CandidateChannel>();
-  const pushChannel = (channel: CandidateChannel): void => {
-    if (!seenChannels.has(channel)) {
-      seenChannels.add(channel);
-      channels.push(channel);
-    }
-  };
-  if (candidate.sparseRank !== undefined) pushChannel(RETRIEVAL_CHANNEL_SPARSE_BM25);
-  if (candidate.denseRank !== undefined) pushChannel(RETRIEVAL_CHANNEL_DENSE_SEMANTIC);
-  if (candidate.learnedSparseRank !== undefined) pushChannel(RETRIEVAL_CHANNEL_LEARNED_SPARSE);
-  if (candidate.anchorRank !== undefined) pushChannel(RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY);
-
-  for (const source of candidate.retrievalTrace.candidateSources) {
-    const canonicalSource = toCanonicalCandidateChannel(source);
-    if (canonicalSource !== null) {
-      pushChannel(canonicalSource);
-    }
-  }
-
-  return channels;
-}
-
-// toCanonicalCandidateChannel + isCandidateChannel: imported from retrieval-channel.ts (SSoT)
-
-function normalizeCandidateChannelScores(
-  channelScores: CandidateEnvelope['provenance']['channelScores'],
-): CandidateEnvelope['provenance']['channelScores'] {
-  return channelScores.flatMap((score) => {
-    const canonical = toCanonicalCandidateChannel(score.channel);
-    return canonical === null ? [] : [{ ...score, channel: canonical }];
-  });
-}
-
-function normalizeCandidateQueryViewMatches(
-  queryViewMatches: readonly QueryViewMatch[],
-): CandidateEnvelope['provenance']['queryViewMatches'] {
-  const seen = new Set<string>();
-  const normalized: QueryViewMatch[] = [];
-
-  for (const match of queryViewMatches) {
-    const canonical = toCanonicalCandidateChannel(match.channel);
-    if (canonical === null) {
-      continue;
-    }
-    const next = { ...match, channel: canonical } satisfies QueryViewMatch;
-    const key = `${next.viewName}\u0000${next.matchedText}\u0000${next.channel}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      normalized.push(next);
-    }
-  }
-
-  return normalized;
-}
-
-function normalizeCandidateProvenance(
-  provenance: CandidateEnvelope['provenance'],
-): CandidateEnvelope['provenance'] {
-  const channels: CandidateChannel[] = [];
-  const seenChannels = new Set<CandidateChannel>();
-  for (const channel of provenance.channels) {
-    const canonical = toCanonicalCandidateChannel(channel);
-    if (canonical !== null && !seenChannels.has(canonical)) {
-      seenChannels.add(canonical);
-      channels.push(canonical);
-    }
-  }
-
-  return {
-    ...provenance,
-    channels,
-    channelScores: normalizeCandidateChannelScores(provenance.channelScores),
-    queryViewMatches: normalizeCandidateQueryViewMatches(provenance.queryViewMatches),
-  };
-}
-
-function toCandidateProvenance(
-  provenance: CandidateEnvelope['provenance'],
-): CandidateEnvelope['provenance'] {
-  const normalized = normalizeCandidateProvenance(provenance);
-  const result = CandidateProvenanceV2Schema.safeParse(normalized);
-  if (!result.success) {
-    bootstrapLogger.warn(
-      { issues: result.error.issues },
-      '[CandidatePool] toCandidateProvenance: schema validation failed — using raw normalized provenance',
-    );
-    return normalized;
-  }
-  const parsed = result.data;
-  return {
-    channels: parsed.channels,
-    channelScores: parsed.channelScores,
-    queryViewMatches: parsed.queryViewMatches,
-    anchorConditioned: parsed.anchorConditioned,
-    matchedFilterConstraints: parsed.matchedFilterConstraints,
-    ...(parsed.failedHardConstraints !== undefined
-      ? { failedHardConstraints: parsed.failedHardConstraints }
-      : {}),
-    ...(parsed.protectedInclusionReason !== undefined
-      ? { protectedInclusionReason: parsed.protectedInclusionReason }
-      : {}),
-    fusionProfile: parsed.fusionProfile,
-    fusionScore: parsed.fusionScore,
-  };
-}
-
-function hybridCandidateToEnvelope(
-  candidate: HybridCandidate,
-  fusionK: number,
-): CandidateEnvelope {
-  if (candidate.retrievalProvenance !== undefined) {
-    const provenance = toCandidateProvenance(candidate.retrievalProvenance);
-    return {
-      entityId: candidate.entityId,
-      provenance,
-      legacyCandidate: {
-        ...candidate,
-        retrievalTrace: {
-          ...candidate.retrievalTrace,
-          candidateSources: preferCanonicalRetrievalChannelLabels(
-            candidate.retrievalTrace.candidateSources,
-          ),
-        },
-      },
-    };
-  }
-
-  const channels = toCandidateChannels(candidate);
-  const channelScores = [];
-
-  // Bugbash 2026-04-09 (Group C): per-channel raw scores must never be
-  // fabricated from any fused score. Missing per-channel raw means missing
-  // evidence, not "reuse the fusion total".
-  // Contract: when a per-channel rank is present but the matching raw is
-  // missing, we log a warning and SKIP that channel entry rather than
-  // fabricating an incorrect rawScore.
-  if (candidate.sparseRank !== undefined) {
-    if (candidate.sparseRawScore !== undefined) {
-      channelScores.push({
-        channel: RETRIEVAL_CHANNEL_SPARSE_BM25,
-        rawScore: candidate.sparseRawScore,
-        rank: candidate.sparseRank,
-        rrfContribution: rrfContribution(candidate.sparseRank, fusionK),
-      });
-    } else {
-      bootstrapLogger.warn(
-        {
-          entityId: candidate.entityId,
-          channel: RETRIEVAL_CHANNEL_SPARSE_BM25,
-          rank: candidate.sparseRank,
-        },
-        'hybridCandidateToEnvelope: sparse channel has rank but no rawScore — skipping channelScores entry (contract violation)',
-      );
-    }
-  }
-  if (candidate.denseRank !== undefined) {
-    if (candidate.denseRawScore !== undefined) {
-      channelScores.push({
-        channel: RETRIEVAL_CHANNEL_DENSE_SEMANTIC,
-        rawScore: candidate.denseRawScore,
-        rank: candidate.denseRank,
-        rrfContribution: rrfContribution(candidate.denseRank, fusionK),
-      });
-    } else {
-      bootstrapLogger.warn(
-        {
-          entityId: candidate.entityId,
-          channel: RETRIEVAL_CHANNEL_DENSE_SEMANTIC,
-          rank: candidate.denseRank,
-        },
-        'hybridCandidateToEnvelope: dense channel has rank but no rawScore — skipping channelScores entry (contract violation)',
-      );
-    }
-  }
-  if (candidate.learnedSparseRank !== undefined) {
-    if (candidate.learnedSparseRawScore !== undefined) {
-      channelScores.push({
-        channel: RETRIEVAL_CHANNEL_LEARNED_SPARSE,
-        rawScore: candidate.learnedSparseRawScore,
-        rank: candidate.learnedSparseRank,
-        rrfContribution: rrfContribution(candidate.learnedSparseRank, fusionK),
-      });
-    } else {
-      bootstrapLogger.warn(
-        {
-          entityId: candidate.entityId,
-          channel: RETRIEVAL_CHANNEL_LEARNED_SPARSE,
-          rank: candidate.learnedSparseRank,
-        },
-        'hybridCandidateToEnvelope: learned_sparse channel has rank but no rawScore — skipping channelScores entry (contract violation)',
-      );
-    }
-  }
-  if (candidate.anchorRank !== undefined) {
-    if (candidate.anchorRawScore !== undefined) {
-      channelScores.push({
-        channel: RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY,
-        rawScore: candidate.anchorRawScore,
-        rank: candidate.anchorRank,
-        rrfContribution: rrfContribution(candidate.anchorRank, fusionK),
-      });
-    } else {
-      bootstrapLogger.warn(
-        {
-          entityId: candidate.entityId,
-          channel: RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY,
-          rank: candidate.anchorRank,
-        },
-        'hybridCandidateToEnvelope: anchor channel has rank but no rawScore — skipping channelScores entry (contract violation)',
-      );
-    }
-  }
-
-  const provenance = {
-    channels,
-    channelScores,
-    queryViewMatches: [],
-    anchorConditioned: candidate.anchorRank !== undefined,
-    matchedFilterConstraints: candidate.matchedConstraints,
-    ...(candidate.unmetHardConstraints !== undefined
-      ? { failedHardConstraints: candidate.unmetHardConstraints }
-      : {}),
-    fusionProfile: candidate.retrievalTrace.retrievalProfile,
-    // fusionRrfTotal: set by FusionService only. Non-fusion candidates (Browse/Compare/similar)
-    // fall back to sparseRawScore (their canonical per-channel score). Default 0 is safe —
-    // these candidates are ranked by signal-computer, not by this fallback fusionScore.
-    fusionScore: candidate.fusionRrfTotal ?? candidate.sparseRawScore ?? 0,
-  } satisfies CandidateEnvelope['provenance'];
-  const normalizedProvenance = toCandidateProvenance(provenance);
-
-  return {
-    entityId: candidate.entityId,
-    provenance: normalizedProvenance,
-    legacyCandidate: {
-      ...candidate,
-      retrievalTrace: {
-        ...candidate.retrievalTrace,
-        candidateSources: preferCanonicalRetrievalChannelLabels(
-          candidate.retrievalTrace.candidateSources,
-        ),
-      },
-      retrievalProvenance: normalizedProvenance,
-    },
-  };
-}
-
-function buildLearnedSparseQueryWeights(
-  input: HybridRetrievalInput,
-): readonly { token: string; weight: number }[] {
-  const counts = new Map<string, number>();
-  const sourceQueries = [...input.lexicalQueries, ...input.semanticQueries];
-
-  for (const query of sourceQueries) {
-    for (const token of query
-      .toLowerCase()
-      .split(/[^\p{L}\p{N}]+/u)
-      .map((part) => part.trim())
-      .filter((part) => part.length >= 2)) {
-      counts.set(token, (counts.get(token) ?? 0) + 1);
-    }
-  }
-
-  for (const boost of [
-    ...(input.retrievalPlan?.softBoosts ?? []),
-    ...(input.retrievalPlan?.inferredBoosts ?? []),
-  ]) {
-    const boostTokens = retrievalValueToTokens(boost.value);
-    for (const token of boostTokens) {
-      // Math.max(0, ...) prevents negative weights from corrupting counts.
-      // Previously Math.max(1, ...) was used but that clamps all [0,1]-range weights to 1,
-      // discarding calibrated confidence signal entirely — high-confidence (0.95) and
-      // low-confidence (0.07) boosts received identical increments of 1.
-      counts.set(token, (counts.get(token) ?? 0) + Math.max(0, Number.isFinite(boost.weight) ? boost.weight : 0));
-    }
-  }
-
-  return [...counts.entries()]
-    .sort((left, right) => {
-      const diff = right[1] - left[1];
-      const primary = Number.isFinite(diff) ? diff : 0;
-      // Deterministic tiebreaker: avoid localeCompare() which is locale-dependent
-      // and produces different token orderings across systems (CLAUDE.md rule 21).
-      // Tokens are ASCII-safe query terms so simple lexicographic comparison is correct.
-      return primary !== 0 ? primary : (left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0);
-    })
-    .slice(0, QUERY_EXPANSION_MAX_TERMS)
-    .map(([token, count]) => ({
-      token,
-      weight: 1 + (count - 1) * QUERY_EXPANSION_TERM_WEIGHT_STEP,
-    }));
-}
-
-function retrievalValueToTokens(value: HybridRetrievalInput['hardConstraints'][number]['value']): readonly string[] {
-  if (typeof value === 'string') {
-    return tokenizeRetrievalValue(value);
-  }
-  if (typeof value === 'number') {
-    return [value.toString()];
-  }
-  if (Array.isArray(value)) {
-    const tokens: string[] = [];
-    for (const entry of value) {
-      if (typeof entry === 'string') {
-        tokens.push(...tokenizeRetrievalValue(entry));
-      }
-    }
-    return tokens;
-  }
-  return [];
-}
-
-function tokenizeRetrievalValue(value: string): readonly string[] {
-  return value
-    .toLowerCase()
-    .split(/[^\p{L}\p{N}]+/u)
-    .map((part) => part.trim())
-    .filter((part) => part.length >= 2);
 }

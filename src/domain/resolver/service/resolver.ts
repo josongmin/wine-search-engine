@@ -1,8 +1,5 @@
 import type { DecisionStatus, NextAction, QueryClass } from '../../shared/types/index.js';
 import { bootstrapLogger } from '../../../domain/shared/bootstrap-logger.js';
-import type { QueryPolicy } from '../../query/model/query-policy.js';
-import type { QueryUncertainty } from '../../query/model/query-uncertainty.js';
-import type { NormalizedQueryViews } from '../../query/model/query-views.js';
 import type { AnchorCandidate } from '../../query/model/anchor-candidate.js';
 import type { ThresholdEntry } from '../../query/model/threshold-profile.js';
 import { DEFAULT_THRESHOLD_PROFILE } from '../../query/model/threshold-profile.js';
@@ -25,203 +22,32 @@ import type {
 import { computeMatcherFeatures } from './learned-matcher-features.js';
 import type { MatcherFeatureVector } from './learned-matcher-features.js';
 import { compareScoreWithTiebreaker } from '../../shared/utils/stable-comparator.js';
-import { CONFORMAL_ALPHA } from '../../shared/config/conformal-config.js';
 import { CORRECTIVE_RETRY_CONFIDENCE_THRESHOLD as RESOLVER_CORRECTIVE_RETRY_CONFIDENCE_THRESHOLD } from '../model/corrective-retry-thresholds.js';
+import {
+  MAX_RESOLVED_CANDIDATES,
+  sanitizeRawScore,
+  classifyLearnedMatcherFailureReason,
+} from './resolver-scoring.js';
+import {
+  computeConformalSetSize,
+  DEFAULT_ALPHA,
+} from './resolver-conformal.js';
+import {
+  applyLookupStrategyAdjustments,
+  computeLookupStrategyAdjustment,
+} from './resolver-lookup-strategy.js';
+import type { LookupStrategyAdjustment } from './resolver-lookup-strategy.js';
+import type { ResolverInput } from '../model/resolver-input.js';
 
-/** Valid conformal alpha interval is (0, this upper bound]. */
-const CONFORMAL_ALPHA_MAX_EXCLUSIVE = 0.5;
+// Re-export the public API so external import paths
+// (`service/resolver.js`) remain stable after the split.
+export { MAX_RESOLVED_CANDIDATES } from './resolver-scoring.js';
+export { computeConformalSetSize, DEFAULT_ALPHA } from './resolver-conformal.js';
+export type { ResolverInput } from '../model/resolver-input.js';
+
 /** Blend resolver raw score with learned match probability. */
 const LEARNED_MATCH_RAW_SCORE_BLEND = 0.6;
 const LEARNED_MATCH_PROBABILITY_BLEND = 0.4;
-/** Cap confidence gap for short-form queries with only noisy lookup support. */
-const SHORT_FORM_NOISY_SUPPORT_GAP_CAP = 0.01;
-/** Decimal places when serializing gap for traces. */
-const RESOLVER_GAP_TRACE_DECIMAL_PLACES = 4;
-
-/**
- * Upper bound on the number of ranked candidates the resolver emits.
- *
- * The blocker (recall >= 0.99) can return a large candidate pool for noisy /
- * short-form queries, but the decision layer and the clarification UI only ever
- * consume the top of the ranked list:
- *   - resolution reads top-1;
- *   - the calibrated gap reads top-1 vs top-2;
- *   - the conformal prediction set caps at K = 2 for any C >= 1 - 2*alpha;
- *   - the clarification surface (RFC-006 §7) presents a small disambiguation
- *     menu, not the full pool.
- *
- * Bounding the *emitted* list to a named constant keeps the result payload
- * deterministic in size and prevents an unbounded array from flowing into the
- * trace / HTTP response on adversarial high-fan-out queries. The bound is >= 2
- * so the top-1/top-2 calibration contract (buildResolvedCandidates index 0/1)
- * is always satisfiable. Ranking, scoring, ambiguity detection, and calibration
- * all run over the FULL pool first; only the final emitted slice is bounded.
- */
-export const MAX_RESOLVED_CANDIDATES = 16;
-
-/**
- * Floor raw score assigned to a candidate whose computed raw score is
- * non-finite (NaN / ±Infinity).
- *
- * A non-finite raw score can only arise from a corrupted MatchSignalSet (e.g. a
- * JSONB column that survived validation but carries NaN, or an upstream divide
- * that produced Infinity). Two contracts force the resolver to neutralize it at
- * the scoring boundary rather than propagate it:
- *   1. The SSoT comparator normalizes NaN to -Infinity, so a poisoned candidate
- *      already sorts to the END of the list — but its raw value is still NaN.
- *   2. `Calibrator.calibrate()` THROWS on a non-finite top1/top2 raw score
- *      (its documented fail-loud contract). Without sanitization a single
- *      poisoned candidate crashes the entire resolution into an exception
- *      instead of degrading to a typed `failed` result.
- *
- * Mapping the value to a finite floor keeps the candidate strictly below any
- * legitimately-scored candidate (the weighted-sum scorer's only negative term
- * is the ambiguity penalty at weight -0.8 over a [0,1] signal, so real scores
- * are >= -0.8) while letting the pipeline degrade gracefully.
- */
-const NON_FINITE_RAW_SCORE_FLOOR = -1;
-
-/** Replaces a non-finite raw score with the deterministic floor sentinel. */
-function sanitizeRawScore(rawScore: number): number {
-  return Number.isFinite(rawScore) ? rawScore : NON_FINITE_RAW_SCORE_FLOOR;
-}
-
-function classifyLearnedMatcherFailureReason(error: unknown): string {
-  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-  return message.includes('timed out')
-    ? 'learned_matcher_timeout'
-    : 'learned_matcher_failed';
-}
-
-/**
- * Input required to run the entity resolution pipeline.
- */
-export interface ResolverInput {
-  /** The original user query string. */
-  readonly rawQuery: string;
-
-  /** Lowercased, accent-stripped, whitespace-collapsed form. */
-  readonly normalizedQuery: string;
-
-  /** Multi-view query normalization snapshot for noisy lookup debugging. */
-  readonly normalizedQueryViews?: NormalizedQueryViews | undefined;
-
-  /** Query class label used to select thresholds. */
-  readonly queryClass: QueryClass;
-
-  /** Compiled policy directives. */
-  readonly policy: QueryPolicy;
-
-  /** Anchor entities extracted from the query. */
-  readonly anchorCandidates: readonly AnchorCandidate[];
-
-  /** Uncertainty assessment from the query planner. */
-  readonly uncertainty: QueryUncertainty;
-
-  /** Pre-loaded candidate entities (may come from external retrieval). */
-  readonly candidateEntities: readonly ResolverCandidate[];
-
-  /**
-   * TA2-4: Blocker-seeded candidates — entities returned by `Blocker.block()`
-   * that were NOT already covered by any anchor's `candidateEntityIds`.
-   *
-   * These carry zero-filled signal sets (`ZERO_SIGNALS`) and `source:
-   * 'blocker_seed'`. They enter the scorer's attribute-hint pathway.
-   *
-   * Produced upstream by `buildResolverCandidatesFromGenerator()` when
-   * the caller supplies `blockerOnlyIds`.  If undefined (not yet wired),
-   * the pipeline falls back to the current anchors-only behaviour.
-   */
-  readonly blockerSeedCandidates?: readonly ResolverCandidate[] | undefined;
-}
-
-/**
- * Default significance level (alpha) for conformal prediction.
- *
- * Imported from SSoT: src/domain/shared/config/conformal-config.ts (W2-BUG-09).
- * At alpha = 0.3 the prediction set has at least 70 % marginal coverage.
- * This means: resolve when C ≥ 0.7, ambiguous when C ≥ 0.4.
- *
- * Previous value (0.1) required C ≥ 0.9 for resolution, causing 96%
- * avoidable abstention because most queries achieved C in [0.70, 0.85].
- * The conformal gate was stricter than T_resolve itself, making the
- * per-class thresholds meaningless.
- *
- * Value should be tuned via AURC on the gate eval set (RFC-009 §5.3).
- */
-export const DEFAULT_ALPHA = CONFORMAL_ALPHA;
-
-const LOOKUP_STRATEGY_SCORE_WEIGHTS = {
-  exact: 0.06,
-  lexical_exact: 0.05,
-  compact_exact: 0.04,
-  transliterated_exact: 0.05,
-  prefix_exact: 0.05,
-  transliterated_prefix: 0.05,
-  phonetic_exact: 0.045,
-  fuzzy_char_ngram: 0.025,
-  transliterated_fuzzy: 0.03,
-  phonetic_fuzzy: 0.03,
-  substring: -0.015,
-  smart_document: -0.02,
-} as const;
-
-type LookupStrategy = keyof typeof LOOKUP_STRATEGY_SCORE_WEIGHTS;
-
-interface LookupStrategyAdjustment {
-  readonly entityId: string;
-  readonly strategies: readonly string[];
-  readonly rawScoreDelta: number;
-}
-
-/**
- * Computes the conformal prediction set size for a single query.
- *
- * The prediction set contracts or expands based on how confidently C exceeds
- * the significance thresholds derived from alpha:
- *
- * - Returns **1** when C >= (1 - alpha)       — top candidate is sufficient.
- * - Returns **2** when C >= (1 - 2 * alpha)   — two candidates are needed.
- * - Returns **K** otherwise                   — abstain; return all candidates.
- *
- * The returned size is ALWAYS clamped to `k`: a prediction set can never name
- * more candidates than actually exist. Without the clamp a high-confidence
- * singleton (k=1) whose C lands in the [1-2*alpha, 1-alpha) band returned 2 —
- * claiming a runner-up that does not exist and breaking the
- * `conformalSetSize <= candidates.length` contract that the result envelope
- * advertises (resolve-result.ts: "K = number of candidates").
- *
- * @param calibratedScore - Calibrated decision confidence C in [0, 1].
- * @param alpha - Significance level (must be in (0, 0.5]).
- * @param k - Total number of candidates (fallback set size on abstain).
- * @returns The conformal prediction set size, in [0, k].
- */
-export function computeConformalSetSize(
-  calibratedScore: number,
-  alpha: number,
-  k: number,
-): number {
-  if (alpha <= 0 || alpha > CONFORMAL_ALPHA_MAX_EXCLUSIVE) {
-    throw new RangeError(`computeConformalSetSize: alpha must be in (0, 0.5], got ${alpha}`);
-  }
-  if (k < 0) {
-    throw new RangeError(`computeConformalSetSize: k must be >= 0, got ${k}`);
-  }
-  if (!Number.isFinite(calibratedScore) || calibratedScore < 0 || calibratedScore > 1) {
-    throw new RangeError(
-      `computeConformalSetSize: calibratedScore must be finite and in [0, 1], got ${calibratedScore}`,
-    );
-  }
-
-  // A prediction set can never name more candidates than exist: clamp to k.
-  if (calibratedScore >= 1 - alpha) {
-    return Math.min(1, k);
-  }
-  if (calibratedScore >= 1 - 2 * alpha) {
-    return Math.min(2, k);
-  }
-  return k;
-}
 
 /**
  * The core entity resolver — Track A of the Wine Intelligence Engine,
@@ -300,7 +126,7 @@ export class Resolver {
       rawScore: sanitizeRawScore(this.candidateScorer.score(candidate)),
     }));
     const lookupStrategyAdjustments = this.collectLookupStrategyAdjustments(input);
-    const adjustedScored = this.applyLookupStrategyAdjustments(scored, lookupStrategyAdjustments);
+    const adjustedScored = applyLookupStrategyAdjustments(scored, lookupStrategyAdjustments);
 
     // Step 2.5: Optionally blend learned match probabilities (RFC-006 §5.2).
     //
@@ -1100,7 +926,7 @@ export class Resolver {
     return [...byEntity.entries()]
       .map(([entityId, strategies]) => {
         const strategyList = [...strategies].sort();
-        const rawScoreDelta = this.computeLookupStrategyAdjustment(
+        const rawScoreDelta = computeLookupStrategyAdjustment(
           strategyList,
           input.queryClass,
         );
@@ -1111,55 +937,5 @@ export class Resolver {
         };
       })
       .filter((entry) => entry.rawScoreDelta !== 0);
-  }
-
-  private applyLookupStrategyAdjustments(
-    scored: readonly { candidate: ResolverCandidate; rawScore: number }[],
-    adjustments: readonly LookupStrategyAdjustment[],
-  ): Array<{ candidate: ResolverCandidate; rawScore: number }> {
-    if (adjustments.length === 0) {
-      return [...scored];
-    }
-
-    const deltaByEntity = new Map(
-      adjustments.map((entry) => [entry.entityId, entry.rawScoreDelta]),
-    );
-
-    return scored.map((entry) => ({
-      candidate: entry.candidate,
-      rawScore: entry.rawScore + (deltaByEntity.get(String(entry.candidate.entityId)) ?? 0),
-    }));
-  }
-
-  private computeLookupStrategyAdjustment(
-    strategies: readonly string[],
-    queryClass: QueryClass,
-  ): number {
-    let delta = 0;
-    for (const strategy of strategies) {
-      if (this.isLookupStrategy(strategy)) {
-        delta += LOOKUP_STRATEGY_SCORE_WEIGHTS[strategy];
-      }
-    }
-
-    if (delta === 0) {
-      return 0;
-    }
-
-    const isShortForm =
-      queryClass === 'exact_entity' ||
-      queryClass === 'short_entity' ||
-      queryClass === 'ambiguous_short_form';
-    const hasOnlyNoisySupport = !hasExactLikeLookupStrategy(strategies);
-
-    if (isShortForm && hasOnlyNoisySupport && delta > 0) {
-      return Math.min(delta, SHORT_FORM_NOISY_SUPPORT_GAP_CAP);
-    }
-
-    return Number(delta.toFixed(RESOLVER_GAP_TRACE_DECIMAL_PLACES));
-  }
-
-  private isLookupStrategy(strategy: string): strategy is LookupStrategy {
-    return strategy in LOOKUP_STRATEGY_SCORE_WEIGHTS;
   }
 }

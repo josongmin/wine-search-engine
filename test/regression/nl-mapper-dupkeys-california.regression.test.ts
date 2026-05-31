@@ -14,8 +14,10 @@ const nullPort: MappingTablePort = {
 
 const mapper = new NLMapper(nullPort);
 
+// The DEFAULT_MAPPINGS literal lives in the extracted vocabulary module; scan
+// that source so the duplicate-key sweep stays attached to the actual catalog.
 const NL_MAPPER_SOURCE_PATH = fileURLToPath(
-  new URL('../../src/domain/attribute/service/nl-mapper.ts', import.meta.url),
+  new URL('../../src/domain/attribute/service/nl-mapper-vocabulary.ts', import.meta.url),
 );
 
 describe('regression: nl-mapper duplicate keys + california region', () => {

@@ -1,24 +1,14 @@
-import type { CanonicalEntityId, QueryClass } from '../../shared/types/index.js';
-import { isBindingInferredConstraint, liftBundleToAtoms } from '../../shared/types/index.js';
-import type { ConstraintGraph } from '../../query/model/constraint-graph.js';
-import type { HybridCandidate } from '../../retrieval/model/hybrid-candidate.js';
-import type {
-  DualLanePresence,
-  IdentityExactnessTier,
-} from '../../retrieval/model/dual-lane-artifact.js';
-import type { SourceRecordRef } from '../../entity/model/source-record-ref.js';
-import type { CandidateProvenance } from '../../retrieval/model/candidate-envelope.js';
-import { PROVENANCE_QUERY_VIEWS, type ProvenanceQueryView } from '../../retrieval/model/provenance.js';
+import { type QueryClass, liftBundleToAtoms } from '../../shared/types/index.js';
 import type { RankingInput } from '../model/ranking-input.js';
-import type { RankedResult, ComponentScores, CoarsePruneStageSummary } from '../model/ranked-result.js';
-import type { RankerRuntimeSignal, RerankerFailureReason } from '../model/ranking-runtime-signal.js';
+import type { RankedResult, CoarsePruneStageSummary } from '../model/ranked-result.js';
+import type { RankerRuntimeSignal } from '../model/ranking-runtime-signal.js';
 import type {
   RankingMetadata,
   RankingOutput,
   RerankDecision,
   RerankDecisionCode,
 } from '../port/ranker.port.js';
-import type { RerankerPort, RerankCandidate } from '../port/reranker.port.js';
+import type { RerankerPort } from '../port/reranker.port.js';
 import type { WineAttributeEncoderPort } from '../port/wine-attribute-encoder.port.js';
 import type { QueryClassWeights } from '../index.js';
 import {
@@ -30,22 +20,12 @@ import {
 import type { ScoringWeights } from '../model/scoring-weights.js';
 import { containsHangul } from '../../shared/utils/hangul.js';
 import { getModeWeights, applyModeWeightOverlay, scaleOverlaidWeights } from '../model/mode-weights.js';
-import { effectiveRerankBlendWeight } from './rerank-blend.js';
 import { type SignalComputer } from './signal-computer.js';
 import { type ScoreAggregator, RankComputationError } from './score-aggregator.js';
 import { type EvidenceMapper } from './evidence-mapper.js';
 import { WineAttributeEncoders } from './wine-attribute-encoder.js';
 import { bootstrapLogger } from '../../../domain/shared/bootstrap-logger.js';
 import { evaluateRerankGate } from './rerank-gate.js';
-import { LTRRanker } from './ltr-ranker.js';
-import {
-  extractLTRFeatures,
-  rankingFeaturesToVector,
-  LTR_FEATURE_DIMENSION,
-  LTR_FEATURE_NAME_ORDER,
-  LTR_FEATURE_SCHEMA_HASH,
-} from './ltr-feature-extractor.js';
-import { MS_PER_DAY } from '../../shared/utils/time-units.js';
 import {
   projectHybridCandidateToRankedResultAttributes,
   projectRankedResultSourceAttributes,
@@ -55,708 +35,57 @@ import {
   buildRerankSafetyListContext,
 } from './rerank-safety.js';
 import type { SafetyCandidateDescriptor } from './rerank-safety.js';
-import type { ScoreDecomposition, ScoreDriftRecord } from '../model/score-decomposition.js';
-import type { LTRScoreComponents } from './ltr-feature-extractor.js';
+import type { ScoreDriftRecord } from '../model/score-decomposition.js';
 import {
-  incrementLtrInferenceComponentScoreAbsent,
-  type LtrInferenceComponentScoreField,
-} from '../../../domain/observability/silent-skip-counters.js';
+  type ScoredEntry,
+  FINAL_SCORE_SORT_TIE_EPSILON,
+  buildEvidenceQualityTier,
+  buildLexicalExactnessTier,
+  compareScoredEntriesByFinalScoreDesc,
+} from './ranker-scored-entry.js';
+import { applyCrossEncoderReranking } from './ranker-cross-encoder.js';
+import {
+  buildQueryConstraintContext,
+  buildConstraintState,
+} from './ranker-constraint-state.js';
+import {
+  type LtrRerankSkipReason,
+  buildObservedLtrInferenceArtifact,
+  applyLearnedLtrRerank,
+} from './ranker-ltr-inference.js';
+import { classifyRerankerFailureReason } from './ranker-failure-classifier.js';
+import {
+  DRIFT_MONITOR_TOP_K,
+  computeKendallTauDistance,
+  computeAverageRerankDelta,
+} from './ranker-drift-metrics.js';
+
+// Re-export the scored-entry surface so existing `from '.../ranker.js'` import
+// paths keep resolving (ScoredEntry + comparator: regression suites;
+// LtrRerankSkipReason: determinism gate type check).
+export { type ScoredEntry, compareScoredEntriesByFinalScoreDesc } from './ranker-scored-entry.js';
+export { type LtrRerankSkipReason } from './ranker-ltr-inference.js';
 
 /**
  * Default number of top candidates to submit for cross-encoder reranking.
  */
 const DEFAULT_RERANK_TOP_K = 20;
 
-/**
- * E5-T6: Top-K window for ScoreDriftRecord heuristic/LTR top-N comparison.
- * Must match ScoreDriftRecord.heuristicTop3EntityIds field semantics (top-3).
- */
-const DRIFT_MONITOR_TOP_K = 3;
-
-/** Max characters sent to the cross-encoder (latency + model context). */
-const RERANK_PASSAGE_MAX_CHARS = 1200;
-
-function classifyRerankerFailureReason(error: unknown): RerankerFailureReason {
-  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-  if (message.includes('timed out')) return 'timeout';
-  if (message.includes('http')) return 'http_error';
-  if (message.includes('unexpected response shape')) return 'parse_error';
-  return 'unknown';
-}
-
-/**
- * Builds a wine-aware passage text for cross-encoder reranking (RFC-017 §5.2).
- */
-function buildWineText(entry: ScoredEntry): string {
-  const parts: string[] = [];
-  const label = entry.canonicalLabel.trim();
-  if (label.length > 0) parts.push(label);
-  const prod = entry.producer?.trim();
-  if (prod !== undefined && prod.length > 0) parts.push(prod);
-  const reg = entry.region?.trim();
-  if (reg !== undefined && reg.length > 0) parts.push(reg);
-  const en = entry.searchTextEn?.trim();
-  if (en !== undefined && en.length > 0) parts.push(en);
-  const grape = entry.grapePrimary?.trim();
-  if (grape !== undefined && grape.length > 0) parts.push(grape);
-
-  if (parts.length === 0) return String(entry.entityId);
-
-  let passage = parts.join('. ');
-  if (passage.length > RERANK_PASSAGE_MAX_CHARS) {
-    passage = passage.slice(0, RERANK_PASSAGE_MAX_CHARS);
-  }
-  return passage;
-}
-
-/**
- * Internal intermediate representation during ranking.
- * Exported for regression tests (E1-P03 tie-break suite).
- */
-export interface ScoredEntry {
-  readonly entityId: CanonicalEntityId;
-  readonly canonicalLabel: string;
-  readonly producer?: string;
-  readonly region?: string;
-  readonly searchTextEn?: string;
-  readonly grapePrimary?: string;
-  readonly appellation?: string;
-  readonly producerPrestige?: number;
-  readonly componentScores: ComponentScores;
-  readonly finalScore: number;
-  readonly matchedConstraints: readonly string[];
-  readonly unmetConstraints: readonly string[];
-  readonly inferredConstraints: readonly string[];
-  /**
-   * ADR-014 Phase 1b.3b: graph slot-node IDs the candidate matched.
-   * Absent when the compiled query carried no graph — the flat
-   * `matchedConstraints` above is the legacy surface in that case.
-   */
-  readonly matchedAtomRefs?: readonly string[] | undefined;
-  /**
-   * ADR-014 Phase 1b.3b: graph slot-node IDs required-but-unmet under
-   * graph semantics. Absent when no graph is present.
-   */
-  readonly unmetAtomRefs?: readonly string[] | undefined;
-  readonly retrievalProvenance?: CandidateProvenance | undefined;
-  /**
-   * E1-T3: sparse (BM25) rank from retrieval — used as tie-break stage after
-   * finalScore and channelMatchType, before entityId. Lower rank = better lexical match.
-   * Present only for candidates retrieved via sparse_bm25 channel.
-   */
-  readonly sparseRank?: number | undefined;
-  /**
-   * E1-T3: dense (ANN embedding) rank from retrieval.
-   * Present only for candidates retrieved via dense_semantic channel.
-   */
-  readonly denseRank?: number | undefined;
-  /**
-   * E1-T3: anchor-neighbourhood rank from retrieval.
-   * Present only for candidates retrieved via anchor_similarity channel.
-   */
-  readonly anchorRank?: number | undefined;
-  /**
-   * E1-T3: evidence quality tier for deterministic stage-2 tie-break.
-   *
-   * Values (lower = stronger exact/known-item evidence):
-   *   0 — exact_alias_match / known_item_lookup protected candidate
-   *   1 — anchor-conditioned candidate
-   *   2 — ordinary lexical/dense candidate with some provenance
-   *   3 — weak candidate with no lexical/protected evidence
-   */
-  readonly evidenceQualityTier?: number | undefined;
-  /**
-   * E1-T3: Lexical exactness tier for stage-3 tie-break.
-   *
-   * Captures how closely the candidate's surface form matched the query
-   * text via BM25 / alias lookup strategies, independently of which
-   * retrieval channels the candidate appeared in.
-   *
-   * Values (lower = better lexical match, consistent with sparseRank):
-   *   0 — strict / accentless / compact query views
-   *   1 — transliterated / phonetic_compact query views
-   *   2 — vintage_canonicalized / vintage_stripped query views
-   *   3 — no recognized query-view evidence
-   */
-  readonly lexicalExactnessTier?: number | undefined;
-  readonly drinkingWindowStart?: number | undefined;
-  readonly drinkingWindowEnd?: number | undefined;
-  readonly drinkingWindowModelVersion?: string | undefined;
-
-  // Wine attributes for Epic 15 dynamic prediction
-  readonly vintageYear?: number | undefined;
-  readonly body?: number | undefined;
-  readonly tannin?: number | undefined;
-  readonly acidity?: number | undefined;
-  readonly sweetness?: number | undefined;
-  readonly avgCriticProxyScore?: number | undefined;
-  readonly criticScoreNormalized?: number | undefined;
-  readonly grapePrimaryEnc?: number | undefined;
-  readonly regionEnc?: number | undefined;
-  readonly countryEnc?: number | undefined;
-
-  // Display metadata for new entity summary fields
-  readonly style?: string | undefined;
-  readonly wineType?: string | undefined;
-  readonly classification?: string | undefined;
-  readonly alcoholPct?: number | undefined;
-  readonly certifications?: readonly string[] | undefined;
-  readonly pairingTags?: readonly string[] | undefined;
-  readonly occasion?: readonly string[] | undefined;
-
-  // Price data for agent/response surface
-  readonly priceBand?: string | undefined;
-  readonly priceUsd?: number | undefined;
-
-  readonly sourceRecordRefs?: readonly SourceRecordRef[] | undefined;
-  readonly entityPosteriorScore?: number | undefined;
-  readonly identityExactnessTier: IdentityExactnessTier;
-  readonly lanePresence?: DualLanePresence | undefined;
-}
-
-const MODEL_STALENESS_THRESHOLD_DAYS = 30;
-
-// MS_PER_DAY imported from SSoT: @domain/shared/utils/time-units
-const MILLISECONDS_PER_DAY = MS_PER_DAY;
-
-/** LambdaMART weight vector length (must match {@link extractLTRFeatures} output). */
-const LTR_MODEL_FEATURE_DIMENSION = LTR_FEATURE_DIMENSION;
-
 /** Entity IDs captured after primary sort for funnel rerank telemetry. */
 const PRE_RERANK_TOP_ENTITY_SNAPSHOT_COUNT = 5;
 
-/**
- * Treat reranker batch as degenerate when max-min below this and keep the
- * heuristic score instead of fabricating a midpoint blend.
- * Logit-scale scores can differ by ~1e-7 from floating-point noise; 1e-8 was
- * overly tight and collapsed distinct candidates into the degraded path.
- */
-const RERANK_SCORE_MIN_MAX_RANGE_EPSILON = 1e-6;
-/** Degradation reason emitted when rerank scores cannot be normalized safely. */
+// Degradation reason emitted when rerank scores cannot be normalized safely.
+// Mirrors the constant in applyCrossEncoderReranking; used here only to
+// synthesize the fallback runtime signal when the cross-encoder module reports
+// a batch normalization failure without an explicit runtimeSignal.
 const RERANK_SCORE_NORMALIZATION_FAILED_REASON = 'reranker_score_normalization_failed';
-/** Degradation reason emitted when the blend weight is not finite. */
-const RERANK_BLEND_WEIGHT_INVALID_REASON = 'reranker_blend_weight_invalid';
 
-/**
- * Final-score comparisons treat values within this epsilon as tied so ordering
- * falls through to entityId (deterministic tie-break, RFC-009/015).
- */
-const FINAL_SCORE_SORT_TIE_EPSILON = 1e-12;
 /** Replay-grade ranking policy version for determinism fingerprinting. */
 export const RANKING_POLICY_VERSION = 'ranker-policy-v2.0';
-const EVIDENCE_QUALITY_TIER_UNKNOWN = 3;
-const LEXICAL_EXACTNESS_TIER_EXACT = 0;
-const LEXICAL_EXACTNESS_TIER_TRANSLITERATED = 1;
-const LEXICAL_EXACTNESS_TIER_VINTAGE = 2;
-const EXACT_QUERY_VIEWS = new Set<ProvenanceQueryView>(['strict', 'accentless', 'compact']);
-const TRANSLITERATED_QUERY_VIEWS = new Set<ProvenanceQueryView>(['transliterated', 'phonetic_compact']);
-const VINTAGE_QUERY_VIEWS = new Set<ProvenanceQueryView>(['vintage_canonicalized', 'vintage_stripped']);
 
 // NON_PENALTY_WEIGHT_FIELDS / sumNonPenaltyWeights moved to the SSoT owner of
 // ScoringWeights: ../model/scoring-weights.ts. Importing keeps the mode-overlay
 // normalisation denominator identical to the channel-aware/situation overlays.
-
-function projectObservedLtrComponentScore(
-  componentScores: ComponentScores,
-  key: LtrInferenceComponentScoreField,
-): Partial<Pick<LTRScoreComponents, LtrInferenceComponentScoreField>> {
-  const value = componentScores[key];
-  if (value === undefined) {
-    incrementLtrInferenceComponentScoreAbsent(key);
-    return {};
-  }
-
-  return { [key]: value } as Pick<LTRScoreComponents, typeof key>;
-}
-
-function buildObservedLtrInferenceScoreComponents(
-  input: {
-    readonly componentScores: ComponentScores;
-    readonly entityPosteriorScore?: number | undefined;
-    readonly identityExactnessTier: IdentityExactnessTier;
-    readonly lanePresence?: DualLanePresence | undefined;
-  },
-): LTRScoreComponents {
-  const { componentScores } = input;
-
-  return {
-    ...projectObservedLtrComponentScore(componentScores, 'semantic'),
-    ...projectObservedLtrComponentScore(componentScores, 'popularity'),
-    ...projectObservedLtrComponentScore(componentScores, 'attributeAlignment'),
-    ...projectObservedLtrComponentScore(componentScores, 'preferenceAlignment'),
-    ...projectObservedLtrComponentScore(componentScores, 'multilingualScore'),
-    ...projectObservedLtrComponentScore(componentScores, 'recency'),
-    ...(input.entityPosteriorScore !== undefined
-      ? { entityPosterior: input.entityPosteriorScore }
-      : {}),
-    identityExactnessTier: input.identityExactnessTier,
-    ...(input.lanePresence !== undefined
-      ? { lanePresence: input.lanePresence }
-      : {}),
-  };
-}
-
-function buildObservedLtrInferenceArtifact(
-  input: {
-    readonly componentScores: ComponentScores;
-    readonly entityPosteriorScore?: number | undefined;
-    readonly identityExactnessTier: IdentityExactnessTier;
-    readonly lanePresence?: DualLanePresence | undefined;
-  },
-): {
-  readonly scoreComponents: LTRScoreComponents;
-  readonly features: ReturnType<typeof extractLTRFeatures>;
-  readonly vector: readonly number[];
-} {
-  const scoreComponents = buildObservedLtrInferenceScoreComponents(input);
-  const features = extractLTRFeatures(scoreComponents);
-
-  return {
-    scoreComponents,
-    features,
-    vector: rankingFeaturesToVector(features),
-  };
-}
-
-/**
- * E1-T3: Compute evidence/lexical tiers for a scored entry.
- *
- * Evidence quality is the stage-2 axis: it measures how strong the
- * exact-known-item evidence is before we look at lexical fidelity.
- *
- * Lexical exactness is the stage-3 axis: it measures how well the candidate
- * matched the query as a surface-form text string, independent of which
- * retrieval channels it appeared in.
- *
- * Tiers are pre-computed at scoring time from retrieval provenance metadata.
- */
-function getEvidenceQualityTier(entry: ScoredEntry): number {
-  return entry.evidenceQualityTier ?? EVIDENCE_QUALITY_TIER_UNKNOWN;
-}
-
-function getLexicalExactnessTier(entry: ScoredEntry): number {
-  return entry.lexicalExactnessTier ?? LEXICAL_EXACTNESS_TIER_UNKNOWN;
-}
-
-/** Sentinel tier value for entries whose lexical exactness could not be determined. */
-const LEXICAL_EXACTNESS_TIER_UNKNOWN = 3;
-
-/**
- * E1-T3: Build the lexical exactness tier from retrieval provenance metadata.
- *
- * Reads canonical provenance query-view vocabulary only.
- */
-function buildLexicalExactnessTier(candidate: HybridCandidate): number {
-  const matchedViews = candidate.retrievalProvenance?.queryViewMatches
-    .map((match) => match.viewName)
-    .filter((view): view is ProvenanceQueryView => (
-      PROVENANCE_QUERY_VIEWS as readonly string[]
-    ).includes(view)) ?? [];
-
-  if (matchedViews.some((view) => EXACT_QUERY_VIEWS.has(view))) {
-    return LEXICAL_EXACTNESS_TIER_EXACT;
-  }
-  if (matchedViews.some((view) => TRANSLITERATED_QUERY_VIEWS.has(view))) {
-    return LEXICAL_EXACTNESS_TIER_TRANSLITERATED;
-  }
-  if (matchedViews.some((view) => VINTAGE_QUERY_VIEWS.has(view))) {
-    return LEXICAL_EXACTNESS_TIER_VINTAGE;
-  }
-
-  return LEXICAL_EXACTNESS_TIER_UNKNOWN;
-}
-
-function buildEvidenceQualityTier(candidate: HybridCandidate): number {
-  const protectedReason = candidate.retrievalProvenance?.protectedInclusionReason;
-  if (protectedReason === 'exact_alias_match' || protectedReason === 'known_item_lookup') {
-    return 0;
-  }
-  if (candidate.anchorRank !== undefined) {
-    return 1;
-  }
-  if (
-    candidate.retrievalProvenance !== undefined
-    || candidate.sparseRank !== undefined
-    || candidate.denseRank !== undefined
-  ) {
-    return 2;
-  }
-  return EVIDENCE_QUALITY_TIER_UNKNOWN;
-}
-
-/**
- * Descending sort by finalScore; NaN-safe; 5-stage deterministic tie-break.
- *
- * Stage 1: finalScore descending (NaN → last)
- * Stage 2: evidenceQualityTier ascending (lower = stronger exact/known-item evidence)
- * Stage 3: lexicalExactnessTier ascending (lower = better surface-form match)
- * Stage 4: sparseRank ascending (lower BM25 rank = better lexical match; absent → last)
- * Stage 5: entityId ascending (stable lexicographic tie-break, RFC-009/015)
- *
- * E1-T3: exact-known-item evidence beats generic lexical evidence; lexical
- * fidelity then breaks remaining ties before sparse rank and entityId.
- */
-export function compareScoredEntriesByFinalScoreDesc(a: ScoredEntry, b: ScoredEntry): number {
-  const aFinite = Number.isFinite(a.finalScore);
-  const bFinite = Number.isFinite(b.finalScore);
-  if (!aFinite && !bFinite) {
-    // Stages 2-5 for NaN-NaN ties
-    const aEvidence = getEvidenceQualityTier(a);
-    const bEvidence = getEvidenceQualityTier(b);
-    if (aEvidence !== bEvidence) return aEvidence - bEvidence;
-    const aTier = getLexicalExactnessTier(a);
-    const bTier = getLexicalExactnessTier(b);
-    if (aTier !== bTier) return aTier - bTier;
-    const aSparse = a.sparseRank ?? Infinity;
-    const bSparse = b.sparseRank ?? Infinity;
-    if (aSparse !== bSparse) return aSparse - bSparse;
-    return a.entityId < b.entityId ? -1 : a.entityId > b.entityId ? 1 : 0;
-  }
-  if (!aFinite) return 1;
-  if (!bFinite) return -1;
-  const scoreDiff = b.finalScore - a.finalScore;
-  if (Math.abs(scoreDiff) > FINAL_SCORE_SORT_TIE_EPSILON) {
-    return scoreDiff > 0 ? 1 : -1;
-  }
-  // Stage 2: evidence quality tier ascending (lower = stronger exact/known-item evidence)
-  const aEvidence = getEvidenceQualityTier(a);
-  const bEvidence = getEvidenceQualityTier(b);
-  if (aEvidence !== bEvidence) return aEvidence - bEvidence;
-  // Stage 3: lexical exactness tier ascending (lower = better surface-form match)
-  const aTier = getLexicalExactnessTier(a);
-  const bTier = getLexicalExactnessTier(b);
-  if (aTier !== bTier) return aTier - bTier;
-  // Stage 4: sparseRank ascending (absent = Infinity → loses)
-  const aSparse = a.sparseRank ?? Infinity;
-  const bSparse = b.sparseRank ?? Infinity;
-  if (aSparse !== bSparse) return aSparse - bSparse;
-  // Stage 5: entityId ascending
-  return a.entityId < b.entityId ? -1 : a.entityId > b.entityId ? 1 : 0;
-}
-
-/**
- * E1-T4: Typed reason why learned LTR rerank was skipped.
- *
- * - `not_skipped`: rerank was applied normally
- * - `no_model_for_query_class`: no LTR model registered for this query class
- * - `empty_candidates`: result list was empty before rerank
- * - `feature_dimension_mismatch`: model weight vector length ≠ LTR_MODEL_FEATURE_DIMENSION
- * - `model_stale`: model age exceeded MODEL_STALENESS_THRESHOLD_DAYS (warning only, does not skip)
- */
-type LtrRerankSkipReason =
-  | 'not_skipped'
-  | 'no_model_for_query_class'
-  | 'empty_candidates'
-  | 'feature_dimension_mismatch';
-
-function applyLearnedLtrRerank(
-  rankedResults: readonly RankedResult[],
-  queryClass: QueryClass,
-  ltrModels: ReadonlyMap<string, QueryClassWeights> | undefined,
-  ltrFeatureInputsByEntityId: ReadonlyMap<
-    string,
-    {
-      readonly features: ReturnType<typeof extractLTRFeatures>;
-      readonly vector: readonly number[];
-    }
-  >,
-): { results: RankedResult[]; skipReason: LtrRerankSkipReason; modelId?: string; ltrSaturated?: boolean } {
-  const ltrModel = ltrModels?.get(queryClass);
-  if (!ltrModel) {
-    return { results: [...rankedResults], skipReason: 'no_model_for_query_class' };
-  }
-  if (rankedResults.length === 0) {
-    return { results: [], skipReason: 'empty_candidates' };
-  }
-
-  // Guard against an Invalid Date `trainedAt` (e.g. JSONB corruption or a
-  // training record written with `new Date(undefined)`). Without this guard,
-  // `getTime()` returns NaN, `NaN > threshold` is false, and a stale model
-  // would silently bypass the freshness warning. Treat NaN as "unknown age"
-  // and log it so operators notice.
-  const trainedAtMs = ltrModel.trainedAt.getTime();
-  const modelAgeMs = Number.isFinite(trainedAtMs) ? Date.now() - trainedAtMs : Number.NaN;
-  const modelAgeDays = modelAgeMs / MILLISECONDS_PER_DAY;
-  if (!Number.isFinite(modelAgeDays)) {
-    bootstrapLogger.warn(
-      { queryClass },
-      '[Ranker] LTR model has invalid trainedAt timestamp — treating as stale',
-    );
-  } else if (modelAgeDays > MODEL_STALENESS_THRESHOLD_DAYS) {
-    bootstrapLogger.warn(
-      {
-        queryClass,
-        modelAgeDays: Math.floor(modelAgeDays),
-        threshold: MODEL_STALENESS_THRESHOLD_DAYS,
-      },
-      '[Ranker] LTR model is stale — consider retraining',
-    );
-  }
-
-  if (ltrModel.weights.length !== LTR_MODEL_FEATURE_DIMENSION) {
-    bootstrapLogger.warn({ queryClass, modelWeightDim: ltrModel.weights.length, expectedDim: LTR_MODEL_FEATURE_DIMENSION }, '[Ranker] LTR model dimension mismatch — skipping LTR rerank');
-    return { results: [...rankedResults], skipReason: 'feature_dimension_mismatch' };
-  }
-
-  // E5-T3: Build safety evaluation descriptors — one per candidate,
-  // using heuristic scores and ranks from the pre-LTR ordering.
-  // We first run LTR to get proposed ranks, then apply safety checks.
-  //
-  // ltrFeatureVectorMap: entity → ordered feature vector (LTR schema order) so ScoreDecomposition can
-  // carry the raw input for debugging / drift analysis.
-  const ltrFeatureVectorMap = new Map<string, readonly number[]>();
-  const rankableDocuments = rankedResults.map((doc, idx) => {
-    const featureInput = ltrFeatureInputsByEntityId.get(String(doc.entityId));
-    if (featureInput === undefined) {
-      throw new Error(
-        `Ranker invariant violated: missing LTR feature input for entity '${String(doc.entityId)}'`,
-      );
-    }
-    ltrFeatureVectorMap.set(String(doc.entityId), featureInput.vector);
-    return {
-      entityId: doc.entityId,
-      retrievalScore: doc.finalScore,
-      features: featureInput.features,
-      originalRank: idx + 1,
-    };
-  });
-
-  const ltrResult = LTRRanker.rerank(rankableDocuments, queryClass, ltrModel);
-  const rerankedDocs = ltrResult.documents;
-  const ltrSaturated = ltrResult.saturated;
-
-  // Build proposed LTR rank map for safety evaluation
-  const proposedLtrRankMap = new Map<string, number>(
-    rerankedDocs.map((r) => [r.entityId, r.finalRank]),
-  );
-
-  // E5-T3: Build safety candidate descriptors + list context.
-  // Safety is evaluated HERE (single pass) with the actual proposed LTR ranks.
-  // H2 fix: hardConstraintViolations carries only the violations that caused
-  // hardConstraintPass=false. When the candidate passes all hard constraints,
-  // unmetConstraints may still have soft mismatches — exclude those here so the
-  // safety envelope does not conflate soft-constraint mismatches with hard ones.
-  const safetyDescriptors: SafetyCandidateDescriptor[] = rankedResults.map((doc, idx) => ({
-    entityId: String(doc.entityId),
-    heuristicRank: idx + 1,
-    hardConstraintPass: doc.componentScores.hardConstraintPass,
-    // When hardConstraintPass is true, there are no hard violations to report.
-    hardConstraintViolations: doc.componentScores.hardConstraintPass ? [] : [...doc.unmetConstraints],
-    anchorSimilarity: doc.componentScores.anchorSimilarity ?? 0,
-    // E5-T3: sparseRank is now propagated from ScoredEntry to RankedResult (Wave 2 fix).
-    // sparseRank === 1 enables protected-candidate Rule 3 for exact-known-item BM25 hits.
-    sparseRank: doc.sparseRank ?? Infinity,
-    heuristicScoreNormalized: Number.isFinite(doc.finalScore) ? doc.finalScore : 0,
-    proposedLtrRank: proposedLtrRankMap.get(doc.entityId) ?? Infinity,
-  }));
-  const safetyListCtx = buildRerankSafetyListContext(safetyDescriptors);
-
-  // Single-pass safety evaluation with actual proposed LTR ranks (H1 fix:
-  // applyLearnedLtrRerank no longer runs a separate safety pass internally).
-  const blockedByEnvelopeIds = new Set<string>();
-  for (const desc of safetyDescriptors) {
-    const safetyResult = evaluateRerankSafety(desc, safetyListCtx, []);
-    if (!safetyResult.allowed) {
-      blockedByEnvelopeIds.add(desc.entityId);
-    }
-  }
-
-  const originalByEntity = new Map<string, RankedResult>(
-    rankedResults.map((result) => [String(result.entityId), result]),
-  );
-
-  const results = rerankedDocs
-    .map((reranked) => {
-      const entityKey = reranked.entityId;
-      const original = originalByEntity.get(entityKey);
-      if (original === undefined) {
-        return undefined;
-      }
-
-      // E5-T3: Safety envelope — blocked candidates keep heuristic score
-      if (blockedByEnvelopeIds.has(entityKey)) {
-        // Keep heuristic score + rank; only attach decomposition with no delta
-        const decomp: ScoreDecomposition = {
-          lexicalContribution: 0,
-          semanticContribution: original.componentScores.semantic ?? 0,
-          anchorContribution: original.componentScores.anchorSimilarity ?? 0,
-          attributeSatisfaction: original.componentScores.attributeAlignment ?? 0,
-          popularityContribution: original.componentScores.popularity ?? 0,
-          preferenceAlignmentContribution: original.componentScores.preferenceAlignment ?? 0,
-          heuristicScoreRaw: original.finalScore,
-          heuristicScoreNormalized: Number.isFinite(original.finalScore) ? original.finalScore : 0,
-          finalScore: original.finalScore,
-        };
-        return {
-          ...original,
-          scoreDecomposition: decomp,
-        };
-      }
-
-      // Allowed — apply LTR score + build full decomposition
-      const heuristicNorm = Number.isFinite(original.finalScore) ? original.finalScore : 0;
-      const ltrNorm = Number.isFinite(reranked.ltrScore) ? reranked.ltrScore : heuristicNorm;
-      const rerankDelta = ltrNorm - heuristicNorm;
-
-        const decomp: ScoreDecomposition = {
-          lexicalContribution: 0,
-        semanticContribution: original.componentScores.semantic ?? 0,
-        anchorContribution: original.componentScores.anchorSimilarity ?? 0,
-        attributeSatisfaction: original.componentScores.attributeAlignment ?? 0,
-        popularityContribution: original.componentScores.popularity ?? 0,
-        preferenceAlignmentContribution: original.componentScores.preferenceAlignment ?? 0,
-        heuristicScoreRaw: heuristicNorm,
-        heuristicScoreNormalized: heuristicNorm,
-        ltrScoreNormalized: ltrNorm,
-        rerankDeltaNormalized: rerankDelta,
-        // C4: attach the feature vector used for LTR inference so ScoreDecomposition
-        // is self-contained for drift analysis and debugging.
-        ...(ltrFeatureVectorMap.has(entityKey)
-          ? {
-              ltrFeatureVector: ltrFeatureVectorMap.get(entityKey),
-              ltrFeatureDimension: LTR_FEATURE_DIMENSION,
-              ltrFeatureNameOrder: LTR_FEATURE_NAME_ORDER,
-              ltrFeatureSchemaHash: LTR_FEATURE_SCHEMA_HASH,
-            }
-          : {}),
-        finalScore: reranked.ltrScore,
-      };
-
-      return {
-        ...original,
-        finalScore: reranked.ltrScore,
-        rank: reranked.finalRank,
-        scoreDecomposition: decomp,
-      };
-    })
-    .filter((result) => result !== undefined) as RankedResult[];
-  // P0-5: queryClass is the model identifier (key into ltrModels Map).
-  // Returned so rank() can populate rerankDecision.modelId.
-  return { results, skipReason: 'not_skipped', modelId: ltrModel.queryClass, ltrSaturated };
-}
-
-/**
- * Query-level constraint context. Computed ONCE per rank() call and reused
- * for every candidate, rather than rebuilding the inferred-attribute list,
- * tracked-attribute Set, and soft-unmet derivation per-candidate.
- *
- * Allocation math (200-candidate query): previously ~7 intermediate arrays
- * + 2 Sets per candidate = ~1800 allocations; now 1 Set + 1 array for the
- * full request, plus only candidate-specific work in `buildConstraintState`.
- */
-interface QueryConstraintContext {
-  readonly inferredConstraints: readonly string[];
-  readonly trackedAttributes: ReadonlySet<string>;
-  readonly softAttributes: readonly string[];
-}
-
-function buildQueryConstraintContext(input: RankingInput): QueryConstraintContext {
-  const inferredSeen = new Set<string>();
-  const inferredConstraints: string[] = [];
-  for (const constraint of input.constraints.inferred) {
-    if (!isBindingInferredConstraint(constraint)) {
-      continue;
-    }
-    if (!inferredSeen.has(constraint.attribute)) {
-      inferredSeen.add(constraint.attribute);
-      inferredConstraints.push(constraint.attribute);
-    }
-  }
-
-  const trackedAttributes = new Set<string>();
-  for (const c of input.constraints.hard) trackedAttributes.add(c.attribute);
-  for (const c of input.constraints.soft) trackedAttributes.add(c.attribute);
-  for (const a of inferredConstraints) trackedAttributes.add(a);
-
-  const softAttributes: string[] = new Array<string>(input.constraints.soft.length);
-  for (let i = 0; i < input.constraints.soft.length; i++) {
-    softAttributes[i] = input.constraints.soft[i]!.attribute;
-  }
-
-  return { inferredConstraints, trackedAttributes, softAttributes };
-}
-
-function buildConstraintState(
-  candidate: HybridCandidate,
-  queryCtx: QueryConstraintContext,
-  graph?: ConstraintGraph  ,
-): {
-  readonly matchedConstraints: readonly string[];
-  readonly unmetConstraints: readonly string[];
-  readonly inferredConstraints: readonly string[];
-  readonly matchedAtomRefs?: readonly string[] | undefined;
-  readonly unmetAtomRefs?: readonly string[] | undefined;
-} {
-  const matchedSet = new Set(candidate.matchedConstraints);
-
-  // Collect unmet constraints into a single dedup set to avoid building
-  // 3 intermediate arrays (softUnmet, inferredUnmet, spread concat) then
-  // a 4th `[...new Set(...)]` over the concatenation.
-  const unmetSet = new Set<string>();
-  const unmetHard = candidate.unmetHardConstraints;
-  if (unmetHard !== undefined) {
-    for (const attr of unmetHard) unmetSet.add(attr);
-  }
-  for (const attr of queryCtx.softAttributes) {
-    if (!matchedSet.has(attr)) unmetSet.add(attr);
-  }
-  for (const attr of queryCtx.inferredConstraints) {
-    if (!matchedSet.has(attr)) unmetSet.add(attr);
-  }
-  const unmetConstraints: string[] = [];
-  for (const attr of unmetSet) unmetConstraints.push(attr);
-
-  // Filter matched constraints against the query-level tracked-attributes
-  // Set (built once per request in buildQueryConstraintContext).
-  const tracked = queryCtx.trackedAttributes;
-  const matchedConstraints: string[] = [];
-  for (const attribute of candidate.matchedConstraints) {
-    if (tracked.has(attribute)) matchedConstraints.push(attribute);
-  }
-
-  // ADR-014 Phase 1b.3b: prefer annotator-provided `matchedAtomRefs` /
-  // `unmetAtomRefs` when the candidate already carries them (batch
-  // annotator path); otherwise reconstruct from the graph nodes here so
-  // unit tests and non-annotated inputs still see the graph-derived slot
-  // IDs. Absent graph → keep the flat legacy shape unchanged.
-  if (graph !== undefined) {
-    if (
-      candidate.matchedAtomRefs !== undefined &&
-      candidate.unmetAtomRefs !== undefined
-    ) {
-      return {
-        matchedConstraints,
-        unmetConstraints,
-        inferredConstraints: queryCtx.inferredConstraints,
-        matchedAtomRefs: candidate.matchedAtomRefs,
-        unmetAtomRefs: candidate.unmetAtomRefs,
-      };
-    }
-    const matchedAtomRefs: string[] = [];
-    const unmetAtomRefs: string[] = [];
-    for (const node of graph.nodes) {
-      if (node.kind !== 'slot') continue;
-      if (matchedSet.has(node.attribute)) {
-        matchedAtomRefs.push(node.nodeId);
-      } else {
-        unmetAtomRefs.push(node.nodeId);
-      }
-    }
-    return {
-      matchedConstraints,
-      unmetConstraints,
-      inferredConstraints: queryCtx.inferredConstraints,
-      matchedAtomRefs,
-      unmetAtomRefs,
-    };
-  }
-
-  return {
-    matchedConstraints,
-    unmetConstraints,
-    inferredConstraints: queryCtx.inferredConstraints,
-  };
-}
 
 type RankerOptions = {
   readonly rerankTopK?: number;
@@ -1443,10 +772,9 @@ export class Ranker {
   /**
    * Applies cross-encoder reranking to the top-K candidates.
    *
-   * Candidates beyond top-K retain their original order appended after
-   * the reranked set.  The final score blends the cross-encoder score with
-   * the original aggregated score using a query-class-aware weight
-   * (RFC-017 §5.3) rather than a hardcoded ratio.
+   * Thin instance wrapper over {@link applyCrossEncoderReranking} that binds
+   * the instance reranker/blend-scale dependencies. Reranking semantics
+   * (RFC-017 §5.2/§5.3) live in the free function.
    */
   private async applyReranking(
     query: string,
@@ -1460,210 +788,13 @@ export class Ranker {
     /** True when normalization failed for ALL top-K candidates (collapsed/NaN batch). */
     readonly normalizationFailed?: boolean | undefined;
   }> {
-    const topK = viable.slice(0, topKLimit);
-    const rest = viable.slice(topKLimit);
-    const degradationReasons: string[] = [];
-
-    // Build wine-aware passage text for the cross-encoder (RFC-017 §5.2).
-    const rerankCandidates: RerankCandidate[] = topK.map((entry) => ({
-      entityId: entry.entityId,
-      text: buildWineText(entry),
-    }));
-
-    const reranker = this.reranker;
-    if (reranker === undefined) {
-      throw new Error('applyReranking requires reranker');
-    }
-    stageTimer?.start('ranking.cross_encoder.remote');
-    const rerankResults = await reranker.rerank(
+    return applyCrossEncoderReranking(
+      { reranker: this.reranker, rerankBlendScale: this.rerankBlendScale },
       query,
-      rerankCandidates,
+      viable,
+      queryClass,
       topKLimit,
+      stageTimer,
     );
-    stageTimer?.end('ranking.cross_encoder.remote');
-
-    stageTimer?.start('ranking.cross_encoder.postprocess');
-    try {
-      // Build lookups
-      const rerankScoreMap = new Map(
-        rerankResults.map((r) => [String(r.entityId), r.score]),
-      );
-      const entryMap = new Map(
-        topK.map((entry) => [String(entry.entityId), entry]),
-      );
-
-    // Normalise reranker scores to [0, 1] before blending.
-    // Cross-encoder logits (e.g. BGE-reranker) are typically in [-10, +15];
-    // min-max within the batch preserves relative ordering while keeping the
-    // scale compatible with the original aggregated score (also [0, 1]).
-    // Non-finite or collapsed score batches are treated as a degraded rerank:
-    // we keep the heuristic score instead of fabricating a midpoint.
-    let minRaw = Infinity;
-    let maxRaw = -Infinity;
-    for (const r of rerankResults) {
-      if (!Number.isFinite(r.score)) continue;
-      if (r.score < minRaw) minRaw = r.score;
-      if (r.score > maxRaw) maxRaw = r.score;
-    }
-    const rawRange = Number.isFinite(minRaw) && Number.isFinite(maxRaw)
-      ? maxRaw - minRaw
-      : NaN;
-
-    function normalizeRerankScore(raw: number, originalScore: number): number {
-      if (
-        !Number.isFinite(raw)
-        || !Number.isFinite(rawRange)
-        || rawRange < RERANK_SCORE_MIN_MAX_RANGE_EPSILON
-      ) {
-        if (!degradationReasons.includes(RERANK_SCORE_NORMALIZATION_FAILED_REASON)) {
-          degradationReasons.push(RERANK_SCORE_NORMALIZATION_FAILED_REASON);
-        }
-        return originalScore;
-      }
-      // Min-max within batch: maps to [0, 1] preserving relative order.
-      // Sigmoid compression is unnecessary when min-max already bounds the range.
-      return (raw - minRaw) / rawRange;
-    }
-
-    // T-E6-02: Detect batch-level normalization failure BEFORE per-candidate loop.
-    // When rawRange is NaN or below epsilon, normalizeRerankScore returns
-    // originalScore for every candidate — the rerank has zero effect but
-    // previously reported applied=true. Surface this as normalizationFailed
-    // so the caller can set the correct RerankDecision.
-    const batchNormalizationFailed =
-      !Number.isFinite(rawRange) || rawRange < RERANK_SCORE_MIN_MAX_RANGE_EPSILON;
-
-    // Reorder top-K by rerank score, blending with original score
-    const rerankedTopK: ScoredEntry[] = [];
-
-    for (const r of rerankResults) {
-      const original = entryMap.get(String(r.entityId));
-      if (original === undefined) {
-        continue;
-      }
-      // Blend: query-class weight × optional global scale (RFC-017 §5.3)
-      const rawW = effectiveRerankBlendWeight(queryClass, this.rerankBlendScale);
-      // Guard against NaN/Infinity from a misconfigured rerankBlendScale (e.g. NaN env var).
-      // A non-finite blend weight is a configuration failure, so fall back to
-      // the heuristic score path instead of fabricating a midpoint blend.
-      const w = Number.isFinite(rawW) ? rawW : 0;
-      if (!Number.isFinite(rawW) && !degradationReasons.includes(RERANK_BLEND_WEIGHT_INVALID_REASON)) {
-        degradationReasons.push(RERANK_BLEND_WEIGHT_INVALID_REASON);
-      }
-      const normScore = normalizeRerankScore(r.score, original.finalScore);
-      const blendedScore = w * normScore + (1 - w) * original.finalScore;
-      rerankedTopK.push({
-        ...original,
-        finalScore: blendedScore,
-      });
-    }
-
-    // Add any topK entries that the reranker dropped
-    for (const entry of topK) {
-      if (!rerankScoreMap.has(String(entry.entityId))) {
-        rerankedTopK.push(entry);
-      }
-    }
-
-    // Sort the entire combined set (top-K reranked + rest) by finalScore.
-    // Previous code concatenated `[...rerankedTopK, ...rest]` which preserved
-    // top-K position even when a rest candidate's original score now exceeded
-    // a blended top-K score — producing rank inversions across the boundary.
-    // Re-sorting fixes this and applies the same NaN-safe tie-break as the
-    // primary sort.
-    // Use .concat() instead of spread — rest can be thousands of entries and
-    // spread pushes all elements onto the call stack (crashes at ~65K; Rule 9).
-      const combined = rerankedTopK.concat(rest);
-      combined.sort(compareScoredEntriesByFinalScoreDesc);
-      return {
-        results: combined,
-        ...(batchNormalizationFailed ? { normalizationFailed: true } : {}),
-        ...(degradationReasons.length > 0
-          ? {
-              runtimeSignal: {
-                rerankerStatus: 'executed',
-                degradation: {
-                  executionMode: 'degraded',
-                  degradationReasons,
-                },
-              } as RankerRuntimeSignal,
-            }
-          : {}),
-      };
-    } finally {
-      stageTimer?.end('ranking.cross_encoder.postprocess');
-    }
   }
-}
-
-// ─── E5-T6: ScoreDriftRecord helpers ─────────────────────────────────────────
-
-/**
- * Compute normalized Kendall tau distance between two entity-ID orderings.
- *
- * Returns a value in [0, 1]:
- *   0 = identical order
- *   1 = completely reversed
- *
- * Only entities present in BOTH lists are compared; entities unique to one
- * list are ignored (avoids penalizing safety-evicted candidates).
- *
- * Time: O(n²) where n = common list length (typically ≤ 3).
- */
-function computeKendallTauDistance(
-  listA: readonly string[],
-  listB: readonly string[],
-): number {
-  // Build intersection in listA order
-  const setB = new Set(listB);
-  const common = listA.filter((id) => setB.has(id));
-  const n = common.length;
-  if (n < 2) return 0;
-
-  // For each id in common, record its position in listB
-  const posB = new Map<string, number>(listB.map((id, i) => [id, i]));
-
-  let discordant = 0;
-  const totalPairs = (n * (n - 1)) / 2;
-  for (let i = 0; i < n; i++) {
-    for (let j = i + 1; j < n; j++) {
-      const rankBi = posB.get(common[i]!) ?? Infinity;
-      const rankBj = posB.get(common[j]!) ?? Infinity;
-      // In listA: i < j (i ranks higher). In listB: discordant if j ranks higher than i.
-      if (rankBj < rankBi) {
-        discordant++;
-      }
-    }
-  }
-
-  return totalPairs > 0 ? discordant / totalPairs : 0;
-}
-
-/**
- * Compute mean absolute normalized score delta across reranked candidates.
- *
- * Compares each candidate's heuristic score (from safetyDescriptors) to
- * the LTR finalScore (from ltrResults). Candidates missing from either
- * side are skipped.
- */
-function computeAverageRerankDelta(
-  safetyDescriptors: readonly SafetyCandidateDescriptor[],
-  ltrResults: readonly RankedResult[],
-): number {
-  const heuristicScoreMap = new Map<string, number>(
-    safetyDescriptors.map((d) => [d.entityId, d.heuristicScoreNormalized]),
-  );
-
-  let totalDelta = 0;
-  let count = 0;
-  for (const r of ltrResults) {
-    const id = String(r.entityId);
-    const heuristicScore = heuristicScoreMap.get(id);
-    if (heuristicScore === undefined) continue;
-    const ltrScore = Number.isFinite(r.finalScore) ? r.finalScore : 0;
-    totalDelta += Math.abs(ltrScore - heuristicScore);
-    count++;
-  }
-
-  return count > 0 ? totalDelta / count : 0;
 }

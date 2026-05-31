@@ -15,10 +15,8 @@ import type { AnchorConditionedQuery } from '../model/relative-query.js';
 import type { QueryUncertainty } from '../model/query-uncertainty.js';
 import type { SessionContext } from '../model/session-context.js';
 import type { QueryBudget } from '../model/query-budget.js';
-import type { QueryTargetType } from '../model/query-target-type.js';
 import { DEFAULT_QUERY_BUDGET } from '../model/query-budget.js';
 import { MAX_QUERY_LENGTH } from '../../shared/constants.js';
-import { STYLE_SENSORY_ATTRIBUTES } from '../../shared/constants/constraint-attributes.js';
 import { DEFAULT_THRESHOLD_PROFILE } from '../model/threshold-profile.js';
 import type {
   AmbiguityDictionary,
@@ -34,7 +32,6 @@ import { hasVintageYear as hasBoundedVintageYear } from '../../shared/utils/vint
 import type { RequestExecutionContext } from '../../shared/request-execution-context.js';
 import type { AmbiguousEntityHint } from '../../attribute/model/ambiguous-entity-hint.js';
 import { parseSpans } from '../../attribute/service/span-parser.js';
-import { isDirectEntityResolution, resolveEntity } from '../../attribute/service/entity-resolver.js';
 import { QueryNormalizer } from './query-normalizer.js';
 import { compareScoreWithTiebreaker } from '../../shared/utils/stable-comparator.js';
 import {
@@ -54,7 +51,7 @@ import {
   isGenericWineNounToken,
   isShortEntityLikeSurface,
 } from './short-entity-surface.js';
-import type { PolicyDecisionRecord, PlannerStage } from '../model/policy-decision-record.js';
+import type { PolicyDecisionRecord } from '../model/policy-decision-record.js';
 import { buildBundleFromAtoms } from './constraint-reasoner.js';
 import { buildRetrievalPlan } from '../../retrieval/service/retrieval-plan-builder.js';
 import { buildRetrievalObjective } from '../../retrieval/model/retrieval-objective.js';
@@ -69,189 +66,58 @@ import type {
 import { isExactLikeLookupStrategy } from './lookup-strategy-taxonomy.js';
 import { splitLookupStrategies } from './anchor-extractor.js';
 import { bootstrapLogger } from '../../shared/bootstrap-logger.js';
+import {
+  PLANNER_VERSION,
+  POLICY_RULE_VERSION,
+  FUZZY_ANCHOR_CONFIDENCE_FLOOR,
+  FUZZY_ANCHOR_EDIT_DISTANCE_PENALTY,
+  CONSTRAINT_SHAPED_ANCHOR_ATTRIBUTES,
+  GENERIC_ANCHOR_SOURCE_ATTRIBUTES,
+  GENERIC_LOOKUP_VARIANT_SINGLE_SUPPORT_MAX,
+  GENERIC_CONSTRAINT_SURFACE_TRUSTED_ALIAS_TYPES,
+  EXPLICIT_NO_MATCH_PATTERNS,
+  SHORT_QUERY_AMBIGUOUS_ANCHOR_CONFIDENCE_THRESHOLD,
+  PAIRING_SOFT_CONSTRAINT_CONFIDENCE,
+  PAIRING_SOFT_CONSTRAINT_MAPPING_VERSION,
+  UNCERTAINTY_PARSER_CONFIDENCE_FLOOR,
+  UNCERTAINTY_PARSER_CONFIDENCE_PER_TOKEN_PENALTY,
+  UNCERTAINTY_CONSTRAINT_CONFIDENCE_NEUTRAL,
+  UNCERTAINTY_LOW_ANCHOR_CONFIDENCE_THRESHOLD,
+  UNCERTAINTY_OVERALL_WEIGHT_PARSER,
+  UNCERTAINTY_OVERALL_WEIGHT_ANCHOR,
+  UNCERTAINTY_OVERALL_WEIGHT_CONSTRAINT,
+  UNCERTAINTY_AMBIGUITY_OVERALL_BUMP,
+  UNCERTAINTY_RAISE_THRESHOLD_OVERALL,
+  KNOWN_AMBIGUOUS_SURFACE_TYPE,
+  KOREAN_NOT_MARKER_PATTERN,
+  ENGLISH_NOT_MARKER_PATTERN,
+  KOREAN_SIMILARITY_MARKER_PATTERN,
+  ENGLISH_SIMILARITY_MARKER_PATTERN,
+  EMPTY_FALLBACK_MAPPER,
+} from './planner-constants.js';
+import {
+  hasSensoryPreferenceConstraint,
+  hasOnlySemanticDiscoveryCompatibleHardConstraints,
+  hasDirectResolvableAttributeEntity,
+  isAbortError,
+  applyAmbiguityIntentInterpretation,
+  escapeRegex,
+  buildDecisionRecord,
+} from './planner-helpers.js';
+import {
+  determineRoute,
+  determineRetrievalMode,
+  inferTargetEntityType,
+} from './planner-routing.js';
 
 const log = bootstrapLogger.child({ component: 'Planner' });
 
-/** Current planner version. */
-const PLANNER_VERSION = '1.0.0';
-
 /**
- * TA2-T2: Minimum confidence floor for planner_heuristic anchors.
- * Fuzzy matches at maximum edit distance would otherwise get confidence 0;
- * clamp to this floor so they still contribute signal to the resolver.
+ * Re-export the public short-query ambiguity threshold from the constants
+ * SSoT so existing import paths (`@domain/query/service/planner.js`) stay
+ * intact for external consumers (e.g. search-usecase-resolver-candidates).
  */
-const FUZZY_ANCHOR_CONFIDENCE_FLOOR = 0.5;
-
-/**
- * TA2-T2: Confidence penalty per unit of edit distance for planner_heuristic anchors.
- * A fuzzy hit with editDistance=1 → confidence × 0.9 (10% discount).
- * A fuzzy hit with editDistance=5 → confidence × 0.5 (clamped at floor).
- */
-const FUZZY_ANCHOR_EDIT_DISTANCE_PENALTY = 0.1;
-const CONSTRAINT_SHAPED_ANCHOR_ATTRIBUTES = new Set([
-  'appellation',
-  'region',
-  'country',
-  'grape_primary',
-  'wine_type',
-  'classification',
-  'vintage_year',
-]);
-const SEMANTIC_DISCOVERY_SENSORY_ATTRIBUTES = new Set([
-  ...STYLE_SENSORY_ATTRIBUTES,
-  'fruit_intensity',
-  'finish_length',
-]);
-const GENERIC_ANCHOR_SOURCE_ATTRIBUTES = new Set([
-  ...CONSTRAINT_SHAPED_ANCHOR_ATTRIBUTES,
-  ...SEMANTIC_DISCOVERY_SENSORY_ATTRIBUTES,
-  'pairing',
-  'price_usd',
-]);
-const GENERIC_LOOKUP_VARIANT_SINGLE_SUPPORT_MAX = 1;
-const GENERIC_CONSTRAINT_SURFACE_TRUSTED_ALIAS_TYPES: ReadonlySet<
-  NonNullable<AnchorCandidate['aliasType']>
-> = new Set([
-  'canonical',
-  'abbreviation',
-]);
-const SEMANTIC_DISCOVERY_ALLOWED_HARD_ATTRIBUTES = new Set([
-  'wine_type',
-  'grape_primary',
-  'country',
-  'region',
-  'appellation',
-]);
-const EXPLICIT_NO_MATCH_PATTERNS: readonly RegExp[] = [
-  /존재하지\s*않(?:는|은|았(?:던|다)|는지|는데)?/u,
-  /(?<![\p{L}\p{N}])(?:unknown|non(?:-|\s)?existent|does\s+not\s+exist|not\s+found)(?![\p{L}\p{N}])/iu,
-];
-
-/** Current policy rule version. */
-const POLICY_RULE_VERSION = '1.0.0';
-
-/** Short-query ambiguity: anchor confidence must exceed this when multiple candidates exist. */
-export const SHORT_QUERY_AMBIGUOUS_ANCHOR_CONFIDENCE_THRESHOLD = 0.8;
-/** Confidence assigned to taxonomy-derived pairing soft constraints. */
-const PAIRING_SOFT_CONSTRAINT_CONFIDENCE = 0.88;
-const PAIRING_SOFT_CONSTRAINT_MAPPING_VERSION = 'pairing-taxonomy-v1.0';
-/** Parser confidence floor in uncertainty (weak prior). */
-const UNCERTAINTY_PARSER_CONFIDENCE_FLOOR = 0.5;
-/** Parser confidence reduction per whitespace token. */
-const UNCERTAINTY_PARSER_CONFIDENCE_PER_TOKEN_PENALTY = 0.05;
-/** Constraint confidence when no hard constraints are present. */
-const UNCERTAINTY_CONSTRAINT_CONFIDENCE_NEUTRAL = 0.5;
-/** Below this aggregate anchor confidence, flag low_anchor_confidence ambiguity. */
-const UNCERTAINTY_LOW_ANCHOR_CONFIDENCE_THRESHOLD = 0.6;
-const UNCERTAINTY_OVERALL_WEIGHT_PARSER = 0.3;
-const UNCERTAINTY_OVERALL_WEIGHT_ANCHOR = 0.4;
-const UNCERTAINTY_OVERALL_WEIGHT_CONSTRAINT = 0.3;
-/** Added to overall uncertainty when any ambiguity markers fire. */
-const UNCERTAINTY_AMBIGUITY_OVERALL_BUMP = 0.15;
-/** Overall uncertainty at or above this triggers raise_threshold decision effect. */
-const UNCERTAINTY_RAISE_THRESHOLD_OVERALL = 0.6;
-/** Exact ambiguity-dictionary surface marker preserved for decision hard gates. */
-const KNOWN_AMBIGUOUS_SURFACE_TYPE = 'known_ambiguous_surface';
-
-function isPositivePreferenceConstraint(constraint: NormalizedConstraint): boolean {
-  return constraint.operator === '='
-    || constraint.operator === '>='
-    || constraint.operator === '<='
-    || constraint.operator === 'range'
-    || constraint.operator === 'in';
-}
-
-function hasSensoryPreferenceConstraint(bundle: ConstraintBundle): boolean {
-  return bundle.soft.some((constraint) =>
-    SEMANTIC_DISCOVERY_SENSORY_ATTRIBUTES.has(constraint.attribute)
-    && isPositivePreferenceConstraint(constraint),
-  );
-}
-
-function hasOnlySemanticDiscoveryCompatibleHardConstraints(
-  bundle: ConstraintBundle,
-): boolean {
-  return bundle.hard.every((constraint) =>
-    SEMANTIC_DISCOVERY_ALLOWED_HARD_ATTRIBUTES.has(constraint.attribute),
-  );
-}
-
-// Vintage detection delegates to the vintage SSoT
-// (`@domain/shared/utils/vintage`).
-
-/** Producer catalog browse: "Château X best wines" (Epic 7, golden `producer_browse`). */
-const PRODUCER_BROWSE_QUERY_PATTERN = /(?<!\p{L})(?<!\p{N})(?:best|top|great|famous)\s+wines(?!\p{L})(?!\p{N})/iu;
-
-/** Region path: hierarchical "A / B / C" (Epic 7, golden `region_browse`). */
-function regionHierarchySlashCount(normalizedQuery: string): number {
-  return (normalizedQuery.match(/\//g) ?? []).length;
-}
-
-/** Region/location keywords for geographic entity detection. */
-const REGION_KEYWORDS: readonly RegExp[] = [
-  /(?<!\p{L})(?<!\p{N})(?:napa|sonoma|bordeaux|burgundy|tuscany|champagne)(?!\p{L})(?!\p{N})/iu,
-  /(?<!\p{L})(?<!\p{N})(?:valley|region|appellation|aoc|doc|doca|côtes|côte)(?!\p{L})(?!\p{N})/iu,
-  /(?:^|[^\p{L}\p{N}])(?:나파|샤블리|보르도|투지|롱글로|토스카나)(?=$|[^\p{L}\p{N}])/u,
-  /(?:^|[^\p{L}\p{N}])(?:지역|지방|아펠라시옹|지역명)(?=$|[^\p{L}\p{N}])/u,
-] as const;
-
-function hasDirectResolvableAttributeEntity(normalizedQuery: string): boolean {
-  return parseSpans(normalizedQuery).some((span) => {
-    const resolved = resolveEntity(span.text, { preferEntityOverStyle: true });
-    return isDirectEntityResolution(resolved) && resolved.entityType !== 'wine_type';
-  });
-}
-
-const KOREAN_NOT_MARKER_PATTERN = '\\s*(?:말고|대신)\\s*';
-const ENGLISH_NOT_MARKER_PATTERN = '(?<!\\p{L})(?<!\\p{N})instead\\s+of\\s+';
-
-/**
- * Similarity markers used to strip a similarity-query ANCHOR from the
- * constraint-parsing surface (intent-aware soft anchoring).
- *
- * On a similarity / relative query ("마고 비슷한 레드" — "red wine similar to
- * Margaux"), the anchor (마고 / Margaux) is a REFERENCE POINT, not a hard
- * filter: the user wants wines *like* Margaux, not wines that *are* Margaux.
- * If the anchor surface stays in the constraint-parsing query, the compiler
- * resolves it into HARD appellation/country/region constraints and the
- * ranker's coarse prune drops every candidate to zero results.
- *
- * We therefore remove the anchor surface together with its similarity marker
- * — exactly mirroring the existing `not`-operator strip (which already removes
- * `<anchor> 말고`) — so the anchor degrades to the soft/anchor retrieval path
- * (the `similar_items` retrieval mode still consumes it via `relativeQuery`),
- * while the remaining intent words (e.g. 레드 → wine_type) are still parsed.
- *
- * Korean markers follow the anchor (`<anchor> 비슷한`); English markers precede
- * it (`like <anchor>`). Patterns are interpolated with the regex-escaped anchor
- * by {@link Planner.buildConstraintParsingQuery}. The English lookbehinds keep
- * the boundary Unicode-safe (CLAUDE.md test discipline rule 8 — never `\\b`).
- */
-const KOREAN_SIMILARITY_MARKER_PATTERN = '\\s*(?:같은|비슷한|처럼|같이)\\s*';
-const ENGLISH_SIMILARITY_MARKER_PATTERN =
-  '(?<!\\p{L})(?<!\\p{N})(?:like|similar\\s+to)\\s+';
-
-const EMPTY_FALLBACK_MAPPER: NLMapper = {
-  mapPhrase: () => Promise.resolve(null),
-  mapConstraints: (phrases: readonly string[]) =>
-    Promise.resolve({
-      constraints: [],
-      constraintExtraction: {
-        candidatePhraseCount: phrases.length,
-        ruleTableHitCount: 0,
-        llmHitCount: 0,
-        llmSkippedCount: 0,
-        fallbackTriggered: true,
-        source: 'fallback',
-        llmLatencyMs: null,
-        phraseCacheHits: 0,
-        phraseCacheNegativeSkipped: 0,
-        phraseCacheMisses: 0,
-        missedPhrases: [],
-        fallbackReason: 'nlmapper_exception',
-      },
-    }),
-} as unknown as NLMapper;
+export { SHORT_QUERY_AMBIGUOUS_ANCHOR_CONFIDENCE_THRESHOLD };
 
 /**
  * Context passed to the planner alongside the raw query.
@@ -561,7 +427,7 @@ export class Planner {
     }
 
     // 4. Determine route.
-    const route = this.determineRoute(intent, allAnchors);
+    const route = determineRoute(intent, allAnchors);
     if (tracingEnabled) {
       plannerTrace.push(buildDecisionRecord(
         'route_resolution',
@@ -574,7 +440,7 @@ export class Planner {
     }
 
     // 5. Determine retrieval mode.
-    const retrievalMode = this.determineRetrievalMode(
+    const retrievalMode = determineRetrievalMode(
       intent,
       allAnchors,
       plannerSurfaceNormalized,
@@ -695,10 +561,10 @@ export class Planner {
     );
     const intentChanged = fuzzyAnchors.length > 0 || anchorsChanged || effectiveIntent !== intent;
     const effectiveRoute = intentChanged
-      ? this.determineRoute(effectiveIntent, effectiveAnchors)
+      ? determineRoute(effectiveIntent, effectiveAnchors)
       : route;
     const effectiveRetrievalMode = intentChanged
-      ? this.determineRetrievalMode(
+      ? determineRetrievalMode(
         effectiveIntent,
         effectiveAnchors,
         plannerSurfaceNormalized,
@@ -794,7 +660,7 @@ export class Planner {
     const budget = context?.budget ?? DEFAULT_QUERY_BUDGET;
 
     // 10. Infer target entity type for result grouping (Epic 8).
-    const targetEntityType = this.inferTargetEntityType(
+    const targetEntityType = inferTargetEntityType(
       normalizedQuery,
       effectiveAnchors,
       constraints,
@@ -901,136 +767,6 @@ export class Planner {
         ? { ambiguityIntentTrace: ambiguityIntentResult.trace }
         : {}),
     };
-  }
-
-  /**
-   * Determines the query route based on intent and anchors.
-   *
-   * RCA5-02 fix: `mixed_query` without any anchor must route to `'hybrid'`,
-   * not `'mixed'`. The `'mixed'` route requires an anchor to perform the
-   * anchor-similarity pass; without one, the execution layer falls through to
-   * a plain hybrid search anyway, but the plan advertises 'mixed' — causing
-   * route/mode mismatch where mode='attribute_search' but route='mixed'.
-   * Aligning route to 'hybrid' when no anchor is present makes the plan
-   * internally consistent: `determineRetrievalMode` already maps
-   * `mixed_query + !hasAnyAnchor → 'attribute_search'` (hybrid strategy).
-   */
-  private determineRoute(
-    intent: QueryIntent,
-    anchors: readonly AnchorCandidate[],
-  ): QueryRoute {
-    switch (intent) {
-      case 'entity_exact':
-        return 'entity';
-      case 'entity_fuzzy':
-        return anchors.length > 0 ? 'entity' : 'hybrid';
-      case 'comparison_search':
-        return 'entity';
-      case 'mixed_query':
-        // Only route to 'mixed' when an anchor exists — 'mixed' requires anchor
-        // evidence for the similarity pass (RFC-005 §3.3, RCA5-02).
-        return anchors.some((a) => a.confidence >= ANCHOR_PRESENT_CONFIDENCE)
-          ? 'mixed'
-          : 'hybrid';
-      case 'facet_search':
-      case 'semantic_discovery':
-      case 'pairing_search':
-      case 'budget_search':
-        return 'hybrid';
-    }
-  }
-
-  /**
-   * Determines the fine-grained retrieval mode based on intent, anchors, and query surface.
-   * RFC-017 §8.3: maps intent + context to a specific retrieval strategy.
-   *
-   * Mode selection logic (from Epic 7):
-   *  - entity_exact → entity_lookup
-   *  - entity_fuzzy + anchor present      → entity_resolution
-   *  - comparison_search → compare_candidates
-   *  - mixed_query + anchor → similar_items
-   *  - pairing_search → recommendation (food / dish evidence only)
-   *  - facet_search/budget_search (no anchor) → constraint_filter
-   *  - semantic_discovery/generic anchor search → attribute_search
-   *  - entity_exact|mixed_query + strong anchor + "best wines" → producer_browse
-   *  - facet/semantic/budget + region path (≥2 '/') → region_browse
-   */
-  private determineRetrievalMode(
-    intent: QueryIntent,
-    anchors: readonly AnchorCandidate[],
-    normalizedQuery: string,
-  ): RetrievalMode {
-    const hasStrongAnchor = anchors.some(
-      (a) => a.confidence >= EXACT_ANCHOR_CONFIDENCE,
-    );
-    const hasAnyAnchor = anchors.some(
-      (a) => a.confidence >= ANCHOR_PRESENT_CONFIDENCE,
-    );
-
-    // Comparison search: multiple anchors or explicit comparison intent
-    if (intent === 'comparison_search') {
-      return 'compare_candidates';
-    }
-
-    // Producer catalog browse ("Domaine X best wines", Epic 7)
-    if (
-      (intent === 'entity_exact' || intent === 'mixed_query') &&
-      hasStrongAnchor &&
-      PRODUCER_BROWSE_QUERY_PATTERN.test(normalizedQuery)
-    ) {
-      return 'producer_browse';
-    }
-
-    // Region / appellation hierarchy path ("… / Napa Valley / …", Epic 7 + golden)
-    if (
-      (intent === 'facet_search' ||
-        intent === 'semantic_discovery' ||
-        intent === 'budget_search') &&
-      regionHierarchySlashCount(normalizedQuery) >= 2
-    ) {
-      return 'region_browse';
-    }
-
-    // Fuzzy known-item recovery stays on the identity-resolution lane even
-    // when the current anchor set collapses to a single candidate. The
-    // downstream decision gate treats `attribute_search` as exploratory and
-    // rightfully refuses approximate sealing there; routing fuzzy entity
-    // recovery through `entity_resolution` keeps the retrieval-mode contract
-    // aligned with the user's actual question: "which entity did I mean?".
-    if (intent === 'entity_fuzzy' && hasAnyAnchor) {
-      return 'entity_resolution';
-    }
-
-    // Strong single entity lookup (exact match)
-    if (intent === 'entity_exact' && hasStrongAnchor) {
-      return 'entity_lookup';
-    }
-
-    // Similar items: mixed query with an anchor
-    if (intent === 'mixed_query' && hasAnyAnchor) {
-      return 'similar_items';
-    }
-
-    // Pairing-based recommendation
-    if (intent === 'pairing_search') {
-      return 'recommendation';
-    }
-
-    // Pure constraint filtering (no entity involved)
-    if (
-      (intent === 'facet_search' || intent === 'budget_search') &&
-      !hasAnyAnchor
-    ) {
-      return 'constraint_filter';
-    }
-
-    // Semantic discovery and generic searches
-    if (intent === 'semantic_discovery') {
-      return 'attribute_search';
-    }
-
-    // Default: attribute search (hybrid vector + constraints)
-    return 'attribute_search';
   }
 
   /**
@@ -1862,140 +1598,4 @@ export class Planner {
       constraintConfidence,
     };
   }
-
-  /**
-   * Infers the target entity type that the query targets (Epic 8).
-   *
-   * Inference rules (in priority order):
-   * 1. If intent is 'facet_search' or 'semantic_discovery' with only style constraints → 'style'
-   * 2. If anchor present and explicit vintage year in query → 'wine'
-   * 3. If anchor present and no vintage, no wine-specific terms → likely 'producer'
-   * 4. If region keywords present → 'region'
-   * 5. Otherwise → 'unknown' (let retrieval strategy decide)
-   *
-   * Returns undefined to signal "no clear target type detected" (applies default strategy).
-   */
-  private inferTargetEntityType(
-    normalizedQuery: string,
-    anchors: readonly AnchorCandidate[],
-    constraints: ConstraintBundle,
-    intent: QueryIntent,
-  ): QueryTargetType | undefined {
-    // Check for style-only constraints (no hard constraints about wine type or vintage).
-    const hasOnlyStyleConstraints =
-      constraints.hard.length === 0 &&
-      constraints.soft.every((c) => STYLE_SENSORY_ATTRIBUTES.has(c.attribute));
-
-    // If semantic discovery or facet search with only style constraints → 'style'
-    if (
-      (intent === 'semantic_discovery' || intent === 'facet_search') &&
-      hasOnlyStyleConstraints &&
-      anchors.length === 0
-    ) {
-      return 'style';
-    }
-
-    // Check for explicit vintage year in query (e.g., "Margaux 2015").
-    const hasVintageYearInQuery = hasBoundedVintageYear(normalizedQuery);
-
-    // If anchor and vintage year present → wine
-    if (anchors.length > 0 && hasVintageYearInQuery) {
-      return 'wine';
-    }
-
-    // Check for region keywords.
-    const hasRegionKeyword = REGION_KEYWORDS.some((re) =>
-      re.test(normalizedQuery),
-    );
-    if (hasRegionKeyword) {
-      return 'region';
-    }
-
-    // If anchor but no vintage, no wine-specific terms → likely producer.
-    // This covers queries like "안티노리" (Antinori) where we want producer set, not wine set.
-    if (anchors.length > 0 && !hasVintageYearInQuery) {
-      // Check for explicit wine type constraint (which would indicate wine query).
-      const hasWineTypeConstraint = constraints.hard.some(
-        (c) => c.attribute === 'wine_type',
-      );
-      if (!hasWineTypeConstraint) {
-        return 'producer';
-      }
-    }
-
-    // No clear signal detected.
-    return undefined;
-  }
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === 'AbortError';
-}
-
-function applyAmbiguityIntentInterpretation(
-  hints: readonly AmbiguousEntityHint[],
-  interpretation: AmbiguityIntentInterpretation | undefined,
-): readonly AmbiguousEntityHint[] {
-  if (interpretation === undefined) {
-    return hints;
-  }
-
-  return hints.map((hint) => {
-    const selection = interpretation.branchSelections.find((entry) =>
-      entry.surface === hint.surface
-      && entry.entityType === hint.entityType,
-    );
-    if (selection === undefined || selection.decision !== 'select_branches') {
-      return hint;
-    }
-
-    const selectedBranchSet = new Set(selection.selectedBranchLabels);
-    const explorationBranches = hint.explorationBranches.filter((branch) => selectedBranchSet.has(branch.label));
-    if (explorationBranches.length === 0) {
-      return hint;
-    }
-
-    return {
-      ...hint,
-      clarifyOptions: hint.clarifyOptions.filter((label) => selectedBranchSet.has(label)),
-      lexicalExpansions: uniqueStrings([
-        ...hint.lexicalExpansions,
-        ...explorationBranches.flatMap((branch) => branch.lexicalExpansions),
-      ]),
-      semanticExpansions: uniqueStrings([
-        ...hint.semanticExpansions,
-        ...explorationBranches.flatMap((branch) => branch.semanticExpansions),
-      ]),
-      explorationBranches,
-    };
-  });
-}
-
-function uniqueStrings(values: readonly string[]): readonly string[] {
-  return Array.from(new Set(values));
-}
-
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/** Build a PolicyDecisionRecord for a planner decision stage. */
-function buildDecisionRecord(
-  stage: PlannerStage,
-  inputFacts: Record<string, unknown>,
-  rulesEvaluated: PolicyDecisionRecord['rulesEvaluated'],
-  rejectedBranches: PolicyDecisionRecord['rejectedBranches'],
-  decision: string,
-  confidence: number,
-  durationMs?: number,
-): PolicyDecisionRecord {
-  return {
-    stage,
-    inputFacts,
-    rulesEvaluated,
-    rejectedBranches,
-    decision,
-    confidence,
-    ...(durationMs !== undefined ? { durationMs } : {}),
-  };
 }
