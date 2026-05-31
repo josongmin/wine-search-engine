@@ -12,7 +12,7 @@ import {
 } from '../model/retrieval-channel.js';
 
 /** Default anchor confidence when plan omits explicit score (neutral). */
-export const HYBRID_ANCHOR_CONFIDENCE_DEFAULT = 0.5;
+const HYBRID_ANCHOR_CONFIDENCE_DEFAULT = 0.5;
 
 /**
  * Runtime retrieval mode resolved by `resolveRuntimeRetrievalMode`.
