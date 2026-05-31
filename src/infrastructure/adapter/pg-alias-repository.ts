@@ -5,6 +5,17 @@ import { createCanonicalEntityId, type CanonicalEntityId } from '../../domain/sh
 import { resolveActiveSnapshot } from '../db/active-snapshot-resolver.js';
 import { runAbortablePgQuery } from '../db/abortable-pg-query.js';
 
+/**
+ * Maximum candidate rows pulled for the prefix-based fuzzy fallback
+ * (`findFuzzyCandidates`). The downstream caller re-ranks these with edit
+ * distance / phonetic scoring, so this is a recall cap, not a result cap:
+ * 50 prefix-sharing aliases is a generous ceiling for a single normalized
+ * surface (the densest real producer prefixes — "château …", "domaine …" —
+ * stay well under this in the active snapshot) while bounding the row
+ * scan + transfer cost of the LIKE-prefix query.
+ */
+const FUZZY_CANDIDATE_FETCH_LIMIT = 50;
+
 function toAliasType(value: string): AliasType {
   if (
     value === 'canonical' ||
@@ -142,7 +153,7 @@ export class PgAliasRepository implements AliasRepository {
       params.push(scope);
     }
 
-    query += ' ORDER BY confidence DESC LIMIT 50';
+    query += ` ORDER BY confidence DESC LIMIT ${FUZZY_CANDIDATE_FETCH_LIMIT}`;
 
     const result = await runAbortablePgQuery<AliasRow>(this.pool, signal, query, params);
     return result.rows.map(rowToAlias);

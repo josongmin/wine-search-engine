@@ -63,13 +63,17 @@ const LATIN_UPPER_END = 0x005a;
 const LATIN_LOWER_START = 0x0061;
 const LATIN_LOWER_END = 0x007a;
 
-// --- Score component weights (sum to 1.0) ---
+// --- Score component weights (medium band) ---
 // These encode how much each signal pushes the 0..1 difficulty score.
 // The hard-rule branches below short-circuit to 0 or 1, so these
 // weights only matter for the medium band.
+//
+// Negation is NOT weighted here: `hasNegation` always short-circuits to
+// 'hard' before the weighted-score block is reached, so a negation weight
+// would multiply a constant 0 (dead weight, CLAUDE.md rule 15). The four
+// weights below sum to 0.85 — the maximum medium-band score before clamp.
 const SCORE_WEIGHT_TOKEN_COUNT = 0.3;
 const SCORE_WEIGHT_ANCHOR = 0.3;
-const SCORE_WEIGHT_NEGATION = 0.15;
 const SCORE_WEIGHT_NUMERIC = 0.1;
 const SCORE_WEIGHT_LANGUAGE_MIX = 0.15;
 
@@ -155,18 +159,16 @@ export function estimateQueryDifficulty(
   const anchorComponent = input.hasAnchor
     ? clamp01(1 - input.anchorConfidence)
     : 1;
-  // Negation already short-circuits to 'hard' above (line 152), so by the
-  // time we reach the medium-tier weighted score, hasNegation is always false.
-  // The component is kept at 0 here so the weight semantics stay symmetric
-  // with the other booleans (token / anchor / numeric / language).
-  const negationComponent = 0;
+  // Negation is intentionally absent from the weighted sum: hasNegation
+  // already short-circuits to 'hard' above, so it can never reach this block.
+  // (Previously a dead `negationComponent = 0` term lived here — removed per
+  // CLAUDE.md rule 15: no dead weights in scoring.)
   const numericComponent = input.hasNumericConstraint ? 1 : 0;
   const languageComponent = languageMix === 'mixed' ? 1 : 0;
 
   const score = clamp01(
     tokenComponent * SCORE_WEIGHT_TOKEN_COUNT +
       anchorComponent * SCORE_WEIGHT_ANCHOR +
-      negationComponent * SCORE_WEIGHT_NEGATION +
       numericComponent * SCORE_WEIGHT_NUMERIC +
       languageComponent * SCORE_WEIGHT_LANGUAGE_MIX,
   );

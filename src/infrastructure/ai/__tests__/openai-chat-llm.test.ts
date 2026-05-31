@@ -347,6 +347,72 @@ describe('OpenAiChatLlm', () => {
     });
   });
 
+  // Reasoning-model parameter routing must agree with the SSoT
+  // isReasoningModel() classifier (openai-reasoning-params.ts), not a
+  // locally-forked regex. The local /^(?:gpt-5|o\d)/ over-matched o2/o5/o9
+  // (the SSoT only recognizes o1/o3/o4 prefixes), splitting the
+  // temperature / max_completion_tokens decision from the headroom logic.
+  describe('reasoning-model param routing (SSoT parity)', () => {
+    async function captureBody(model: string): Promise<Record<string, unknown>> {
+      let capturedBody: Record<string, unknown> = {};
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (_url: string, init: RequestInit) => {
+          const rawBody = init.body;
+          if (typeof rawBody !== 'string') {
+            throw new Error('expected JSON string request body');
+          }
+          capturedBody = JSON.parse(rawBody) as Record<string, unknown>;
+          return new Response(successBody('ok'), { status: 200 });
+        }),
+      );
+      const llm = new OpenAiChatLlm({
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'sk-test',
+        defaultModel: model,
+        httpTimeoutMs: 5000,
+      });
+      await llm.complete({
+        messages: [{ role: 'user', content: 'hi' }],
+        temperature: 0,
+        maxOutputTokens: 300,
+      });
+      return capturedBody;
+    }
+
+    it('uses max_completion_tokens and omits temperature for gpt-5 reasoning models', async () => {
+      const body = await captureBody('gpt-5-mini');
+      expect(body['max_completion_tokens']).toBeDefined();
+      expect(body['max_tokens']).toBeUndefined();
+      expect(body['temperature']).toBeUndefined();
+    });
+
+    it('uses max_completion_tokens for o4 reasoning models (SSoT prefix)', async () => {
+      const body = await captureBody('o4-mini');
+      expect(body['max_completion_tokens']).toBeDefined();
+      expect(body['max_tokens']).toBeUndefined();
+    });
+
+    it('treats gpt-4o as a non-reasoning model (max_tokens + temperature pass-through)', async () => {
+      const body = await captureBody('gpt-4o-mini');
+      expect(body['max_tokens']).toBe(300);
+      expect(body['max_completion_tokens']).toBeUndefined();
+      expect(body['temperature']).toBe(0);
+    });
+
+    it('treats o2/o5 as non-reasoning, matching the SSoT (NOT the legacy o\\d regex)', async () => {
+      // The SSoT only recognizes o1/o3/o4; the old local regex /^o\d/ wrongly
+      // classified o2/o5 as reasoning, setting max_completion_tokens while the
+      // headroom helper (also SSoT-gated) treated them as non-reasoning.
+      for (const model of ['o2-preview', 'o5-mini']) {
+        const body = await captureBody(model);
+        expect(body['max_tokens'], `${model} should use max_tokens`).toBe(300);
+        expect(body['max_completion_tokens'], `${model} should not use max_completion_tokens`).toBeUndefined();
+        expect(body['temperature'], `${model} should pass temperature through`).toBe(0);
+      }
+    });
+  });
+
   // E4-T8: AG-04 — empty choices array guard
   describe('empty choices guard', () => {
     it('throws when response.choices is empty', async () => {

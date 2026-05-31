@@ -792,7 +792,11 @@ export const AuditExtensionSchema = z.object({
     specialized_route_executed: z.string().nullable().optional(),
     used_compiled_execution: z.boolean().optional(),
     compiled_budget: z.object({
-      max_candidates: z.number().int(),
+      // Same query-budget value as execution_contract.budget.max_candidates
+      // (both sourced from executionBudget.maxCandidates). Mirror that field's
+      // bounds: candidate counts are never negative and are capped by the
+      // query-budget ceiling so a runaway producer can't ship absurd counts.
+      max_candidates: z.number().int().nonnegative().max(MAX_QUERY_BUDGET_CANDIDATES),
       rerank_limit: z.number().int().nonnegative().max(MAX_QUERY_BUDGET_RERANK_LIMIT),
       enable_precision_rerank: z.boolean(),
     }).strict().optional(),

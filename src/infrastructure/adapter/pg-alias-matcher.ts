@@ -58,11 +58,50 @@ type FuzzyLookupStrategy =
   | 'transliterated_fuzzy'
   | 'phonetic_fuzzy';
 
+/**
+ * Minimum compacted query length (chars) before the fuzzy lane engages.
+ * Below 5 chars the edit-distance / n-gram signals are dominated by noise
+ * — a single edit on a 3-4 char surface flips the similarity wildly and
+ * produces spurious matches across short producer abbreviations. Short
+ * surfaces are already covered by the exact/compact/transliterated lanes.
+ */
 const MIN_FUZZY_QUERY_LENGTH = 5;
+/**
+ * Per-query ceiling on fuzzy candidate rows pulled from the aliases table
+ * (the SQL `LIMIT`). The trigram-LIKE prefilter is recall-oriented and can
+ * match broadly; this caps the row scan/transfer + the O(N) re-scoring loop
+ * per query. 200 comfortably covers the densest real prefix clusters while
+ * keeping batch fuzzy lookups bounded. Re-ranking by edit distance picks the
+ * true match from within this pool, so a higher cap adds cost without recall.
+ */
 const MAX_FUZZY_CANDIDATES = 200;
+/**
+ * Max OSA edit distance allowed, as a fraction of the longer surface length,
+ * for a candidate to clear the fuzzy gate on edit distance alone. 0.25 ≈ one
+ * edit per four characters — tolerates realistic single typos/transpositions
+ * (Sasicaia↔Sassicaia) without admitting unrelated surfaces of similar length.
+ */
 const COMPACT_FUZZY_DISTANCE_RATIO = 0.25;
+/**
+ * Minimum trigram (3-gram) Jaccard overlap to clear the fuzzy gate when edit
+ * distance does not. 0.45 keeps mid-length surfaces that share substantial
+ * local structure while rejecting incidental trigram coincidence between
+ * unrelated names. Paired with the bigram floor for short surfaces.
+ */
 const MIN_CHAR_NGRAM_OVERLAP = 0.45;
+/**
+ * Minimum bigram (2-gram) Jaccard overlap floor, used for very short surfaces
+ * where trigram coverage collapses. Set higher than the trigram floor (0.6 vs
+ * 0.45) because bigrams are far less discriminative — a lower bar would admit
+ * near-random 2-gram coincidence.
+ */
 const MIN_BIGRAM_OVERLAP = 0.6;
+/**
+ * Minimum length of a single whole-token query before it is allowed to match a
+ * candidate token via the lexical-exact lane. Below 4 chars a whole-token
+ * equality is too weak a signal (common short fragments collide across many
+ * unrelated aliases), so we defer those to the stricter exact/prefix lanes.
+ */
 const MIN_WHOLE_TOKEN_LOOKUP_LENGTH = 4;
 const ALIAS_TABLE_CHECK_TIMEOUT_MESSAGE = 'PostgreSQL alias-table existence probe timed out';
 

@@ -96,6 +96,15 @@ import { classifyShortfallLayer } from '../../domain/shared/types/provenance-sho
 /** Number of top-ranked entity IDs captured in pre/post-rerank audit snapshots. */
 const AUDIT_RERANK_SNAPSHOT_COUNT = 5;
 const retrievalProfileService = new RetrievalProfileService();
+/**
+ * Cap on how many top-ranked results trigger a (potentially slow) drinking-window
+ * prediction in `recommendation` mode. Recommendation responses surface a broad
+ * list, but the drinking-window block is only valuable for the few headline picks
+ * the user actually acts on; predicting it for the whole list multiplies predictor
+ * calls (each bounded by DRINKING_WINDOW_CHECK_TIMEOUT_MS in map-result-items) for
+ * little user benefit. Limited to the top 3 picks. Other retrieval modes leave it
+ * uncapped (maxPredictions undefined).
+ */
 const RECOMMENDATION_DRINKING_WINDOW_PREDICTION_LIMIT = 3;
 
 /**

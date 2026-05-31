@@ -26,6 +26,7 @@ import {
 } from '../../domain/shared/circuit-breaker/circuit-breaker.js';
 import { runUnderLlmBreaker } from './llm-circuit-breaker-classifier.js';
 import {
+  isReasoningModel,
   resolveCompletionTokens,
   resolveReasoningEffort,
 } from './openai-reasoning-params.js';
@@ -195,14 +196,18 @@ export class OpenAiChatLlm implements ChatLlmPort {
         content: m.content,
       })),
     };
-    // GPT-5.4 series (gpt-5, gpt-5.4, gpt-5.4-mini, gpt-5.4-nano, o-series):
+    // Reasoning models (gpt-5*, o1*, o3*, o4*):
     //   - temperature: only default (1) supported — omit when caller passes 0
     //   - token limit: must use max_completion_tokens, not max_tokens
     // Earlier models (gpt-4o, gpt-4-turbo, gpt-3.5-turbo): standard params.
-    const isGpt5Series = /^(?:gpt-5|o\d)/i.test(model);
+    // Classification is delegated to the SSoT isReasoningModel() so the
+    // temperature / token-param branch and resolveCompletionTokens() /
+    // resolveReasoningEffort() can never disagree (the old local
+    // /^(?:gpt-5|o\d)/ regex over-matched o2/o5/o9, which the SSoT rejects).
+    const isReasoning = isReasoningModel(model);
     if (request.temperature !== undefined) {
-      if (!isGpt5Series) body['temperature'] = request.temperature;
-      // GPT-5 series: temperature param not supported (only default=1 allowed) — omit entirely.
+      if (!isReasoning) body['temperature'] = request.temperature;
+      // Reasoning models: temperature param not supported (only default=1 allowed) — omit entirely.
     }
     if (request.maxOutputTokens !== undefined) {
       // Reasoning models (gpt-5*, o-series): max_completion_tokens caps the
@@ -211,8 +216,8 @@ export class OpenAiChatLlm implements ChatLlmPort {
       // available AFTER the model burns its reasoning quota. Non-reasoning
       // models keep the original semantics (max_tokens pass-through).
       // See src/infrastructure/ai/openai-reasoning-params.ts for the spec.
-      body[isGpt5Series ? 'max_completion_tokens' : 'max_tokens'] =
-        isGpt5Series
+      body[isReasoning ? 'max_completion_tokens' : 'max_tokens'] =
+        isReasoning
           ? resolveCompletionTokens(model, request.maxOutputTokens)
           : request.maxOutputTokens;
     }

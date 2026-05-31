@@ -736,6 +736,77 @@ describe('DecisionEngine', () => {
     });
   });
 
+  // ── Boundary coverage for the noisy-short-query guard constants ──
+  // Mirrors the named constants in decision-engine.ts:
+  //   NOISY_SHORT_QUERY_MAX_COMPACT_LENGTH = 12  (length <= 12 is "short")
+  //   NOISY_SHORT_QUERY_CONFIDENCE_FLOOR   = 0.9 (C >= 0.9 bypasses the guard)
+  //   NOISY_SHORT_QUERY_GAP_FLOOR          = 0.08 (gap >= 0.08 satisfies margin)
+  // short_entity dynamic gap_tau = 0.03, so requiredGap = max(0.03, 0.08) = 0.08.
+  describe('noisy short-query guard — constant boundaries', () => {
+    /**
+     * Builds a guard-eligible input (short_entity + alias_fuzzy identity) with a
+     * normalized query whose compact length (letters/digits only) equals
+     * `compactLen`, plus the given C/gap.
+     */
+    function makeNoisyGuardInput(compactLen: number, C: number, gap: number): Partial<DecisionInput> {
+      const compact = 'a'.repeat(compactLen);
+      return {
+        queryPlan: {
+          ...makeQueryPlan('short_entity'),
+          rawQuery: compact,
+          normalizedQuery: compact,
+        },
+        resolveResult: makeResolverResult(C, gap, false, {
+          anchorLookupStrategies: ['fuzzy_char_ngram'],
+          anchorLookupVariants: [compact],
+        }),
+        evidenceSummary: makeStrongIdentityEvidence({
+          identityEvidence: { exactnessTier: 'alias_fuzzy' },
+        }),
+      };
+    }
+
+    describe('NOISY_SHORT_QUERY_MAX_COMPACT_LENGTH = 12', () => {
+      it('compact length 12 (== max) is still "short" → guard fires (low C)', async () => {
+        const output = await expectDecisionStatus(makeNoisyGuardInput(12, 0.85, 0.20), 'ambiguous');
+        expect(output.decisionTrace.rulesApplied).toContain('NOISY_SHORT_QUERY_GUARD');
+      });
+
+      it('compact length 13 (just over max) is not "short" → guard skipped, resolves', async () => {
+        const output = await expectDecisionStatus(makeNoisyGuardInput(13, 0.85, 0.20), 'resolved');
+        expect(output.decisionTrace.rulesApplied).not.toContain('NOISY_SHORT_QUERY_GUARD');
+      });
+    });
+
+    describe('NOISY_SHORT_QUERY_CONFIDENCE_FLOOR = 0.9 (with passing gap)', () => {
+      it('C == 0.90 (== floor) with passing gap → bypassed via high confidence', async () => {
+        const output = await expectDecisionStatus(makeNoisyGuardInput(10, 0.9, 0.20), 'resolved');
+        expect(output.decisionTrace.rulesApplied).toContain(
+          'NOISY_SHORT_QUERY_GUARD_BYPASSED_HIGH_CONFIDENCE',
+        );
+      });
+
+      it('C == 0.89 (just below floor) → not bypassed, guard fires', async () => {
+        const output = await expectDecisionStatus(makeNoisyGuardInput(10, 0.89, 0.20), 'ambiguous');
+        expect(output.decisionTrace.rulesApplied).toContain('NOISY_SHORT_QUERY_GUARD');
+      });
+    });
+
+    describe('NOISY_SHORT_QUERY_GAP_FLOOR = 0.08 (with passing confidence)', () => {
+      it('gap == 0.08 (== floor) with C above floor → bypassed (margin satisfied)', async () => {
+        const output = await expectDecisionStatus(makeNoisyGuardInput(10, 0.95, 0.08), 'resolved');
+        expect(output.decisionTrace.rulesApplied).toContain(
+          'NOISY_SHORT_QUERY_GUARD_BYPASSED_HIGH_CONFIDENCE',
+        );
+      });
+
+      it('gap == 0.07 (just below floor) even with high C → guard fires (margin too thin)', async () => {
+        const output = await expectDecisionStatus(makeNoisyGuardInput(10, 0.95, 0.07), 'ambiguous');
+        expect(output.decisionTrace.rulesApplied).toContain('NOISY_SHORT_QUERY_GUARD');
+      });
+    });
+  });
+
   describe('evidence obligation', () => {
     it.each([
       [

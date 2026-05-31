@@ -20,7 +20,7 @@ function searchOutcome(
 ): ToolOutcome {
   return {
     stepId: 'q:0:0',
-    tool: 'search_wines',
+    tool: 'search_hybrid',
     kind: opts?.kind ?? 'success',
     durationMs: 1,
     result: {
@@ -43,7 +43,7 @@ function searchOutcome(
 function groundingJsonOutcome(json: unknown): ToolOutcome {
   return {
     stepId: 'q:0:0',
-    tool: 'search_wines',
+    tool: 'search_hybrid',
     kind: 'success',
     durationMs: 1,
     result: `Some summary text\nGROUNDING_JSON: ${JSON.stringify(json)}`,
@@ -442,5 +442,21 @@ describe('synthesis-grounding-verify — adversarial / regression', () => {
     ]);
     const r = verifyAnswerGrounding('샤또 마고 2015은 최고입니다.', ['샤또 마고 2015은'], facts);
     expect(r.grounded).toBe(true);
+  });
+
+  it('Korean exact-label citation matches via exact_nfc_lower (never particle_stripped)', () => {
+    // Dead-rule removal: `tryParticleStripped` previously sat AFTER
+    // `tryExactNfcLower` in the cascade and shared the identical predicate
+    // (`facts.labels.has(claim)`). It could therefore never fire — any Korean
+    // exact-label match is already caught by exact_nfc_lower. This regression
+    // pins that a Korean exact citation is grounded AND that its matched rule
+    // is exact_nfc_lower, so no claim ever surfaces a particle_stripped kind.
+    const facts = collectGroundingFacts([
+      groundingJsonOutcome({ wines: [{ canonical_label: '샤또 마고' }] }),
+    ]);
+    const r = verifyAnswerGrounding('샤또 마고를 추천합니다.', ['샤또 마고'], facts);
+    expect(r.grounded).toBe(true);
+    expect(r.trace.length).toBe(1);
+    expect(r.trace[0]?.matchedRule).toEqual({ kind: 'exact_nfc_lower' });
   });
 });

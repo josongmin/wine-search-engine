@@ -52,8 +52,24 @@ function isMetricsHeaderAuthorized(
  */
 let lastHeartbeatMs: number = Date.now();
 
-/** Maximum allowed event-loop silence before /health returns 503 (ms). */
+/**
+ * Maximum allowed event-loop silence before /health returns 503 (ms).
+ * 30s is comfortably above the 1s heartbeat interval below (30 missed ticks),
+ * so transient GC/CPU spikes don't flap the liveness probe, while still
+ * catching a genuinely wedged event loop within one orchestrator probe window.
+ */
 const HEARTBEAT_STALE_THRESHOLD_MS = 30_000;
+/**
+ * Timeout for the optional snapshot_health reader embedded in /ready (ms).
+ * Bounded so a slow/hung PG query can't delay the readiness response — the
+ * block is best-effort observability, not a gating check, so on timeout we
+ * omit it rather than fail readiness.
+ *
+ * Coincidentally equal to readiness.ts ALIAS_SUBSTRATE_PROBE_TIMEOUT_MS (750),
+ * but a DIFFERENT concept (snapshot_health embed budget vs alias-substrate PG
+ * statement_timeout); the shared value is incidental, so these are NOT merged
+ * into one SSoT constant (rule 30 applies to same-concept constants only).
+ */
 export const SNAPSHOT_HEALTH_READER_TIMEOUT_MS = 750;
 
 /**

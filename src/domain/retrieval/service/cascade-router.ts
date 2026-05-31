@@ -265,15 +265,17 @@ export class CascadeRouter {
       if (queryClass === 'unknown') {
         return 'hard';
       }
-      if (analysis.effectiveComplexity < CASCADE_EASY_THRESHOLD) {
-        // OR-heavy / no-AND queries: candidate set widens, sparse +
-        // dense (medium) is enough; mirror the legacy 'medium' default
-        // for pure_constraint with few constraints so we don't downgrade
-        // queries that previously routed medium without a graph.
-        if (queryClass === 'pure_constraint') {
-          return 'medium';
-        }
-        return 'medium';
+      if (analysis.andDepth === 0 && analysis.effectiveComplexity < CASCADE_EASY_THRESHOLD) {
+        // Pure-OR / zero-AND-depth queries: the candidate set WIDENS
+        // (alternatives expand recall rather than collapse it) and there is no
+        // required AND constraint to satisfy, so the documented cascade design
+        // routes these 'easy' = sparse-only. The dominant hard cases
+        // (anchored_similarity, semantic_preference, comparison_query,
+        // ambiguous_short_form, unknown) are short-circuited above this graph
+        // branch. A query with any AND-depth (e.g. "(Cabernet OR Merlot) AND
+        // under-50") keeps a required attribute and stays 'medium' so dense
+        // recall is preserved for the AND leg.
+        return 'easy';
       }
       return 'medium';
     }

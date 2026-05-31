@@ -178,9 +178,24 @@ function parseBatchResponse(
   });
 }
 
-function normalizeVerdict(raw: string): ClaimVerdict {
+/**
+ * Negated forms of the conflict/contradiction stems. An LLM that emits a free-text
+ * verdict like "no conflict" / "no conflicting evidence" / "not contradicted" is
+ * asserting the ABSENCE of contradiction — the naive substring check
+ * `r.includes('conflict')` would otherwise misclassify these as `contradicted`,
+ * silently flipping a supported/uncertain claim into a hard contradiction.
+ * Stripping the negated stems before the positive check avoids that false positive.
+ * ASCII-only stems, so the /g word-boundary form is Unicode-safe here.
+ */
+const NEGATED_CONFLICT_PATTERN =
+  /(?:^|[^\p{L}\p{N}])(?:no|not|without|never)\s+(?:conflict\w*|contradict\w*)(?=$|[^\p{L}\p{N}])/gu;
+
+export function normalizeVerdict(raw: string): ClaimVerdict {
   const r = raw.toLowerCase().trim();
-  if (r.includes('contradict') || r.includes('conflict') || r === 'false' || r === 'no') return 'contradicted';
+  // Remove negated conflict/contradiction phrases so "no conflicting evidence"
+  // is not read as a conflict (see NEGATED_CONFLICT_PATTERN).
+  const deNegated = r.replace(NEGATED_CONFLICT_PATTERN, ' ');
+  if (deNegated.includes('contradict') || deNegated.includes('conflict') || r === 'false' || r === 'no') return 'contradicted';
   if (r.includes('partial')) return 'partially_entailed';
   if (r.includes('entail') || r === 'supported' || r === 'true' || r === 'yes' || r === 'support') return 'entailed';
   return 'not_entailed';

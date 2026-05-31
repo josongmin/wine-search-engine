@@ -23,6 +23,16 @@ import { buildDisplayIdentitySignature } from '../../domain/response/service/dis
 const ENTROPY_SNAPSHOT_REASON_FRACTION_DIGITS = 4;
 const ENTROPY_CLARIFICATION_REASON_FRACTION_DIGITS = 3;
 
+/**
+ * Max disambiguation candidates surfaced in a clarification payload (top labels,
+ * option entities, and the `candidates` array). Bounded to 3 so the clarify UI
+ * presents a short, scannable choice set rather than the full ranked pool — a
+ * "did you mean A / B / C?" prompt, not a result list. Applied identically to
+ * every clarification slice so the label list, optionEntities, and candidates
+ * stay in lockstep.
+ */
+const MAX_CLARIFICATION_CANDIDATES = 3;
+
 function buildAbstainDecisionTraceReason(
   abstainDecision: TypedAbstainDecision,
   entropy: number,
@@ -253,7 +263,7 @@ function buildStructuredClarifyPayload(
   const topLabels = shouldFailClosedIdentityClarification(plan, abstainDecision)
     ? []
     : rankedResults
-      .slice(0, 3)
+      .slice(0, MAX_CLARIFICATION_CANDIDATES)
       .map((result) => result.canonicalLabel)
       .filter((label) => label.trim().length > 0);
   const topAmbiguousEntityHint = plan.expansions.ambiguousEntityHints?.[0];
@@ -296,13 +306,13 @@ function buildStructuredClarifyPayload(
           ? {
               options: topLabels,
               optionEntities: rankedResults
-                .slice(0, 3)
+                .slice(0, MAX_CLARIFICATION_CANDIDATES)
                 .map((result): StructuredClarifyOptionEntity => ({
                   entityId: result.entityId,
                   label: result.canonicalLabel,
                   distinguishingFeatures: buildClarificationDistinguishingFeatures(
                     result,
-                    rankedResults.slice(0, 3),
+                    rankedResults.slice(0, MAX_CLARIFICATION_CANDIDATES),
                   ),
                 })),
             }
@@ -511,12 +521,12 @@ export function buildEntropyAbstainResponseParams(options: {
       structuredPayload: buildStructuredClarifyPayload(plan, abstainDecision, presentationRankedResults),
       candidates: failClosedIdentityClarification
         ? []
-        : presentationRankedResults.slice(0, 3).map((r) => ({
+        : presentationRankedResults.slice(0, MAX_CLARIFICATION_CANDIDATES).map((r) => ({
           entityId: r.entityId,
           label: r.canonicalLabel,
           distinguishingFeatures: buildClarificationDistinguishingFeatures(
             r,
-            presentationRankedResults.slice(0, 3),
+            presentationRankedResults.slice(0, MAX_CLARIFICATION_CANDIDATES),
           ),
         })),
       suggestionType: 'disambiguation',

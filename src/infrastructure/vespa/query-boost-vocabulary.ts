@@ -91,6 +91,33 @@ function escapeRegex(literal: string): string {
 }
 
 /**
+ * Memoized compiled matcher per vocabulary (CLAUDE.md rule 16: a
+ * deterministic value derived purely from its inputs MUST NOT be
+ * re-allocated on every call). The combined word-boundary regex for a
+ * given vocabulary never changes, and the only callers pass the three
+ * module-level vocabularies (`MAJOR_REGION/COUNTRY/GRAPE_KEYWORDS`), so
+ * keying by array identity collapses to at most three cached RegExps for
+ * the lifetime of the process. The public {@link queryMentionsAny} API
+ * stays pure — callers observe identical results, only the per-call
+ * RegExp recompilation is removed.
+ */
+const compiledMatcherByVocabulary = new WeakMap<readonly string[], RegExp>();
+
+function getCompiledMatcher(vocabulary: readonly string[]): RegExp {
+  const cached = compiledMatcherByVocabulary.get(vocabulary);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const alternation = vocabulary.map((term) => escapeRegex(term)).join('|');
+  const pattern = new RegExp(
+    `${WORD_BOUNDARY_PREFIX}(?:${alternation})${WORD_BOUNDARY_SUFFIX}`,
+    'iu',
+  );
+  compiledMatcherByVocabulary.set(vocabulary, pattern);
+  return pattern;
+}
+
+/**
  * Returns true iff `query` mentions any keyword from `vocabulary` as a
  * whole word (Unicode-safe word boundary), case-insensitive.
  *
@@ -109,19 +136,16 @@ function escapeRegex(literal: string): string {
  * letter-like matches JavaScript's historical `\b` semantics and
  * correctly suppresses false positives on snake-case compound tokens.
  *
- * Performance: This compiles a single combined regex per call. The
- * vocabulary lists are small (< 10 entries) so the compilation cost is
- * negligible and we avoid module-level caching to keep the API pure.
+ * Performance: The combined word-boundary regex is compiled once per
+ * vocabulary and memoized by array identity (see
+ * {@link getCompiledMatcher}); repeat calls with the same vocabulary
+ * reuse the cached RegExp instead of recompiling. The API stays pure —
+ * the result depends only on (query, vocabulary).
  */
 export function queryMentionsAny(
   query: string,
   vocabulary: readonly string[],
 ): boolean {
   if (query.length === 0 || vocabulary.length === 0) return false;
-  const alternation = vocabulary.map((term) => escapeRegex(term)).join('|');
-  const pattern = new RegExp(
-    `${WORD_BOUNDARY_PREFIX}(?:${alternation})${WORD_BOUNDARY_SUFFIX}`,
-    'iu',
-  );
-  return pattern.test(query);
+  return getCompiledMatcher(vocabulary).test(query);
 }

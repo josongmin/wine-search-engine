@@ -13,6 +13,23 @@ const STRONG_MATCH_RATIO = 0.85;
 const AMBIGUITY_TOP_CANDIDATE_SCAN_K = 5;
 /** Top candidates scanned for alias-collision ambiguity. */
 const AMBIGUITY_ALIAS_COLLISION_SCAN_K = 10;
+/**
+ * Top candidates whose entity TYPES are inspected for type-collision
+ * (wine_vs_producer / wine_vs_region). Kept tight (3) because a type
+ * collision only matters among the very top matches; deeper candidates are
+ * long-tail noise for the purposes of "is the head ambiguous by type".
+ */
+const AMBIGUITY_TYPE_COLLISION_SCAN_K = 3;
+/**
+ * Minimum number of same-producer wines among the top scan window to call a
+ * producer-family collision. 3 = a clear cluster (not a coincidental pair),
+ * suggesting the query targets the producer rather than one specific wine.
+ */
+const PRODUCER_FAMILY_COLLISION_MIN_COUNT = 3;
+/** ≥ this many distinct ambiguity types → 'high' severity (compounding ambiguity). */
+const SEVERITY_HIGH_TYPE_COUNT = 3;
+/** ≥ this many distinct ambiguity types → 'medium' severity. */
+const SEVERITY_MEDIUM_TYPE_COUNT = 2;
 
 /**
  * Classifies ambiguity among resolution candidates, per RFC-006 §7.
@@ -168,7 +185,7 @@ export class AmbiguityClassifier {
       }
     }
     for (const count of producerCounts.values()) {
-      if (count >= 3) {
+      if (count >= PRODUCER_FAMILY_COLLISION_MIN_COUNT) {
         return true;
       }
     }
@@ -218,11 +235,12 @@ export class AmbiguityClassifier {
   }
 
   /**
-   * Returns the set of entity types among the top candidates (up to 3).
+   * Returns the set of entity types among the top candidates
+   * (up to AMBIGUITY_TYPE_COLLISION_SCAN_K).
    */
   private getTopCandidateTypes(candidates: readonly ResolverCandidate[]): Set<string> {
     const types = new Set<string>();
-    for (const candidate of candidates.slice(0, 3)) {
+    for (const candidate of candidates.slice(0, AMBIGUITY_TYPE_COLLISION_SCAN_K)) {
       types.add(candidate.entityType);
     }
     return types;
@@ -245,12 +263,12 @@ export class AmbiguityClassifier {
     }
 
     // Multiple ambiguity types or many strong candidates → high
-    if (types.length >= 3) {
+    if (types.length >= SEVERITY_HIGH_TYPE_COUNT) {
       return 'high';
     }
 
     // At least two types or producer family collision → medium
-    if (types.length >= 2 || types.includes('producer_family_collision')) {
+    if (types.length >= SEVERITY_MEDIUM_TYPE_COUNT || types.includes('producer_family_collision')) {
       return 'medium';
     }
 

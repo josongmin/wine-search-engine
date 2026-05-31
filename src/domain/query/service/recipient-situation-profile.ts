@@ -387,8 +387,12 @@ const UNKNOWN_PREFERENCE_RECIPIENT_QUERY_SIGNALS: readonly string[] = [
   'pinot gris',
   'prosecco',
   'cava',
-  'merlot',
-  'pinot noir',
+  // NOTE: specific grape varieties (merlot / pinot noir) are intentionally
+  // NOT signals here. Naming a grape in the QUERY is a *preference
+  // expression* — the opposite of "I don't know their preference" — so it must
+  // not trigger the unknown-preference recipient profile. (Crowd-pleasing reds
+  // still surface candidate-side via `crowd_pleasing_red` and in the retrieval
+  // term expansion, which operate on wine attributes, not user intent.)
 ];
 
 const QUERY_PROFILE_SIGNAL_MAP: Readonly<Record<RecipientProfileValue, readonly string[]>> = {

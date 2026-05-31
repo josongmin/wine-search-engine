@@ -30,8 +30,19 @@ import type {
 import { canonicalJsonStringify } from '../../shared/utils/canonical-json.js';
 
 const COMPOSITIONAL_VERSION = 'compositional-v1.0';
+// Inferred constraints are domain priors, not facts — capped below 0.8 so the
+// downstream ranker never treats them as hard identity evidence (RFC-019 §6.5).
 const COMPOSITIONAL_CONFIDENCE = 0.75;
 
+// ── Inferred attribute floor levels (Rule 15) ──
+// Attribute values are normalized to [0,1]. These are the lower-bound (`>=`)
+// thresholds emitted for body/tannin/acidity priors. Centered above the 0.5
+// midpoint so the prior nudges ranking toward the expected style without
+// hard-filtering retrieval, and tiered to mirror well-known wine intensity:
+//   HIGH (0.70)  — defining, near-archetypal trait (Champagne acidity, Barossa body).
+//   MED_PLUS (0.65) — strongly characteristic (Barolo/Napa tannin & body).
+//   MED (0.60)   — clearly present but not defining (Barolo acidity, Brunello tannin).
+//   MED_LOW (0.55) — gentle prior, just above neutral (Bordeaux red tannin).
 const LEVEL_HIGH = 0.7;
 const LEVEL_MED_PLUS = 0.65;
 const LEVEL_MED = 0.6;

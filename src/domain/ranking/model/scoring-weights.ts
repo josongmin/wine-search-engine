@@ -297,10 +297,28 @@ export function sumNonPenaltyWeights(weights: ScoringWeights): number {
   return total;
 }
 
+/**
+ * Minimum gift-suitability weight once an explicit gift intent is detected.
+ * 0.15 ≈ the DEFAULT_WEIGHTS semantic/softConstraint band — large enough to
+ * surface gift-suited wines above generic popularity, below the dominant
+ * constraint/integrity signals so identity is never overridden by occasion.
+ */
 const SITUATION_INTENT_GIFT_WEIGHT_FLOOR = 0.15;
+/** Beginner-suitability floor: paired with the gift floor (same 0.15 band) so
+ * approachability ranks at parity with gift suitability under situation intent. */
 const SITUATION_INTENT_BEGINNER_WEIGHT_FLOOR = 0.15;
+/** Producer-prestige floor under prestige intent. Set just below the gift/beginner
+ * floors (0.12 < 0.15): prestige is a strong but secondary occasion signal. */
 const SITUATION_INTENT_PRESTIGE_WEIGHT_FLOOR = 0.12;
+/** Popularity floor under "unknown-preference recipient" intent. Mirrors the
+ * prestige floor (0.12) — both are crowd-proxy signals used when no explicit
+ * taste constraint is available. */
 const SITUATION_INTENT_POPULARITY_WEIGHT_FLOOR = 0.12;
+/**
+ * Minimum numeric facet score (gift/beginner/prestige/popularity) that counts
+ * as an explicit situation intent. 0.5 = midpoint of the normalized [0,1] facet
+ * scale — below the midpoint the signal is too weak to overlay scoring weights.
+ */
 const SITUATION_INTENT_FACET_TRIGGER_MIN = 0.5;
 
 function constraintValueMatches(

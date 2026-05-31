@@ -600,6 +600,41 @@ describe('SearchResponseSchema', () => {
     expect(parsed.success).toBe(true);
   });
 
+  function makeExecutionTraceCompiledBudget(maxCandidates: number) {
+    return {
+      ...makeValidV1SearchResponse(),
+      meta: {
+        ...makeValidV1SearchResponse().meta,
+        audit_extension: {
+          execution_trace: {
+            effective_route: 'hybrid',
+            used_compiled_execution: true,
+            compiled_budget: {
+              max_candidates: maxCandidates,
+              rerank_limit: 50,
+              enable_precision_rerank: true,
+            },
+          },
+        },
+      },
+    };
+  }
+
+  it('accepts a valid in-bound execution_trace.compiled_budget.max_candidates', () => {
+    const parsed = SearchResponseSchema.safeParse(makeExecutionTraceCompiledBudget(120));
+    expect(parsed.success).toBe(true);
+  });
+
+  it('rejects a negative execution_trace.compiled_budget.max_candidates', () => {
+    const parsed = SearchResponseSchema.safeParse(makeExecutionTraceCompiledBudget(-1));
+    expect(parsed.success).toBe(false);
+  });
+
+  it('rejects an execution_trace.compiled_budget.max_candidates above MAX_QUERY_BUDGET_CANDIDATES', () => {
+    const parsed = SearchResponseSchema.safeParse(makeExecutionTraceCompiledBudget(1_001));
+    expect(parsed.success).toBe(false);
+  });
+
   it('rejects unknown nested keys inside typed constraint_resolution_trace entries', () => {
     const parsed = SearchResponseSchema.safeParse({
       ...makeValidV1SearchResponse(),

@@ -52,10 +52,29 @@ const CONFIDENCE_REGION = 0.9;
 /** Grape aliases — lowest auto tier (short names can be ambiguous). */
 const CONFIDENCE_GRAPE = 0.88;
 
-/** Minimum combinedScore from FuzzyMatcher to consider a fuzzy fallback hit. */
+/**
+ * Minimum combinedScore from FuzzyMatcher to consider a fuzzy fallback hit
+ * (Rule 15). 0.7 sits below the lowest auto exact-tier confidence
+ * (CONFIDENCE_GRAPE=0.88) so a fuzzy hit is admitted only when it is clearly
+ * stronger than noise, while still catching 1-2 edit typos. Below this the
+ * matcher's score range is dominated by coincidental n-gram overlap.
+ */
 const FUZZY_MIN_CONFIDENCE = 0.7;
-/** Discount applied to fuzzy matches relative to exact matches. */
+/**
+ * Discount applied to fuzzy matches relative to exact matches (Rule 15).
+ * A fuzzy hit is never as trustworthy as an exact alias match, so its score is
+ * scaled by 0.85 (a ~15% penalty). The factor keeps a strong fuzzy hit
+ * (combinedScore≈1.0 → 0.85) below every exact auto-tier (≥0.88), guaranteeing
+ * an exact resolution always outranks a fuzzy one of the same surface.
+ */
 const FUZZY_CONFIDENCE_DISCOUNT = 0.85;
+/**
+ * Max Levenshtein edit distance for the fuzzy fallback (Rule 16: module-scope).
+ * 2 catches single transposition + single typo (e.g. "romane conti" →
+ * "romanee conti") without admitting unrelated short aliases. Higher distances
+ * explode false positives on 4-6 char grape/region tokens.
+ */
+const MAX_FUZZY_EDIT_DISTANCE = 2;
 
 export interface ResolvedEntity {
   /** Resolved canonical display label (e.g. 'Bordeaux', 'Cabernet Sauvignon'). */
@@ -256,7 +275,6 @@ export function resolveEntity(
 
   // ── Fuzzy fallback: re-lookup best fuzzy match in RESOLVER_INDEX ──
   if (fuzzyMatcher !== undefined) {
-    const MAX_FUZZY_EDIT_DISTANCE = 2;
     const fuzzyHits = fuzzyMatcher.match(spanText, MAX_FUZZY_EDIT_DISTANCE);
     for (const hit of fuzzyHits) {
       if (hit.combinedScore < FUZZY_MIN_CONFIDENCE) break; // sorted desc — no further hits will pass

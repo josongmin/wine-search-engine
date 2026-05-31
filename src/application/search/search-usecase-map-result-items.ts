@@ -29,6 +29,15 @@ const drinkingWindowLogger = bootstrapLogger.child({
   component: 'search-result-drinking-window',
 });
 
+/**
+ * Per-result soft deadline for a single drinking-window prediction. Drinking
+ * window is an OPTIONAL enrichment block on the result item — it must never
+ * stall the user-facing response. 2s caps a slow predictor/cache call; on
+ * timeout the prediction is dropped (approximationUsed=true) and the result is
+ * still returned without a window. Sized as a soft enrichment budget, below the
+ * overall request SLO so a stuck predictor degrades gracefully instead of
+ * blocking the whole response.
+ */
 const DRINKING_WINDOW_CHECK_TIMEOUT_MS = 2_000;
 
 const EXACT_MATCH_TYPES = new Set<MatchDetail['matchType']>(['exact', 'alias_exact', 'alias_fuzzy']);

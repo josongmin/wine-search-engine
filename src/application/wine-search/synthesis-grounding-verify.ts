@@ -46,9 +46,9 @@
  * rule operates on the citation surface (label-shaped) and grounding fields.
  *
  *   - exact_nfc_lower         — direct string equality after normalisation.
- *   - particle_stripped       — Korean josa is stripped by normalisation; this
- *                               rule formalises the case where particle-strip
- *                               is the only reason the surfaces collide.
+ *                               normalizeClaimSurface already strips Korean
+ *                               josa, so Korean particle-only differences
+ *                               collide here (no separate particle rule).
  *   - transliteration_pair    — claim and grounded label are alternate
  *                               surfaces of the same wine via curated catalogs
  *                               (korean-wine-aliases.ts and Transliterator
@@ -146,7 +146,6 @@ export interface GroundingFacts {
 /** Discriminated-union tag for which rule fired on a given citation. */
 type GroundingMatchRule =
   | { readonly kind: 'exact_nfc_lower' }
-  | { readonly kind: 'particle_stripped' }
   | { readonly kind: 'transliteration_pair' }
   | { readonly kind: 'compound_subsumed_by_label' }
   | { readonly kind: 'vintage_year_field_match' }
@@ -554,23 +553,6 @@ function tryExactNfcLower(claim: string, facts: GroundingFacts): boolean {
 }
 
 /**
- * Rule: particle-stripped match. `normalizeClaimSurface` already strips josa,
- * so this rule covers the case where stripping a josa from the RAW citation
- * (not the normalized one) is what causes the surfaces to collide. We detect
- * this by comparing the claim to the labels with the trailing single Hangul
- * (a heuristic-free josa surrogate is already handled by `stripKoreanJosa`);
- * since both sides went through the same normalisation, particle_stripped
- * fires exactly when exact_nfc_lower would fire after stripKoreanJosa was the
- * differentiating step. We treat this as an alias for exact_nfc_lower when
- * the claim contains Hangul — kept as a separate rule kind purely for
- * provenance telemetry.
- */
-function tryParticleStripped(claim: string, facts: GroundingFacts): boolean {
-  if (!/\p{Script=Hangul}/u.test(claim)) return false;
-  return facts.labels.has(claim);
-}
-
-/**
  * Rule: claim and a grounded label belong to the same curated alias
  * equivalence class. Cross-walks both directions via the Transliterator and
  * the korean-wine-aliases catalog. ANY overlap between the claim's alternates
@@ -808,9 +790,6 @@ function matchClaim(
 ): GroundingMatchRule | null {
   if (tryExactNfcLower(claim, facts)) {
     return { kind: 'exact_nfc_lower' };
-  }
-  if (tryParticleStripped(claim, facts)) {
-    return { kind: 'particle_stripped' };
   }
   if (tryTransliterationPair(claim, facts)) {
     return { kind: 'transliteration_pair' };

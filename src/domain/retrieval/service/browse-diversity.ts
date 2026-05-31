@@ -259,12 +259,21 @@ export function diversifyRegionBrowseHits(
   return selected.slice(0, limit);
 }
 
-/** Over-fetch multiplier for sparse browse before diversity selection. */
+/**
+ * Over-fetch multiplier for sparse browse before diversity selection.
+ *
+ * 8× headroom: producer/region browse collapses many hits down to one per
+ * (product line, vintage) or caps wines-per-producer, so the raw sparse pool
+ * must be several times the requested result count to survive diversity
+ * pruning and still fill `limit`. 8 is the empirical floor at which a typical
+ * producer catalog (multiple vintages × cuvées) still yields a full page after
+ * dedup; the result is hard-capped at BROWSE_SPARSE_FETCH_CEILING (240) so the
+ * over-fetch never explodes Vespa latency for large result limits.
+ */
 const BROWSE_SPARSE_OVERFETCH_MULTIPLIER = 8;
-const BROWSE_SPARSE_OVERFETCH_FACTOR = BROWSE_SPARSE_OVERFETCH_MULTIPLIER;
 
 export function browseSparseFetchLimit(resultLimit: number): number {
-  const raw = resultLimit * BROWSE_SPARSE_OVERFETCH_FACTOR;
+  const raw = resultLimit * BROWSE_SPARSE_OVERFETCH_MULTIPLIER;
   return Math.min(BROWSE_SPARSE_FETCH_CEILING, Math.max(resultLimit, raw));
 }
 

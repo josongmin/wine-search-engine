@@ -3,6 +3,7 @@ import type { EmbeddingServicePort } from '../port/embedding-service.port.js';
 import type { HybridRetrievalInput } from '../model/retrieval-input.js';
 import type { HybridCandidate } from '../model/hybrid-candidate.js';
 import type { NormalizedConstraint } from '../../shared/types/index.js';
+import type { ExecutionRetrievalMode } from '../../query/model/engine-execution-contract.js';
 import type {
   CandidateEnvelope,
   CandidateChannel,
@@ -198,6 +199,25 @@ function buildRawQueryPriceConstraints(rawQuery: string): readonly NormalizedCon
  *
  * Dependencies injected for testability and loose coupling (SOLID - D principle).
  */
+
+/**
+ * Runtime retrieval mode resolved by `resolveRuntimeRetrievalMode`.
+ *
+ * It is the compiled `ExecutionRetrievalMode` PLUS the two router-internal
+ * modes that never appear on the engine-execution contract but are produced
+ * here:
+ *  - `'relative'`            → compare_candidates with an explicit anchor entity.
+ *  - `'entity_anchor_first'` → TRACK-A A4 anchor-dominant dual path.
+ *
+ * Typed as a closed union (not bare `string`) so a typo in a future mode
+ * literal is caught at compile time. Downstream consumers (`getProfile`,
+ * `resolveVespaRankProfile`, `mapDomainQueryClassToFusionQueryClass`) accept
+ * `string`, so the narrower type is assignable everywhere.
+ */
+export type RuntimeRetrievalMode =
+  | ExecutionRetrievalMode
+  | 'relative'
+  | 'entity_anchor_first';
 
 /**
  * Retrieval modes that handle their own routing and must not be overridden by
@@ -1228,7 +1248,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
     return uniqueEntityIds.size === 1;
   }
 
-  private resolveRuntimeRetrievalMode(input: HybridRetrievalInput): string | undefined {
+  private resolveRuntimeRetrievalMode(input: HybridRetrievalInput): RuntimeRetrievalMode {
     if (input.compiledRetrievalMode === undefined) {
       throw new Error('CandidatePoolService requires compiledRetrievalMode from compiled execution');
     }
