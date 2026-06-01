@@ -38,7 +38,9 @@ import type { NormalizedQueryViews } from '../../../domain/query/model/query-vie
 import type {
   LookupAdmissionGatePort,
   LookupAdmissionVerdict,
+  LookupDecision,
 } from '../../../domain/resolver/v2/lookup-v2-types.js';
+import { CalibratedAbstainDecider } from '../../../domain/resolver/v2/calibrated-abstain-decider.js';
 import { buildResolverCandidatesFromGenerator } from '../search-usecase-resolver-candidates.js';
 import { shouldSuppressBlockerSeedExpansion } from '../search-usecase-blocker-seed-policy.js';
 import { buildPlannerContextFromSearchRequest } from '../search-usecase-planner-context.js';
@@ -79,6 +81,7 @@ export interface EntityLookupV2UseCaseDeps {
 
 export class EntityLookupV2UseCase {
   private readonly constraintSAT = new ConstraintSAT();
+  private readonly decider = new CalibratedAbstainDecider();
 
   constructor(private readonly deps: EntityLookupV2UseCaseDeps) {}
 
@@ -162,10 +165,16 @@ export class EntityLookupV2UseCase {
     const result = await this.resolveCandidatePool(plan, options);
     throwIfAborted(options?.abortSignal, 'Entity lookup V2 aborted');
 
+    // V2 calibrated-abstain authority — precision-first, downgrade-only over the
+    // resolver's advisory status (T-ELV2-05).
+    const decision = this.decider.decide(result, plan.queryClass);
+
     pipelineDebug(
       {
         step: PipelineDebugStep.RESOLVE_USE_CASE_DONE,
         resolve_status: result.status,
+        decision_status: decision.status,
+        decision_reason: decision.reasonCode,
         candidate_count: result.candidates.length,
         has_top_entity: result.topEntity !== undefined,
       },
@@ -178,7 +187,8 @@ export class EntityLookupV2UseCase {
       viewsView,
       admission,
       result,
-      decisionReasonCode: result.decisionTrace.outcomeReasonCodes[0] ?? result.status,
+      decision,
+      decisionReasonCode: decision.reasonCode,
       startedAt,
     });
   }
@@ -253,13 +263,16 @@ export class EntityLookupV2UseCase {
     viewsView: NormalizedQueryViewsView;
     admission: LookupAdmissionVerdict;
     result: EntityResolveResult | undefined;
+    decision?: LookupDecision | undefined;
     forcedStatus?: 'failed' | 'redirect_discovery';
     decisionReasonCode: string;
     startedAt: number;
   }): EntityLookupV2Result {
-    const { command, plan, viewsView, admission, result, forcedStatus, decisionReasonCode } = args;
+    const { command, plan, viewsView, admission, result, decision, forcedStatus, decisionReasonCode } = args;
 
-    const status = forcedStatus ?? mapResolverStatusToLookupStatus(result?.status ?? 'failed');
+    // Authority order: a forced status (admission/SAT) wins; otherwise the
+    // calibrated-abstain decision; otherwise the resolver's advisory status.
+    const status = forcedStatus ?? decision?.status ?? mapResolverStatusToLookupStatus(result?.status ?? 'failed');
     const trace = result?.decisionTrace;
     const candidates: readonly LookupV2CandidateView[] = result === undefined
       ? []
@@ -285,9 +298,18 @@ export class EntityLookupV2UseCase {
 
     const queryTimeMs = Math.max(0, performance.now() - args.startedAt);
 
+    // Prefer the decision's human detail on the resolve path; fall back to the
+    // canonical reason text for forced (admission/SAT) outcomes.
+    const decisionReason =
+      decision !== undefined && forcedStatus === undefined
+        ? decision.detail
+        : decisionReasonText(status, decisionReasonCode, admission);
+    const topConfidence = decision?.topConfidence ?? trace?.top1CalibratedScore;
+    const top1Top2Margin = decision?.top1Top2Margin ?? trace?.calibratedGap;
+
     return {
       status,
-      decisionReason: decisionReasonText(status, decisionReasonCode, admission),
+      decisionReason,
       normalizedQueryViews: viewsView,
       candidates,
       topCandidate,
@@ -295,11 +317,9 @@ export class EntityLookupV2UseCase {
       evidenceSummary: {
         admissionReasonCode: admission.reasonCode,
         decisionReasonCode,
-        ...(trace?.top1CalibratedScore !== undefined
-          ? { topConfidence: clamp01(trace.top1CalibratedScore) }
-          : {}),
-        ...(trace?.calibratedGap !== undefined ? { top1Top2Margin: clamp01(trace.calibratedGap) } : {}),
-        calibrationTrusted: trace?.calibrationTrusted ?? false,
+        ...(topConfidence !== undefined ? { topConfidence: clamp01(topConfidence) } : {}),
+        ...(top1Top2Margin !== undefined ? { top1Top2Margin: clamp01(top1Top2Margin) } : {}),
+        calibrationTrusted: decision?.calibrationTrusted ?? trace?.calibrationTrusted ?? false,
         queryClass: plan.queryClass,
         candidatePoolSize: result?.candidates.length ?? 0,
         // Per-channel coverage rail is populated by T-ELV2-04.

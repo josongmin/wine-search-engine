@@ -130,9 +130,11 @@ describe('ConceptAdmissionGate (T-ELV2-02 baseline)', () => {
     expect(gate.classify({ rawQuery: 'CM', views: makeViews('CM') }).decision).toBe('admit');
   });
 
-  it('counts CJK as signal chars (single Hangul syllable is under-specified, two are not)', () => {
+  it('counts CJK as signal chars (single Hangul syllable is under-specified)', () => {
     expect(gate.classify({ rawQuery: '와', views: makeViews('와') }).decision).toBe('reject');
-    expect(gate.classify({ rawQuery: '와인', views: makeViews('와인') }).decision).toBe('admit');
+    // '와인' (= "wine") clears the length gate but is a generic concept word →
+    // redirect_discovery (handled by the T-02 concept lexicon), not admit.
+    expect(gate.classify({ rawQuery: '와인', views: makeViews('와인') }).decision).toBe('redirect_discovery');
   });
 });
 
