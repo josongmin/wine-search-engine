@@ -78,6 +78,15 @@ function normalizeConceptTerm(term: string): string {
     .trim();
 }
 
+/**
+ * Korean particles (josa) that can survive as a standalone residual token after
+ * an agglutinated concept term is stripped (`까쇼는` → `는`). Dropped only as a
+ * WHOLE residual token, never substring-stripped from a real name.
+ */
+const JOSA_ONLY_TOKENS: ReadonlySet<string> = new Set([
+  '는', '은', '이', '가', '을', '를', '의', '도', '만', '에', '와', '과', '로', '으로',
+]);
+
 /** Lower-cased, accent-stripped, de-duplicated phrase list from reused vocab. */
 const ATTRIBUTE_CONCEPT_PHRASES: readonly string[] = Array.from(
   new Set(
@@ -184,10 +193,17 @@ export function classifyConcept(views: NormalizedQueryViews): ConceptClassificat
     residual = ` ${residual.replace(re, ' ')} `;
   }
 
-  // Drop any leftover standalone digits (stray vintage fragments, counts).
-  residual = residual.replace(/(?:^|[^\p{L}\p{N}])\d+(?=$|[^\p{L}\p{N}])/gu, ' ');
+  // Drop residual tokens that are nothing but a Korean particle (josa) left
+  // over from an agglutinated concept query (e.g. `까쇼는` → 까쇼 stripped → `는`).
+  // Whole-token only — never strips a josa syllable from inside a real name
+  // (audit R3). NOTE: bare numeric tokens are NOT dropped — pure-numeric wine
+  // brands ("1865", "707") are entity references, not stray vintages (the
+  // vintageStripped view already removed real vintage years).
+  const residualTokens = collapse(residual)
+    .split(' ')
+    .filter((token) => token.length > 0 && !JOSA_ONLY_TOKENS.has(token));
 
-  const cleaned = collapse(residual);
+  const cleaned = residualTokens.join(' ');
   return {
     isConceptOnly: cleaned.length === 0,
     hasConceptTerm: terms.size > 0,

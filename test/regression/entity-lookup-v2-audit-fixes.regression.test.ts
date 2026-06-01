@@ -18,6 +18,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { classifyConcept } from '../../src/domain/resolver/v2/concept-lexicon.js';
 import { CalibratedAbstainDecider } from '../../src/domain/resolver/v2/calibrated-abstain-decider.js';
+import { anchorsHaveExactIdentityEvidence } from '../../src/domain/resolver/v2/channel-provenance.js';
 import { ConceptAdmissionGate } from '../../src/domain/resolver/v2/concept-admission-gate.js';
 import { EntityLookupV2UseCase } from '../../src/application/search/entity-lookup-v2/entity-lookup-v2.usecase.js';
 import { createEntityId } from '../../src/domain/shared/types/index.js';
@@ -212,5 +213,51 @@ describe('audit R2 HIGH — untrusted resolve is not forgeable by a recall strat
   it('RESOLVES when untrusted top candidate has a strict exact strategy', async () => {
     const out = await untrustedUseCase('exact').execute({ query: 'margaux', maxCandidates: 5, mode: 'default' });
     expect(out.status).toBe('resolved');
+  });
+});
+
+// ── R3: fuzzy-fallback anchor must NOT forge exact-identity evidence ──────────
+
+describe('audit R3 — fuzzy-fallback anchor cannot forge exact identity', () => {
+  const eid = createEntityId('opus-one-2018');
+  const anchorWith = (strategies: string[], confidence: number) => [{
+    surfaceForm: 'opu one', normalizedForm: 'opu one', candidateEntityIds: [eid],
+    lookupStrategies: strategies, confidence,
+  }];
+
+  it('rejects an anchor carrying both `exact` and a fuzzy marker (opu one → opus one)', () => {
+    // The planner copies a bare `exact` (matched on the CORRECTED term) onto a
+    // fuzzy-fallback anchor; this must NOT count as exact identity.
+    expect(anchorsHaveExactIdentityEvidence(eid, anchorWith(['exact', 'fuzzy_match_fallback'], 0.873))).toBe(false);
+  });
+
+  it('accepts a genuine non-fuzzy exact anchor', () => {
+    expect(anchorsHaveExactIdentityEvidence(eid, anchorWith(['exact'], 0.97))).toBe(true);
+  });
+
+  it('rejects recall strategies that merely contain the word exact/alias', () => {
+    expect(anchorsHaveExactIdentityEvidence(eid, anchorWith(['lexical_exact'], 0.97))).toBe(false);
+    expect(anchorsHaveExactIdentityEvidence(eid, anchorWith(['prefix_exact'], 0.97))).toBe(false);
+    expect(anchorsHaveExactIdentityEvidence(eid, anchorWith(['inexact_alias'], 0.97))).toBe(false);
+  });
+});
+
+// ── R3: concept-lexicon Korean spelling / josa / numeric brand ───────────────
+
+describe('audit R3 — concept-lexicon Korean spelling + josa + numeric brand', () => {
+  const gate = new ConceptAdmissionGate();
+
+  it('redirects the standard ㅋ Korean Cabernet spelling 카베르네 (SSoT fix)', () => {
+    expect(classifyConcept(makeViews('카베르네 소비뇽')).isConceptOnly).toBe(true);
+    expect(gate.classify({ rawQuery: '카베르네 소비뇽', views: makeViews('카베르네 소비뇽') }).decision).toBe('redirect_discovery');
+  });
+
+  it('redirects a particle-suffixed concept query (까쇼는)', () => {
+    expect(classifyConcept(makeViews('까쇼는')).isConceptOnly).toBe(true);
+  });
+
+  it('ADMITS pure-numeric wine brands (1865, 707) — not stray vintages', () => {
+    expect(gate.classify({ rawQuery: '1865', views: makeViews('1865') }).decision).toBe('admit');
+    expect(gate.classify({ rawQuery: '707', views: makeViews('707') }).decision).toBe('admit');
   });
 });

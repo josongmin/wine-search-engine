@@ -75,23 +75,44 @@ const STRICT_EXACT_IDENTITY_STRATEGIES: ReadonlySet<string> = new Set([
 export const EXACT_IDENTITY_MIN_CONFIDENCE = 0.85;
 
 /**
+ * Markers that make an anchor FUZZY/recall by construction. Critically, the
+ * planner's fuzzy-fallback path runs the edit-distance-CORRECTED term through
+ * the exact alias matcher and copies the resulting bare `exact` strategy onto
+ * the fuzzy anchor (so it carries BOTH `exact` and `fuzzy_match_fallback`). A
+ * typo like `opu one`→`opus one` would then forge exact-identity evidence
+ * (audit R3). Any anchor carrying one of these markers is fuzzy and can NEVER
+ * count as exact identity, regardless of a co-present `exact` label.
+ */
+const FUZZY_RECALL_STRATEGY_MARKER = /fuzzy|ngram|trigram|edit|prefix|inexact|lexical|phonetic|fallback/u;
+
+/**
  * Whether the entity has EXACT-identity evidence among the anchors that
  * recalled it: an anchor that includes the entity, carries a strict-exact
- * lookup strategy, and meets the confidence floor. Used by the calibrated
- * decider to certify a resolve under UNtrusted calibration (substitute trust =
- * exact evidence; memory calibration-trust gate) WITHOUT reading a raw score.
+ * lookup strategy, is NOT fuzzy-by-construction, and meets the confidence
+ * floor. Used by the calibrated decider to certify a resolve under UNtrusted
+ * calibration (substitute trust = exact evidence; memory calibration-trust
+ * gate) WITHOUT reading a raw score.
  */
 export function anchorsHaveExactIdentityEvidence(
   entityId: CanonicalEntityId,
   anchors: readonly AnchorCandidate[],
 ): boolean {
   const idStr = String(entityId);
-  return anchors.some(
-    (anchor) =>
-      clamp01(anchor.confidence) >= EXACT_IDENTITY_MIN_CONFIDENCE &&
-      anchor.candidateEntityIds.some((id) => String(id) === idStr) &&
-      (anchor.lookupStrategies ?? []).some((s) => STRICT_EXACT_IDENTITY_STRATEGIES.has(s.toLowerCase())),
-  );
+  return anchors.some((anchor) => {
+    if (clamp01(anchor.confidence) < EXACT_IDENTITY_MIN_CONFIDENCE) {
+      return false;
+    }
+    if (!anchor.candidateEntityIds.some((id) => String(id) === idStr)) {
+      return false;
+    }
+    const strategies = (anchor.lookupStrategies ?? []).map((s) => s.toLowerCase());
+    // A fuzzy-by-construction anchor's exact label was earned by a CORRECTED
+    // term, not the user's query — reject it as identity evidence.
+    if (strategies.some((s) => FUZZY_RECALL_STRATEGY_MARKER.test(s))) {
+      return false;
+    }
+    return strategies.some((s) => STRICT_EXACT_IDENTITY_STRATEGIES.has(s));
+  });
 }
 
 /**

@@ -43,17 +43,17 @@
  * regex rule). No `\b` is used — Korean has no ASCII word boundaries.
  */
 export const KOREAN_GRAPE_ALIASES: ReadonlyArray<readonly [RegExp, string]> = [
-  // Cabernet Sauvignon — `까?베르네` covers 카베르네/까베르네; `까쇼` is the
-  // common Korean shorthand merged in from claim-extractor. The bare
-  // `까?베르네` alternative carries a negative lookahead `(?!\s*프랑)` so it does
-  // NOT swallow the Korean Cabernet *Franc* surface `카베르네 프랑` (W2 merge
+  // Cabernet Sauvignon — `[카까]?베르네` covers BOTH romanizations 카베르네 (ㅋ) and
+  // 까베르네 (ㄲ) plus the bare 베르네; `까?` previously only optionalized ㄲ and
+  // silently missed the standard ㅋ spelling 카베르네 (audit R3 concept leak).
+  // `까쇼` is the common Korean shorthand merged in from claim-extractor. The
+  // bare `[카까]?베르네` alternative carries a negative lookahead `(?!\s*프랑)` so it
+  // does NOT swallow the Korean Cabernet *Franc* surface `카베르네 프랑` (W2 merge
   // regression: first-match-wins previously misclassified Franc as Sauvignon).
-  [/까?베르네\s*소비뇽|까?베르네소비뇽|까?베르네(?!\s*프랑)|까쇼|cab(?:ernet)?\s*sauv(?:ignon)?/iu, 'Cabernet Sauvignon'],
-  // `까?베르네\s*프랑` is symmetric with the Sauvignon entry's `까?베르네` so the
-  // ㄲ-romanization `까베르네 프랑` resolves to Franc (not null). Without the
-  // optional `까`, the Sauvignon lookahead blocks `까베르네 프랑` AND this entry
-  // misses it → null (self-audit R3 regression from the lookahead fix).
-  [/까?베르네\s*프랑|cab(?:ernet)?\s*franc/iu, 'Cabernet Franc'],
+  [/[카까]?베르네\s*소비뇽|[카까]?베르네소비뇽|[카까]?베르네(?!\s*프랑)|까쇼|cab(?:ernet)?\s*sauv(?:ignon)?/iu, 'Cabernet Sauvignon'],
+  // `[카까]?베르네\s*프랑` is symmetric with the Sauvignon entry so both ㅋ/ㄲ
+  // romanizations `카베르네 프랑` / `까베르네 프랑` resolve to Franc (not null).
+  [/[카까]?베르네\s*프랑|cab(?:ernet)?\s*franc/iu, 'Cabernet Franc'],
   [/메를로|merlot/iu, 'Merlot'],
   [/피노\s*누아르?|피노누아|pinot\s*noir/iu, 'Pinot Noir'],
   [/피노\s*그리(?:지오)?|pinot\s*gri(?:gio|s)/iu, 'Pinot Grigio'],
