@@ -129,6 +129,12 @@ bash scripts/deploy/sync-local-runtime-state-to-host.sh \
   --s3-bucket "$ARTIFACT_BUCKET" \
   --local-data-dir "$LOCAL_DATA_DIR"
 
+echo "[deploy] ensure dedicated env: ${INSTANCE_ID}"
+bash scripts/deploy/ensure-dedicated-app-host-env.sh \
+  --region "$REGION" \
+  --instance-id "$INSTANCE_ID" \
+  --env-file "$ENV_FILE"
+
 echo "[deploy] ssm rollout: ${INSTANCE_ID}"
 bash scripts/deploy/ssm-rollout-from-ecr.sh \
   --region "$REGION" \

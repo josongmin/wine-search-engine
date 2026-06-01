@@ -206,6 +206,9 @@ export class OpenAiLLMInjectionClassifier implements LLMInjectionClassifierPort 
           );
         } catch (err) {
           if (isAbortError(err)) {
+            if (options?.abortSignal?.aborted === true) {
+              throw err;
+            }
             const abortErr = new Error(`OpenAI injection classifier: request timed out after ${this.httpTimeoutMs}ms`);
             abortErr.name = 'AbortError';
             throw abortErr;

@@ -22,6 +22,9 @@
 16. **RFC-014** — Search API·external contract (RFC-008 매핑)
 17. **RFC-015** — Determinism, Replay, operational controls (스냅샷·임계 버전·증거 게이트·kill switch)
 18. **RFC-017** — IR Quality Flywheel: Vivino ETL·Golden Query Set·LTR·Cross-Encoder (RFC-002·009·010·012·013 실행 계획)
+19. **RFC-019** — NL Mapper Elevation to Ontology-Grounded Semantic Constraint Compiler
+20. **RFC-020** — Constraint Extraction Measurement Framework
+21. **RFC-021** — Primitive Search Surface and Agent-Orchestrated Query Composition
 
 ## 문서 목록 (파일명)
 
@@ -45,6 +48,9 @@
 | 015 | `RFC-015.md` | Determinism, Replay, kill switch, drift |
 | 016 | `RFC-016.md` | Admission Gate, `FailureReason`, identity·snapshot·evidence closure |
 | 017 | `RFC-017.md` | IR Quality Flywheel: Vivino ETL·Golden Query Set·LTR·Cross-Encoder |
+| 019 | `docs/rfc/RFC-019-nl-mapper-coverage.md` | Rule table를 ontology-grounded constraint compiler로 승격 |
+| 020 | `docs/rfc/RFC-020-constraint-extraction-measurement.md` | Constraint extraction 측정 프레임워크 |
+| 021 | `docs/rfc/RFC-021-primitive-search-and-agent-orchestration.md` | Public search primitive화 + agent orchestration 경계 |
 
 ## 개념·용어 정렬 (논리 연결)
 

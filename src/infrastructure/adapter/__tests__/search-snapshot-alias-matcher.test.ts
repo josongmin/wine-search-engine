@@ -46,12 +46,16 @@ describe('SearchSnapshotAliasMatcher', () => {
 
     const matcher = await SearchSnapshotAliasMatcher.loadFromPostgres(pool);
     expect(matcher).toBeDefined();
+    const internalState = matcher as unknown as {
+      broadRecallIndexesBuilt: boolean;
+    };
 
     const matches = await matcher?.findMatches('opus one');
     expect(matches?.[0]).toMatchObject({
       surfaceForm: 'Opus One',
       entityIds: ['entity-opus-one'],
     });
+    expect(internalState.broadRecallIndexesBuilt).toBe(true);
     expect(queries.some((query) => query.includes('FROM active_search_snapshot'))).toBe(true);
     expect(queries.some((query) => query.includes('FROM aliases'))).toBe(true);
   });

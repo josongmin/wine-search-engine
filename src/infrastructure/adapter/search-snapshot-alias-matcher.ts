@@ -225,6 +225,7 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
       const aliases = parseNdjson(aliasesRaw, aliasesPath);
       const buildStartedAt = Date.now();
       const matcher = new SearchSnapshotAliasMatcher(aliases);
+      matcher.warmBroadRecallIndexes();
       bootstrapLogger.info(
         {
           manifestPath,
@@ -318,6 +319,7 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
 
       const buildStartedAt = Date.now();
       const matcher = new SearchSnapshotAliasMatcher(aliases);
+      matcher.warmBroadRecallIndexes();
       bootstrapLogger.info(
         {
           activeSnapshotId,
@@ -410,6 +412,10 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
 
   getSurfaceForms(): readonly string[] {
     return this.surfaceForms;
+  }
+
+  warmBroadRecallIndexes(): void {
+    this.ensureBroadRecallIndexes();
   }
 
   findMatchesBatch(

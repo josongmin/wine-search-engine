@@ -99,6 +99,30 @@ bash scripts/deploy/clone-runtime-state-between-hosts.sh \
 
 이 경로는 `SSM -> S3 -> SSM`으로만 이동한다. SSH 의존성은 없다.
 
+## 2.5. dedicated host 운영 env 고정
+
+전용 public search host는 아래 값을 명시적으로 유지해야 한다.
+
+- `SEARCH_SNAPSHOT_REQUIRE_ACTIVE_LTR_FOR_RUNTIME=false`
+- `INJECTION_JUDGE_FAIL_OPEN=true`
+- `OPENAI_INJECTION_HTTP_TIMEOUT_MS=5000`
+- `INJECTION_JUDGE_TIMEOUT_MS=5000`
+
+이유:
+
+- 현재 public search request budget은 `30s`다.
+- Layer 2 judge를 `45s + fail_closed`로 두면 cold request에서 ordinary query도 timeout/abort로 죽는다.
+- dedicated host direct deploy는 이 값을 자동으로 upsert한다.
+
+수동 적용이 필요하면:
+
+```bash
+bash scripts/deploy/ensure-dedicated-app-host-env.sh \
+  --region ap-northeast-2 \
+  --instance-id i-0e28f63452c548a9f \
+  --env-file /etc/wine-search-engine.env
+```
+
 ## 3. 새 host에 동일 이미지 배포
 
 현재 운영 이미지와 동일 태그로 먼저 올려서 환경 분리만 검증하는 것이 가장 안전하다.

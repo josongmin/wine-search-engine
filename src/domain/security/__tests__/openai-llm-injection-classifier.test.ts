@@ -119,6 +119,28 @@ describe('OpenAiLLMInjectionClassifier', () => {
     await expect(classifier.classify('find wine')).rejects.toThrow('HTTP 401');
   });
 
+  it('preserves external aborts instead of mislabeling them as classifier timeouts', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    vi.mocked(fetch).mockRejectedValueOnce(new DOMException('The operation was aborted.', 'AbortError'));
+
+    const classifier = new OpenAiLLMInjectionClassifier({
+      apiKey: 'sk-test',
+      baseUrl: 'https://api.openai.com/v1',
+    });
+
+    const error = await classifier.classify('find wine', { abortSignal: controller.signal })
+      .then(() => undefined)
+      .catch((err: unknown) => err);
+
+    expect(error).toMatchObject({
+      message: expect.stringMatching(/aborted/i),
+    });
+    expect(error).not.toMatchObject({
+      message: expect.stringMatching(/timed out after 45000ms/),
+    });
+  });
+
   it('rotates across OPENAI_API_KEYS on key-level failures', async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce({
