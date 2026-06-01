@@ -41,7 +41,8 @@ import type {
   LookupDecision,
 } from '../../../domain/resolver/v2/lookup-v2-types.js';
 import { CalibratedAbstainDecider } from '../../../domain/resolver/v2/calibrated-abstain-decider.js';
-import { buildChannelHitsForEntity } from '../../../domain/resolver/v2/channel-provenance.js';
+import { buildChannelHitsForEntity, hasExactIdentityEvidence } from '../../../domain/resolver/v2/channel-provenance.js';
+import { clamp01 } from '../../../domain/shared/utils/clamp.js';
 import { LOOKUP_RETRIEVAL_CHANNELS } from '../../../domain/resolver/v2/lookup-v2-types.js';
 import type { LookupRetrievalChannel } from '../../../domain/resolver/v2/lookup-v2-types.js';
 import { buildResolverCandidatesFromGenerator } from '../search-usecase-resolver-candidates.js';
@@ -169,9 +170,19 @@ export class EntityLookupV2UseCase {
     const result = await this.resolveCandidatePool(plan, options);
     throwIfAborted(options?.abortSignal, 'Entity lookup V2 aborted');
 
+    // Establish EXACT-identity evidence for the top candidate from its anchor
+    // channels (exact/compact/transliteration alias hit). This — NOT a raw
+    // score — is what may certify a resolve under untrusted calibration.
+    const top = result.candidates[0];
+    const topExactEvidence =
+      top !== undefined &&
+      hasExactIdentityEvidence(
+        buildChannelHitsForEntity(top.entityId, top.rank, plan.anchors, top.blockerSeed === true),
+      );
+
     // V2 calibrated-abstain authority — precision-first, downgrade-only over the
     // resolver's advisory status (T-ELV2-05).
-    const decision = this.decider.decide(result, plan.queryClass);
+    const decision = this.decider.decide(result, plan.queryClass, topExactEvidence);
 
     pipelineDebug(
       {
@@ -279,9 +290,11 @@ export class EntityLookupV2UseCase {
     const status = forcedStatus ?? decision?.status ?? mapResolverStatusToLookupStatus(result?.status ?? 'failed');
     const trace = result?.decisionTrace;
     const anchors = plan.anchors;
+    // Cap the surfaced candidate fan-out to the caller's max_candidates. The
+    // resolver is ordered by rank, so slicing keeps the strongest candidates.
     const candidates: readonly LookupV2CandidateView[] = result === undefined
       ? []
-      : result.candidates.map((c) => {
+      : result.candidates.slice(0, command.maxCandidates).map((c) => {
           // T-ELV2-04: decompose the recall that produced this candidate into
           // the declared V2 channels (exact/compact/transliteration/jamo/fuzzy/
           // family/dense) so the per-channel union is an explicit artifact.
@@ -352,19 +365,6 @@ export class EntityLookupV2UseCase {
       },
     };
   }
-}
-
-function clamp01(value: number): number {
-  if (!Number.isFinite(value)) {
-    return 0;
-  }
-  if (value < 0) {
-    return 0;
-  }
-  if (value > 1) {
-    return 1;
-  }
-  return value;
 }
 
 /**

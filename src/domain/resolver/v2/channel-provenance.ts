@@ -15,6 +15,7 @@
 
 import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { AnchorCandidate } from '../../query/model/anchor-candidate.js';
+import { clamp01 } from '../../shared/utils/clamp.js';
 import type { LookupChannelHit, LookupRetrievalChannel } from './lookup-v2-types.js';
 
 /**
@@ -38,9 +39,34 @@ export function mapLookupStrategyToChannel(strategy: string): LookupRetrievalCha
 /** Channel attributed to blocker-seeded candidates (high-recall, non-alias). */
 export const BLOCKER_SEED_CHANNEL: LookupRetrievalChannel = 'dense';
 
-function clamp01(value: number): number {
-  if (!Number.isFinite(value) || value < 0) return 0;
-  return value > 1 ? 1 : value;
+/**
+ * Channels that constitute EXACT identity evidence: a normalized/compact/
+ * transliterated exact alias hit. Fuzzy / family / dense are recall-only and
+ * do NOT prove identity.
+ */
+const EXACT_IDENTITY_CHANNELS: ReadonlySet<LookupRetrievalChannel> = new Set([
+  'exact_alias',
+  'compact_exact',
+  'transliteration_exact',
+]);
+
+/**
+ * Minimum anchor confidence for a channel hit to count as exact-identity
+ * evidence. High by design — exact-channel hits below this are treated as
+ * recall, not identity proof. Used by the calibrated-abstain decider to certify
+ * a resolve when calibration is UNtrusted (substitute trust = exact evidence;
+ * memory: calibration-trust gate), instead of trusting a raw score.
+ */
+export const EXACT_IDENTITY_ANCHOR_CONFIDENCE = 0.95;
+
+/**
+ * Whether a candidate's channel union carries exact-identity evidence — i.e. an
+ * exact/compact/transliteration alias hit at or above the confidence floor.
+ */
+export function hasExactIdentityEvidence(hits: readonly LookupChannelHit[]): boolean {
+  return hits.some(
+    (h) => EXACT_IDENTITY_CHANNELS.has(h.channel) && h.channelScore >= EXACT_IDENTITY_ANCHOR_CONFIDENCE,
+  );
 }
 
 /**

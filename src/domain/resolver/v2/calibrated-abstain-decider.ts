@@ -18,25 +18,24 @@
  *      ceiling may certify a resolve when calibration params are not fresh.
  */
 
+import { clamp01 } from '../../shared/utils/clamp.js';
 import type { EntityResolveResult } from '../model/resolve-result.js';
 import type { QueryClass } from '../../shared/types/index.js';
 import type { LookupDecision } from './lookup-v2-types.js';
-
-/**
- * Calibrated-score ceiling that counts as exact-identity evidence even when the
- * calibration parameters are not trusted. At/above this the score reflects a
- * deterministic exact-alias match, not a learned probability, so it may certify
- * a resolve under untrusted calibration; below it, an untrusted score cannot.
- * 0.99 mirrors the resolver's exact-match signal ceiling.
- */
-export const LOOKUP_EXACT_EVIDENCE_CEILING = 0.99;
 
 export class CalibratedAbstainDecider {
   /**
    * Decide the terminal V2 status from the resolver result. Never upgrades the
    * resolver's advisory status; only holds or tightens it.
+   *
+   * @param hasExactEvidence whether the top candidate carries EXACT identity
+   *   evidence (an exact/compact/transliteration alias hit — see
+   *   {@link hasExactIdentityEvidence}). This is the ONLY thing that may certify
+   *   a resolve under UNtrusted calibration: a raw/uncalibrated score must never
+   *   be read as a probability (calibration-trust gate; audit DoD-d). When the
+   *   caller cannot establish exact evidence it MUST pass false → abstain.
    */
-  decide(result: EntityResolveResult, _queryClass: QueryClass): LookupDecision {
+  decide(result: EntityResolveResult, _queryClass: QueryClass, hasExactEvidence: boolean): LookupDecision {
     const trace = result.decisionTrace;
     const topConfidence = clamp01(trace.top1CalibratedScore);
     const margin = trace.calibratedGap;
@@ -59,12 +58,14 @@ export class CalibratedAbstainDecider {
     const { resolveThreshold, gapThreshold } = trace.appliedThresholds;
 
     if (!calibrationTrusted) {
-      // A raw, uncalibrated score must not be read as a probability. Only an
-      // exact-evidence ceiling may certify a resolve here; otherwise abstain.
-      if (topConfidence >= LOOKUP_EXACT_EVIDENCE_CEILING && isMarginClear(margin, gapThreshold)) {
-        return decision('resolved', 'exact_identity_uncalibrated', 'Resolved on exact-identity evidence (calibration untrusted).', topConfidence, margin, calibrationTrusted);
+      // A raw, uncalibrated score must NOT be read as a probability (audit
+      // DoD-d). Only an explicit EXACT-identity signal — an exact/compact/
+      // transliteration alias hit, NOT the numeric score — may certify a
+      // resolve here; otherwise abstain.
+      if (hasExactEvidence && isMarginClear(margin, gapThreshold)) {
+        return decision('resolved', 'exact_identity_uncalibrated', 'Resolved on exact-identity alias evidence (calibration untrusted).', topConfidence, margin, calibrationTrusted);
       }
-      return decision('ambiguous', 'uncalibrated_low_trust', 'Calibration is untrusted and evidence is not exact — abstaining.', topConfidence, margin, calibrationTrusted);
+      return decision('ambiguous', 'uncalibrated_low_trust', 'Calibration is untrusted and there is no exact-identity evidence — abstaining.', topConfidence, margin, calibrationTrusted);
     }
 
     // Trusted calibration: enforce confidence floor + margin.
@@ -106,9 +107,3 @@ function decision(
   };
 }
 
-function clamp01(value: number): number {
-  if (!Number.isFinite(value) || value < 0) {
-    return 0;
-  }
-  return value > 1 ? 1 : value;
-}

@@ -22,6 +22,7 @@
 
 import { GRAPE_VOCABULARY, REGION_VOCABULARY, COUNTRY_VOCABULARY } from '../../ranking/model/wine-attribute-vocabulary.js';
 import { KOREAN_GRAPE_ALIASES } from '../../shared/utils/korean-grape-aliases.js';
+import { stripAccents } from '../../shared/utils/unicode-normalize.js';
 import type { NormalizedQueryViews } from '../../query/model/query-views.js';
 
 /**
@@ -60,41 +61,75 @@ const GENERIC_STOPWORDS: readonly string[] = [
   '와인', '와인추천', '좀', '하나', '추천해줘', '추천해', '주세요',
 ];
 
-/** Lower-cased, de-duplicated phrase list from the reused attribute vocab. */
+/**
+ * Normalize a concept phrase the SAME way the matched view is normalized:
+ * accent-stripped + lower-cased. The classifier matches against
+ * `views.vintageStripped`, which is accent-stripped — so an accented vocab
+ * term ("Châteauneuf-du-Pape", "Rhône", "rosé") MUST be accent-stripped here
+ * or it could never match (audit: DoD-b miss).
+ */
+function normalizeConceptTerm(term: string): string {
+  // Match `vintageStripped`: accent-stripped, lower-cased, punctuation folded to
+  // spaces (so hyphenated terms like "Châteauneuf-du-Pape" align with the
+  // punctuation-stripped view "chateauneuf du pape"), whitespace collapsed.
+  return stripAccents(term.toLowerCase())
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim();
+}
+
+/** Lower-cased, accent-stripped, de-duplicated phrase list from reused vocab. */
 const ATTRIBUTE_CONCEPT_PHRASES: readonly string[] = Array.from(
   new Set(
-    [...GRAPE_VOCABULARY, ...REGION_VOCABULARY, ...COUNTRY_VOCABULARY].map((p) => p.toLowerCase()),
+    [...GRAPE_VOCABULARY, ...REGION_VOCABULARY, ...COUNTRY_VOCABULARY].map(normalizeConceptTerm),
   ),
 );
 
 /**
  * All single-step concept phrases (attribute vocab + descriptors + occasion),
- * sorted longest-first so multi-word phrases are stripped before their tokens.
+ * accent-stripped, sorted longest-first so multi-word phrases are stripped
+ * before their tokens.
  */
-const CONCEPT_PHRASES: readonly string[] = [
-  ...ATTRIBUTE_CONCEPT_PHRASES,
-  ...STYLE_DESCRIPTOR_TERMS,
-  ...OCCASION_PRICE_TERMS,
-].slice().sort((a, b) => b.length - a.length);
+const CONCEPT_PHRASES: readonly string[] = Array.from(
+  new Set([
+    ...ATTRIBUTE_CONCEPT_PHRASES,
+    ...STYLE_DESCRIPTOR_TERMS.map(normalizeConceptTerm),
+    ...OCCASION_PRICE_TERMS.map(normalizeConceptTerm),
+  ]),
+).sort((a, b) => b.length - a.length);
 
-/** Korean grape regexes recompiled global+unicode for repeated stripping. */
-const KOREAN_GRAPE_STRIP_REGEXES: ReadonlyArray<readonly [RegExp, string]> =
-  KOREAN_GRAPE_ALIASES.map(([re, grape]) => [new RegExp(re.source, 'giu'), grape] as const);
+/**
+ * Wrap a regex source in Unicode-safe word boundaries.
+ * `\b` is ASCII-only (rule 8) — use `[\p{L}\p{N}]` class boundaries with /u so
+ * Korean / accented sources match at token edges only and never substring-match
+ * inside a producer/entity token (audit: DoD-c over-stripping).
+ */
+function boundedSource(source: string): RegExp {
+  return new RegExp(`(?:^|[^\\p{L}\\p{N}])(?:${source})(?=$|[^\\p{L}\\p{N}])`, 'giu');
+}
 
 /**
  * Escape a literal phrase and wrap it in Unicode-safe word boundaries.
- * `\b` is ASCII-only (rule 8) — use `[\p{L}\p{N}]` class boundaries with /u so
- * Korean / accented phrases match correctly.
  */
 function boundedPhraseRegex(phrase: string): RegExp {
   const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
-  return new RegExp(`(?:^|[^\\p{L}\\p{N}])${escaped}(?=$|[^\\p{L}\\p{N}])`, 'giu');
+  return boundedSource(escaped);
 }
+
+/**
+ * Korean grape regexes recompiled global+unicode AND boundary-wrapped. The raw
+ * {@link KOREAN_GRAPE_ALIASES} were authored for substring extraction; here
+ * they MUST be bounded so e.g. `시라`(Syrah) / `merlot` do not strip out of the
+ * middle of a producer name (audit DoD-c). The grape's alternation is grouped
+ * by {@link boundedSource} so the boundaries apply to the whole alternation.
+ */
+const KOREAN_GRAPE_STRIP_REGEXES: ReadonlyArray<readonly [RegExp, string]> =
+  KOREAN_GRAPE_ALIASES.map(([re, grape]) => [boundedSource(re.source), grape] as const);
 
 const CONCEPT_PHRASE_REGEXES: ReadonlyArray<readonly [RegExp, string]> = CONCEPT_PHRASES.map(
   (phrase) => [boundedPhraseRegex(phrase), phrase] as const,
 );
-const STOPWORD_REGEXES: readonly RegExp[] = GENERIC_STOPWORDS.map((w) => boundedPhraseRegex(w));
+const STOPWORD_REGEXES: readonly RegExp[] = GENERIC_STOPWORDS.map((w) => boundedPhraseRegex(normalizeConceptTerm(w)));
 
 export interface ConceptClassification {
   /** True when the query, stripped of concept tokens + stopwords, has no residual. */
@@ -125,15 +160,15 @@ export function classifyConcept(views: NormalizedQueryViews): ConceptClassificat
   const terms = new Set<string>();
 
   for (const [re, grape] of KOREAN_GRAPE_STRIP_REGEXES) {
+    // Bounded regexes consume the leading boundary char; re-pad after each
+    // replace so adjacent tokens still see a boundary.
     if (re.test(residual)) {
       terms.add(grape);
-      residual = residual.replace(re, ' ');
+      residual = ` ${residual.replace(re, ' ')} `;
     }
   }
 
   for (const [re, phrase] of CONCEPT_PHRASE_REGEXES) {
-    // boundedPhraseRegex consumes the leading boundary char; re-pad after each
-    // replace so adjacent phrases still see a boundary.
     if (re.test(residual)) {
       terms.add(phrase);
       residual = ` ${residual.replace(re, ' ')} `;
