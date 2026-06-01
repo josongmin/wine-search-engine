@@ -29,6 +29,7 @@ import type { ToolOutcome } from '@domain/agent/model/tool-outcome.js';
 import { KNOWN_AGENT_TOOL_NAMES } from '@domain/agent/model/agent-tool-attempt-schema.js';
 import { AGENT_DIRECTIVE_COPY } from '@domain/agent/copy/directive-copy.js';
 import type { SearchUseCasePort } from './execution-runner.js';
+import type { SearchUseCaseInput } from './execution-plan-schemas.js';
 import type { DecomposedSearchUseCasePort } from '../search/port/search-route-usecases.port.js';
 import type { DrinkingWindowUseCasePort } from '../drinking-window/port/drinking-window-usecase.port.js';
 import type { EntityDocumentLookupPort } from '../search/port/search-pipeline-deps.port.js';
@@ -229,6 +230,11 @@ export interface WineAgentLoopInput {
    *  single-turn run (T-MTA-01). */
   readonly priorHistory?: readonly ChatMessage[] | undefined;
   readonly analysis: WineSearchAnalysis;
+  /** Router-authored deterministic seed input for the active multi-step
+   *  query. Used when a follow-up primitive can be continued structurally
+   *  from prior tool results (e.g. lookup_wine → similar_to_entity) without
+   *  burning another planner LLM turn. */
+  readonly seedSearchInput?: SearchUseCaseInput | undefined;
   /** Directive seeded by `DeterministicRouter` when applicable. Optional —
    *  if absent the runner starts with no directive and recomputes after the
    *  first LLM turn. */

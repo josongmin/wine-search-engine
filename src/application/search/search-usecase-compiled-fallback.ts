@@ -1,6 +1,7 @@
 import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
 import type { QueryPlanV1, QueryPlanV2 } from '../../domain/query/model/query-plan.js';
 import { ExecutionCompiler } from '../../domain/query/service/execution-compiler.js';
+import type { QueryRoute } from '../../domain/query/model/query-route.js';
 
 const executionCompiler = new ExecutionCompiler();
 
@@ -33,6 +34,22 @@ function toQueryPlanV2(plan: QueryPlanV1): QueryPlanV2 {
  * Compatibility-only fallback for callers that only received QueryPlanV1.
  * Centralizing this avoids multiple ad hoc V1 -> compiled bridges drifting.
  */
-export function compileFromLegacyPlan(plan: QueryPlanV1): CompiledWineQuery {
-  return executionCompiler.compile({ plan: toQueryPlanV2(plan) });
+export interface LegacyPlanCompileOptions {
+  readonly apiRouteOverride?: QueryRoute | undefined;
+  readonly maxCandidatesOverride?: number | undefined;
+}
+
+export function compileFromLegacyPlan(
+  plan: QueryPlanV1,
+  options?: LegacyPlanCompileOptions,
+): CompiledWineQuery {
+  return executionCompiler.compile({
+    plan: toQueryPlanV2(plan),
+    ...(options?.apiRouteOverride !== undefined
+      ? { apiRouteOverride: options.apiRouteOverride }
+      : {}),
+    ...(options?.maxCandidatesOverride !== undefined
+      ? { maxCandidatesOverride: options.maxCandidatesOverride }
+      : {}),
+  });
 }

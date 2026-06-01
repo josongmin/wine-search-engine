@@ -185,6 +185,20 @@ describe('mapSearchUseCaseInputToSearchRequest', () => {
     });
   });
 
+  it('maps lookup_wine onto the path-authoritative primitive route', () => {
+    const input: SearchUseCaseInput = {
+      query: 'Opus One',
+      primitiveRoute: 'lookup_wine',
+      limit: 3,
+    };
+    const req = mapSearchUseCaseInputToSearchRequest(input);
+    expect(req).toEqual({
+      query: 'Opus One',
+      primitiveRoute: 'lookup_wine',
+      limit: 3,
+    });
+  });
+
   it('forwards explicit callerInterpretation even on entity-mode requests', () => {
     const input: SearchUseCaseInput = {
       query: 'Opus One 2018',
@@ -225,6 +239,7 @@ describe('SearchUseCaseAdapter', () => {
     const opts = call[2] as SearchExecutionOptions | undefined;
     expect(opts?.requestId).toBe(REQUEST_ID);
     expect(opts?.abortSignal).toBe(ctrl.signal);
+    expect(opts?.executionPrincipal).toBeUndefined();
   });
 
   it('preserves non-generic callerInterpretation through execute()', async () => {
@@ -254,6 +269,33 @@ describe('SearchUseCaseAdapter', () => {
     const opts = stub.executeMock.mock.calls[0]?.[2] as SearchExecutionOptions | undefined;
     expect(opts?.abortSignal).toBeUndefined();
     expect(opts?.requestId).toBe(REQUEST_ID);
+    expect(opts?.executionPrincipal).toBeUndefined();
+  });
+
+  it('marks lookup_wine primitive execution as agent_internal_trusted', async () => {
+    const stub = makeUseCase();
+    const adapter = new SearchUseCaseAdapter(asUseCase(stub));
+
+    await adapter.execute(
+      { query: 'Opus One', primitiveRoute: 'lookup_wine', limit: 3 },
+      REQUEST_ID,
+    );
+
+    const opts = stub.executeMock.mock.calls[0]?.[2] as SearchExecutionOptions | undefined;
+    expect(opts?.executionPrincipal).toBe('agent_internal_trusted');
+  });
+
+  it('marks similar_to_entity primitive execution as agent_internal_trusted', async () => {
+    const stub = makeUseCase();
+    const adapter = new SearchUseCaseAdapter(asUseCase(stub));
+
+    await adapter.execute(
+      { query: 'opus-one-2018', anchorEntityId: 'opus-one-2018', limit: 5 },
+      REQUEST_ID,
+    );
+
+    const opts = stub.executeMock.mock.calls[0]?.[2] as SearchExecutionOptions | undefined;
+    expect(opts?.executionPrincipal).toBe('agent_internal_trusted');
   });
 
   it('returns the SearchResponseV1 unchanged', async () => {

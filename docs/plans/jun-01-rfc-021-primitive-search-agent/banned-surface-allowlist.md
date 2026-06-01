@@ -81,4 +81,3 @@ excludes them.
 | Internal retrieval mode / mixed solver | yes (`similar_items`/`mixed`) | allowlisted (internal engine) |
 | Internal attempt schema | yes (`compare_wines`) | allowlisted (unreachable) |
 | Historical docs (rfc/adr) | yes | allowlisted (historical record) |
-| `system-overview/*` | yes (`search_wines`) | follow-up refresh (non-blocking) |

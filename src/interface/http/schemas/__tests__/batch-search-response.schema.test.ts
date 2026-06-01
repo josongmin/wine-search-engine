@@ -176,4 +176,11 @@ describe('BatchSearchRequestSchema', () => {
     });
     expect(parsed.success).toBe(true);
   });
+
+  it('rejects retrieval_mode=mixed on the retained batch-search contract', () => {
+    const parsed = BatchSearchRequestSchema.safeParse({
+      requests: [{ id: '1', query: 'Bordeaux 2015', retrieval_mode: 'mixed' }],
+    });
+    expect(parsed.success).toBe(false);
+  });
 });

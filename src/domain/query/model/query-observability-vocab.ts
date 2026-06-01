@@ -101,6 +101,16 @@ function isConvergedExactLookupTelemetryContract(
     && mode === 'entity_lookup';
 }
 
+function isSemanticReferenceSimilarityDiscovery(
+  plan: PlanLike,
+  compiled?: CompiledWineQuery,
+): boolean {
+  const mode = getObservabilityRetrievalMode(plan, compiled);
+  return plan.intent === 'mixed_query'
+    && plan.queryClass === 'anchored_similarity'
+    && mode !== 'similar_items';
+}
+
 export function deriveQueryFamily(
   plan: PlanLike,
   compiled?: CompiledWineQuery,
@@ -118,6 +128,14 @@ export function deriveQueryFamily(
   // the primitive chain stays visible in telemetry (no longer conflated).
   if (mode === 'similar_items') return 'reference_similarity';
   if (mode === 'recommendation') return 'recommendation';
+  // RFC-021 T-PSA-03/04: the public primitive discovery routes may demote an
+  // anchor-similarity query off the mixed/similar_items lane while still
+  // preserving the underlying "reference similarity" semantics. In that case
+  // the family must not regress to `comparison`; the executed retrieval mode is
+  // different, but the request is still a "wines like X" query family.
+  if (isSemanticReferenceSimilarityDiscovery(plan, compiled)) {
+    return 'reference_similarity';
+  }
 
   // When the planner/runtime have already converged on an exact entity lookup,
   // keep the family aligned with that contract even if a coarse ambiguity bit

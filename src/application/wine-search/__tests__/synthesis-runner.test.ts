@@ -60,6 +60,7 @@ function makeAnalysis(
   query: string,
   hangulDominant: boolean,
   intent: WineSearchAnalysis['intent'] = 'search',
+  callerInterpretation?: WineSearchAnalysis['callerInterpretation'],
 ): WineSearchAnalysis {
   return {
     intent,
@@ -74,25 +75,34 @@ function makeAnalysis(
     recommendedBudget: { maxSteps: 4, perToolCap: 3 },
     hangulDominant,
     preservedSurface: query,
+    ...(callerInterpretation !== undefined ? { callerInterpretation } : {}),
   };
 }
 
 function makeSearchOutcome(
-  results: ReadonlyArray<{ canonicalLabel: string; producer?: string; region?: string }>,
-  opts?: { kind?: ToolOutcome['kind']; stepId?: string },
+  results: ReadonlyArray<{
+    canonicalLabel: string;
+    producer?: string;
+    region?: string;
+    priceRange?: string;
+    entityId?: string;
+  }>,
+  opts?: { kind?: ToolOutcome['kind']; stepId?: string; tool?: string },
 ): ToolOutcome {
   return {
     stepId: opts?.stepId ?? 'q:0:0',
-    tool: 'search_hybrid',
+    tool: opts?.tool ?? 'search_hybrid',
     kind: opts?.kind ?? 'success',
     durationMs: 12,
     result: {
       queryType: 'search',
-      results: results.map((r) => ({
+      results: results.map((r, index) => ({
         entity: {
+          entityId: r.entityId ?? `wine-${String(index + 1)}`,
           canonicalLabel: r.canonicalLabel,
           ...(r.producer !== undefined ? { producer: r.producer } : {}),
           ...(r.region !== undefined ? { region: r.region } : {}),
+          ...(r.priceRange !== undefined ? { priceRange: r.priceRange } : {}),
         },
       })),
     },
@@ -159,6 +169,7 @@ async function run(
     readonly hangulDominant?: boolean;
     readonly abortSignal?: AbortSignal;
     readonly intent?: WineSearchAnalysis['intent'];
+    readonly callerInterpretation?: WineSearchAnalysis['callerInterpretation'];
   },
 ): Promise<AnswerResult> {
   const { runner } = makeRunner(llm);
@@ -166,6 +177,7 @@ async function run(
     overrides.query,
     overrides.hangulDominant ?? false,
     overrides.intent ?? 'search',
+    overrides.callerInterpretation,
   );
   return runner.run({
     query: overrides.query,
@@ -342,6 +354,77 @@ describe('SynthesisRunner — Layer 2 deterministic template', () => {
     expect(result.answer).toBe(
       'Based on your query, I found: Château Margaux (Château Margaux, Bordeaux). (Note: simplified result due to processing constraints.)',
     );
+  });
+
+  it('anchored_similarity + similar_to_entity success bypasses synthesis LLM and returns grounded candidates', async () => {
+    const llm = makeStubLlm(async () => {
+      throw new Error('LLM must not be called on deterministic reference-similarity fast path');
+    });
+    const result = await run(llm, {
+      query: 'Opus One similar but cheaper',
+      hangulDominant: false,
+      callerInterpretation: {
+        authority: 'caller',
+        intent: 'mixed_query',
+        queryClass: 'anchored_similarity',
+      },
+      toolOutcomes: [
+        makeSearchOutcome(
+          [{ canonicalLabel: 'Opus One 2018', producer: 'Opus One', region: 'Napa Valley' }],
+          { tool: 'lookup_wine' },
+        ),
+        makeSearchOutcome(
+          [
+            { canonicalLabel: 'Quintessa 2019', producer: 'Quintessa', region: 'Napa Valley', priceRange: '$180-$220' },
+            { canonicalLabel: 'Dominus Estate 2019', producer: 'Dominus', region: 'Napa Valley', priceRange: '$200-$240' },
+          ],
+          { tool: 'similar_to_entity' },
+        ),
+      ],
+    });
+    expect(result.layer).toBe('layer2');
+    expect(result.synthesisAttempts).toBe(0);
+    expect(result.verificationAttempts).toBe(0);
+    expect(result.answer).toContain('Opus One 2018');
+    expect(result.answer).toContain('Quintessa 2019');
+    expect(result.answer).toContain('Dominus Estate 2019');
+    expect(llm.synthesizeMock).not.toHaveBeenCalled();
+  });
+
+  it('anchored_similarity + similar_to_entity empty_result returns deterministic no-match answer without LLM', async () => {
+    const llm = makeStubLlm(async () => {
+      throw new Error('LLM must not be called on deterministic reference-similarity no-match fast path');
+    });
+    const result = await run(llm, {
+      query: '오푸스원이랑 비슷한데 더 싼 거 추천해줘',
+      hangulDominant: true,
+      callerInterpretation: {
+        authority: 'caller',
+        intent: 'mixed_query',
+        queryClass: 'anchored_similarity',
+      },
+      toolOutcomes: [
+        makeSearchOutcome(
+          [{ canonicalLabel: 'Opus One 2018', producer: 'Opus One', region: 'Napa Valley' }],
+          { tool: 'lookup_wine' },
+        ),
+        {
+          stepId: 'q:1:0',
+          tool: 'similar_to_entity',
+          kind: 'empty_result',
+          durationMs: 10,
+          result: {
+            queryType: 'search',
+            results: [],
+          },
+        },
+      ],
+    });
+    expect(result.layer).toBe('layer2');
+    expect(result.answer).toContain('Opus One 2018');
+    expect(result.answer).toContain('찾지 못했습니다');
+    expect(result.synthesisAttempts).toBe(0);
+    expect(llm.synthesizeMock).not.toHaveBeenCalled();
   });
 });
 

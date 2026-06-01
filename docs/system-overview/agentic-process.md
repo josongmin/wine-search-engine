@@ -51,18 +51,27 @@ search primitive에 대한 `Accept` 기반 content negotiation으로 투영됩�
 ```
 HTTP 요청
   → Fastify preHandler (security hooks)
-  → Zod 스키마 검증 (`SearchRequestSchema` — `search-request.schema.ts` + `search-shared.schema.ts`의 `QueryStringSchema` 등)
-      ├─ query: string (1–MAX_QUERY_LENGTH=500자)    ← QueryStringSchema
-      ├─ context?: { locale: string, currency: string }   ← SearchContextSchema
-      ├─ options?: { mode: 'auto'|'entity'|'hybrid'|'mixed', explain: boolean, clarification: boolean }
-      ├─ retrieval_mode?: 'auto'|'entity'|'hybrid'|'mixed'
-      ├─ sessionContext? / session_context?  ← camelCase/snake_case 양쪽 허용 (중복 불가)
-      └─ queryBudget? / query_budget?        ← camelCase/snake_case 양쪽 허용 (중복 불가)
+  → Zod 스키마 검증
+      ├─ public primitive search (`PrimitiveSearchRequestSchema`)
+      │   ├─ query: string (1–MAX_QUERY_LENGTH=500자)  ← QueryStringSchema
+      │   ├─ context?: { locale: string, currency: string }
+      │   ├─ filters?: NormalizedConstraint[]
+      │   ├─ preferences?: NormalizedConstraint[]
+      │   ├─ limit?: number
+      │   ├─ options?: { explain?: boolean, clarification?: boolean }
+      │   └─ queryBudget? / query_budget?  ← camelCase/snake_case 양쪽 허용 (중복 불가)
+      └─ retained generic tooling schema (`SearchRequestSchema`, 비공개/내부)
+          ├─ options.mode / retrieval_mode override 허용
+          ├─ sessionContext? / session_context?
+          └─ queryBudget? / query_budget?
   → SearchUseCase.execute() 호출
 ```
 
 > **주의:** `locale`, `session_id`, `explain`, `budget_override` 같은 최상위 단독 필드는 없습니다.  
 > locale은 `context.locale`, explain은 `options.explain`, session은 `sessionContext.sessionId` 안에 있습니다.
+
+> **추가 주의:** 현재 공개 HTTP primitive (`POST /v1/search/hybrid|semantic|lexical`)는
+> `options.mode` / `retrieval_mode`를 받지 않습니다. lane authority는 URL path입니다.
 
 스키마 검증 실패 시 400 Bad Request + RFC-014 에러 엔벨로프 반환. 검증 통과 후 `SearchUseCase`로 제어권 이동.
 
@@ -872,16 +881,11 @@ SynthesisContext {
 
 기존 ad-hoc if/else 대신 **선언적 정책 그래프**로 배치 제약을 관리합니다:
 
-```typescript
-TOOL_BATCH_POLICY = {
-  search_wines:        { canRunWith: ['get_food_pairings', 'search_wines'], mustRunAlone: false, maxPerBatch: 4 },
-  compare_wines:       { canRunWith: [],                                    mustRunAlone: true,  maxPerBatch: 1 },
-  check_drinking_window: { canRunWith: ['check_drinking_window'],           mustRunAlone: false, maxPerBatch: 4 },
-  get_food_pairings:   { canRunWith: ['search_wines'],                      mustRunAlone: false, maxPerBatch: 1 },
-}
-
-evaluateBatchPolicy(calls) → { allowed: true } | { allowed: false, reason, violatingTools }
-```
+현재 active runtime은 legacy convenience tool 묶음이 아니라
+`search_hybrid` / `search_semantic` / `search_lexical` / `lookup_wine` /
+`similar_to_entity` primitive taxonomy를 사용합니다. Loop / batch control은
+구버전 `TOOL_BATCH_POLICY` 예제가 아니라 `StepBudget.recordStep()` /
+`recordParallelBatch()` 쪽이 authority입니다.
 
 ### 도구 입력 변경사항
 
@@ -956,10 +960,9 @@ execute()
 
 | 도구 | 설명 | 배치 정책 (TOOL_BATCH_POLICY) |
 |------|------|------------------------------|
-| `search_wines` | 와인 검색 (§3–8 전체 파이프라인) | canRunWith: `get_food_pairings`, `search_wines`; maxPerBatch: 4 |
-| `compare_wines` | 두 와인 상세 비교 (2-way) | **mustRunAlone: true**; maxPerBatch: 1 |
-| `check_drinking_window` | 음용 적기 예측 | canRunWith: `check_drinking_window`만; maxPerBatch: 4 |
-| `get_food_pairings` | 음식 페어링 조회 | canRunWith: `search_wines`; maxPerBatch: 1 |
+| `search_hybrid` / `search_semantic` / `search_lexical` | discovery primitive search | loop / duplicate guard는 `StepBudget` authority |
+| `lookup_wine` | exact wine identity lookup | exact entity resolution primitive |
+| `similar_to_entity` | deterministic reference-similarity primitive | `entity_id` authority, no free-text anchor |
 
 ### 예산 구성
 
@@ -1006,7 +1009,7 @@ execute()
 
 [Layer 2] !policyBlocked && answer==='' && !hasToolObservations && !aborted
   단일 fallback search (FALLBACK_SEARCH_TIMEOUT_MS=5_000ms)
-  recoverLastSearchInput(steps)로 이전 search_wines query 복원
+  recoverLastSearchInput(steps)로 이전 primitive-search query 복원
   결과 있으면 → 언어 감지(Hangul 여부) 후 ko/en 템플릿 answer
   결과 없으면 → "결과 없음" 템플릿, terminationReason='fallback'
 

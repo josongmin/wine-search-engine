@@ -10,7 +10,7 @@ export interface BatchSearchRequestItem {
   readonly id: string;
   readonly query: string;
   readonly limit?: number | undefined;
-  readonly retrieval_mode?: 'auto' | 'entity' | 'hybrid' | 'mixed' | undefined;
+  readonly retrieval_mode?: 'auto' | 'entity' | 'hybrid' | undefined;
   readonly context?: SearchRequestContext | undefined;
   readonly sessionContext?: SearchSessionContext | undefined;
   readonly queryBudget?: SearchQueryBudget | undefined;

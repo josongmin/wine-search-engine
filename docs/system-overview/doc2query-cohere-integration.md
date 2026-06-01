@@ -85,7 +85,7 @@ Vespa wine_entity
     └── synthetic_queries field, indexed with BM25
 ```
 
-### 런타임 (HTTP /v1/search/{hybrid,semantic,lexical} 또는 /v1/agent의 search_wines 도구)
+### 런타임 (HTTP /v1/search/{hybrid,semantic,lexical} 또는 /v1/agent의 primitive search tools)
 
 ```
 HTTP request

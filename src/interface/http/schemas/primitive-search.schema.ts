@@ -30,7 +30,6 @@ import {
   QueryBudgetSchema,
   QueryStringSchema,
   SearchContextSchema,
-  SearchModeSchema,
 } from './search-shared.schema.js';
 import { NormalizedConstraintSchema } from '@shared/types/index.js';
 import { WINE_SEARCH_MAX_CONSTRAINTS } from '@app/wine-search/wine-search-schemas.js';
@@ -55,8 +54,7 @@ const QueryBudgetSnakeSchema = z.object({
   },
 }));
 
-const LegacyPrimitiveOptionsSchema = z.object({
-  mode: SearchModeSchema.optional(),
+const PrimitiveCompatibilityOptionsSchema = z.object({
   explain: z.boolean().optional(),
   clarification: z.boolean().optional(),
 }).strict();
@@ -80,8 +78,9 @@ export const PrimitiveSearchRequestSchema = z.object({
   /** Per-request result-count cap. Bounded by `MAX_SEARCH_RESULTS_PER_RESPONSE`
    *  so a single caller cannot exhaust the response budget. */
   limit: z.number().int().finite().min(1).max(MAX_SEARCH_RESULTS_PER_RESPONSE).optional(),
-  /** Legacy no-op compatibility envelope. Parsed, then dropped. */
-  options: LegacyPrimitiveOptionsSchema.optional(),
+  /** Legacy no-op compatibility envelope. Path authority is strict: lane /
+   *  mode override keys are rejected instead of silently ignored. */
+  options: PrimitiveCompatibilityOptionsSchema.optional(),
   /** Per-request budget — camelCase form. */
   queryBudget: QueryBudgetSchema.optional(),
   /** Per-request budget — snake_case form (auto-normalized to `queryBudget`). */

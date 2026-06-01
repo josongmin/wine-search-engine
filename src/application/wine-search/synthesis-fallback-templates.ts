@@ -56,6 +56,35 @@ function appendLayer2Detail(
     : `${body}. ${suffix}`;
 }
 
+function joinNonEmpty(parts: readonly string[]): string {
+  return parts.filter((part) => part.length > 0).join(', ');
+}
+
+function normalizeReferenceSimilarityAnchor(anchorLabel: string | undefined): string | undefined {
+  return typeof anchorLabel === 'string' && anchorLabel.trim().length > 0
+    ? anchorLabel.trim()
+    : undefined;
+}
+
+function renderReferenceSimilarityCandidate(
+  rank: number,
+  candidate: {
+    readonly canonicalLabel: string;
+    readonly producer?: string;
+    readonly region?: string;
+    readonly price?: string;
+  },
+): string {
+  const detail = joinNonEmpty([
+    candidate.producer?.trim() ?? '',
+    candidate.region?.trim() ?? '',
+    candidate.price?.trim() ?? '',
+  ]);
+  return detail.length > 0
+    ? `${String(rank)}. ${candidate.canonicalLabel} (${detail})`
+    : `${String(rank)}. ${candidate.canonicalLabel}`;
+}
+
 /**
  * Production-pinned template strings. Each layer's Korean and English texts
  * are byte-identical to the existing AgentAnswerRecoveryPolicy emissions.
@@ -86,6 +115,54 @@ export const FALLBACK_TEMPLATES = {
   layer4: {
     korean: '요청하신 와인 정보를 현재 처리하지 못했습니다. 검색어를 바꿔서 다시 시도해주세요.',
     english: 'We could not process your wine query. Please try rephrasing or simplifying your search.',
+  },
+  referenceSimilarity: {
+    korean: (
+      anchorLabel: string | undefined,
+      candidates: ReadonlyArray<{
+        readonly canonicalLabel: string;
+        readonly producer?: string;
+        readonly region?: string;
+        readonly price?: string;
+      }>,
+    ): string => {
+      const anchor = normalizeReferenceSimilarityAnchor(anchorLabel);
+      const rendered = candidates.map((candidate, index) =>
+        renderReferenceSimilarityCandidate(index + 1, candidate),
+      ).join('; ');
+      return anchor !== undefined
+        ? `검색 결과 기준, 현재 조건에서 ${anchor}와 비슷한 후보는 ${rendered} 입니다.`
+        : `검색 결과 기준, 현재 조건에서 비슷한 후보는 ${rendered} 입니다.`;
+    },
+    english: (
+      anchorLabel: string | undefined,
+      candidates: ReadonlyArray<{
+        readonly canonicalLabel: string;
+        readonly producer?: string;
+        readonly region?: string;
+        readonly price?: string;
+      }>,
+    ): string => {
+      const anchor = normalizeReferenceSimilarityAnchor(anchorLabel);
+      const rendered = candidates.map((candidate, index) =>
+        renderReferenceSimilarityCandidate(index + 1, candidate),
+      ).join('; ');
+      return anchor !== undefined
+        ? `Based on the grounded results, the closest matches to ${anchor} under the current constraints are ${rendered}.`
+        : `Based on the grounded results, the closest matches under the current constraints are ${rendered}.`;
+    },
+    noMatchKorean: (anchorLabel: string | undefined): string => {
+      const anchor = normalizeReferenceSimilarityAnchor(anchorLabel);
+      return anchor !== undefined
+        ? `검색 결과 기준, 현재 조건에서 ${anchor}와 비슷한 후보를 찾지 못했습니다. 조건을 조금 넓혀 다시 검색해 주세요.`
+        : '검색 결과 기준, 현재 조건에서 비슷한 후보를 찾지 못했습니다. 조건을 조금 넓혀 다시 검색해 주세요.';
+    },
+    noMatchEnglish: (anchorLabel: string | undefined): string => {
+      const anchor = normalizeReferenceSimilarityAnchor(anchorLabel);
+      return anchor !== undefined
+        ? `Based on the grounded results, no similar matches to ${anchor} were found under the current constraints. Please broaden the constraints and try again.`
+        : 'Based on the grounded results, no similar matches were found under the current constraints. Please broaden the constraints and try again.';
+    },
   },
   policyBlocked: {
     korean: '이 요청은 처리할 수 없습니다. 와인 검색과 관련된 질문을 해주세요.',

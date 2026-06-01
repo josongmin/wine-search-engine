@@ -119,11 +119,17 @@ void _strippedSharedRetrievalMode;
  */
 const SimilarToEntityEntityIdField = buildEntityIdToolField({
   maxLen: SIMILAR_TO_ENTITY_ENTITY_ID_MAX_LEN,
-}).refine((value) => !isSourceRecordStylePublicEntityId(value), {
-  message:
-    'entity_id must be a canonical public id from a prior lookup_wine result, ' +
-    'not a source-record (vivino-) id.',
-});
+})
+  .refine((value) => !value.includes('::'), {
+    message:
+      'entity_id must be the canonical id only. Do not pass the lookup preview token ' +
+      '`entity_id::canonical_label`; copy only the entity_id field from the prior result.',
+  })
+  .refine((value) => !isSourceRecordStylePublicEntityId(value), {
+    message:
+      'entity_id must be a canonical public id from a prior lookup_wine result, ' +
+      'not a source-record (vivino-) id.',
+  });
 
 const SimilarToEntityInputSchemaBase = z
   .object({

@@ -463,6 +463,46 @@ describe('planToObservabilitySlice', () => {
     expect(slice.queryFamily).toBe('attribute_constrained');
   });
 
+  it('keeps reference_similarity for anchored mixed_query semantics even when execution is demoted onto the discovery lane', () => {
+    const plan = makePlan({
+      rawQuery: '오푸스원 같은 와인',
+      normalizedQuery: '오푸스원 같은 와인',
+      intent: 'mixed_query',
+      suggestedRoute: 'mixed',
+      suggestedRetrievalMode: 'similar_items',
+      queryClass: 'anchored_similarity',
+    });
+    const compiled: CompiledWineQuery = {
+      query: {
+        rawQuery: plan.rawQuery,
+        normalizedQuery: plan.normalizedQuery,
+        intent: plan.intent,
+        queryClass: plan.queryClass,
+        anchors: plan.anchors,
+        constraints: plan.constraints,
+        expansions: plan.expansions,
+        uncertainty: plan.uncertainty,
+        plannerVersion: plan.plannerVersion,
+        policyRuleVersion: plan.policyRuleVersion,
+        thresholdProfileId: plan.thresholdProfileId,
+      },
+      execution: {
+        effectiveRoute: 'hybrid',
+        effectiveRetrievalMode: 'attribute_search',
+        routeSource: 'planner',
+        budget: { maxCandidates: 50, enablePrecisionRerank: true },
+        provenancePolicy: {
+          requireIdentitySeal: false,
+          requireConstraintEvidence: false,
+          requireAnchorEvidence: false,
+        },
+      },
+    };
+
+    const slice = planToObservabilitySlice('q1', plan, compiled);
+    expect(slice.queryFamily).toBe('reference_similarity');
+  });
+
   it('truncates rawQuery to 200 chars', () => {
     const longQuery = 'a'.repeat(300);
     const plan = makePlan({ rawQuery: longQuery });

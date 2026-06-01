@@ -204,6 +204,76 @@ describe('Resolver applyDecisionBoundary calibratedGap invariant (C2)', () => {
 });
 
 describe('Resolver singleton routing', () => {
+  it('skips blocker filtering when the caller marks the candidate pool authoritative', async () => {
+    const block = vi.fn().mockResolvedValue([]);
+    const resolver = new Resolver(
+      { block } as never,
+      {
+        score: vi.fn().mockReturnValue(0.92),
+      } as never,
+      {
+        classify: vi.fn().mockReturnValue({
+          detected: false,
+          types: [],
+          severity: 'low',
+        }),
+      } as never,
+      {
+        calibrate: vi.fn().mockResolvedValue({
+          top1CalibratedScore: 0.92,
+          top2CalibratedScore: 0,
+          calibratedGap: 0.92,
+          decisionConfidenceC: 0.92,
+          candidateCount: 1,
+          calibrationTrusted: true,
+        }),
+      } as never,
+    );
+
+    const result = await resolver.resolve(makeResolverInput({
+      blockingPolicy: 'trust_candidate_pool',
+    }));
+
+    expect(block).not.toHaveBeenCalled();
+    expect(result.candidates).toHaveLength(1);
+    expect(result.status).toBe('resolved');
+    expect(String(result.topEntity?.entityId)).toBe(String(ENTITY_ID));
+  });
+
+  it('keeps legacy blocker enforcement when blockingPolicy is omitted', async () => {
+    const block = vi.fn().mockResolvedValue([]);
+    const resolver = new Resolver(
+      { block } as never,
+      {
+        score: vi.fn().mockReturnValue(0.92),
+      } as never,
+      {
+        classify: vi.fn().mockReturnValue({
+          detected: false,
+          types: [],
+          severity: 'low',
+        }),
+      } as never,
+      {
+        calibrate: vi.fn().mockResolvedValue({
+          top1CalibratedScore: 0.92,
+          top2CalibratedScore: 0,
+          calibratedGap: 0.92,
+          decisionConfidenceC: 0.92,
+          candidateCount: 1,
+          calibrationTrusted: true,
+        }),
+      } as never,
+    );
+
+    const result = await resolver.resolve(makeResolverInput());
+
+    expect(block).toHaveBeenCalledOnce();
+    expect(result.candidates).toHaveLength(0);
+    expect(result.status).toBe('failed');
+    expect(result.decisionTrace.outcomeReasonCodes).toContain('NO_CANDIDATES_AFTER_BLOCKING');
+  });
+
   it('does not resolve a singleton candidate below the calibrated threshold', async () => {
     const resolver = new Resolver(
       {

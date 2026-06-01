@@ -52,11 +52,13 @@ import {
 } from './kill-switch-policy.js';
 import { warnStartupMisconfigurations } from './startup-preflight.js';
 import { SearchSnapshotEntityLookup } from '../infrastructure/adapter/search-snapshot-entity-lookup.js';
+import type { AnchorRefreshCallback } from '../domain/query/service/anchor-refresh.js';
 
 export interface CoreContainerServices {
   // T1.2: typed as QueryPlannerPort for backward compat while Planner returns QueryPlanV2.
   // T1.5 will update the port to QueryPlanV2.
   readonly queryPlanner: QueryPlannerPort;
+  readonly entityLookupAnchorRefresh: AnchorRefreshCallback;
   readonly blocker: BlockingUseCasePort;
   readonly chatLlm?: ChatLlmPort;
   readonly entityResolver: Resolver;
@@ -110,6 +112,9 @@ export async function buildCoreContainerServices(
   // holds. The callback is always wired in production because the alias
   // matcher is always built (either PG-backed, snapshot-backed, or
   // search-index-backed — see container-adapters.ts).
+  const entityLookupAnchorRefresh = buildAnchorRefreshCallbackFromAliasOverlay(
+    adapters.aliasMatcher,
+  );
   const queryPlanner: QueryPlannerPort = new PlannerV1Adapter(
     await buildQueryPlanner(
       adapters,
@@ -121,7 +126,7 @@ export async function buildCoreContainerServices(
       runtime.searchSnapshotId,
     ),
     {
-      anchorRefresh: buildAnchorRefreshCallbackFromAliasOverlay(adapters.aliasMatcher),
+      anchorRefresh: entityLookupAnchorRefresh,
     },
   );
   const entityResolver = buildEntityResolver(adapters, config);
@@ -136,6 +141,7 @@ export async function buildCoreContainerServices(
 
   return {
     queryPlanner,
+    entityLookupAnchorRefresh,
     blocker: buildBlockingUseCaseAdapter(adapters),
     entityResolver,
     candidatePool,

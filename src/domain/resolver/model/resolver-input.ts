@@ -34,6 +34,19 @@ export interface ResolverInput {
   readonly candidateEntities: readonly ResolverCandidate[];
 
   /**
+   * Controls whether the resolver re-applies its internal blocker gate to the
+   * provided candidate pool.
+   *
+   * - `enforce_blocker` (default): resolver calls `Blocker.block()` and keeps
+   *   only candidates whose IDs survive blocking.
+   * - `trust_candidate_pool`: caller asserts `candidateEntities` is already the
+   *   authoritative entity pool (for example, built from exact alias/entity-id
+   *   hydration upstream). Resolver skips the extra blocker filter so exact
+   *   candidates are not erased by a degraded / unavailable blocker substrate.
+   */
+  readonly blockingPolicy?: 'enforce_blocker' | 'trust_candidate_pool' | undefined;
+
+  /**
    * TA2-4: Blocker-seeded candidates — entities returned by `Blocker.block()`
    * that were NOT already covered by any anchor's `candidateEntityIds`.
    *

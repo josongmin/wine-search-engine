@@ -177,8 +177,24 @@ interface GroundedTopResult {
   readonly region: string;
 }
 
+interface ReferenceSimilarityCandidate {
+  readonly canonicalLabel: string;
+  readonly producer?: string;
+  readonly region?: string;
+  readonly price?: string;
+}
+
+/** Keep the deterministic reference-similarity summary short. Three
+ *  candidates are enough for the agent surface and stay well below the
+ *  synthesis answer cap without another LLM pass. */
+const REFERENCE_SIMILARITY_MAX_CANDIDATES = 3;
+
 function asNonEmptyString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function asFiniteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
 /**
@@ -213,6 +229,60 @@ function findGroundedTopResult(
     };
   }
   return undefined;
+}
+
+function findLastToolOutcome(
+  outcomes: readonly ToolOutcome[],
+  tool: string,
+): ToolOutcome | undefined {
+  for (let i = outcomes.length - 1; i >= 0; i -= 1) {
+    const outcome = outcomes[i];
+    if (outcome?.tool === tool) return outcome;
+  }
+  return undefined;
+}
+
+function extractReferenceSimilarityCandidates(
+  result: unknown,
+): readonly ReferenceSimilarityCandidate[] {
+  if (typeof result !== 'object' || result === null) return [];
+  const record = result as Record<string, unknown>;
+  const results = record['results'];
+  if (!Array.isArray(results) || results.length === 0) return [];
+  const candidates: ReferenceSimilarityCandidate[] = [];
+  for (const row of results) {
+    if (typeof row !== 'object' || row === null) continue;
+    const entity = (row as Record<string, unknown>)['entity'];
+    if (typeof entity !== 'object' || entity === null) continue;
+    const entityRecord = entity as Record<string, unknown>;
+    const canonicalLabel = asNonEmptyString(entityRecord['canonicalLabel'])
+      ?? asNonEmptyString(entityRecord['canonical_label']);
+    if (canonicalLabel === undefined) continue;
+    candidates.push({
+      canonicalLabel,
+      ...(asNonEmptyString(entityRecord['producer']) !== undefined
+        ? { producer: asNonEmptyString(entityRecord['producer'])! }
+        : {}),
+      ...(asNonEmptyString(entityRecord['region']) !== undefined
+        ? { region: asNonEmptyString(entityRecord['region'])! }
+        : {}),
+      ...(asNonEmptyString(entityRecord['priceRange']) !== undefined
+        ? { price: asNonEmptyString(entityRecord['priceRange'])! }
+        : asFiniteNumber(entityRecord['priceUsd']) !== undefined
+          ? { price: `$${String(asFiniteNumber(entityRecord['priceUsd'])!)}` }
+          : {}),
+    });
+    if (candidates.length >= REFERENCE_SIMILARITY_MAX_CANDIDATES) break;
+  }
+  return candidates;
+}
+
+function extractLookupAnchorLabel(
+  outcomes: readonly ToolOutcome[],
+): string | undefined {
+  const lookup = findLastToolOutcome(outcomes, 'lookup_wine');
+  if (lookup === undefined) return undefined;
+  return findGroundedTopResult([lookup])?.canonicalLabel;
 }
 
 function pickFromArray(value: unknown): Record<string, unknown> | undefined {
@@ -494,6 +564,14 @@ export class SynthesisRunner {
     if (input.policyBlocked) {
       const kind: SynthesisBlockedKind = input.blockedKind ?? 'security_block';
       return this.makePolicyBlockedResult(kind, queryHasHangul);
+    }
+
+    const deterministicReferenceSimilarity = this.maybeBuildReferenceSimilarityResult(
+      input,
+      queryHasHangul,
+    );
+    if (deterministicReferenceSimilarity !== undefined) {
+      return deterministicReferenceSimilarity;
     }
 
     const hasGrounding = input.toolOutcomes.some(
@@ -884,6 +962,66 @@ export class SynthesisRunner {
       tokenUsage: args.usage,
       degradedReason: args.degradedReason,
     };
+  }
+
+  private maybeBuildReferenceSimilarityResult(
+    input: SynthesisRunInput,
+    queryHasHangul: boolean,
+  ): AnswerResult | undefined {
+    if (input.analysis.callerInterpretation?.queryClass !== 'anchored_similarity') {
+      return undefined;
+    }
+    const similarityOutcome = findLastToolOutcome(input.toolOutcomes, 'similar_to_entity');
+    if (similarityOutcome === undefined) return undefined;
+    const anchorLabel = extractLookupAnchorLabel(input.toolOutcomes);
+
+    if (similarityOutcome.kind === 'success' || similarityOutcome.kind === 'partial_result') {
+      const candidates = extractReferenceSimilarityCandidates(similarityOutcome.result);
+      if (candidates.length > 0) {
+        const answer = queryHasHangul
+          ? FALLBACK_TEMPLATES.referenceSimilarity.korean(anchorLabel, candidates)
+          : FALLBACK_TEMPLATES.referenceSimilarity.english(anchorLabel, candidates);
+        this.logger.info(
+          {
+            requestId: input.requestId,
+            candidateCount: candidates.length,
+            anchorLabel,
+          },
+          '[synthesis] deterministic reference-similarity fast path',
+        );
+        return {
+          answer,
+          layer: 'layer2',
+          groundedOnToolResults: true,
+          synthesisAttempts: 0,
+          verificationAttempts: 0,
+          tokenUsage: makeZeroTokenUsage(),
+        };
+      }
+    }
+
+    if (similarityOutcome.kind === 'empty_result') {
+      const answer = queryHasHangul
+        ? FALLBACK_TEMPLATES.referenceSimilarity.noMatchKorean(anchorLabel)
+        : FALLBACK_TEMPLATES.referenceSimilarity.noMatchEnglish(anchorLabel);
+      this.logger.info(
+        {
+          requestId: input.requestId,
+          anchorLabel,
+        },
+        '[synthesis] deterministic reference-similarity no-match fast path',
+      );
+      return {
+        answer,
+        layer: 'layer2',
+        groundedOnToolResults: true,
+        synthesisAttempts: 0,
+        verificationAttempts: 0,
+        tokenUsage: makeZeroTokenUsage(),
+      };
+    }
+
+    return undefined;
   }
 
   // -------------------------------------------------------------------------

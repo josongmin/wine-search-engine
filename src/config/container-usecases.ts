@@ -69,6 +69,7 @@ export function buildUseCaseContainerServices(
 
   const searchUseCase = new SearchUseCase({
     queryPlanner: core.queryPlanner,
+    entityLookupAnchorRefresh: core.entityLookupAnchorRefresh,
     blocker: core.blocker,
     entityResolver: core.entityResolver,
     entityLookup: core.entityLookup,

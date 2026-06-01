@@ -33,11 +33,18 @@ import type {
 
 const CALLER_CONTROLLED_SEARCH_INTENT = 'semantic_discovery' as const;
 const CALLER_CONTROLLED_SEARCH_QUERY_CLASS = 'semantic_preference' as const;
+const AGENT_INTERNAL_TRUSTED_EXECUTION_PRINCIPAL = 'agent_internal_trusted' as const;
 
 function shouldBypassPlanner(
   input: SearchUseCaseInput,
 ): boolean {
   return input.mode !== 'entity' && input.mode !== 'mixed';
+}
+
+function shouldBypassPublicQueryEntrySecurityForInternalPrimitive(
+  input: SearchUseCaseInput,
+): boolean {
+  return input.primitiveRoute === 'lookup_wine' || input.anchorEntityId !== undefined;
 }
 
 /** Thrown when the underlying `SearchUseCase` returns a comparison response
@@ -64,6 +71,9 @@ export class SearchUseCaseAdapter implements SearchUseCasePort {
     const useCaseOptions: SearchExecutionOptions = {
       requestId,
       ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
+      ...(shouldBypassPublicQueryEntrySecurityForInternalPrimitive(input)
+        ? { executionPrincipal: AGENT_INTERNAL_TRUSTED_EXECUTION_PRINCIPAL }
+        : {}),
     };
     const response = await this.useCase.execute(request, requestId, useCaseOptions);
     if (response.queryType !== 'search') {
@@ -85,6 +95,14 @@ export class SearchUseCaseAdapter implements SearchUseCasePort {
 export function mapSearchUseCaseInputToSearchRequest(
   input: SearchUseCaseInput,
 ): SearchRequest {
+  if (input.primitiveRoute === 'lookup_wine') {
+    return {
+      query: input.query,
+      primitiveRoute: 'lookup_wine',
+      ...(input.limit !== undefined ? { limit: input.limit } : {}),
+    };
+  }
+
   // RFC-021 T-PSA-02: reference-similarity is path-authoritative. When the
   // dispatcher supplied a resolved anchor entity, emit the internal
   // `similar_to_entity` primitive route + anchor — NOT a callerInterpretation.

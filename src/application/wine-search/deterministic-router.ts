@@ -15,7 +15,8 @@
  *     intent=unknown → reject.
  *  2. decomposition.kind=parallel-slot → parallel-search plan (one search
  *     per slot, total budget split if present).
- *  3. expectedMultiStep=true (none of the above) → multi-step handoff.
+ *  3. anchored_similarity / expectedMultiStep=true (none of the above)
+ *     → multi-step handoff.
  *  4. fallback → single-search plan (80% happy path).
  *
  * NOTE: context-dependent input normalization is delegated to
@@ -199,6 +200,12 @@ function expandParallelSlots(
   return { searches };
 }
 
+function requiresReferenceSimilarityHandoff(
+  analysis: WineSearchAnalysis,
+): boolean {
+  return analysis.callerInterpretation?.queryClass === 'anchored_similarity';
+}
+
 // ---------------------------------------------------------------------------
 // Public surface
 // ---------------------------------------------------------------------------
@@ -240,8 +247,8 @@ export class DeterministicRouter {
       }
     }
 
-    // Rule 3 — multi-step (defer to WineAgentLoop).
-    if (analysis.expectedMultiStep) {
+    // Rule 3 — anchored similarity / explicit multi-step (defer to WineAgentLoop).
+    if (requiresReferenceSimilarityHandoff(analysis) || analysis.expectedMultiStep) {
       return {
         kind: PLAN_KIND_MULTI_STEP,
         handoff: this.buildMultiStepHandoff(analysis),

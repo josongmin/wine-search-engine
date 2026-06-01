@@ -1,12 +1,12 @@
-# Batch Search API (Epic 16.2)
+# Batch Search Contract (inactive public route)
 
 ## Overview
 
-The Batch Search API enables efficient processing of multiple search requests in a single HTTP call with support for partial failure handling, request-level timeouts, and idempotent batch IDs.
+This document describes the retained batch-search request/response contract used by internal tooling and fixtures. The public HTTP surface currently does **not** register `POST /v1/batch-search`; see the current route registry / parity rails for live endpoints.
 
-**HTTP Endpoint:** `POST /v1/batch-search`
+**Public status:** inactive / unregistered
 
-**Response Status:** `HTTP 207 Multi-Status` (regardless of success/failure distribution)
+**Historical response status:** `HTTP 207 Multi-Status` (regardless of success/failure distribution)
 
 ## Request Structure
 
@@ -50,7 +50,7 @@ The Batch Search API enables efficient processing of multiple search requests in
 - `id` (required): Unique identifier within batch (max 256 chars)
 - `query` (required): Search string (1–2000 chars)
 - `limit` (optional): Result limit (default: 5)
-- `retrieval_mode` (optional): 'auto' | 'entity' | 'hybrid' | 'mixed' (default: 'auto')
+- `retrieval_mode` (optional): 'auto' | 'entity' | 'hybrid' (default: 'auto')
 - `context`, `sessionContext`, `queryBudget` (optional): Standard search options
 
 **Options:**
@@ -274,7 +274,7 @@ curl -X POST http://localhost:3000/v1/batch-search \
   - Maps errors to `BatchErrorCode`
   - Generates sub-request IDs
 
-- **Route:** `registerBatchSearchRoute` (src/interface/http/routes/batch-search.route.ts)
+- **Route:** retired from the current public HTTP surface (historical route module removed)
   - Parses request via Zod schema
   - Returns HTTP 207 Multi-Status
   - Delegates to use case

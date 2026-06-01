@@ -58,11 +58,13 @@ Query: `오푸스원이랑 비슷한데 5만원 이하로`
 
 `POST /v1/search/hybrid` with body `{ "query": "오푸스원 같은 와인" }`
 
-- [ ] Response query-family telemetry is a **discovery** family
-      (`attribute_constrained` / `entity_resolution`), **not**
-      `reference_similarity` — the public discovery route does not silently
-      perform anchor-similarity composition.
+- [ ] Response query-family telemetry stays **`reference_similarity`** when the
+      planner sees anchored-similarity semantics, even though the public path
+      stays non-agentic.
 - [ ] The execution route is `hybrid` (path authority), not `mixed`.
+- [ ] The execution contract does **not** silently become the agent primitive
+      chain (`lookup_wine` → `similar_to_entity`). `queryFamily` here is
+      observability semantics, not proof of agent composition.
 
 ## 6. Observability spot-check
 

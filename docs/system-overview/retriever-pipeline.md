@@ -569,7 +569,7 @@ export function buildRanker(
     }
 ```
 
-`bm25_wine`은 `lexical` rank profile에 정의되고, `hybrid` / `wine_aware` / `prestige_hybrid` / `popularity_native`가 모두 `lexical` (또는 `hybrid`) 을 상속하므로 **모든 sparse_bm25 호출 경로가 +0.6 가중치 합성 쿼리 매칭을 자동으로 받는다**. agent flow의 `search_wines` 도구도 `SearchUseCase`를 그대로 재사용하므로 동일하게 적용.
+`bm25_wine`은 `lexical` rank profile에 정의되고, `hybrid` / `wine_aware` / `prestige_hybrid` / `popularity_native`가 모두 `lexical` (또는 `hybrid`) 을 상속하므로 **모든 sparse_bm25 호출 경로가 +0.6 가중치 합성 쿼리 매칭을 자동으로 받는다**. agent flow의 active primitive search tools도 `SearchUseCase`를 그대로 재사용하므로 동일하게 적용.
 
 `match-features` 블록에도 `bm25(synthetic_queries)`가 포함되어 디버그/관측성 측정 가능.
 

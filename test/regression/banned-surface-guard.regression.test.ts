@@ -25,6 +25,8 @@ import {
   buildWineAgentLoopToolBundle,
   WINE_AGENT_LOOP_TOOL_NAMES,
 } from '../../src/application/wine-search/wine-agent-loop-tool-bundle.js';
+import { PrimitiveSearchRequestSchema } from '../../src/interface/http/schemas/primitive-search.schema.js';
+import { BatchSearchRequestSchema } from '../../src/interface/http/schemas/batch-search.schema.js';
 import type { WineAgentLoopToolPorts } from '../../src/application/wine-search/wine-agent-loop-schemas.js';
 
 /** Legacy/convenience tool names that must never reappear as a product tool. */
@@ -106,5 +108,31 @@ describe('banned-surface guard — agent runtime copy & public mappers', () => {
     for (const token of [...BANNED_TOOL_NAMES, 'mode=mixed', 'similar_items']) {
       expect(src.includes(token)).toBe(false);
     }
+  });
+
+  it('the public primitive schema fail-closes on any legacy mode override key', () => {
+    const mixed = PrimitiveSearchRequestSchema.safeParse({
+      query: 'Opus One',
+      options: { mode: 'mixed' },
+    });
+    const hybrid = PrimitiveSearchRequestSchema.safeParse({
+      query: 'Opus One',
+      options: { mode: 'hybrid' },
+    });
+    expect(mixed.success).toBe(false);
+    expect(hybrid.success).toBe(false);
+  });
+
+  it('the retained batch-search contract does not expose retrieval_mode=mixed', () => {
+    const parsed = BatchSearchRequestSchema.safeParse({
+      requests: [{ id: '1', query: 'Opus One', retrieval_mode: 'mixed' }],
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it('the retained batch-search doc no longer advertises retrieval_mode=mixed or a live public endpoint', () => {
+    const src = repoFile('docs/batch-search.md');
+    expect(src.includes("'auto' | 'entity' | 'hybrid' | 'mixed'")).toBe(false);
+    expect(src.includes('**HTTP Endpoint:** `POST /v1/batch-search`')).toBe(false);
   });
 });

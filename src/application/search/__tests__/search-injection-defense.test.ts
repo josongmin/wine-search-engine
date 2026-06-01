@@ -279,6 +279,39 @@ describe('SearchUseCase with Injection Defense', () => {
         expect.any(Object),
       );
     });
+
+    it('allows agent_internal_trusted only for path-authoritative internal primitives', async () => {
+      const judgeCall = mockInjectionJudge.judge as any;
+
+      await expect(
+        useCase.execute(
+          {
+            query: 'Opus One',
+            primitiveRoute: 'lookup_wine',
+          },
+          'test-request-agent-internal-primitive',
+          { executionPrincipal: 'agent_internal_trusted' },
+        ),
+      ).resolves.toMatchObject({
+        queryType: 'search',
+      });
+
+      expect(judgeCall).not.toHaveBeenCalled();
+    });
+
+    it('does not bypass public-edge security for generic agent_internal_trusted searches', async () => {
+      (mockInjectionJudge.judge as any).mockResolvedValueOnce(true);
+
+      await expect(
+        useCase.execute(
+          { query: 'find Bordeaux wines' },
+          'test-request-agent-internal-generic',
+          { executionPrincipal: 'agent_internal_trusted' },
+        ),
+      ).rejects.toBeInstanceOf(PolicyBlockedError);
+
+      expect(mockInjectionJudge.judge).toHaveBeenCalledOnce();
+    });
   });
 
   describe('Injection rejection response format', () => {

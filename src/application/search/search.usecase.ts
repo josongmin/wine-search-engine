@@ -82,6 +82,7 @@ import { buildRetrievalObjective } from '../../domain/retrieval/model/retrieval-
 import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
 import { executeDualLaneHybridRoute } from './search-usecase-dual-lane-execution.js';
 import type { SearchSnapshotFieldAvailability } from '../../domain/shared/types/search-field-availability.js';
+import type { AnchorRefreshCallback } from '../../domain/query/service/anchor-refresh.js';
 
 export type { SearchRequest } from './search-request.dto.js';
 
@@ -106,6 +107,13 @@ export interface SnapshotVersions {
  */
 export interface SearchUseCaseDeps {
   readonly queryPlanner: QueryPlannerPort;
+  /**
+   * Shared entity-lookup safety net used by path-authoritative lookup
+   * primitives that bypass the planner adapter. When `entity_lookup` runs
+   * with zero anchors, this callback re-queries the alias substrate before
+   * the resolver sees an empty candidate set.
+   */
+  readonly entityLookupAnchorRefresh?: AnchorRefreshCallback | undefined;
   /**
    * Explicit test / special-seam escape hatch for planners that only implement
    * plan(). Production wiring must leave this unset.
@@ -297,6 +305,7 @@ export class SearchUseCase {
         queryEntrySecurityObserver: this.deps.queryEntrySecurityObserver,
       },
       queryPlanner: this.deps.queryPlanner,
+      entityLookupAnchorRefresh: this.deps.entityLookupAnchorRefresh,
       responseBuilder: this.deps.responseBuilder,
       constraintSAT: this.constraintSAT,
       cacheService: this.deps.cacheService,
@@ -605,6 +614,7 @@ export class SearchUseCase {
       anchorCandidates: plan.anchors,
       uncertainty: plan.uncertainty,
       candidateEntities,
+      blockingPolicy: 'trust_candidate_pool',
     });
 
     // TA3-1: Evaluate corrective retry trigger conditions
@@ -729,6 +739,7 @@ export class SearchUseCase {
       anchorCandidates: plan.anchors,
       uncertainty: plan.uncertainty,
       candidateEntities: retryCandidateEntities,
+      blockingPolicy: 'trust_candidate_pool',
     });
 
     // TA3-2: Apply exit conditions after corrective retry

@@ -72,6 +72,15 @@ describe('normalizeSimilarToEntityInput — anchor authority', () => {
     expect(result.message.toLowerCase()).toContain('vivino-');
   });
 
+  it('rejects a decorated lookup preview token (entity_id::canonical_label)', () => {
+    const result = normalizeSimilarToEntityInput({
+      entity_id: 'opus-one-2018::Opus One 2018',
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.message).toContain('canonical id only');
+  });
+
   it('accepts a canonical public id (the runtime-exposed form)', () => {
     expect(normalizeSimilarToEntityInput({ entity_id: 'opus-one-2018' }).ok).toBe(true);
     expect(normalizeSimilarToEntityInput({ entity_id: 'nx-abc123' }).ok).toBe(true);

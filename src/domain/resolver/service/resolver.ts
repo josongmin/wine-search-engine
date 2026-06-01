@@ -82,10 +82,12 @@ export class Resolver {
    */
   async resolve(input: ResolverInput): Promise<EntityResolveResult> {
     // Step 1: Block — get candidate IDs from the blocking port
-    const blockedIds = await this.blocker.block(
-      input.rawQuery,
-      input.normalizedQuery,
-    );
+    const blockedIds = input.blockingPolicy === 'trust_candidate_pool'
+      ? undefined
+      : await this.blocker.block(
+        input.rawQuery,
+        input.normalizedQuery,
+      );
 
     // TA2-4: Merge pre-loaded candidates with blocker-seeded candidates.
     // Both pools are filtered to IDs that survived blocking (recall gate).
@@ -96,7 +98,6 @@ export class Resolver {
     // This promotes the blocker's high-recall recall output from a filter
     // to a hydrate-able seed — fixing the "invisible entity" failure mode
     // where the blocker found the correct wine but alias lookup missed it.
-    const blockedIdSet = new Set(blockedIds.map(String));
     const allInputCandidates = [
       ...input.candidateEntities,
       ...(input.blockerSeedCandidates ?? []),
@@ -112,9 +113,14 @@ export class Resolver {
         mergedCandidates.push(c);
       }
     }
-    const candidates = mergedCandidates.filter(
-      (c) => blockedIdSet.has(String(c.entityId)),
-    );
+    const candidates = blockedIds === undefined
+      ? mergedCandidates
+      : (() => {
+          const blockedIdSet = new Set(blockedIds.map(String));
+          return mergedCandidates.filter(
+            (c) => blockedIdSet.has(String(c.entityId)),
+          );
+        })();
 
     // Step 2: Score each candidate.
     // Sanitize non-finite raw scores at the boundary: a corrupted signal must

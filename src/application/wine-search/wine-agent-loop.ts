@@ -54,7 +54,10 @@ import {
   withTimeout,
 } from '../agent/agent-tool-execution-support.js';
 import { normalizeLookupWineInput } from '../search/lookup-wine-execution.js';
-import { normalizeSimilarToEntityInput } from '../search/reference-similarity-execution.js';
+import {
+  SIMILAR_TO_ENTITY_LIMIT_MAX,
+  normalizeSimilarToEntityInput,
+} from '../search/reference-similarity-execution.js';
 import {
   sanitizeOptionalToolNulls,
 } from '../search/search-tool-contract.js';
@@ -189,6 +192,37 @@ function makeInitialState(): RunnerState {
   };
 }
 
+function isReferenceSimilarityAnalysis(
+  analysis: WineAgentLoopInput['analysis'],
+): boolean {
+  return analysis.callerInterpretation?.queryClass === 'anchored_similarity';
+}
+
+function isGroundedRetrievalTool(tool: string): boolean {
+  return isSearchPrimitiveToolName(tool) || tool === 'similar_to_entity';
+}
+
+function validateToolCallsAgainstDirective(
+  directive: WineAgentLoopDirective | undefined,
+  toolCalls: readonly WineAgentLoopToolCall[],
+): string | undefined {
+  if (directive === undefined) return undefined;
+
+  if (directive.kind === 'required_tool') {
+    const onlyCall = toolCalls.length === 1 ? toolCalls[0] : undefined;
+    if (onlyCall?.tool === directive.tool) return undefined;
+    return `Directive requires ${directive.tool} before any other tool call. Do not call a different tool first.`;
+  }
+
+  if (directive.kind === 'grounded_search_required') {
+    const onlyCall = toolCalls.length === 1 ? toolCalls[0] : undefined;
+    if (onlyCall !== undefined && isGroundedRetrievalTool(onlyCall.tool)) return undefined;
+    return 'Directive requires a grounded retrieval tool before answering. Call a search primitive first.';
+  }
+
+  return undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Logger seam
 // ---------------------------------------------------------------------------
@@ -243,7 +277,13 @@ export class WineAgentLoopRunner {
     const agentConfig = buildAgentConfigFromInput(input);
     const budget = new StepBudget(agentConfig);
 
-    let pendingDirective: WineAgentLoopDirective | undefined = input.initialDirective;
+    let pendingDirective: WineAgentLoopDirective | undefined =
+      input.initialDirective
+      ?? computeNextDirective(
+        input,
+        { toolOutcomes: state.toolOutcomes, steps: state.steps },
+        copy,
+      );
     // History grows with one entry per turn — kept short because the
     // adapter handles prompt caching of the static system prompt. Prior
     // conversation turns (multi-turn / session history) are seeded BEFORE
@@ -286,6 +326,91 @@ export class WineAgentLoopRunner {
       if (input.abortSignal?.aborted === true) {
         state.terminationReason = transitionTerminationReason(state.terminationReason, 'aborted');
         break;
+      }
+
+      const deterministicToolCall = buildDeterministicRequiredToolCall(
+        input,
+        pendingDirective,
+        state.toolOutcomes,
+      );
+      if (deterministicToolCall !== undefined) {
+        const stepStartedAtMs = Date.now();
+        const admit = budget.recordParallelBatch([
+          { tool: deterministicToolCall.toolCall.tool, input: deterministicToolCall.toolCall.input },
+        ]);
+        if (!admit.allowed) {
+          state.loopDetectedCount += 1;
+          if (state.loopDetectedCount >= WINE_AGENT_LOOP_LOOP_DETECTED_TERMINATE_COUNT) {
+            state.terminationReason = transitionTerminationReason(
+              state.terminationReason,
+              admit.reason ?? 'loop_detected',
+            );
+            state.steps.push({
+              index: state.steps.length,
+              kind: 'error',
+              reasoning: deterministicToolCall.reasoning,
+              toolCalls: [deterministicToolCall.toolCall],
+              observations: [copy.loopDetected],
+              toolOutcomes: [],
+              errorReason: admit.reason ?? 'loop_detected',
+              errorMessage: copy.loopDetected,
+              durationMs: Math.max(0, Date.now() - stepStartedAtMs),
+              tokenUsage: makeZeroTokenUsage(),
+            });
+            break;
+          }
+          history.push({ role: 'assistant', content: serializeAssistantToolCalls([deterministicToolCall.toolCall]) });
+          history.push({ role: 'user', content: copy.loopDetected });
+          trimHistoryInPlace(history, anchorMessage);
+          pendingDirective = undefined;
+          state.steps.push({
+            index: state.steps.length,
+            kind: 'error',
+            reasoning: deterministicToolCall.reasoning,
+            toolCalls: [deterministicToolCall.toolCall],
+            observations: [copy.loopDetected],
+            toolOutcomes: [],
+            errorReason: admit.reason ?? 'loop_detected',
+            errorMessage: copy.loopDetected,
+            durationMs: Math.max(0, Date.now() - stepStartedAtMs),
+            tokenUsage: makeZeroTokenUsage(),
+          });
+          continue;
+        }
+
+        const dispatchResult = await this.dispatchDeterministicSearchInput(
+          deterministicToolCall,
+          input.toolPorts,
+          input.requestId,
+          state.steps.length,
+          input.perStepTimeoutMs,
+          input.abortSignal,
+        );
+        state.toolOutcomes.push(dispatchResult.outcome);
+        const step: WineAgentLoopStep = {
+          index: state.steps.length,
+          kind: 'tool_use',
+          reasoning: deterministicToolCall.reasoning,
+          toolCalls: [deterministicToolCall.toolCall],
+          observations: [dispatchResult.observation],
+          toolOutcomes: [dispatchResult.outcome],
+          durationMs: Math.max(0, Date.now() - stepStartedAtMs),
+          tokenUsage: makeZeroTokenUsage(),
+        };
+        state.steps.push(step);
+        state.directiveIgnoredCount = 0;
+        history.push({ role: 'assistant', content: serializeAssistantToolCalls([deterministicToolCall.toolCall]) });
+        history.push({
+          role: 'user',
+          content: serializeToolResults([deterministicToolCall.toolCall], [dispatchResult.observation]),
+        });
+        trimHistoryInPlace(history, anchorMessage);
+        pendingDirective = computeNextDirective(input, state, copy);
+        if (shouldTerminateAfterToolBatch(input, state.toolOutcomes, pendingDirective)) {
+          state.terminationReason = transitionTerminationReason(state.terminationReason, 'answer');
+          break;
+        }
+        continue;
       }
 
       // 4. If a directive is pending, inject it as the next user message
@@ -337,6 +462,35 @@ export class WineAgentLoopRunner {
 
       // 7. Branch on what the LLM produced.
       if (stepResult.kind === 'tool_use') {
+        const directiveViolation = validateToolCallsAgainstDirective(
+          pendingDirective,
+          stepResult.toolCalls,
+        );
+        if (directiveViolation !== undefined) {
+          state.directiveIgnoredCount += 1;
+          state.steps.push({
+            index: state.steps.length,
+            kind: 'error',
+            reasoning: stepResult.reasoning,
+            toolCalls: stepResult.toolCalls,
+            observations: [directiveViolation],
+            toolOutcomes: [],
+            errorReason: 'max_steps',
+            errorMessage: directiveViolation,
+            durationMs: Math.max(0, Date.now() - stepStartedAtMs),
+            tokenUsage: stepResult.tokenUsage,
+          });
+          history.push({ role: 'assistant', content: serializeAssistantToolCalls(stepResult.toolCalls) });
+          history.push({ role: 'user', content: directiveViolation });
+          trimHistoryInPlace(history, anchorMessage);
+          if (state.directiveIgnoredCount >= WINE_AGENT_LOOP_DIRECTIVE_IGNORED_TERMINATE_COUNT) {
+            state.terminationReason = transitionTerminationReason(state.terminationReason, 'max_steps');
+            break;
+          }
+          pendingDirective = computeNextDirective(input, state, copy);
+          continue;
+        }
+
         // 7a. Budget admission for the dispatched calls (atomic).
         const admit = budget.recordParallelBatch(
           stepResult.toolCalls.map((c) => ({ tool: c.tool, input: c.input })),
@@ -449,6 +603,17 @@ export class WineAgentLoopRunner {
         // analysis. This is the architectural fix — there's no sticky
         // pendingDirective on the runner instance.
         pendingDirective = computeNextDirective(input, state, copy);
+        // If the contract is already satisfied after this tool batch, stop
+        // here and hand the gathered outcomes to the downstream synthesizer.
+        // The orchestrator never consumes `WineAgentLoopOutcome.answer`, so a
+        // trailing planner-only text turn would be dead latency and dead
+        // failure surface. Keeping the loop open after the directive clears
+        // is what was causing live `/v1/agent` reference-similarity runs to
+        // spend one extra structured-LLM RTT and die there.
+        if (shouldTerminateAfterToolBatch(input, state.toolOutcomes, pendingDirective)) {
+          state.terminationReason = transitionTerminationReason(state.terminationReason, 'answer');
+          break;
+        }
         continue;
       }
 
@@ -716,6 +881,74 @@ export class WineAgentLoopRunner {
 
     return { observation, outcome };
   }
+
+  private async dispatchDeterministicSearchInput(
+    dispatch: DeterministicRequiredToolCall,
+    ports: WineAgentLoopToolPorts,
+    requestId: string,
+    stepIndex: number,
+    perStepTimeoutMs: number,
+    abortSignal: AbortSignal | undefined,
+  ): Promise<{ readonly observation: string; readonly outcome: ToolOutcome }> {
+    const startedAtMs = Date.now();
+    const local = new AbortController();
+    let cleanupListener: (() => void) | undefined;
+    if (abortSignal !== undefined) {
+      const onAbort = (): void => {
+        local.abort(abortError(`WineAgentLoop deterministic tool "${dispatch.toolCall.tool}" aborted by caller`));
+      };
+      if (abortSignal.aborted) {
+        onAbort();
+      } else {
+        abortSignal.addEventListener('abort', onAbort);
+        cleanupListener = (): void => { abortSignal.removeEventListener('abort', onAbort); };
+      }
+    }
+
+    let observation = '';
+    let rawResult: unknown = null;
+    let timedOut = false;
+    let execError = false;
+    try {
+      rawResult = await withTimeout(
+        ports.searchUseCase.execute(
+          dispatch.searchInput,
+          requestId,
+          { abortSignal: local.signal },
+        ),
+        perStepTimeoutMs,
+        `WineAgentLoop deterministic tool "${dispatch.toolCall.tool}" timed out after ${perStepTimeoutMs}ms`,
+      );
+      observation = formatSearchObservation(rawResult);
+    } catch (err) {
+      local.abort();
+      const isTimeout = isTimeoutLikeError(err);
+      if (isTimeout) {
+        timedOut = true;
+        observation = `Tool "${dispatch.toolCall.tool}" timed out after ${perStepTimeoutMs}ms`;
+      } else {
+        execError = true;
+        observation = `Tool "${dispatch.toolCall.tool}" failed: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    } finally {
+      cleanupListener?.();
+    }
+
+    const durationMs = Math.max(0, Date.now() - startedAtMs);
+    const outcome = buildToolOutcome(
+      requestId,
+      stepIndex,
+      0,
+      dispatch.toolCall.tool,
+      observation,
+      rawResult,
+      durationMs,
+      execError,
+      timedOut,
+      /* policyViolation */ false,
+    );
+    return { observation, outcome };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -733,6 +966,89 @@ function buildAgentConfigFromInput(input: WineAgentLoopInput): AgentConfig {
     maxContextChars: WINE_AGENT_LOOP_MAX_HISTORY_CHARS,
     maxTotalTokens: input.maxTotalTokens,
   };
+}
+
+interface DeterministicRequiredToolCall {
+  readonly toolCall: WineAgentLoopToolCall;
+  readonly searchInput: SearchUseCaseInput;
+  readonly reasoning: string;
+}
+
+function buildDeterministicRequiredToolCall(
+  input: WineAgentLoopInput,
+  directive: WineAgentLoopDirective | undefined,
+  toolOutcomes: readonly ToolOutcome[],
+): DeterministicRequiredToolCall | undefined {
+  if (directive?.kind !== 'required_tool') return undefined;
+  if (directive.tool !== 'similar_to_entity') return undefined;
+  if (!isReferenceSimilarityAnalysis(input.analysis)) return undefined;
+  const seed = input.seedSearchInput;
+  if (seed === undefined) return undefined;
+
+  const anchorEntityId = extractSuccessfulLookupAnchorEntityId(toolOutcomes);
+  if (anchorEntityId === undefined) return undefined;
+
+  const searchInput: SearchUseCaseInput = {
+    query: anchorEntityId,
+    anchorEntityId,
+    ...(seed?.filters !== undefined && seed.filters.length > 0
+      ? { filters: [...seed.filters] }
+      : {}),
+    ...(seed?.preferences !== undefined && seed.preferences.length > 0
+      ? { preferences: [...seed.preferences] }
+      : {}),
+    ...(seed?.limit !== undefined ? { limit: Math.min(seed.limit, SIMILAR_TO_ENTITY_LIMIT_MAX) } : {}),
+  };
+  return {
+    toolCall: {
+      tool: 'similar_to_entity',
+      input: {
+        entity_id: anchorEntityId,
+        ...(searchInput.limit !== undefined ? { limit: searchInput.limit } : {}),
+        ...(searchInput.filters !== undefined ? { filters: [...searchInput.filters] } : {}),
+        ...(searchInput.preferences !== undefined ? { preferences: [...searchInput.preferences] } : {}),
+      },
+    },
+    searchInput,
+    reasoning: 'deterministic reference-similarity continuation',
+  };
+}
+
+function extractSuccessfulLookupAnchorEntityId(
+  toolOutcomes: readonly ToolOutcome[],
+): string | undefined {
+  for (let i = toolOutcomes.length - 1; i >= 0; i -= 1) {
+    const outcome = toolOutcomes[i];
+    if (outcome?.tool !== 'lookup_wine' || outcome.kind !== 'success') continue;
+    const entityId = extractTopSearchResultEntityId(outcome.result);
+    if (entityId !== undefined) return entityId;
+  }
+  return undefined;
+}
+
+function extractTopSearchResultEntityId(result: unknown): string | undefined {
+  if (result === null || typeof result !== 'object') return undefined;
+  const record = result as Record<string, unknown>;
+  const results = record['results'];
+  if (!Array.isArray(results) || results.length === 0) return undefined;
+  const first = results[0];
+  if (first === null || typeof first !== 'object') return undefined;
+  const entity = (first as Record<string, unknown>)['entity'];
+  if (entity === null || typeof entity !== 'object') return undefined;
+  const entityId = (entity as Record<string, unknown>)['entityId'];
+  return typeof entityId === 'string' && entityId.length > 0 ? entityId : undefined;
+}
+
+function shouldTerminateAfterToolBatch(
+  input: WineAgentLoopInput,
+  toolOutcomes: readonly ToolOutcome[],
+  _pendingDirective: WineAgentLoopDirective | undefined,
+): boolean {
+  if (!isReferenceSimilarityAnalysis(input.analysis)) return false;
+  return toolOutcomes.some((outcome) =>
+    outcome.tool === 'similar_to_entity'
+    && (outcome.kind === 'success' || outcome.kind === 'empty_result' || outcome.kind === 'partial_result'),
+  );
 }
 
 function totalTokensOf(usage: TokenUsage): number {
@@ -884,13 +1200,9 @@ async function invokeToolPort(
       // did a bare `typeof query === 'string'` check that silently accepted
       // " " or "__TODO__" — see SOLID H2 audit notes.
       //
-      // mode='entity' restored after the entity-route anchor-refresh fix
-      // landed (replaces the historical `lookup_wine → mode='hybrid'`
-      // workaround from commit a344fe64). Entity-route anchors now recover
-      // via the PlannerV1Adapter `anchorRefresh` hook when the planner
-      // misses an alias the overlay holds — see
-      // `src/domain/query/service/anchor-refresh.ts` and memory
-      // `project_entity_route_broken`.
+      // Path-authoritative lookup primitive. This bypasses the legacy
+      // `mode='entity'` hint so the tool shares the exact contract with
+      // `/v1/lookup/wine` and does not depend on planner/entity-route drift.
       const normalized = normalizeLookupWineInput(call.input);
       if (!normalized.ok) {
         return {
@@ -899,7 +1211,11 @@ async function invokeToolPort(
         };
       }
       const result = await ports.searchUseCase.execute(
-        { query: normalized.query, mode: 'entity', limit: normalized.clampedLimit },
+        {
+          query: normalized.query,
+          primitiveRoute: 'lookup_wine',
+          limit: normalized.clampedLimit,
+        },
         requestId,
         { abortSignal: signal },
       );
@@ -995,18 +1311,31 @@ function formatSearchObservation(result: unknown): string {
     return `${WINE_AGENT_LOOP_NO_MATCH_PREFIX}search returned 0 results`;
   }
   const preview = results.slice(0, WINE_AGENT_LOOP_RESULT_PREVIEW_LIMIT)
-    .map((r) => {
-      if (r === null || typeof r !== 'object') return null;
-      const entity = (r as Record<string, unknown>)['entity'];
-      if (entity === null || typeof entity !== 'object') return null;
-      const entityRecord = entity as Record<string, unknown>;
-      const id = typeof entityRecord['entityId'] === 'string' ? entityRecord['entityId'] : 'unknown';
-      const label = typeof entityRecord['canonicalLabel'] === 'string' ? entityRecord['canonicalLabel'] : id;
-      return `${id}::${label}`;
-    })
-    .filter((s): s is string => s !== null);
-  const body = `search: ${results.length} results; top=[${preview.join(', ')}]`;
+    .map((r) => formatSearchObservationEntityPreview(r))
+    .filter(
+      (s): s is { readonly entity_id: string; readonly canonical_label: string } => s !== null,
+    );
+  const body = `search: ${results.length} results; top=${JSON.stringify(preview)}`;
   return clipObservation(body);
+}
+
+function formatSearchObservationEntityPreview(
+  resultItem: unknown,
+): { readonly entity_id: string; readonly canonical_label: string } | null {
+  if (resultItem === null || typeof resultItem !== 'object') return null;
+  const entity = (resultItem as Record<string, unknown>)['entity'];
+  if (entity === null || typeof entity !== 'object') return null;
+  const entityRecord = entity as Record<string, unknown>;
+  const entityId = typeof entityRecord['entityId'] === 'string'
+    ? entityRecord['entityId']
+    : 'unknown';
+  const canonicalLabel = typeof entityRecord['canonicalLabel'] === 'string'
+    ? entityRecord['canonicalLabel']
+    : entityId;
+  return {
+    entity_id: entityId,
+    canonical_label: canonicalLabel,
+  };
 }
 
 function formatGenericObservation(tool: string, result: unknown): string {
@@ -1165,21 +1494,42 @@ export function computeNextDirective(
 
   // Helpers — small inline because they're only used here.
   const hasOutcome = (tool: string): boolean => outcomes.some((o) => o.tool === tool);
-  const hasAnySearchOutcome = (): boolean => outcomes.some((o) => isSearchPrimitiveToolName(o.tool));
-  const lastSearchOutcome = (): ToolOutcome | undefined => {
-    for (let i = outcomes.length - 1; i >= 0; i--) {
+  const hasSuccessfulOutcome = (tool: string): boolean =>
+    outcomes.some((o) => o.tool === tool && o.kind === 'success');
+  const hasAnyGroundedRetrievalOutcome = (): boolean =>
+    outcomes.some((o) => isGroundedRetrievalTool(o.tool));
+  const lastSearchLikeOutcome = (): ToolOutcome | undefined => {
+    for (let i = outcomes.length - 1; i >= 0; i -= 1) {
       const o = outcomes[i];
-      if (o !== undefined && isSearchPrimitiveToolName(o.tool)) return o;
+      if (o !== undefined && isGroundedRetrievalTool(o.tool)) return o;
     }
     return undefined;
   };
-  // 1. Grounded search required + no search yet. Any discovery primitive
-  //    (search_hybrid/semantic/lexical) satisfies the grounded-search gate.
-  if (contract.requiresGroundedWineSearch && !hasAnySearchOutcome()) {
+
+  // 1. Reference-similarity chain authority.
+  if (isReferenceSimilarityAnalysis(input.analysis)) {
+    if (!hasSuccessfulOutcome('lookup_wine')) {
+      return {
+        kind: 'required_tool',
+        tool: 'lookup_wine',
+        instruction: copy.requiredTool('lookup_wine'),
+      };
+    }
+    if (!hasOutcome('similar_to_entity')) {
+      return {
+        kind: 'required_tool',
+        tool: 'similar_to_entity',
+        instruction: copy.requiredTool('similar_to_entity'),
+      };
+    }
+  }
+
+  // 2. Grounded search required + no grounded retrieval yet.
+  if (contract.requiresGroundedWineSearch && !hasAnyGroundedRetrievalOutcome()) {
     return { kind: 'grounded_search_required', instruction: copy.groundedSearch };
   }
 
-  // 2. Required tool not yet called.
+  // 3. Required tool not yet called.
   if (
     contract.requiredTool !== undefined
     && !hasOutcome(contract.requiredTool)
@@ -1191,9 +1541,9 @@ export function computeNextDirective(
     };
   }
 
-  // 4. Relax constraints — fire when the last search returned 0 results
+  // 4. Relax constraints — fire when the last grounded retrieval returned 0 results
   // AND we have not yet attempted a relax retry.
-  const lastSearch = lastSearchOutcome();
+  const lastSearch = lastSearchLikeOutcome();
   if (
     lastSearch?.kind === 'empty_result'
     && hasRelaxableConstraints(input.analysis)

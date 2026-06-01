@@ -12,8 +12,8 @@ guard. Reported per the README's "작업자용 최소 보고 포맷" (owner-loca
 | T-PSA-01 | `reference-similarity-execution.test.ts` (32), `similar-to-entity-primitive-plan.test.ts` (14), pre-route dispatch case; `src/application/search/__tests__` 210/210; typecheck + lint clean |
 | T-PSA-02 | `wine-agent-loop-tool-bundle.test.ts`, `wine-agent-loop.test.ts` (chain + free-text-reject), `search-use-case-adapter.test.ts`, `tool-result-cache.regression`, wire-contract snapshot, injection-boundary; wine-search/agent/config 438/438 + integration 21/21 |
 | T-PSA-03 | `planner-routing-lane-lock.test.ts`, `planner-v2.test.ts` (lockDiscoveryLane), `search-usecase-planner-context-lane-lock.test.ts`; retrieval/query svc sweeps green |
-| T-PSA-04 | `reference-similarity-agent.test.ts`, `reference-similarity-public-search.test.ts`, observability vocab + retrieval-profile sweeps (345 + 44) |
-| T-PSA-05 | `banned-surface-guard.regression.test.ts` (7) |
+| T-PSA-04 | `reference-similarity-agent.test.ts`, `reference-similarity-public-search.test.ts`, observability vocab + retrieval-profile sweeps (345 + 44); `test/benchmark/wine-search/runner.ts --profile quick-realdata --ids 7 --concurrency 1 --runs 1` → `score=65.5%`, `planKind=multi-step`, `lookup_wine -> similar_to_entity` |
+| T-PSA-05 | `banned-surface-guard.regression.test.ts` (10), primitive-route fail-close integration rail, batch-search schema guard |
 
 Cross-cutting: `pnpm run typecheck` green after every ticket.
 
@@ -30,9 +30,9 @@ already enforced in that solver's core when `retrievalMode='similar_items'`.
 
 - Vespa-backed e2e (`test:e2e:vespa`, `test:quality:vespa`) — need a populated
   Vespa + aligned PG snapshot. The §1 rails are infra-free by design.
-- Live agent benchmark (`test/benchmark/agent`) — needs an LLM provider +
-  Vespa. Scenario #7 was re-aligned to the `lookup_wine → similar_to_entity`
-  chain but not executed live.
+- Full live agent benchmark suite (`test/benchmark/agent`) — still not run as
+  a suite. Only the focused real-data wine-search lane for scenario #7 was
+  executed owner-local with `WINE_SEARCH_LLM_PROVIDER=openai` and `gpt-5-mini`.
 - Operator live smoke — see `docs/runbook-reference-similarity-smoke.md`.
 - One PRE-EXISTING ambient failure unrelated to this work:
   `planner-constraint-fallback-observability.test.ts` (err-serialization) —
@@ -46,7 +46,7 @@ already enforced in that solver's core when `retrievalMode='similar_items'`.
 - Vespa schema / ETL / deploy infra — untouched.
 - `data/golden-queries-*.jsonl` — NOT modified (strict release-gate schema +
   only meaningful against live Vespa). Reference-similarity corpus is carried by
-  the §1 regression rails + benchmark scenario #7 instead. **Follow-up.**
+  the §1 regression rails + focused benchmark scenario #7 instead. **Follow-up.**
 - `src/domain/evaluation/service/build-evidence-records-from-frames.ts` — the
   always-on `query_observability.queryFamily` de-conflation (new
   `reference_similarity` family) already makes the primitive chain
@@ -57,9 +57,7 @@ already enforced in that solver's core when `retrievalMode='similar_items'`.
 - Internal: `similar_items` retrieval mode, mixed solver, `mixed_anchor` profile,
   `CompareWinesAttemptInputSchema` (unreachable — not in `KNOWN_AGENT_TOOL_NAMES`).
 - Tests: `compare_wines` unsupported-branch guard in `wine-agent-loop.test.ts`.
-- Docs: historical `docs/rfc/**` + `docs/adr/**` (preserved as record);
-  `docs/system-overview/*` stale `search_wines` mentions flagged for a future
-  system-overview refresh (non-blocking).
+- Docs: historical `docs/rfc/**` + `docs/adr/**` (preserved as record).
 
 The banned-surface rail enforces the PRODUCT/TOOL surface is clean; the raw
 `rg 'search_wines|compare_wines|mixed|similar_items'` will still match the

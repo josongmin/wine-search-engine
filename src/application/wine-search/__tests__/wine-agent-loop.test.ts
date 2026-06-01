@@ -55,6 +55,7 @@ import {
 import type {
   SearchUseCasePort,
 } from '../execution-runner.js';
+import type { SearchUseCaseInput } from '../execution-plan-schemas.js';
 import type { DecomposedSearchUseCasePort } from '../../search/port/search-route-usecases.port.js';
 import type { DrinkingWindowUseCasePort } from '../../drinking-window/port/drinking-window-usecase.port.js';
 import type { EntityDocumentLookupPort } from '../../search/port/search-pipeline-deps.port.js';
@@ -91,6 +92,8 @@ function makeAnalysis(opts?: {
   requiresGroundedWineSearch?: boolean;
   requiredTool?: WineSearchAnalysis['contract']['requiredTool'];
   constraints?: WineSearchAnalysis['normalizedConstraints'];
+  callerInterpretation?: WineSearchAnalysis['callerInterpretation'];
+  preservedSurface?: string;
 }): WineSearchAnalysis {
   return {
     intent: 'search',
@@ -105,7 +108,10 @@ function makeAnalysis(opts?: {
     expectedMultiStep: true,
     recommendedBudget: { maxSteps: WINE_AGENT_LOOP_DEFAULT_MAX_STEPS, perToolCap: WINE_AGENT_LOOP_DEFAULT_PER_TOOL_CAP },
     hangulDominant: opts?.hangulDominant ?? false,
-    preservedSurface: 'fixture-query',
+    preservedSurface: opts?.preservedSurface ?? 'fixture-query',
+    ...(opts?.callerInterpretation !== undefined
+      ? { callerInterpretation: opts.callerInterpretation }
+      : {}),
   };
 }
 
@@ -322,6 +328,7 @@ function makeInput(overrides: Partial<WineAgentLoopInput> & { readonly analysis?
     maxOutputTokens: overrides.maxOutputTokens ?? WINE_AGENT_LOOP_DEFAULT_MAX_OUTPUT_TOKENS,
     perToolCap: overrides.perToolCap ?? WINE_AGENT_LOOP_DEFAULT_PER_TOOL_CAP,
     ...(overrides.initialDirective !== undefined ? { initialDirective: overrides.initialDirective } : {}),
+    ...(overrides.seedSearchInput !== undefined ? { seedSearchInput: overrides.seedSearchInput } : {}),
     ...(overrides.priorHistory !== undefined ? { priorHistory: overrides.priorHistory } : {}),
     ...(overrides.abortSignal !== undefined ? { abortSignal: overrides.abortSignal } : {}),
   };
@@ -431,6 +438,183 @@ describe('WineAgentLoopRunner — required tool directive', () => {
 });
 
 describe('WineAgentLoopRunner — reference similarity primitive (RFC-021 T-PSA-02)', () => {
+  it('rejects a non-required tool when the directive requires lookup_wine first', async () => {
+    const searchPort = makeSearchPort(() => Promise.resolve(makeSearchResponse(['wine-1', 'wine-2'])));
+    const llm = makeStubLlm([
+      async () => asToolUseResult([toolUse('search_hybrid', { query: 'Opus One cheap alternative' })]),
+      async () => asToolUseResult([toolUse('lookup_wine', { query: 'Opus One' })]),
+      async () => asToolUseResult([
+        toolUse('similar_to_entity', { entity_id: 'opus-one-2018', max_price_krw: 80000 }),
+      ]),
+      async () => asTextResult('Here are wines similar to Opus One but cheaper.'),
+    ]);
+    const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
+    const out = await runner.run(makeInput({
+      query: 'Opus One이랑 비슷한데 더 싼 거',
+      analysis: makeAnalysis({
+        callerInterpretation: {
+          authority: 'caller',
+          intent: 'mixed_query',
+          queryClass: 'anchored_similarity',
+        },
+        preservedSurface: 'Opus One이랑 비슷한데 더 싼 거',
+      }),
+      toolPorts: makeToolPorts({ searchUseCase: searchPort }),
+      maxSteps: 6,
+    }));
+
+    expect(out.terminationReason).toBe('answer');
+    expect(searchPort.executeMock).toHaveBeenCalledTimes(2);
+    expect(searchPort.executeMock.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+      primitiveRoute: 'lookup_wine',
+    }));
+    expect(searchPort.executeMock.mock.calls[1]?.[0]).toEqual(expect.objectContaining({
+      anchorEntityId: 'opus-one-2018',
+    }));
+    const rejectedStep = out.steps.find((step) =>
+      step.observations.some((observation) => observation.includes('Directive requires lookup_wine')),
+    );
+    expect(rejectedStep).toBeDefined();
+  });
+
+  it('injects lookup_wine first, then similar_to_entity after successful lookup', async () => {
+    const observedDirectives: string[] = [];
+    const searchPort = makeSearchPort(() => Promise.resolve(makeSearchResponse(['wine-1', 'wine-2'])));
+    const llm = makeStubLlm([
+      async (req) => {
+        const directive = [...req.messages]
+          .reverse()
+          .find((m) => m.role === 'user' && m.content.startsWith('[directive]'))
+          ?.content;
+        if (directive !== undefined) observedDirectives.push(directive);
+        return asToolUseResult([toolUse('lookup_wine', { query: 'Opus One' })]);
+      },
+      async (req) => {
+        const directive = [...req.messages]
+          .reverse()
+          .find((m) => m.role === 'user' && m.content.startsWith('[directive]'))
+          ?.content;
+        if (directive !== undefined) observedDirectives.push(directive);
+        return asToolUseResult([
+          toolUse('similar_to_entity', { entity_id: 'opus-one-2018', max_price_krw: 80000 }),
+        ]);
+      },
+      async () => asTextResult('Here are wines similar to Opus One but cheaper.'),
+    ]);
+    const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
+    const out = await runner.run(makeInput({
+      query: 'Opus One이랑 비슷한데 더 싼 거',
+      analysis: makeAnalysis({
+        callerInterpretation: {
+          authority: 'caller',
+          intent: 'mixed_query',
+          queryClass: 'anchored_similarity',
+        },
+        preservedSurface: 'Opus One이랑 비슷한데 더 싼 거',
+      }),
+      toolPorts: makeToolPorts({ searchUseCase: searchPort }),
+      maxSteps: 5,
+    }));
+
+    expect(out.terminationReason).toBe('answer');
+    expect(llm.executeMock).toHaveBeenCalledTimes(2);
+    expect(observedDirectives[0]).toContain('lookup_wine');
+    expect(observedDirectives[1]).toContain('similar_to_entity');
+    expect(out.toolOutcomes.map((o) => o.tool)).toEqual(['lookup_wine', 'similar_to_entity']);
+  });
+
+  it('uses deterministic similar_to_entity continuation when seedSearchInput is present', async () => {
+    const pricePreference = {
+      attribute: 'price_usd',
+      operator: '<=',
+      value: 60,
+      text: '8만원 이하',
+    } as unknown as NonNullable<SearchUseCaseInput['preferences']>[number];
+    const searchPort = makeSearchPort((_input, _reqId) => {
+      const callIdx = searchPort.executeMock.mock.calls.length;
+      if (callIdx === 1) {
+        return Promise.resolve(makeSearchResponse(['opus-one-2018']));
+      }
+      return Promise.resolve(makeSearchResponse(['wine-1', 'wine-2']));
+    });
+    const llm = makeStubLlm([
+      async () => asToolUseResult([toolUse('lookup_wine', { query: 'Opus One 2018' })]),
+      async () => asTextResult('unused fallback answer'),
+    ]);
+    const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
+    const out = await runner.run(makeInput({
+      query: '오푸스원 비슷한데 더 싼 와인',
+      analysis: makeAnalysis({
+        callerInterpretation: {
+          authority: 'caller',
+          intent: 'mixed_query',
+          queryClass: 'anchored_similarity',
+        },
+        preservedSurface: '오푸스원 비슷한데 더 싼 와인',
+      }),
+      seedSearchInput: {
+        query: '오푸스원 비슷한데 더 싼 와인',
+        preferences: [pricePreference],
+        limit: 7,
+      },
+      toolPorts: makeToolPorts({ searchUseCase: searchPort }),
+      maxSteps: 5,
+    }));
+
+    expect(out.terminationReason).toBe('answer');
+    expect(llm.executeMock).toHaveBeenCalledTimes(1);
+    expect(searchPort.executeMock).toHaveBeenCalledTimes(2);
+    expect(searchPort.executeMock.mock.calls[1]?.[0]).toEqual(expect.objectContaining({
+      query: 'opus-one-2018',
+      anchorEntityId: 'opus-one-2018',
+      limit: 7,
+      preferences: [pricePreference],
+    }));
+    expect(out.toolOutcomes.map((o) => o.tool)).toEqual(['lookup_wine', 'similar_to_entity']);
+  });
+
+  it('terminates after similar_to_entity empty result instead of opening a relax LLM turn', async () => {
+    const searchPort = makeSearchPort((_input, _reqId) => {
+      const callIdx = searchPort.executeMock.mock.calls.length;
+      if (callIdx === 1) {
+        return Promise.resolve(makeSearchResponse(['opus-one-2018']));
+      }
+      return Promise.resolve(makeSearchResponse([]));
+    });
+    const llm = makeStubLlm([
+      async () => asToolUseResult([toolUse('lookup_wine', { query: 'Opus One 2018' })]),
+      async () => asTextResult('this should never be consumed'),
+    ]);
+    const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
+    const out = await runner.run(makeInput({
+      query: '오푸스원이랑 비슷한데 더 싼 거 추천해줘',
+      analysis: makeAnalysis({
+        callerInterpretation: {
+          authority: 'caller',
+          intent: 'mixed_query',
+          queryClass: 'anchored_similarity',
+        },
+        constraints: [
+          { attribute: 'max_price_krw', operator: '<=', value: 80000, mustHave: false } as never,
+        ],
+        preservedSurface: '오푸스원이랑 비슷한데 더 싼 거 추천해줘',
+      }),
+      seedSearchInput: {
+        query: '오푸스원이랑 비슷한데 더 싼 거 추천해줘',
+        preferences: [
+          { attribute: 'price_usd', operator: '<=', value: 60, text: '8만원 이하' } as never,
+        ],
+      },
+      toolPorts: makeToolPorts({ searchUseCase: searchPort }),
+      maxSteps: 5,
+    }));
+
+    expect(out.terminationReason).toBe('answer');
+    expect(llm.executeMock).toHaveBeenCalledTimes(1);
+    expect(searchPort.executeMock).toHaveBeenCalledTimes(2);
+    expect(out.toolOutcomes.map((o) => o.kind)).toEqual(['success', 'empty_result']);
+  });
+
   it('lookup_wine → similar_to_entity chain: dispatches the anchor by entity_id, not free text', async () => {
     const searchPort = makeSearchPort(() => Promise.resolve(makeSearchResponse(['wine-1', 'wine-2'])));
     const llm = makeStubLlm([
@@ -445,12 +629,21 @@ describe('WineAgentLoopRunner — reference similarity primitive (RFC-021 T-PSA-
     const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
     const out = await runner.run(makeInput({
       query: '오푸스원 비슷한 와인 추천해줘',
+      analysis: makeAnalysis({
+        callerInterpretation: {
+          authority: 'caller',
+          intent: 'mixed_query',
+          queryClass: 'anchored_similarity',
+        },
+        preservedSurface: '오푸스원 비슷한 와인 추천해줘',
+      }),
       toolPorts: makeToolPorts({ searchUseCase: searchPort }),
       maxSteps: 5,
     }));
 
     expect(out.terminationReason).toBe('answer');
     expect(searchPort.executeMock).toHaveBeenCalledTimes(2);
+    expect(llm.executeMock).toHaveBeenCalledTimes(2);
     // The similarity leg carries the resolved anchor as anchorEntityId — the
     // path-authoritative similar_to_entity signal — and never a lane `mode`.
     const similarityCall = searchPort.executeMock.mock.calls[1]?.[0];
@@ -461,6 +654,38 @@ describe('WineAgentLoopRunner — reference similarity primitive (RFC-021 T-PSA-
     // The structured residual (price ceiling) is compiled into a preference.
     expect(similarityCall).toHaveProperty('preferences');
     expect(out.toolOutcomes.map((o) => o.tool)).toEqual(['lookup_wine', 'similar_to_entity']);
+  });
+
+  it('formats lookup_wine observations with explicit entity_id fields, not id::label preview tokens', async () => {
+    const searchPort = makeSearchPort(() => Promise.resolve({
+      queryType: 'search',
+      engineDecision: { decisionStatus: 'resolved' } as unknown as SearchResponseV1['engineDecision'],
+      results: [
+        {
+          entity: {
+            entityId: 'opus-one-2018',
+            canonicalLabel: 'Opus One 2018',
+          },
+        },
+      ] as unknown as SearchResponseV1['results'],
+      meta: { generatedAt: new Date().toISOString() } as unknown as SearchResponseV1['meta'],
+    }));
+    const llm = makeStubLlm([
+      async () => asToolUseResult([toolUse('lookup_wine', { query: 'Opus One 2018' })]),
+      async () => asTextResult('Resolved the wine.'),
+    ]);
+    const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
+    const out = await runner.run(makeInput({
+      query: 'Opus One 2018 찾아줘',
+      toolPorts: makeToolPorts({ searchUseCase: searchPort }),
+      maxSteps: 4,
+    }));
+
+    expect(out.terminationReason).toBe('answer');
+    const lookupObservation = out.steps[0]?.observations[0] ?? '';
+    expect(lookupObservation).toContain('"entity_id":"opus-one-2018"');
+    expect(lookupObservation).toContain('"canonical_label":"Opus One 2018"');
+    expect(lookupObservation).not.toContain('opus-one-2018::Opus One 2018');
   });
 
   it('rejects a free-text anchor passed straight into similar_to_entity (no entity_id)', async () => {
@@ -868,6 +1093,68 @@ describe('computeNextDirective (pure function)', () => {
       selectDirectiveCopy(false),
     );
     expect(second).toBeUndefined();
+  });
+
+  it('returns required_tool=lookup_wine first for anchored-similarity analysis', () => {
+    const input = makeInput({
+      query: 'Opus One이랑 비슷한데 더 싼 거',
+      analysis: makeAnalysis({
+        callerInterpretation: {
+          authority: 'caller',
+          intent: 'mixed_query',
+          queryClass: 'anchored_similarity',
+        },
+      }),
+    });
+    const out = computeNextDirective(input, makeStateView([]), selectDirectiveCopy(false));
+    expect(out?.kind).toBe('required_tool');
+    if (out?.kind !== 'required_tool') return;
+    expect(out.tool).toBe('lookup_wine');
+  });
+
+  it('returns required_tool=similar_to_entity after successful lookup for anchored-similarity analysis', () => {
+    const input = makeInput({
+      query: 'Opus One이랑 비슷한데 더 싼 거',
+      analysis: makeAnalysis({
+        callerInterpretation: {
+          authority: 'caller',
+          intent: 'mixed_query',
+          queryClass: 'anchored_similarity',
+        },
+      }),
+    });
+    const out = computeNextDirective(
+      input,
+      makeStateView([{ tool: 'lookup_wine', kind: 'success' }]),
+      selectDirectiveCopy(false),
+    );
+    expect(out?.kind).toBe('required_tool');
+    if (out?.kind !== 'required_tool') return;
+    expect(out.tool).toBe('similar_to_entity');
+  });
+
+  it('similar_to_entity empty result still triggers relax retry when residual constraints exist', () => {
+    const input = makeInput({
+      analysis: makeAnalysis({
+        callerInterpretation: {
+          authority: 'caller',
+          intent: 'mixed_query',
+          queryClass: 'anchored_similarity',
+        },
+        constraints: [
+          { attribute: 'maxPriceKrw', operator: 'lte', value: 80000, mustHave: false } as unknown as WineSearchAnalysis['normalizedConstraints'][number],
+        ],
+      }),
+    });
+    const out = computeNextDirective(
+      input,
+      makeStateView([
+        { tool: 'lookup_wine', kind: 'success' },
+        { tool: 'similar_to_entity', kind: 'empty_result' },
+      ]),
+      selectDirectiveCopy(false),
+    );
+    expect(out?.kind).toBe('relax_constraints_retry');
   });
 
   it('does not return relax when all constraints are must-have', () => {

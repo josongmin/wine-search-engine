@@ -240,6 +240,25 @@ describe('DeterministicRouter — Rule 3: multi-step handoff', () => {
     if (plan.kind !== 'multi-step') return;
     expect(plan.handoff.initialAction).toBe('compare');
   });
+
+  it('anchored_similarity caller interpretation → multi-step even when expectedMultiStep=false', () => {
+    const router = makeRouter();
+    const plan = router.route(
+      baseAnalysis({
+        intent: 'search',
+        preservedSurface: 'Opus One이랑 비슷한데 더 싼 거',
+        callerInterpretation: {
+          authority: 'caller',
+          intent: 'mixed_query',
+          queryClass: 'anchored_similarity',
+        },
+        expectedMultiStep: false,
+      }),
+    );
+    expect(plan.kind).toBe('multi-step');
+    if (plan.kind !== 'multi-step') return;
+    expect(plan.handoff.initialAction).toBe('search');
+  });
 });
 
 describe('DeterministicRouter — Rule 4: single-search (default)', () => {

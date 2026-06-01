@@ -32,23 +32,10 @@ import type {
 import { PolicyCompiler } from '../domain/query/service/policy-compiler.js';
 import { ExecutionCompiler } from '../domain/query/service/execution-compiler.js';
 import {
+  type AnchorRefreshCallback,
   type AnchorRefreshAliasOverlayPort,
-  type AnchorRefreshResult,
   refreshAnchorsFromAliasOverlay,
 } from '../domain/query/service/anchor-refresh.js';
-import type { AnchorCandidate } from '../domain/query/model/anchor-candidate.js';
-
-/**
- * Callback shape for the optional anchor-refresh hook.
- *
- * Closes over the alias overlay (production: `core.aliasMatcher`). Returning
- * the {@link AnchorRefreshResult} lets the adapter inspect the status and
- * surface diagnostics without re-running the lookup itself.
- */
-export type AnchorRefreshCallback = (input: {
-  readonly normalizedQuery: string;
-  readonly existingAnchors: readonly AnchorCandidate[];
-}) => Promise<AnchorRefreshResult>;
 
 /**
  * Build an {@link AnchorRefreshCallback} from an alias-overlay port.

@@ -16,8 +16,16 @@ export interface RequestExecutionContext {
    * `benchmark_trusted` is reserved for internally authenticated benchmark lanes
    * and skips public-edge query-entry security so retrieval quality can be
    * measured independently from prompt-injection defenses.
+   * `agent_internal_trusted` is reserved for deterministic agent-internal
+   * primitive hops (for example `lookup_wine` / `similar_to_entity`) on an
+   * already-admitted outer `/v1/agent` request. It must never be set from a
+   * public wire surface.
    */
-  readonly executionPrincipal?: 'public' | 'benchmark_trusted' | undefined;
+  readonly executionPrincipal?:
+    | 'public'
+    | 'benchmark_trusted'
+    | 'agent_internal_trusted'
+    | undefined;
   readonly abortSignal?: AbortSignal | undefined;
   /**
    * True when the HTTP request passed X-Debug-Key validation.

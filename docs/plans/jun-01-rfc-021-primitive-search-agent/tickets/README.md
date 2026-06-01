@@ -14,11 +14,11 @@
 
 | Ticket | 주제 | 상태 | 선행 | 핵심 출력 |
 |---|---|---|---|---|
-| `T-PSA-01` | deterministic reference-similarity primitive | planned | 없음 | `similar_to_entity(entity_id, ...)` internal primitive |
-| `T-PSA-02` | agent primitive composition cutover | planned | `T-PSA-01` | `lookup_wine -> similar_to_entity` agent flow |
-| `T-PSA-03` | public search path authority and planner scope reduction | planned | `T-PSA-01` | primitive route lane authority hardening |
-| `T-PSA-04` | reference-similarity eval, golden queries, observability | planned | `T-PSA-01`, `T-PSA-02`, `T-PSA-03` | regression corpus + trace/eval rails |
-| `T-PSA-05` | legacy mixed-surface purge and proof rails | planned | `T-PSA-02`, `T-PSA-03`, `T-PSA-04` | banned surface guard + closeout matrix |
+| `T-PSA-01` | deterministic reference-similarity primitive | implemented | 없음 | `similar_to_entity(entity_id, ...)` internal primitive |
+| `T-PSA-02` | agent primitive composition cutover | implemented | `T-PSA-01` | `lookup_wine -> similar_to_entity` agent flow |
+| `T-PSA-03` | public search path authority and planner scope reduction | implemented | `T-PSA-01` | primitive route lane authority hardening |
+| `T-PSA-04` | reference-similarity eval, golden queries, observability | implemented | `T-PSA-01`, `T-PSA-02`, `T-PSA-03` | regression corpus + trace/eval rails |
+| `T-PSA-05` | legacy mixed-surface purge and proof rails | implemented | `T-PSA-02`, `T-PSA-03`, `T-PSA-04` | banned surface guard + closeout matrix |
 
 ## Wave
 

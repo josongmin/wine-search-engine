@@ -78,6 +78,69 @@ describe('public-search rail — reference-similarity observability is not confl
     expect(deriveQueryFamily(plan, compiled)).toBe('reference_similarity');
     expect(deriveQueryFamily(plan, compiled)).not.toBe('recommendation');
   });
+
+  it('a lane-locked anchored similarity query stays reference_similarity instead of regressing to comparison', () => {
+    const plan = {
+      rawQuery: '오푸스원 같은 와인',
+      normalizedQuery: '오푸스원 같은 와인',
+      intent: 'mixed_query',
+      route: 'mixed',
+      retrievalMode: 'similar_items',
+      queryClass: 'anchored_similarity',
+      anchors: [ANCHOR],
+      constraints: { hard: [], soft: [], inferred: [] },
+      expansions: { lexical: [], semantic: [] },
+      policy: {
+        requireExact: false,
+        allowApproximate: true,
+        requireClarification: false,
+        fallbackMode: 'hybrid',
+        policyReasonCodes: [],
+      },
+      uncertainty: {
+        overall: 0.1,
+        ambiguityDetected: false,
+        ambiguityTypes: [],
+        ambiguitySeverity: 'low',
+        decisionEffect: 'trace_only',
+        parserConfidence: 0.8,
+        anchorConfidence: 0.9,
+        constraintConfidence: 0.1,
+      },
+      plannerVersion: '1.0.0',
+      policyRuleVersion: '1.0.0',
+      thresholdProfileId: 'default',
+    } as const;
+    const compiled = {
+      query: {
+        rawQuery: plan.rawQuery,
+        normalizedQuery: plan.normalizedQuery,
+        intent: plan.intent,
+        queryClass: plan.queryClass,
+        anchors: plan.anchors,
+        constraints: plan.constraints,
+        expansions: plan.expansions,
+        uncertainty: plan.uncertainty,
+        plannerVersion: plan.plannerVersion,
+        policyRuleVersion: plan.policyRuleVersion,
+        thresholdProfileId: plan.thresholdProfileId,
+      },
+      execution: {
+        effectiveRoute: 'hybrid',
+        effectiveRetrievalMode: 'attribute_search',
+        routeSource: 'planner',
+        budget: { maxCandidates: 50, enablePrecisionRerank: true },
+        provenancePolicy: {
+          requireIdentitySeal: false,
+          requireConstraintEvidence: false,
+          requireAnchorEvidence: false,
+        },
+      },
+    } as const;
+
+    expect(deriveQueryFamily(plan, compiled)).toBe('reference_similarity');
+    expect(deriveQueryFamily(plan, compiled)).not.toBe('comparison');
+  });
 });
 
 describe('public-search rail — reference-similarity trace provenance (T-PSA-04 DoD#2)', () => {

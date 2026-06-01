@@ -37,7 +37,7 @@ flowchart LR
 | **RetrievalMode (`plan.retrievalMode`)** | 세부 전략 12종 (`entity_lookup`, `compare_candidates`, …) | `retrieval-mode.ts` |
 | **QueryClass** | 임계값·캘리브레이션용 **7종** + `unknown` | `query-class.ts` |
 | **GoldenQueryClass** | 평가용 라벨 **9종** — 런타임 `QueryClass`와 **집합이 다름** | `scripts/etl/types.ts` |
-| **effectiveRoute** | 요청 `retrieval_mode` / `options.mode` / **retrievalMode 승격 규칙** 반영 후 실행 라우트 | `search-usecase-route-resolution.ts` |
+| **effectiveRoute** | compiled execution contract 기준 실행 라우트. retained generic tooling request에서는 `retrieval_mode` / `options.mode` override가 가능하지만, public primitive HTTP는 path authority로 고정 | `search-usecase-route-resolution.ts`, `primitive-search.schema.ts` |
 
 ---
 
@@ -360,35 +360,20 @@ export function resolveRouteFromPlanAndOptionMode(
 
 ---
 
-## 11. 별도 부록: API가 라우트를 바꿀 때
+## 11. 별도 부록: 누가 라우트를 결정하나
 
 | 입력 | 효과 |
 |------|------|
-| `retrieval_mode` (non-auto) | 플래너보다 **우선** (`apiOverrideMode`) |
-| `options.mode` + auto | `resolveRouteFromPlanAndOptionMode`와 함께 해석 |
-| `POST /v1/search/hybrid` | 강제 hybrid 유스케이스 (`retrieval_mode: hybrid`) |
+| public primitive HTTP `POST /v1/search/hybrid` | **항상 hybrid lane**. body의 `options.mode` / `retrieval_mode`는 거부 |
+| public primitive HTTP `POST /v1/search/semantic` | **항상 semantic lane**. body override 없음 |
+| public primitive HTTP `POST /v1/search/lexical` | **항상 lexical lane**. body override 없음 |
+| retained generic tooling request `retrieval_mode` (non-auto) | 플래너/compiled contract보다 **우선** (`apiOverrideMode`) |
+| retained generic tooling request `options.mode` | `retrieval_mode`가 없을 때만 `resolveRouteFromPlanAndOptionMode`와 함께 해석 |
 
-```36:54:src/application/search/search-usecase-route-resolution.ts
-export function buildSearchRouteResolutionContext(
-  plan: QueryPlanV1,
-  request: SearchRequest,
-): SearchRouteResolutionContext {
-  const apiOverrideMode =
-    request.retrieval_mode !== undefined && request.retrieval_mode !== 'auto'
-      ? request.retrieval_mode
-      : undefined;
-  const effectiveRoute =
-    apiOverrideMode ?? resolveRouteFromPlanAndOptionMode(plan, request.options?.mode);
-  const retrievalModeSource: 'planner' | 'api_override' =
-    apiOverrideMode !== undefined ? 'api_override' : 'planner';
-  return {
-    apiOverrideMode,
-    effectiveRoute,
-    retrievalModeSource,
-    plannerSuggestedMode: plan.route,
-  };
-}
-```
+공개 surface와 내부 tooling surface를 섞어 읽으면 오판합니다.
+`SearchRouteResolutionContext`의 override 규칙은 retained generic request용입니다.
+현재 public primitive surface는 `PrimitiveSearchRequestSchema`에서 lane override field를
+막고 route handler가 path로 lane을 주입합니다.
 
 ---
 

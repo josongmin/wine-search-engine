@@ -819,6 +819,7 @@ export class WineSearchOrchestrator {
       const outcome = await this.deps.wineAgentLoopRunner.run({
         query: input.query,
         analysis,
+        seedSearchInput: plan.handoff.seedSearchInput,
         requestId: input.requestId,
         // Thread the prior conversation into the agent loop so the planner
         // plans against the real multi-turn context — NOT just the anchor

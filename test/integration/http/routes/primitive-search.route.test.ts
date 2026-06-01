@@ -85,11 +85,24 @@ describe('primitive search route compatibility', () => {
     await app.close();
   });
 
-  it('accepts the legacy options envelope on /v1/search/hybrid but keeps the path authoritative', async () => {
+  it('rejects a legacy mode hint on /v1/search/hybrid', async () => {
     const response = await post(app, '/v1/search/hybrid', {
       query: 'Opus One 2018',
       options: {
         mode: 'entity',
+        explain: true,
+        clarification: false,
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(deps.searchUseCase.execute).not.toHaveBeenCalled();
+  });
+
+  it('accepts explain/clarification-only options on /v1/search/hybrid', async () => {
+    const response = await post(app, '/v1/search/hybrid', {
+      query: 'Opus One 2018',
+      options: {
         explain: true,
         clarification: false,
       },
@@ -105,7 +118,7 @@ describe('primitive search route compatibility', () => {
     expect((args?.[0] as { retrieval_mode?: string } | undefined)?.retrieval_mode).toBeUndefined();
   });
 
-  it('ignores a legacy mode hint on /v1/search/semantic and still forces semantic_only', async () => {
+  it('rejects a legacy mode hint on /v1/search/semantic', async () => {
     const response = await post(app, '/v1/search/semantic', {
       query: 'Cloudy Bay',
       options: {
@@ -115,13 +128,7 @@ describe('primitive search route compatibility', () => {
       },
     });
 
-    expect(response.statusCode).toBe(200);
-    expect(deps.searchUseCase.execute).toHaveBeenCalledTimes(1);
-    const args = (deps.searchUseCase.execute as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(args?.[0]).toMatchObject({
-      query: 'Cloudy Bay',
-      retrievalLane: 'semantic_only',
-    });
-    expect((args?.[0] as { retrieval_mode?: string } | undefined)?.retrieval_mode).toBeUndefined();
+    expect(response.statusCode).toBe(400);
+    expect(deps.searchUseCase.execute).not.toHaveBeenCalled();
   });
 });

@@ -13,12 +13,13 @@ import {
 } from '../constants.js';
 import {
   QueryStringSchema,
-  SearchModeSchema,
   SearchContextSchema,
   SessionContextSchema,
   QueryBudgetSchema,
 } from './search-shared.schema.js';
 import { SearchResponseSchema } from './search-response.schema.js';
+
+const BatchSearchRetrievalModeSchema = z.enum(['auto', 'entity', 'hybrid']);
 
 const BatchSessionContextSnakeSchema = z.object({
   session_id: z.string().min(1),
@@ -58,7 +59,7 @@ export const BatchSearchRequestItemSchema = z.object({
     .max(MAX_ENTITY_ID_CHARS, `id must not exceed ${String(MAX_ENTITY_ID_CHARS)} characters`),
   query: QueryStringSchema,
   limit: z.number().int().positive().max(MAX_SEARCH_RESULTS_PER_RESPONSE).optional(),
-  retrieval_mode: SearchModeSchema.optional(),
+  retrieval_mode: BatchSearchRetrievalModeSchema.optional(),
   context: SearchContextSchema.optional(),
   sessionContext: SessionContextSchema.optional(),
   session_context: BatchSessionContextSnakeSchema.optional(),

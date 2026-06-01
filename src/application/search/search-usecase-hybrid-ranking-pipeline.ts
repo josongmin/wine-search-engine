@@ -448,6 +448,7 @@ export async function resolveEntityRouteForPlanExecution(
     anchorCandidates: plan.anchors,
     uncertainty: plan.uncertainty,
     candidateEntities,
+    blockingPolicy: 'trust_candidate_pool',
   });
 
   pipelineDebug(

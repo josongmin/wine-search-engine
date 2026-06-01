@@ -170,6 +170,7 @@ export class ResolveUseCase {
       anchorCandidates: plan.anchors,
       uncertainty: plan.uncertainty,
       candidateEntities,
+      blockingPolicy: 'trust_candidate_pool',
     };
 
     throwIfAborted(options?.abortSignal, 'Resolve use case aborted');

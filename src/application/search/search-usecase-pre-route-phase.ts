@@ -42,6 +42,7 @@ import {
   type SearchSnapshotFieldAvailability,
 } from '../../domain/shared/types/search-field-availability.js';
 import type { NormalizedConstraint } from '../../domain/shared/types/index.js';
+import type { AnchorRefreshCallback } from '../../domain/query/service/anchor-refresh.js';
 
 /** Hard timeout for decomposed (multi-sub-query) search execution. */
 const DECOMPOSED_SEARCH_TIMEOUT_MS = 15_000;
@@ -404,6 +405,7 @@ export interface SearchPreRoutePhaseContext extends RequestExecutionContext {
   readonly fieldAvailability?: SearchSnapshotFieldAvailability | undefined;
   readonly securityGateDeps: SearchSecurityGateDeps;
   readonly queryPlanner: QueryPlannerPort;
+  readonly entityLookupAnchorRefresh?: AnchorRefreshCallback | undefined;
   readonly responseBuilder: ResponseBuilderPort;
   readonly constraintSAT: ConstraintSAT;
   readonly cacheService?: SearchResponseCachePort | undefined;
@@ -414,6 +416,58 @@ export interface SearchPreRoutePhaseContext extends RequestExecutionContext {
    * Production search paths must provide planWithCompiled and should not rely on this.
    */
   readonly allowCompiledFallback?: boolean | undefined;
+}
+
+function shouldBypassPublicQueryEntrySecurity(
+  ctx: SearchPreRoutePhaseContext,
+): boolean {
+  if (ctx.executionPrincipal === 'benchmark_trusted') {
+    return true;
+  }
+
+  if (ctx.executionPrincipal !== 'agent_internal_trusted') {
+    return false;
+  }
+
+  return (
+    ctx.request.primitiveRoute === 'lookup_wine'
+    || ctx.request.primitiveRoute === 'similar_to_entity'
+  );
+}
+
+async function refreshEntityLookupAnchorsIfNeeded(
+  plan: QueryPlanV1,
+  compiled: CompiledWineQuery,
+  anchorRefresh?: AnchorRefreshCallback,
+): Promise<{ readonly plan: QueryPlanV1; readonly compiled: CompiledWineQuery }> {
+  if (
+    anchorRefresh === undefined
+    || compiled.execution.effectiveRetrievalMode !== 'entity_lookup'
+    || plan.anchors.length > 0
+  ) {
+    return { plan, compiled };
+  }
+
+  const refreshResult = await anchorRefresh({
+    normalizedQuery: plan.normalizedQuery,
+    existingAnchors: plan.anchors,
+  });
+  if (refreshResult.status !== 'refreshed') {
+    return { plan, compiled };
+  }
+
+  const refreshedPlan: QueryPlanV1 = {
+    ...plan,
+    anchors: refreshResult.anchors,
+  };
+  const refreshedCompiled = compileFromLegacyPlan(refreshedPlan, {
+    apiRouteOverride:
+      compiled.execution.routeSource === 'api_override'
+        ? refreshedPlan.route
+        : undefined,
+    maxCandidatesOverride: compiled.execution.budget.maxCandidates,
+  });
+  return { plan: refreshedPlan, compiled: refreshedCompiled };
 }
 
 /**
@@ -627,6 +681,12 @@ export async function runSearchPreRoutePhase(
       }
     }
 
+    ({ plan, compiled } = await refreshEntityLookupAnchorsIfNeeded(
+      plan,
+      compiled,
+      ctx.entityLookupAnchorRefresh,
+    ));
+
     // Merge caller-supplied structured filters (from agent tools / batch API)
     // into the planner's hard constraints so they flow to Vespa as YQL filters.
     //
@@ -799,7 +859,7 @@ export async function runSearchPreRoutePhase(
     return { outcome: 'continue', plan, compiled };
   };
 
-  if (ctx.executionPrincipal === 'benchmark_trusted') {
+  if (shouldBypassPublicQueryEntrySecurity(ctx)) {
     return runPreRouteCore(ctx.request.query, ctx.abortSignal);
   }
 
