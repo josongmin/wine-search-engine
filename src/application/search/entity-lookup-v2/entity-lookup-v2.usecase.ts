@@ -41,6 +41,9 @@ import type {
   LookupDecision,
 } from '../../../domain/resolver/v2/lookup-v2-types.js';
 import { CalibratedAbstainDecider } from '../../../domain/resolver/v2/calibrated-abstain-decider.js';
+import { buildChannelHitsForEntity } from '../../../domain/resolver/v2/channel-provenance.js';
+import { LOOKUP_RETRIEVAL_CHANNELS } from '../../../domain/resolver/v2/lookup-v2-types.js';
+import type { LookupRetrievalChannel } from '../../../domain/resolver/v2/lookup-v2-types.js';
 import { buildResolverCandidatesFromGenerator } from '../search-usecase-resolver-candidates.js';
 import { shouldSuppressBlockerSeedExpansion } from '../search-usecase-blocker-seed-policy.js';
 import { buildPlannerContextFromSearchRequest } from '../search-usecase-planner-context.js';
@@ -53,6 +56,7 @@ import type {
   EntityLookupV2Command,
   EntityLookupV2Result,
   LookupV2CandidateView,
+  LookupV2ChannelCoverageView,
   LookupV2ClarificationOptionView,
   NormalizedQueryViewsView,
 } from './entity-lookup-v2.dto.js';
@@ -274,18 +278,34 @@ export class EntityLookupV2UseCase {
     // calibrated-abstain decision; otherwise the resolver's advisory status.
     const status = forcedStatus ?? decision?.status ?? mapResolverStatusToLookupStatus(result?.status ?? 'failed');
     const trace = result?.decisionTrace;
+    const anchors = plan.anchors;
     const candidates: readonly LookupV2CandidateView[] = result === undefined
       ? []
-      : result.candidates.map((c) => ({
-          entityId: String(c.entityId),
-          canonicalLabel: c.canonicalLabel,
-          calibratedScore: clamp01(c.calibratedScore),
-          rank: c.rank,
-          // Multi-channel provenance is filled by T-ELV2-04; the resolver-backed
-          // baseline has no per-channel union yet, so agreement is 0 / hits empty.
-          channelAgreement: 0,
-          channelHits: [],
-        }));
+      : result.candidates.map((c) => {
+          // T-ELV2-04: decompose the recall that produced this candidate into
+          // the declared V2 channels (exact/compact/transliteration/jamo/fuzzy/
+          // family/dense) so the per-channel union is an explicit artifact.
+          const channelHits = buildChannelHitsForEntity(
+            c.entityId,
+            c.rank,
+            anchors,
+            c.blockerSeed === true,
+          );
+          return {
+            entityId: String(c.entityId),
+            canonicalLabel: c.canonicalLabel,
+            calibratedScore: clamp01(c.calibratedScore),
+            rank: c.rank,
+            channelAgreement: channelHits.length,
+            channelHits: channelHits.map((h) => ({
+              channel: h.channel,
+              matchedView: h.matchedView,
+              ...(h.matchedAlias !== undefined ? { matchedAlias: h.matchedAlias } : {}),
+              channelScore: h.channelScore,
+              channelRank: h.channelRank,
+            })),
+          };
+        });
 
     const topCandidate = status === 'resolved' ? (candidates[0] ?? null) : null;
     const clarificationOptions: readonly LookupV2ClarificationOptionView[] =
@@ -322,8 +342,7 @@ export class EntityLookupV2UseCase {
         calibrationTrusted: decision?.calibrationTrusted ?? trace?.calibrationTrusted ?? false,
         queryClass: plan.queryClass,
         candidatePoolSize: result?.candidates.length ?? 0,
-        // Per-channel coverage rail is populated by T-ELV2-04.
-        channelCoverage: [],
+        channelCoverage: buildChannelCoverage(candidates),
       },
       meta: {
         ...(command.requestId !== undefined ? { requestId: command.requestId } : {}),
@@ -346,6 +365,32 @@ function clamp01(value: number): number {
     return 1;
   }
   return value;
+}
+
+/**
+ * Aggregate the per-candidate channel hits into the per-channel coverage rail.
+ * Emits one row per channel that actually contributed at least one candidate,
+ * in declared-channel order. `latencyMs` is 0 on the reuse path (channels are
+ * decomposed from anchor recall, not run as independent timed retrievers — the
+ * timed independent runtime lands behind the LookupCandidateRetrievalPort seam).
+ */
+function buildChannelCoverage(
+  candidates: readonly LookupV2CandidateView[],
+): readonly LookupV2ChannelCoverageView[] {
+  const counts = new Map<LookupRetrievalChannel, number>();
+  for (const candidate of candidates) {
+    for (const hit of candidate.channelHits) {
+      counts.set(hit.channel, (counts.get(hit.channel) ?? 0) + 1);
+    }
+  }
+  const rows: LookupV2ChannelCoverageView[] = [];
+  for (const channel of LOOKUP_RETRIEVAL_CHANNELS) {
+    const hitCount = counts.get(channel);
+    if (hitCount !== undefined && hitCount > 0) {
+      rows.push({ channel, firing: true, hitCount, latencyMs: 0 });
+    }
+  }
+  return rows;
 }
 
 /**
