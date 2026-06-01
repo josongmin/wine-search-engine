@@ -99,13 +99,18 @@ const CONCEPT_PHRASES: readonly string[] = Array.from(
 ).sort((a, b) => b.length - a.length);
 
 /**
- * Wrap a regex source in Unicode-safe word boundaries.
- * `\b` is ASCII-only (rule 8) — use `[\p{L}\p{N}]` class boundaries with /u so
- * Korean / accented sources match at token edges only and never substring-match
- * inside a producer/entity token (audit: DoD-c over-stripping).
+ * Wrap a regex source in a SCRIPT-AWARE soft boundary.
+ *
+ * `\b` is ASCII-only (rule 8). A full `[\p{L}\p{N}]` boundary is ALSO wrong for
+ * Korean: Hangul agglutinates with no inter-morpheme space, so a full boundary
+ * misses `까쇼와인` / `레드와인` (audit R2 — DoD-c regression). We instead block
+ * adjacency only to a LATIN letter or digit: this still prevents a Latin grape
+ * substring-matching inside a word (`merlot` ⊄ `merlotation`) while allowing
+ * Hangul/CJK adjacency. Lookbehind/lookahead are NON-consuming, so an adjacent
+ * Hangul char is never deleted by the strip.
  */
 function boundedSource(source: string): RegExp {
-  return new RegExp(`(?:^|[^\\p{L}\\p{N}])(?:${source})(?=$|[^\\p{L}\\p{N}])`, 'giu');
+  return new RegExp(`(?<![a-z0-9])(?:${source})(?![a-z0-9])`, 'giu');
 }
 
 /**

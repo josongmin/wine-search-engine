@@ -76,19 +76,28 @@ describe('audit HIGH — untrusted calibration never resolves on a raw score', (
 
 // ── MED: bounded Korean grape regexes ─────────────────────────────────────────
 
-describe('audit MED — Korean grape regexes are boundary-wrapped (no over-strip)', () => {
-  it('strips a standalone grape token but NOT a grape substring inside another token', () => {
-    // '시라' = Syrah (standalone) → concept; '시라소니'(lynx) merely contains 시라 → NOT stripped.
-    expect(classifyConcept(makeViews('시라')).isConceptOnly).toBe(true);
-    const inside = classifyConcept(makeViews('시라소니'));
-    expect(inside.isConceptOnly).toBe(false);
-    expect(inside.residual).toContain('시라소니');
-  });
-
-  it('does not strip "merlot" out of the middle of a token', () => {
+describe('audit MED/R2 — script-aware concept boundaries', () => {
+  it('does not strip a LATIN grape out of the middle of a token (merlot ⊄ merlotation)', () => {
     const c = classifyConcept(makeViews('merlotation'));
     expect(c.isConceptOnly).toBe(false);
     expect(c.residual).toContain('merlotation');
+  });
+
+  it('treats a standalone Korean grape as concept but still admits a producer token that contains it', () => {
+    // '시라'(Syrah) standalone → concept; '시라소니' agglutinates 시라 — it gets
+    // stripped (Korean has no inter-morpheme space) but the residual '소니'
+    // remains, so the query still ADMITS (no false redirect_discovery).
+    expect(classifyConcept(makeViews('시라')).isConceptOnly).toBe(true);
+    const inside = classifyConcept(makeViews('시라소니'));
+    expect(inside.isConceptOnly).toBe(false);
+    expect(inside.residual).toContain('소니');
+  });
+
+  it('R2: detects AGGLUTINATED Korean concept compounds (까쇼와인, 레드와인) — DoD §3 restored', () => {
+    expect(classifyConcept(makeViews('까쇼와인')).isConceptOnly).toBe(true);
+    expect(classifyConcept(makeViews('레드와인')).isConceptOnly).toBe(true);
+    const gate = new ConceptAdmissionGate();
+    expect(gate.classify({ rawQuery: '까쇼와인', views: makeViews('까쇼와인') }).decision).toBe('redirect_discovery');
   });
 });
 
@@ -147,5 +156,61 @@ describe('audit MED — max_candidates caps the surfaced candidate list', () => 
     expect(out.candidates.length).toBe(3);
     // candidate_pool_size still reports the FULL pool (honest)
     expect(out.evidenceSummary.candidatePoolSize).toBe(6);
+    // R2: the display cap must NOT starve clarification — built from the full set.
+    expect(out.clarificationOptions.length).toBe(6);
+  });
+});
+
+// ── R2 HIGH: untrusted resolve requires STRICT exact-identity strategy ────────
+
+describe('audit R2 HIGH — untrusted resolve is not forgeable by a recall strategy', () => {
+  function untrustedUseCase(strategy: string): EntityLookupV2UseCase {
+    const eid = createEntityId('chateau-margaux');
+    const resolver: EntityResolverPort = {
+      resolve: vi.fn().mockResolvedValue({
+        status: 'resolved',
+        candidates: [{ entityId: eid, canonicalLabel: 'Chateau Margaux', calibratedScore: 1.0, rank: 1, evidenceRefs: [] }],
+        topEntity: { entityId: eid, canonicalLabel: 'Chateau Margaux', calibratedScore: 1.0 },
+        decisionTrace: {
+          queryClass: 'short_entity', top1CalibratedScore: 1.0, top2CalibratedScore: undefined,
+          calibratedGap: undefined, decisionConfidenceC: 1.0, calibrationTrusted: false,
+          ambiguityDetected: false, ambiguityTypes: [],
+          appliedThresholds: { resolveThreshold: 0.5, gapThreshold: 0.1 }, outcomeReasonCodes: [],
+        },
+        conformalSetSize: 1,
+      }),
+    };
+    const doc = { entityId: eid, entityType: 'wine' as const, canonicalLabel: 'Chateau Margaux' };
+    const queryPlanner: QueryPlannerPort = {
+      plan: vi.fn().mockResolvedValue({
+        rawQuery: 'margaux', normalizedQuery: 'margaux', intent: 'known_item', route: 'entity',
+        retrievalMode: 'entity_lookup', queryClass: 'short_entity',
+        anchors: [{ surfaceForm: 'margaux', normalizedForm: 'margaux', candidateEntityIds: [eid], lookupStrategies: [strategy], confidence: 0.97 }],
+        constraints: { hard: [], soft: [], inferred: [] }, expansions: { lexical: [], semantic: [] },
+        policy: {}, uncertainty: {}, normalizedQueryViews: makeViews('margaux'),
+        plannerVersion: '1', policyRuleVersion: '1', thresholdProfileId: 'default',
+      }),
+    };
+    return new EntityLookupV2UseCase({
+      admissionGate: new ConceptAdmissionGate(),
+      queryPlanner,
+      entityResolver: resolver,
+      entityLookup: {
+        getDocument: vi.fn().mockResolvedValue(doc),
+        getDocuments: vi.fn().mockResolvedValue(new Map([[eid, doc]])),
+      },
+      querySanitizer: { sanitize: vi.fn((q: string) => ({ safe: true, sanitizedQuery: q })) } as never,
+    });
+  }
+
+  it('ABSTAINS when untrusted top candidate has only a lexical_exact (recall) strategy', async () => {
+    const out = await untrustedUseCase('lexical_exact').execute({ query: 'margaux', maxCandidates: 5, mode: 'default' });
+    expect(out.status).toBe('ambiguous');
+    expect(out.evidenceSummary.decisionReasonCode).toBe('uncalibrated_low_trust');
+  });
+
+  it('RESOLVES when untrusted top candidate has a strict exact strategy', async () => {
+    const out = await untrustedUseCase('exact').execute({ query: 'margaux', maxCandidates: 5, mode: 'default' });
+    expect(out.status).toBe('resolved');
   });
 });

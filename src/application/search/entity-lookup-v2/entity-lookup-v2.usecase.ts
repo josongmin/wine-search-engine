@@ -41,7 +41,7 @@ import type {
   LookupDecision,
 } from '../../../domain/resolver/v2/lookup-v2-types.js';
 import { CalibratedAbstainDecider } from '../../../domain/resolver/v2/calibrated-abstain-decider.js';
-import { buildChannelHitsForEntity, hasExactIdentityEvidence } from '../../../domain/resolver/v2/channel-provenance.js';
+import { anchorsHaveExactIdentityEvidence, buildChannelHitsForEntity } from '../../../domain/resolver/v2/channel-provenance.js';
 import { clamp01 } from '../../../domain/shared/utils/clamp.js';
 import { LOOKUP_RETRIEVAL_CHANNELS } from '../../../domain/resolver/v2/lookup-v2-types.js';
 import type { LookupRetrievalChannel } from '../../../domain/resolver/v2/lookup-v2-types.js';
@@ -170,15 +170,12 @@ export class EntityLookupV2UseCase {
     const result = await this.resolveCandidatePool(plan, options);
     throwIfAborted(options?.abortSignal, 'Entity lookup V2 aborted');
 
-    // Establish EXACT-identity evidence for the top candidate from its anchor
-    // channels (exact/compact/transliteration alias hit). This — NOT a raw
-    // score — is what may certify a resolve under untrusted calibration.
+    // Establish EXACT-identity evidence for the top candidate from a STRICT
+    // exact lookup strategy on the anchors that recalled it (not a raw score,
+    // not a substring-classified channel). This — and only this — may certify a
+    // resolve under untrusted calibration (audit R2 close).
     const top = result.candidates[0];
-    const topExactEvidence =
-      top !== undefined &&
-      hasExactIdentityEvidence(
-        buildChannelHitsForEntity(top.entityId, top.rank, plan.anchors, top.blockerSeed === true),
-      );
+    const topExactEvidence = top !== undefined && anchorsHaveExactIdentityEvidence(top.entityId, plan.anchors);
 
     // V2 calibrated-abstain authority — precision-first, downgrade-only over the
     // resolver's advisory status (T-ELV2-05).
@@ -290,11 +287,13 @@ export class EntityLookupV2UseCase {
     const status = forcedStatus ?? decision?.status ?? mapResolverStatusToLookupStatus(result?.status ?? 'failed');
     const trace = result?.decisionTrace;
     const anchors = plan.anchors;
-    // Cap the surfaced candidate fan-out to the caller's max_candidates. The
-    // resolver is ordered by rank, so slicing keeps the strongest candidates.
-    const candidates: readonly LookupV2CandidateView[] = result === undefined
+    // Build the FULL candidate view first (channel provenance per candidate);
+    // clarification + coverage are derived from this full set so the
+    // max_candidates DISPLAY cap never starves disambiguation/observability
+    // (audit R2). Only the surfaced `candidates` list is capped.
+    const allCandidates: readonly LookupV2CandidateView[] = result === undefined
       ? []
-      : result.candidates.slice(0, command.maxCandidates).map((c) => {
+      : result.candidates.map((c) => {
           // T-ELV2-04: decompose the recall that produced this candidate into
           // the declared V2 channels (exact/compact/transliteration/jamo/fuzzy/
           // family/dense) so the per-channel union is an explicit artifact.
@@ -320,10 +319,12 @@ export class EntityLookupV2UseCase {
           };
         });
 
+    // The resolver orders by rank, so slicing keeps the strongest candidates.
+    const candidates = allCandidates.slice(0, command.maxCandidates);
     const topCandidate = status === 'resolved' ? (candidates[0] ?? null) : null;
     const clarificationOptions: readonly LookupV2ClarificationOptionView[] =
       status === 'ambiguous'
-        ? candidates.slice(0, LOOKUP_V2_MAX_CLARIFICATION_OPTIONS).map((c) => ({
+        ? allCandidates.slice(0, LOOKUP_V2_MAX_CLARIFICATION_OPTIONS).map((c) => ({
             entityId: c.entityId,
             label: c.canonicalLabel,
           }))
@@ -355,7 +356,7 @@ export class EntityLookupV2UseCase {
         calibrationTrusted: decision?.calibrationTrusted ?? trace?.calibrationTrusted ?? false,
         queryClass: plan.queryClass,
         candidatePoolSize: result?.candidates.length ?? 0,
-        channelCoverage: buildChannelCoverage(candidates),
+        channelCoverage: buildChannelCoverage(allCandidates),
       },
       meta: {
         ...(command.requestId !== undefined ? { requestId: command.requestId } : {}),

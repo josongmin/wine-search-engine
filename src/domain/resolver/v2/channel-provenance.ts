@@ -29,7 +29,15 @@ export function mapLookupStrategyToChannel(strategy: string): LookupRetrievalCha
   if (s.includes('compact')) return 'compact_exact';
   if (s.includes('translit')) return 'transliteration_exact';
   if (s.includes('jamo') || s.includes('phonetic')) return 'jamo_phonetic';
-  if (s.includes('fuzzy') || s.includes('ngram') || s.includes('trigram') || s.includes('edit')) return 'fuzzy_alias';
+  // Recall / expansion strategies — fuzzy, n-gram, edit-distance, AND the
+  // partial-token expansions (lexical_exact, prefix_exact, inexact_*). These
+  // names CONTAIN "exact"/"alias" but are NOT exact identity; route them to the
+  // fuzzy channel so the display label is honest (audit R2). Checked before the
+  // generic exact/alias fallback.
+  if (
+    s.includes('fuzzy') || s.includes('ngram') || s.includes('trigram') || s.includes('edit') ||
+    s.includes('inexact') || s.includes('lexical') || s.includes('prefix')
+  ) return 'fuzzy_alias';
   if (s.includes('family')) return 'family_graph';
   if (s.includes('semantic') || s.includes('dense')) return 'dense';
   if (s.includes('exact') || s.includes('canonical') || s.includes('alias')) return 'exact_alias';
@@ -40,32 +48,49 @@ export function mapLookupStrategyToChannel(strategy: string): LookupRetrievalCha
 export const BLOCKER_SEED_CHANNEL: LookupRetrievalChannel = 'dense';
 
 /**
- * Channels that constitute EXACT identity evidence: a normalized/compact/
- * transliterated exact alias hit. Fuzzy / family / dense are recall-only and
- * do NOT prove identity.
+ * STRICT exact-identity lookup strategies — matched as WHOLE normalized strings
+ * (never as substrings), so recall/expansion strategies whose NAMES merely
+ * contain "exact"/"alias" (`lexical_exact`, `prefix_exact`, `inexact_alias`,
+ * `*_fuzzy`) can never count as identity evidence (audit R2 bypass). These are
+ * the strategies that prove the query IS the entity, not merely recalls it.
  */
-const EXACT_IDENTITY_CHANNELS: ReadonlySet<LookupRetrievalChannel> = new Set([
+const STRICT_EXACT_IDENTITY_STRATEGIES: ReadonlySet<string> = new Set([
+  'exact',
   'exact_alias',
+  'exact_entity',
+  'canonical_exact',
   'compact_exact',
+  'transliterated_exact',
   'transliteration_exact',
 ]);
 
 /**
- * Minimum anchor confidence for a channel hit to count as exact-identity
- * evidence. High by design — exact-channel hits below this are treated as
- * recall, not identity proof. Used by the calibrated-abstain decider to certify
- * a resolve when calibration is UNtrusted (substitute trust = exact evidence;
- * memory: calibration-trust gate), instead of trusting a raw score.
+ * Minimum anchor confidence for a strict-exact strategy to count as identity
+ * evidence. Set BELOW the canonical-exact confidence so the legitimately weaker
+ * exact strategies still qualify (compact_exact ≈0.90, transliterated_exact
+ * ≈0.88) while clearly-degraded hits are excluded — the prior 0.95 floor was an
+ * inverted gate that rejected the very strategies it meant to admit (audit R2).
+ * The STRATEGY allowlist — not this number — is the primary gate.
  */
-export const EXACT_IDENTITY_ANCHOR_CONFIDENCE = 0.95;
+export const EXACT_IDENTITY_MIN_CONFIDENCE = 0.85;
 
 /**
- * Whether a candidate's channel union carries exact-identity evidence — i.e. an
- * exact/compact/transliteration alias hit at or above the confidence floor.
+ * Whether the entity has EXACT-identity evidence among the anchors that
+ * recalled it: an anchor that includes the entity, carries a strict-exact
+ * lookup strategy, and meets the confidence floor. Used by the calibrated
+ * decider to certify a resolve under UNtrusted calibration (substitute trust =
+ * exact evidence; memory calibration-trust gate) WITHOUT reading a raw score.
  */
-export function hasExactIdentityEvidence(hits: readonly LookupChannelHit[]): boolean {
-  return hits.some(
-    (h) => EXACT_IDENTITY_CHANNELS.has(h.channel) && h.channelScore >= EXACT_IDENTITY_ANCHOR_CONFIDENCE,
+export function anchorsHaveExactIdentityEvidence(
+  entityId: CanonicalEntityId,
+  anchors: readonly AnchorCandidate[],
+): boolean {
+  const idStr = String(entityId);
+  return anchors.some(
+    (anchor) =>
+      clamp01(anchor.confidence) >= EXACT_IDENTITY_MIN_CONFIDENCE &&
+      anchor.candidateEntityIds.some((id) => String(id) === idStr) &&
+      (anchor.lookupStrategies ?? []).some((s) => STRICT_EXACT_IDENTITY_STRATEGIES.has(s.toLowerCase())),
   );
 }
 
