@@ -1,4 +1,5 @@
 import type { NormalizedConstraint } from '../../domain/shared/types/constraint-bundle.js';
+import type { CanonicalEntityId } from '../../domain/shared/types/entity-id.js';
 import type { WineSearchCallerInterpretation } from '../wine-search/wine-search-schemas.js';
 
 /**
@@ -74,11 +75,25 @@ export interface SearchRequest {
    *
    * Current use:
    * - `lookup_wine` → `/v1/lookup/wine` exact canonical-entity surface
+   * - `similar_to_entity` → RFC-021 deterministic reference-similarity primitive
+   *   ("wines like {entity_id}"). The anchor authority is {@link anchorEntityId},
+   *   NOT the query string — the plan builder fixes route=`mixed` /
+   *   retrievalMode=`similar_items` and seeds the anchor directly, so no
+   *   free-text re-resolution occurs.
    *
    * NEVER populate from a request body. This is an application-internal
    * dispatch signal owned by the front-door adapter.
    */
-  readonly primitiveRoute?: 'lookup_wine' | undefined;
+  readonly primitiveRoute?: 'lookup_wine' | 'similar_to_entity' | undefined;
+  /**
+   * Resolved canonical anchor entity for the `similar_to_entity` primitive
+   * route. This — not {@link query} — is the similarity anchor authority
+   * (RFC-021 T-PSA-01): the plan builder seeds it into `plan.anchors` so the
+   * mixed solver resolves the entity directly and excludes it from results,
+   * with no free-text anchor extraction. Only meaningful when
+   * `primitiveRoute === 'similar_to_entity'`.
+   */
+  readonly anchorEntityId?: CanonicalEntityId | undefined;
   /** Maximum number of result items to return (batch / caller-specified cap). */
   readonly limit?: number | undefined;
   /**

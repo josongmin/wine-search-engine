@@ -34,12 +34,13 @@ const SECONDS_PER_DAY = SECONDS_PER_HOUR * HOURS_PER_DAY;
  *  reruns, user retries). */
 const LOOKUP_WINE_TTL_DAYS = 1;
 
-/** search_hybrid / search_semantic / search_lexical — constraint-driven
- *  discovery retrieval. Results depend on Vespa snapshot + LTR weights +
- *  recent ingest. Vespa publish cadence is hourly at the slowest; 1 hour is
- *  the freshest TTL that still lets repeat queries within a session benefit
- *  from cache. All three discovery primitives share the same volatility
- *  envelope (same corpus, same snapshot) so they share one TTL. */
+/** search_hybrid / search_semantic / search_lexical / similar_to_entity —
+ *  retrieval over the Vespa snapshot. Results depend on Vespa snapshot + LTR
+ *  weights + recent ingest. Vespa publish cadence is hourly at the slowest;
+ *  1 hour is the freshest TTL that still lets repeat queries within a session
+ *  benefit from cache. All four retrieval primitives share the same volatility
+ *  envelope (same corpus, same snapshot) so they share one TTL —
+ *  `similar_to_entity` is anchor-conditioned retrieval over that same snapshot. */
 const SEARCH_PRIMITIVE_TTL_HOURS = 1;
 
 // ---------------------------------------------------------------------------
@@ -61,6 +62,7 @@ export const TOOL_RESULT_CACHE_TTL_SECONDS: ReadonlyMap<string, number> = new Ma
   ['search_hybrid', SEARCH_PRIMITIVE_TTL_HOURS * SECONDS_PER_HOUR],
   ['search_semantic', SEARCH_PRIMITIVE_TTL_HOURS * SECONDS_PER_HOUR],
   ['search_lexical', SEARCH_PRIMITIVE_TTL_HOURS * SECONDS_PER_HOUR],
+  ['similar_to_entity', SEARCH_PRIMITIVE_TTL_HOURS * SECONDS_PER_HOUR],
 ]);
 
 /**

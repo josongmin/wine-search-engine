@@ -2453,4 +2453,51 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
         + 'If no exact match, should explicitly state price or region constraint was broadened.',
     },
   },
+  // RFC-021 T-PSA-04: reference similarity ("X 비슷한 와인") composes as
+  // lookup_wine → similar_to_entity. The agent MUST resolve the named anchor to
+  // an entity_id first, then anchor the similarity on that id — never feed the
+  // name straight into a discovery search.
+  {
+    id: 489,
+    tier: 'relative_reference',
+    query: '사시카이아랑 비슷한 이탈리아 레드 추천해줘',
+    description: 'Reference similarity (Korean): lookup_wine(Sassicaia) → similar_to_entity',
+    expectation: {
+      tools: [
+        { tool: 'lookup_wine', inputContains: ['Sassicaia'] },
+        { tool: 'similar_to_entity' },
+      ],
+      ordered: true,
+      maxSteps: 4,
+      maxDurationMs: 45_000,
+      maxTotalTokens: 9_000,
+      answerMustMatch: ['(sassicaia|사시카이아)'],
+      mustNotCallTools: ['compare_wines', 'search_wines'],
+      rubric:
+        'Must resolve Sassicaia via lookup_wine FIRST, then call similar_to_entity '
+        + 'with the resolved entity_id (NOT the name). Must recommend Italian reds '
+        + 'similar to Sassicaia, and must NOT include Sassicaia itself in the result set.',
+    },
+  },
+  {
+    id: 490,
+    tier: 'relative_reference',
+    query: 'Opus One similar but cheaper',
+    description: 'Reference similarity (English) + price residual: lookup_wine → similar_to_entity(max_price)',
+    expectation: {
+      tools: [
+        { tool: 'lookup_wine', inputContains: ['Opus'] },
+        { tool: 'similar_to_entity' },
+      ],
+      ordered: true,
+      maxSteps: 4,
+      maxDurationMs: 45_000,
+      maxTotalTokens: 9_000,
+      answerMustMatch: ['(opus\\s*one|오푸스\\s*원)', '(cheap|less\\s+expensive|under|저렴|싸|싼)'],
+      rubric:
+        'Must resolve Opus One via lookup_wine, then similar_to_entity on the entity_id '
+        + 'with a price residual. Recommended wines must be cheaper than Opus One and '
+        + 'must not include Opus One itself.',
+    },
+  },
 ];

@@ -46,6 +46,7 @@ import {
 } from '@domain/agent/model/agent-tool-attempt-schema.js';
 import type { ToolDefinition } from '@domain/ai/port/structured-llm.port.js';
 import { LookupWineInputSchema } from '../search/lookup-wine-execution.js';
+import { SimilarToEntityInputSchema } from '../search/reference-similarity-execution.js';
 import {
   SEARCH_FAMILY_UNSUPPORTED_TOOL_FIELDS,
   buildSearchToolFieldShape,
@@ -170,6 +171,8 @@ const SEARCH_LEXICAL_DESCRIPTION =
   'Discovery search using ONLY lexical (BM25) token matching — no embedding leg. Use when exact words/names/codes matter and semantic drift is undesirable (rare producer names, appellation codes, precise varietal spellings).';
 const LOOKUP_WINE_DESCRIPTION =
   'Look up a SPECIFIC wine by name/identity (e.g. "Opus One 2018"). Returns the 1-3 most exact matches via high-precision entity resolution. No filters — use a search_* primitive for constraint-based discovery.';
+const SIMILAR_TO_ENTITY_DESCRIPTION =
+  'Find wines SIMILAR to an already-resolved wine. Pass entity_id (copy it from a prior lookup_wine result — never a name/free-text). For "X 비슷한 와인" / "wines like X", first call lookup_wine to resolve X, then call this with that entity_id. Optional structured filters (price/style/region) refine the set ("like X but under 50,000원"). The anchor wine is always excluded from results.';
 
 // ---------------------------------------------------------------------------
 // Per-tool definitions — exported as module-scope `const`s so they have
@@ -204,6 +207,12 @@ export const LOOKUP_WINE_TOOL_DEF: ToolDefinition = {
   inputSchema: LookupWineInputSchema,
 };
 
+export const SIMILAR_TO_ENTITY_TOOL_DEF: ToolDefinition = {
+  name: 'similar_to_entity' satisfies KnownAgentToolName,
+  description: SIMILAR_TO_ENTITY_DESCRIPTION,
+  inputSchema: SimilarToEntityInputSchema,
+};
+
 /** Frozen production tool list. Module-scope const so every
  *  `buildWineAgentLoopToolBundle` call returns the exact same array identity —
  *  prompt cache benefit on the Anthropic side and a simple equality check
@@ -213,6 +222,7 @@ const WINE_AGENT_LOOP_TOOL_DEFS: readonly ToolDefinition[] = Object.freeze([
   SEARCH_SEMANTIC_TOOL_DEF,
   SEARCH_LEXICAL_TOOL_DEF,
   LOOKUP_WINE_TOOL_DEF,
+  SIMILAR_TO_ENTITY_TOOL_DEF,
 ]);
 
 // ---------------------------------------------------------------------------
@@ -256,6 +266,7 @@ export const WINE_AGENT_LOOP_TOOL_NAMES: readonly KnownAgentToolName[] = [
   'search_semantic',
   'search_lexical',
   'lookup_wine',
+  'similar_to_entity',
 ];
 
 // Compile-time guarantee: every name in WINE_AGENT_LOOP_TOOL_NAMES exists in the

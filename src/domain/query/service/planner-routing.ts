@@ -31,7 +31,19 @@ import {
 export function determineRoute(
   intent: QueryIntent,
   anchors: readonly AnchorCandidate[],
+  lockDiscoveryLane = false,
 ): QueryRoute {
+  // RFC-021 T-PSA-03: public primitive discovery routes
+  // (`/v1/search/{hybrid,semantic,lexical}`) carry caller/path lane authority.
+  // The planner is permitted to compile constraints, but it MUST NOT promote
+  // such a request onto the entity or mixed/anchor-similarity route — that
+  // would let a similarity heuristic (e.g. a Korean "비슷한" marker) silently
+  // override the lane the caller selected by URL path. Force the hybrid route
+  // so the path-selected lane filter (semantic_only / lexical_only / hybrid)
+  // remains the authority end-to-end.
+  if (lockDiscoveryLane) {
+    return 'hybrid';
+  }
   switch (intent) {
     case 'entity_exact':
       return 'entity';
@@ -68,7 +80,42 @@ export function determineRoute(
  *  - entity_exact|mixed_query + strong anchor + "best wines" → producer_browse
  *  - facet/semantic/budget + region path (≥2 '/') → region_browse
  */
+/**
+ * Retrieval modes that execute OFF the standard hybrid candidate pool — they
+ * dispatch to the entity resolver (`entity_lookup` / `entity_resolution` /
+ * `no_match_detection`) or the mixed/anchor-similarity solver
+ * (`similar_items` / `compare_candidates`). On a public primitive discovery
+ * route these bypass the caller-selected retrieval lane entirely, so when the
+ * lane is path-locked they are coerced to `attribute_search` (RFC-021 T-PSA-03).
+ */
+const LANE_BYPASSING_RETRIEVAL_MODES: ReadonlySet<RetrievalMode> = new Set<RetrievalMode>([
+  'entity_lookup',
+  'entity_resolution',
+  'no_match_detection',
+  'similar_items',
+  'compare_candidates',
+]);
+
 export function determineRetrievalMode(
+  intent: QueryIntent,
+  anchors: readonly AnchorCandidate[],
+  normalizedQuery: string,
+  lockDiscoveryLane = false,
+): RetrievalMode {
+  if (lockDiscoveryLane) {
+    // Compute the heuristic mode, then coerce any lane-bypassing mode back to
+    // the hybrid discovery default. Region/producer/recommendation discovery
+    // sub-modes still run on the hybrid pool, so they keep the lane filter and
+    // are preserved.
+    const heuristicMode = determineRetrievalModeCore(intent, anchors, normalizedQuery);
+    return LANE_BYPASSING_RETRIEVAL_MODES.has(heuristicMode)
+      ? 'attribute_search'
+      : heuristicMode;
+  }
+  return determineRetrievalModeCore(intent, anchors, normalizedQuery);
+}
+
+function determineRetrievalModeCore(
   intent: QueryIntent,
   anchors: readonly AnchorCandidate[],
   normalizedQuery: string,

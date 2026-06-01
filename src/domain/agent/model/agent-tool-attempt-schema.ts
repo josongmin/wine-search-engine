@@ -1,20 +1,25 @@
 import { z } from 'zod';
 
 /**
- * T-IR-05: the active agent tool taxonomy is exactly the four retrieval
- * primitives that mirror the external `/v1/search/{hybrid,semantic,lexical}`
- * and `/v1/lookup/wine` HTTP surface. The convenience tools
+ * T-IR-05 + RFC-021 T-PSA-02: the active agent tool taxonomy is the retrieval
+ * primitive set that mirrors the external `/v1/search/{hybrid,semantic,lexical}`
+ * and `/v1/lookup/wine` HTTP surface, plus the deterministic
+ * `similar_to_entity` reference-similarity primitive. The convenience tools
  * (`get_food_pairings`, `check_drinking_window`, `compare_wines`) were removed
  * from the active loop — the agent composes those capabilities from primitive
- * retrieval + synthesis (architecture-decision §5). The legacy single search
- * tool with an in-body lane selector
- * is gone; the lane is selected by the tool NAME, not a body field.
+ * retrieval + synthesis (architecture-decision §5):
+ *   - reference similarity ("X 비슷한 와인") = `lookup_wine` → `similar_to_entity`
+ *   - comparison = `lookup_wine` → `lookup_wine` → synthesis
+ * The legacy single search tool with an in-body lane selector is gone; the lane
+ * is selected by the tool NAME, not a body field. `similar_to_entity` takes an
+ * already-resolved `entity_id` anchor — never a free-text name.
  */
 export const KNOWN_AGENT_TOOL_NAMES = [
   'search_hybrid',
   'search_semantic',
   'search_lexical',
   'lookup_wine',
+  'similar_to_entity',
 ] as const;
 
 export type KnownAgentToolName = (typeof KNOWN_AGENT_TOOL_NAMES)[number];

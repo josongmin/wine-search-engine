@@ -115,6 +115,24 @@ export interface AuditExtension {
     } | undefined;
     readonly lane_trace?: ExecutionLaneTrace | undefined;
     readonly provenance_closure?: ExecutionProvenanceClosure | undefined;
+    /**
+     * RFC-021 T-PSA-04: machine-checkable reference-similarity provenance.
+     * Present only on the `similar_to_entity` path (retrievalMode
+     * `similar_items`). Surfaces the source anchor, the policy/profile the
+     * similarity neighborhood was drawn from, and the structural same-entity
+     * exclusion guarantee — so eval/observability can verify anchor loss and
+     * same-entity leakage without re-deriving them from raw candidates.
+     */
+    readonly reference_similarity?: {
+      /** The resolved anchor entity the similarity set is conditioned on. */
+      readonly source_anchor_entity_id: string | null;
+      /** Always `similar_items` here — the deterministic anchor-similarity lane. */
+      readonly retrieval_mode: 'similar_items';
+      /** Live retrieval profile the neighborhood was drawn from (e.g. `mixed_anchor`). */
+      readonly similarity_profile_id: string;
+      /** Structural guarantee: the anchor seed is excluded from its own results. */
+      readonly same_entity_exclusion: 'anchor_seed_excluded';
+    } | undefined;
   } | undefined;
 
   /**

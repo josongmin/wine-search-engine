@@ -23,8 +23,10 @@ import { compileFromLegacyPlan } from './search-usecase-compiled-fallback.js';
 import {
   buildLookupWinePrimitivePlan,
   buildCallerControlledPrimitivePlan,
+  buildSimilarToEntityPrimitivePlan,
   isLookupWinePrimitiveSearchRequest,
   isCallerControlledPrimitiveSearchRequest,
+  isSimilarToEntityPrimitiveSearchRequest,
 } from './search-usecase-caller-controlled-plan.js';
 import { buildRetrievalPlan } from '../../domain/retrieval/service/retrieval-plan-builder.js';
 import { buildRetrievalObjective } from '../../domain/retrieval/model/retrieval-objective.js';
@@ -428,8 +430,18 @@ export async function runSearchPreRoutePhase(
       isCallerControlledPrimitiveSearchRequest(ctx.request);
     const lookupWinePrimitiveSearch =
       isLookupWinePrimitiveSearchRequest(ctx.request);
+    const similarToEntityPrimitiveSearch =
+      isSimilarToEntityPrimitiveSearchRequest(ctx.request);
+    // Any path-authoritative primitive plan: the planner is bypassed and the
+    // caller's structured filters/preferences are ALREADY baked into the plan
+    // by the dedicated builder (so the constraint re-merge below must skip them
+    // to avoid double-application).
+    const pathAuthoritativePrimitiveSearch =
+      callerControlledPrimitiveSearch
+      || lookupWinePrimitiveSearch
+      || similarToEntityPrimitiveSearch;
     if (ctx.decomposedSearch) {
-      if (callerControlledPrimitiveSearch || lookupWinePrimitiveSearch) {
+      if (pathAuthoritativePrimitiveSearch) {
         pipelineDebug(
           {
             step: PipelineDebugStep.PRE_ROUTE_DECOMPOSED_COMPARISON,
@@ -569,6 +581,11 @@ export async function runSearchPreRoutePhase(
         ctx.request,
         sanitizedQuery,
       ));
+    } else if (similarToEntityPrimitiveSearch) {
+      ({ plan, compiled } = buildSimilarToEntityPrimitivePlan(
+        ctx.request,
+        sanitizedQuery,
+      ));
     } else if (callerControlledPrimitiveSearch) {
       ({ plan, compiled } = buildCallerControlledPrimitivePlan(
         ctx.request,
@@ -627,8 +644,7 @@ export async function runSearchPreRoutePhase(
     //   override a different attribute like wine_type.
     let structuredConstraintsMerged = false;
     if (
-      !callerControlledPrimitiveSearch
-      && !lookupWinePrimitiveSearch
+      !pathAuthoritativePrimitiveSearch
       && ctx.request.filters !== undefined
       && ctx.request.filters.length > 0
     ) {
@@ -654,8 +670,7 @@ export async function runSearchPreRoutePhase(
     }
 
     if (
-      !callerControlledPrimitiveSearch
-      && !lookupWinePrimitiveSearch
+      !pathAuthoritativePrimitiveSearch
       && ctx.request.preferences !== undefined
       && ctx.request.preferences.length > 0
     ) {

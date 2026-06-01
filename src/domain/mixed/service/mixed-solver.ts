@@ -34,6 +34,7 @@ import {
 } from '../model/mixed-degradation.js';
 import { bootstrapLogger } from '../../../domain/shared/bootstrap-logger.js';
 import { annotateCandidateConstraintEvidenceBatch } from '../../retrieval/service/candidate-constraint-evidence.js';
+import { stripVintageYearsBounded } from '../../shared/utils/vintage.js';
 export type {
   AnchorResolverPort,
   SimilarRetrievalPort,
@@ -44,6 +45,56 @@ export type {
  * Default number of similar candidates to retrieve from the index.
  */
 const DEFAULT_RETRIEVAL_LIMIT = 100;
+
+/**
+ * RFC-021 T-PSA-01: deterministic near-duplicate key for similar_items results.
+ *
+ * Two candidates collapse to the same product line when they share a producer
+ * AND a vintage-stripped canonical label (e.g. "Opus One 2017" and "Opus One
+ * 2018"). Requires BOTH fields so two genuinely different wines from one
+ * producer — or two same-named wines from different producers — are never
+ * over-collapsed. Returns `undefined` when either field is missing, signalling
+ * "do not dedup this candidate".
+ */
+export function nearDuplicateProductLineKey(candidate: HybridCandidate): string | undefined {
+  const producer = candidate.producer?.trim();
+  const label = candidate.canonicalLabel?.trim();
+  if (producer === undefined || producer === '' || label === undefined || label === '') {
+    return undefined;
+  }
+  const strippedLabel = stripVintageYearsBounded(label).trim().toLowerCase();
+  if (strippedLabel === '') {
+    return undefined;
+  }
+  return `${producer.toLowerCase()}|${strippedLabel}`;
+}
+
+/**
+ * RFC-021 T-PSA-01: collapse same-product-line-across-vintage near-duplicates,
+ * keeping the FIRST occurrence (callers pass a score-sorted list so the
+ * top-scored vintage is the representative). Candidates without a
+ * {@link nearDuplicateProductLineKey} (missing producer/label) are always kept.
+ * Pure + order-preserving so it is trivially testable and deterministic.
+ */
+export function suppressNearDuplicateProductLines(
+  scoreSortedCandidates: readonly HybridCandidate[],
+): HybridCandidate[] {
+  const seen = new Set<string>();
+  const kept: HybridCandidate[] = [];
+  for (const candidate of scoreSortedCandidates) {
+    const lineKey = nearDuplicateProductLineKey(candidate);
+    if (lineKey === undefined) {
+      kept.push(candidate);
+      continue;
+    }
+    if (seen.has(lineKey)) {
+      continue;
+    }
+    seen.add(lineKey);
+    kept.push(candidate);
+  }
+  return kept;
+}
 
 /**
  * Orchestrates the full mixed query flow (RFC-011).
@@ -242,12 +293,14 @@ export class MixedSolver {
   }
 
   /**
-   * Epic 10: Applies set-specific constraints for similar_items mode.
+   * Epic 10 + RFC-021 T-PSA-01: Applies set-specific constraints for
+   * similar_items mode (the lane `similar_to_entity` compiles to).
    *
    * For similar_items (similar wines queries):
    * - Exclude the seed entity (anchor) itself from results
+   * - Suppress near-duplicates: collapse the same product line across vintages
+   *   (e.g. "Opus One 2017" vs "Opus One 2018"), keeping the top-scored one
    * - Apply diversity constraint: max 2 wines from same producer
-   * - Prioritize candidates that match anchor's tannin/body profile (±1 point)
    *
    * @param candidates - Raw candidates from similarity retrieval.
    * @param anchorEntityId - The reference entity ID to exclude.
@@ -272,12 +325,23 @@ export class MixedSolver {
       (a, b) => (b.fusionRrfTotal ?? b.denseRawScore ?? 0) - (a.fusionRrfTotal ?? a.denseRawScore ?? 0),
     );
 
+    // Step 2.5: Near-duplicate suppression (RFC-021 T-PSA-01 invariant).
+    // Collapse candidates that are the SAME wine across vintages — a
+    // vintage-stripped (producer | label) key. Distinct entityIds mean the
+    // anchor-exclusion + entity dedup never catch these, so "Opus One 2018"
+    // similarity results would otherwise be dominated by every Opus One
+    // vintage. Deterministic, no heuristic threshold; the list is already
+    // score-sorted so the FIRST (top-scored) vintage is the representative.
+    // Candidates lacking BOTH producer and label are kept (never over-collapse
+    // by a generic name alone).
+    const deduped = suppressNearDuplicateProductLines(sorted);
+
     // Step 3: Apply producer diversity (max 2 per producer).
     // Candidates with no producer metadata bypass the slot check — lack of
     // metadata should never penalize a candidate.
     const producerSlots = new Map<string, number>();
     const filtered: HybridCandidate[] = [];
-    for (const candidate of sorted) {
+    for (const candidate of deduped) {
       const rawKey = candidate.producer;
       if (rawKey === undefined || rawKey === '') {
         filtered.push(candidate);

@@ -249,6 +249,10 @@ export const LIVE_QUERY_FAMILY_POLICY = {
     profileName: 'recommendation_anchor',
     reason: 'recommendation family -> recommendation_anchor profile for broader neighborhood retrieval',
   },
+  reference_similarity: {
+    profileName: 'mixed_anchor',
+    reason: 'reference_similarity family -> mixed_anchor profile (anchor-conditioned similarity neighborhood)',
+  },
   pairing: {
     profileName: 'mixed_anchor',
     reason: 'pairing family -> anchor_similarity channel anchored on food entity',

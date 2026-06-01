@@ -120,10 +120,15 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
         ],
       },
     } },
-  { id: 7, tier: 'multi_step', query: 'Opus One이랑 비슷한데 더 싼 거', description: 'Similar + cheaper',
+  // RFC-021 T-PSA-04: reference similarity is the lookup_wine → similar_to_entity
+  // primitive chain. The agent must resolve "Opus One" to an entity_id FIRST
+  // (lookup_wine), then anchor the similarity on that id (similar_to_entity) —
+  // never feed the name straight into a discovery search.
+  { id: 7, tier: 'multi_step', query: 'Opus One이랑 비슷한데 더 싼 거', description: 'Reference similarity + cheaper (lookup_wine → similar_to_entity)',
     expectation: { maxSteps: 3, maxDurationMs: 40_000, maxTotalTokens: 8_000,
+      tools: [{ tool: 'lookup_wine', inputContains: ['Opus'] }, { tool: 'similar_to_entity' }],
       answerMustMatch: ['(opus\\s*one|오푸스\\s*원)', '(저렴|싸|싼|cheap|less\\s+expensive|under|이하|이하로|비교적)'],
-      rubric: 'Answer must reference Opus One for context AND recommend wines that are explicitly cheaper or lower-priced.' },
+      rubric: 'Answer must reference Opus One for context AND recommend wines that are explicitly cheaper or lower-priced. The agent should resolve Opus One via lookup_wine then run similar_to_entity on the resolved entity_id.' },
     goldenKeywords: ['opus one'] },
   { id: 8, tier: 'multi_step', query: '이탈리아 레드 중에 평점 좋고 지금 마실 수 있는 거', description: 'Search + drinking window',
     expectation: { maxSteps: 4, maxDurationMs: 90_000, maxTotalTokens: 8_000,

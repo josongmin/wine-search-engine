@@ -352,7 +352,8 @@ describe('Wine-search structural prompt-injection boundary', () => {
     // Static manifest — the assertions above are parametrized; this fixture
     // exists so a reader sees the full corpus surface at a glance.
     expect(INJECTION_CORPUS.length).toBeGreaterThanOrEqual(10);
-    expect(ALLOWED_TOOL_NAMES.size).toBe(4);
+    // T-IR-05 retrieval primitives + RFC-021 T-PSA-02 `similar_to_entity`.
+    expect(ALLOWED_TOOL_NAMES.size).toBe(5);
     expect(ANSWER_MAX_CHARS).toBeGreaterThan(0);
   });
 });

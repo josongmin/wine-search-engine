@@ -12,13 +12,15 @@
  *    prompt-cache hygiene).
  *  - The `toolPorts` identity passes through unchanged.
  *
- * T-IR-05 taxonomy: the active loop is exactly the four retrieval primitives
- * (`search_hybrid`, `search_semantic`, `search_lexical`, `lookup_wine`). The
- * three discovery primitives share ONE permissive input schema
- * (`SEARCH_PRIMITIVE_INPUT_SCHEMA`); the retrieval lane is selected by the tool
- * NAME, so there is no `mode` field in the body. The legacy convenience tools
- * (`search_wines`, `get_food_pairings`, `check_drinking_window`,
- * `compare_wines`) were removed from the loop.
+ * T-IR-05 + RFC-021 T-PSA-02 taxonomy: the active loop is the retrieval
+ * primitive set (`search_hybrid`, `search_semantic`, `search_lexical`,
+ * `lookup_wine`) plus the deterministic reference-similarity primitive
+ * (`similar_to_entity`). The three discovery primitives share ONE permissive
+ * input schema (`SEARCH_PRIMITIVE_INPUT_SCHEMA`); the retrieval lane is selected
+ * by the tool NAME, so there is no `mode` field in the body. `similar_to_entity`
+ * takes an `entity_id` anchor (never a free-text name/lane). The legacy
+ * convenience tools (`search_wines`, `get_food_pairings`,
+ * `check_drinking_window`, `compare_wines`) were removed from the loop.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -28,6 +30,7 @@ import type { WineAgentLoopToolPorts } from '../wine-agent-loop-schemas.js';
 import {
   buildWineAgentLoopToolBundle,
   LOOKUP_WINE_TOOL_DEF,
+  SIMILAR_TO_ENTITY_TOOL_DEF,
   WINE_AGENT_LOOP_TOOL_NAMES,
   SEARCH_HYBRID_TOOL_DEF,
   SEARCH_SEMANTIC_TOOL_DEF,
@@ -55,7 +58,7 @@ describe('buildWineAgentLoopToolBundle', () => {
   it('returns one tool definition per KNOWN_AGENT_TOOL_NAMES', () => {
     const bundle = buildWineAgentLoopToolBundle(makeStubToolPorts());
     expect(bundle.tools).toHaveLength(KNOWN_AGENT_TOOL_NAMES.length);
-    expect(bundle.tools).toHaveLength(4);
+    expect(bundle.tools).toHaveLength(5);
   });
 
   it('preserves the toolPorts identity (no cloning)', () => {
@@ -163,6 +166,67 @@ describe('SEARCH_HYBRID_TOOL_DEF', () => {
   });
 });
 
+describe('SIMILAR_TO_ENTITY_TOOL_DEF (RFC-021 T-PSA-02)', () => {
+  it('has name "similar_to_entity" and a Zod inputSchema', () => {
+    expect(SIMILAR_TO_ENTITY_TOOL_DEF.name).toBe('similar_to_entity');
+    expect(SIMILAR_TO_ENTITY_TOOL_DEF.inputSchema).toBeInstanceOf(z.ZodType);
+    expect(SIMILAR_TO_ENTITY_TOOL_DEF.description.length).toBeGreaterThan(10);
+  });
+
+  it('accepts a bare entity_id anchor', () => {
+    const parsed = SIMILAR_TO_ENTITY_TOOL_DEF.inputSchema.safeParse({
+      entity_id: 'opus-one-2018',
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it('accepts entity_id + structured price/style residual', () => {
+    const parsed = SIMILAR_TO_ENTITY_TOOL_DEF.inputSchema.safeParse({
+      entity_id: 'opus-one-2018',
+      max_price_krw: 50_000,
+      style: 'approachable',
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it('rejects a free-text anchor (query / anchor_name) — entity_id is the only anchor authority', () => {
+    expect(
+      SIMILAR_TO_ENTITY_TOOL_DEF.inputSchema.safeParse({
+        entity_id: 'opus-one-2018',
+        query: 'opus one',
+      }).success,
+    ).toBe(false);
+    expect(
+      SIMILAR_TO_ENTITY_TOOL_DEF.inputSchema.safeParse({
+        entity_id: 'opus-one-2018',
+        anchor_name: 'opus one',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects a lane override (mode / retrieval_mode)', () => {
+    expect(
+      SIMILAR_TO_ENTITY_TOOL_DEF.inputSchema.safeParse({
+        entity_id: 'opus-one-2018',
+        retrieval_mode: 'mixed',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('requires entity_id (no implicit defaulting)', () => {
+    expect(SIMILAR_TO_ENTITY_TOOL_DEF.inputSchema.safeParse({}).success).toBe(false);
+  });
+
+  it('is permissive on non-anchor extra keys (rule 10)', () => {
+    const parsed = SIMILAR_TO_ENTITY_TOOL_DEF.inputSchema.safeParse({
+      entity_id: 'opus-one-2018',
+      _reasoning: 'user wants wines like opus one',
+      confidence: 0.9,
+    });
+    expect(parsed.success).toBe(true);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Cross-cutting: no .strict() anywhere on the input schemas (rule 10)
 //
@@ -179,6 +243,7 @@ describe('CLAUDE.md rule 10 — LLM tool input schemas MUST NOT be strict', () =
     ['search_semantic', SEARCH_SEMANTIC_TOOL_DEF, { query: 'q' }],
     ['search_lexical', SEARCH_LEXICAL_TOOL_DEF, { query: 'q' }],
     ['lookup_wine', LOOKUP_WINE_TOOL_DEF, { query: 'Opus One 2018' }],
+    ['similar_to_entity', SIMILAR_TO_ENTITY_TOOL_DEF, { entity_id: 'opus-one-2018' }],
   ])('%s schema accepts a payload with an extra unknown key', (_name, def, baseInput) => {
     const parsed = def.inputSchema.safeParse({
       ...baseInput,

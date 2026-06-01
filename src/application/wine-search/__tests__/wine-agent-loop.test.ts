@@ -304,6 +304,7 @@ function makeToolDefs(): readonly ToolDefinition[] {
     { name: 'search_semantic', description: 'semantic search', inputSchema: passthrough },
     { name: 'search_lexical', description: 'lexical search', inputSchema: passthrough },
     { name: 'lookup_wine', description: 'lookup', inputSchema: passthrough },
+    { name: 'similar_to_entity', description: 'reference similarity', inputSchema: passthrough },
   ];
 }
 
@@ -426,6 +427,61 @@ describe('WineAgentLoopRunner — required tool directive', () => {
       retrievalLane: 'hybrid',
     }));
     expect(searchPort.executeMock.mock.calls[0]?.[0]).not.toHaveProperty('mode');
+  });
+});
+
+describe('WineAgentLoopRunner — reference similarity primitive (RFC-021 T-PSA-02)', () => {
+  it('lookup_wine → similar_to_entity chain: dispatches the anchor by entity_id, not free text', async () => {
+    const searchPort = makeSearchPort(() => Promise.resolve(makeSearchResponse(['wine-1', 'wine-2'])));
+    const llm = makeStubLlm([
+      // Step 1: resolve the named wine to a canonical entity.
+      async () => asToolUseResult([toolUse('lookup_wine', { query: 'Opus One 2018' })]),
+      // Step 2: feed the resolved entity_id into the similarity primitive.
+      async () => asToolUseResult([
+        toolUse('similar_to_entity', { entity_id: 'opus-one-2018', max_price_krw: 80000 }),
+      ]),
+      async () => asTextResult('Here are wines similar to Opus One.'),
+    ]);
+    const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
+    const out = await runner.run(makeInput({
+      query: '오푸스원 비슷한 와인 추천해줘',
+      toolPorts: makeToolPorts({ searchUseCase: searchPort }),
+      maxSteps: 5,
+    }));
+
+    expect(out.terminationReason).toBe('answer');
+    expect(searchPort.executeMock).toHaveBeenCalledTimes(2);
+    // The similarity leg carries the resolved anchor as anchorEntityId — the
+    // path-authoritative similar_to_entity signal — and never a lane `mode`.
+    const similarityCall = searchPort.executeMock.mock.calls[1]?.[0];
+    expect(similarityCall).toEqual(expect.objectContaining({
+      anchorEntityId: 'opus-one-2018',
+    }));
+    expect(similarityCall).not.toHaveProperty('mode');
+    // The structured residual (price ceiling) is compiled into a preference.
+    expect(similarityCall).toHaveProperty('preferences');
+    expect(out.toolOutcomes.map((o) => o.tool)).toEqual(['lookup_wine', 'similar_to_entity']);
+  });
+
+  it('rejects a free-text anchor passed straight into similar_to_entity (no entity_id)', async () => {
+    const searchPort = makeSearchPort(() => Promise.resolve(makeSearchResponse(['wine-1'])));
+    const llm = makeStubLlm([
+      async () => asToolUseResult([toolUse('similar_to_entity', { query: '오푸스원' })]),
+      async () => asTextResult('I could not run similarity without a resolved entity.'),
+    ]);
+    const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
+    const out = await runner.run(makeInput({
+      query: '오푸스원 비슷한 와인',
+      toolPorts: makeToolPorts({ searchUseCase: searchPort }),
+      maxSteps: 4,
+    }));
+
+    // Invalid input is observed; the search use case is never invoked.
+    expect(searchPort.executeMock).not.toHaveBeenCalled();
+    const similarStep = out.steps.find((s) =>
+      s.toolCalls.some((c) => c.tool === 'similar_to_entity'),
+    );
+    expect(similarStep?.observations[0]).toMatch(/invalid input/i);
   });
 });
 

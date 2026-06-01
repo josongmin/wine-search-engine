@@ -133,6 +133,17 @@ export interface PlannerContext extends RequestExecutionContext {
    * header. Absent / false → plannerTrace is omitted from the plan.
    */
   readonly enablePlannerTrace?: boolean | undefined;
+  /**
+   * RFC-021 T-PSA-03: lock the execution onto the hybrid discovery route.
+   *
+   * Set by the public primitive search routes
+   * (`/v1/search/{hybrid,semantic,lexical}`), whose retrieval lane is selected
+   * by URL path. When true, {@link determineRoute} / {@link determineRetrievalMode}
+   * still compile constraints but MUST NOT promote the request onto the entity
+   * or mixed/anchor-similarity lanes — the path-selected lane stays authoritative
+   * end-to-end. Absent / false → full planner routing (unchanged).
+   */
+  readonly lockDiscoveryLane?: boolean | undefined;
 }
 
 /**
@@ -418,7 +429,8 @@ export class Planner {
     }
 
     // 4. Determine route.
-    const route = determineRoute(intent, allAnchors);
+    const lockDiscoveryLane = context?.lockDiscoveryLane === true;
+    const route = determineRoute(intent, allAnchors, lockDiscoveryLane);
     if (tracingEnabled) {
       plannerTrace.push(buildDecisionRecord(
         'route_resolution',
@@ -435,6 +447,7 @@ export class Planner {
       intent,
       allAnchors,
       plannerSurfaceNormalized,
+      lockDiscoveryLane,
     );
     if (tracingEnabled) {
       plannerTrace.push(buildDecisionRecord(
@@ -552,13 +565,14 @@ export class Planner {
     );
     const intentChanged = fuzzyAnchors.length > 0 || anchorsChanged || effectiveIntent !== intent;
     const effectiveRoute = intentChanged
-      ? determineRoute(effectiveIntent, effectiveAnchors)
+      ? determineRoute(effectiveIntent, effectiveAnchors, lockDiscoveryLane)
       : route;
     const effectiveRetrievalMode = intentChanged
       ? determineRetrievalMode(
         effectiveIntent,
         effectiveAnchors,
         plannerSurfaceNormalized,
+        lockDiscoveryLane,
       )
       : retrievalMode;
     const classifiedQueryClass = intentChanged

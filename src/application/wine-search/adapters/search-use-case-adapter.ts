@@ -20,6 +20,7 @@
 
 import type { SearchExecutionOptions } from '../../search/port/search-executor.port.js';
 import type { SearchRequest } from '../../search/search-request.dto.js';
+import { createCanonicalEntityId } from '../../../domain/shared/types/entity-id.js';
 import type { SearchUseCase } from '../../search/search.usecase.js';
 import type { SearchResponseV1 } from '../../../domain/response/model/search-response.js';
 import { DomainError } from '../../../domain/shared/error/domain-error.js';
@@ -84,6 +85,26 @@ export class SearchUseCaseAdapter implements SearchUseCasePort {
 export function mapSearchUseCaseInputToSearchRequest(
   input: SearchUseCaseInput,
 ): SearchRequest {
+  // RFC-021 T-PSA-02: reference-similarity is path-authoritative. When the
+  // dispatcher supplied a resolved anchor entity, emit the internal
+  // `similar_to_entity` primitive route + anchor — NOT a callerInterpretation.
+  // The dedicated plan builder fixes route=mixed/retrievalMode=similar_items and
+  // seeds the anchor directly (no free-text re-resolution). `query` is carried
+  // for provenance only; it is never used to resolve the anchor.
+  if (input.anchorEntityId !== undefined) {
+    return {
+      query: input.query,
+      primitiveRoute: 'similar_to_entity',
+      anchorEntityId: createCanonicalEntityId(input.anchorEntityId),
+      ...(input.filters !== undefined && input.filters.length > 0
+        ? { filters: input.filters }
+        : {}),
+      ...(input.preferences !== undefined && input.preferences.length > 0
+        ? { preferences: input.preferences }
+        : {}),
+      ...(input.limit !== undefined ? { limit: input.limit } : {}),
+    };
+  }
   const callerInterpretation = input.callerInterpretation
     ?? (shouldBypassPlanner(input)
       ? {

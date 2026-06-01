@@ -712,14 +712,15 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
     // At least one execute() turn + one synthesize().
     expect(capture.requests.length).toBeGreaterThanOrEqual(2);
     const execBody = assertWireInvariants(capture.requests[0]!);
-    // WineAgentLoop uses tool_choice auto and exposes the four active tools.
+    // WineAgentLoop uses tool_choice auto and exposes the active tools.
     expect(execBody.tool_choice).toEqual({ type: 'auto' });
-    // T-IR-05: the agent bundle now carries the four active primitives, in
-    // WINE_AGENT_LOOP_TOOL_NAMES order. We assert membership (sorted) so the
-    // check is order-independent of how the adapter serializes the array.
+    // T-IR-05 + RFC-021 T-PSA-02: the agent bundle carries the retrieval
+    // primitives plus `similar_to_entity`, in WINE_AGENT_LOOP_TOOL_NAMES order.
+    // We assert membership (sorted) so the check is order-independent of how the
+    // adapter serializes the array.
     const execToolNames = execBody.tools.map((t) => t.name).sort();
     expect(execToolNames).toEqual(
-      ['lookup_wine', 'search_hybrid', 'search_lexical', 'search_semantic'],
+      ['lookup_wine', 'search_hybrid', 'search_lexical', 'search_semantic', 'similar_to_entity'],
     );
     // WineAgentLoop passes enablePromptCache:true (wine-agent-loop.ts L484).
     assertPromptCacheMarkers(execBody, true);

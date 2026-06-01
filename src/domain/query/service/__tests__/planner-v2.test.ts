@@ -452,6 +452,28 @@ describe('Planner – suggestedRoute matches expected routing', () => {
     expect(plan.suggestedRoute).toBe('mixed');
   });
 
+  it('RFC-021 T-PSA-03: lockDiscoveryLane suppresses the mixed/similar_items promotion for the SAME query', async () => {
+    const entries = new Map([['오푸스원', makeMatchResult('오푸스원', 0.9)]]);
+    const planner = makePlanner(entries);
+    // Identical anchored-similarity query as above, but routed through a public
+    // primitive discovery lane (path authority). The planner must still compile
+    // the query but MUST NOT hand the lane to the mixed/anchor-similarity route.
+    const plan = await planner.plan('오푸스원 같은 10만원 와인', { lockDiscoveryLane: true });
+
+    expect(plan.suggestedRoute).toBe('hybrid');
+    expect(plan.suggestedRetrievalMode).not.toBe('similar_items');
+  });
+
+  it('RFC-021 T-PSA-03: lockDiscoveryLane keeps an exact entity query on the discovery lane, not the entity route', async () => {
+    const entries = new Map([['오푸스원', makeMatchResult('오푸스원', 0.95)]]);
+    const planner = makePlanner(entries);
+    const plan = await planner.plan('오푸스원', { lockDiscoveryLane: true });
+
+    expect(plan.suggestedRoute).toBe('hybrid');
+    expect(plan.suggestedRetrievalMode).not.toBe('entity_lookup');
+    expect(plan.suggestedRetrievalMode).not.toBe('similar_items');
+  });
+
   it('constraint-only query with no anchors → suggestedRoute is "hybrid"', async () => {
     const planner = makePlanner(new Map());
     const plan = await planner.plan('풀바디 레드 와인');

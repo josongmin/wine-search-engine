@@ -30,7 +30,7 @@ function buildToolOutcomeStepId(
 }
 
 function getExpectedOutputSchema(tool: string): ExpectedOutputSchema | undefined {
-  if (isSearchPrimitiveToolName(tool) || tool === 'lookup_wine') {
+  if (isSearchPrimitiveToolName(tool) || tool === 'lookup_wine' || tool === 'similar_to_entity') {
     return {
       minResults: 1,
       requiredFields: ['entity.entityId', 'entity.canonicalLabel'],
@@ -45,7 +45,7 @@ function getComparableResultItems(tool: string, rawResult: unknown): readonly un
   }
   const record = rawResult as Record<string, unknown>;
   if (
-    (isSearchPrimitiveToolName(tool) || tool === 'lookup_wine') &&
+    (isSearchPrimitiveToolName(tool) || tool === 'lookup_wine' || tool === 'similar_to_entity') &&
     record['queryType'] === 'search' &&
     Array.isArray(record['results'])
   ) {

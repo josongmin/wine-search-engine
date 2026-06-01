@@ -27,6 +27,11 @@ export const QUERY_FAMILY_LABELS = [
   'region_browse',
   'comparison',
   'recommendation',
+  // RFC-021 T-PSA-04: reference similarity ("wines like {entity_id}") is its
+  // OWN observability family — it was previously conflated into `recommendation`,
+  // which hid anchor-similarity behavior behind a generic discovery bucket and
+  // made same-entity-leakage / anchor-loss regressions invisible in telemetry.
+  'reference_similarity',
   'pairing',
   'multi_intent',
   'no_match',
@@ -109,7 +114,10 @@ export function deriveQueryFamily(
   if (mode === 'producer_browse') return 'producer_browse';
   if (mode === 'region_browse') return 'region_browse';
   if (mode === 'compare_candidates') return 'comparison';
-  if (mode === 'recommendation' || mode === 'similar_items') return 'recommendation';
+  // RFC-021 T-PSA-04: keep reference similarity distinct from recommendation so
+  // the primitive chain stays visible in telemetry (no longer conflated).
+  if (mode === 'similar_items') return 'reference_similarity';
+  if (mode === 'recommendation') return 'recommendation';
 
   // When the planner/runtime have already converged on an exact entity lookup,
   // keep the family aligned with that contract even if a coarse ambiguity bit

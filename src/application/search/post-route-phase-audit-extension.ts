@@ -18,6 +18,7 @@ import type { ChannelDegradationSummary } from '../../domain/query/model/abstain
 import {
   deriveQueryFamily,
 } from '../../domain/query/model/query-observability-vocab.js';
+import { resolveLiveQueryFamilyPolicy } from '../../domain/retrieval/service/live-retrieval-policy-registry.js';
 import type { SearchRouteRetrievalKind } from './search-usecase-route-dispatch.js';
 import type { SnapshotVersionInjection } from './search-usecase-cache-lookup.js';
 import type { DeterminismFingerprintParams } from '../../domain/shared/utils/determinism-fingerprint.js';
@@ -184,6 +185,45 @@ export function deriveAuditExtension(
   };
 }
 
+/** The reference-similarity sub-trace shape (RFC-021 T-PSA-04). */
+type ReferenceSimilarityAuditTrace = NonNullable<
+  NonNullable<AuditExtension['execution_trace']>['reference_similarity']
+>;
+
+/**
+ * RFC-021 T-PSA-04: build the machine-checkable reference-similarity provenance
+ * for the `similar_items` path. Returns `undefined` on every other path so the
+ * field is omitted (exactOptionalPropertyTypes-friendly). The similarity
+ * profile id is resolved from the SSoT family→profile policy — never hardcoded.
+ */
+export function buildReferenceSimilarityAuditTrace(
+  compiled: CompiledWineQuery,
+  effectiveRetrievalMode: ExecutionRetrievalMode,
+): ReferenceSimilarityAuditTrace | undefined {
+  if (effectiveRetrievalMode !== 'similar_items') {
+    return undefined;
+  }
+  // Select the anchor the similarity neighborhood was actually conditioned on:
+  // the HIGHEST-confidence anchor that carries a resolved entity id. Positional
+  // anchors[0] is wrong on the planner mixed path, where a zero-filled
+  // blocker_seed anchor can sit at index 0 (audit MINOR-1).
+  let sourceAnchorEntityId: string | null = null;
+  let bestConfidence = -Infinity;
+  for (const anchor of compiled.query.anchors) {
+    const entityId = anchor.candidateEntityIds[0];
+    if (entityId !== undefined && anchor.confidence > bestConfidence) {
+      bestConfidence = anchor.confidence;
+      sourceAnchorEntityId = entityId;
+    }
+  }
+  return {
+    source_anchor_entity_id: sourceAnchorEntityId,
+    retrieval_mode: 'similar_items',
+    similarity_profile_id: resolveLiveQueryFamilyPolicy('reference_similarity').profileName,
+    same_entity_exclusion: 'anchor_seed_excluded',
+  };
+}
+
 export function buildExecutionAuditTrace(
   effectiveRoute: QueryRoute,
   retrievalModeSource: 'planner' | 'api_override',
@@ -205,6 +245,13 @@ export function buildExecutionAuditTrace(
   const rerankLimit = Number.isFinite(executionBudget.rerankLimit)
     ? executionBudget.rerankLimit
     : 0;
+
+  const referenceSimilarity = buildReferenceSimilarityAuditTrace(
+    compiled,
+    routeExecutionFacts.effectiveRetrievalMode,
+  );
+  const referenceSimilarityTrace =
+    referenceSimilarity !== undefined ? { reference_similarity: referenceSimilarity } : {};
 
   return {
     effective_route: effectiveRoute,
@@ -231,6 +278,7 @@ export function buildExecutionAuditTrace(
     ...(provenanceClosure !== undefined
       ? { provenance_closure: provenanceClosure }
       : {}),
+    ...referenceSimilarityTrace,
   };
 }
 

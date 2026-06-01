@@ -20,6 +20,8 @@
  */
 
 import { z } from 'zod';
+import { isSourceRecordStylePublicEntityId } from '../../domain/shared/constants/public-entity-id-namespace.js';
+import { SIMILAR_TO_ENTITY_ENTITY_ID_MAX_LEN } from '../search/reference-similarity-execution.js';
 import {
   AnalysisContractSchema,
   NormalizedConstraintSchema,
@@ -105,6 +107,27 @@ export const SearchUseCaseInputSchema = z.object({
    * Absent → full hybrid channel mix.
    */
   retrievalLane: z.enum(['hybrid', 'semantic_only', 'lexical_only']).optional(),
+  /**
+   * RFC-021 T-PSA-02: resolved canonical anchor entity for the
+   * `similar_to_entity` reference-similarity primitive. When present, the
+   * `SearchUseCaseAdapter` maps it onto a path-authoritative
+   * `SearchRequest.anchorEntityId` + `primitiveRoute='similar_to_entity'`, so
+   * the deterministic mixed/anchor-similarity plan executes. This — not
+   * `query` — is the similarity anchor authority; the agent MUST copy it from a
+   * prior `lookup_wine` result, never guess it.
+   */
+  anchorEntityId: z
+    .string()
+    .min(1)
+    .max(SIMILAR_TO_ENTITY_ENTITY_ID_MAX_LEN)
+    // Defense-in-depth (RFC-021 T-PSA-04 audit C2): the shared schema EVERY
+    // caller funnels through rejects a source-record (vivino-) anchor, so the
+    // adapter's `createCanonicalEntityId(anchorEntityId)` is provably total and
+    // can never throw at the use-case seam.
+    .refine((value) => !isSourceRecordStylePublicEntityId(value), {
+      message: 'anchorEntityId must be a canonical public id, not a source-record (vivino-) id.',
+    })
+    .optional(),
 }).strict();
 export type SearchUseCaseInput = z.infer<typeof SearchUseCaseInputSchema>;
 

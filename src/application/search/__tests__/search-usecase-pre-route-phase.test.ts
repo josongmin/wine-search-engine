@@ -3,6 +3,7 @@ import { runSearchPreRoutePhase } from '../search-usecase-pre-route-phase.js';
 import type { SearchPreRoutePhaseContext } from '../search-usecase-pre-route-phase.js';
 import type { QueryPlanV1 } from '../../../domain/query/model/query-plan.js';
 import { PolicyBlockedError } from '../../../domain/shared/error/policy-blocked.js';
+import { createCanonicalEntityId } from '../../../domain/shared/types/entity-id.js';
 
 const HIGH_SENSORY_FIELD_AVAILABILITY = {
   appellation: { populatedDocCount: 8, totalDocCount: 10, populatedDocRatio: 0.8 },
@@ -236,6 +237,45 @@ describe('runSearchPreRoutePhase – fallback path (plan() only, no planWithComp
     expect(result.compiled.execution.effectiveRoute).toBe('entity');
     expect(result.compiled.execution.effectiveRetrievalMode).toBe('entity_lookup');
     expect(result.compiled.execution.executionTopology).toBe('entity_only');
+    expect(result.compiled.execution.routeSource).toBe('api_override');
+  });
+
+  it('builds a path-authoritative similar_to_entity plan without invoking the planner (RFC-021 T-PSA-01)', async () => {
+    const plannerWithoutCompiled = {
+      plan: vi.fn().mockResolvedValue(makeV1Plan({
+        route: 'hybrid',
+        retrievalMode: 'attribute_search',
+        queryClass: 'semantic_preference',
+      })),
+    };
+    const ctx = makeBaseContext({
+      request: {
+        query: 'opus one',
+        primitiveRoute: 'similar_to_entity',
+        anchorEntityId: createCanonicalEntityId('opus-one-2018'),
+        options: {
+          mode: 'auto',
+          explain: false,
+          clarification: false,
+        },
+      },
+      queryPlanner: plannerWithoutCompiled,
+    });
+
+    const result = await runSearchPreRoutePhase(ctx);
+
+    expect(result.outcome).toBe('continue');
+    if (result.outcome !== 'continue') throw new Error('narrowing guard');
+    // DoD: similarity execution does NOT depend on planner heuristics.
+    expect(plannerWithoutCompiled.plan).not.toHaveBeenCalled();
+    expect(result.plan.queryClass).toBe('anchored_similarity');
+    expect(result.plan.retrievalMode).toBe('similar_items');
+    expect(result.plan.anchors[0]?.candidateEntityIds).toEqual([
+      createCanonicalEntityId('opus-one-2018'),
+    ]);
+    expect(result.plan.policy.policyReasonCodes).toContain('SIMILAR_TO_ENTITY_PATH_AUTHORITY');
+    expect(result.compiled.execution.effectiveRoute).toBe('mixed');
+    expect(result.compiled.execution.effectiveRetrievalMode).toBe('similar_items');
     expect(result.compiled.execution.routeSource).toBe('api_override');
   });
 

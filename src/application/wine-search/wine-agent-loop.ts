@@ -54,6 +54,7 @@ import {
   withTimeout,
 } from '../agent/agent-tool-execution-support.js';
 import { normalizeLookupWineInput } from '../search/lookup-wine-execution.js';
+import { normalizeSimilarToEntityInput } from '../search/reference-similarity-execution.js';
 import {
   sanitizeOptionalToolNulls,
 } from '../search/search-tool-contract.js';
@@ -139,8 +140,12 @@ const WINE_AGENT_LOOP_SYSTEM_PROMPT = [
   '  - search_semantic: discovery search using ONLY semantic similarity (no lexical leg). Use for vibe/profile/preference queries ("light summer red").',
   '  - search_lexical: discovery search using ONLY lexical/BM25 token matching (no embedding leg). Use when exact words/names/codes matter and semantic drift is undesirable.',
   '  - lookup_wine: resolve ONE specific wine by name/identity (1-3 exact matches); use when the user names a particular wine.',
+  '  - similar_to_entity: find wines SIMILAR to an ALREADY-resolved wine. Input is entity_id (copy it from a prior lookup_wine result), NOT a name. The anchor wine is excluded from results. Optional structured filters refine the set.',
   '',
-  'Composition note: there are no dedicated pairing / drinkability / comparison tools. Achieve those by running one or more search_* / lookup_wine calls and synthesizing the answer from the results.',
+  'Composition note: there are no dedicated pairing / drinkability / comparison / "similar wine" name-based tools. Compose them from primitives:',
+  '  - "X 비슷한 와인" / "wines like X": lookup_wine(X) FIRST to get the entity_id, THEN similar_to_entity(entity_id). Never pass a name straight into similar_to_entity.',
+  '  - comparison ("A vs B"): lookup_wine(A) then lookup_wine(B), then synthesize the comparison from the two results.',
+  '  - pairing / drinkability: run one or more search_* / lookup_wine calls and synthesize from the results.',
   '',
   'Hard rules:',
   '  - Call AT MOST ONE tool per turn. If the user clearly asked for parallel work, prefer a single search with combined constraints.',
@@ -900,6 +905,37 @@ async function invokeToolPort(
       );
       return { rawResult: result, observation: formatSearchObservation(result) };
     }
+    case 'similar_to_entity': {
+      // RFC-021 T-PSA-02: deterministic reference-similarity. The anchor
+      // authority is `entity_id` (copied from a prior lookup_wine result),
+      // NEVER a free-text name — the contract rejects free-text anchors. We
+      // thread the resolved id as `anchorEntityId` so the SearchUseCaseAdapter
+      // emits the path-authoritative `similar_to_entity` plan (route=mixed /
+      // retrievalMode=similar_items) which excludes the seed entity in core.
+      // `query` carries the id for provenance only; it never re-resolves the
+      // anchor. Structured filters/preferences refine the set.
+      const normalized = normalizeSimilarToEntityInput(call.input);
+      if (!normalized.ok) {
+        return {
+          rawResult: null,
+          observation: `Tool "${call.tool}" failed: invalid input — ${normalized.message}`,
+        };
+      }
+      const result = await ports.searchUseCase.execute(
+        {
+          query: normalized.entityId,
+          anchorEntityId: normalized.entityId,
+          limit: normalized.clampedLimit,
+          ...(normalized.filters.length > 0 ? { filters: [...normalized.filters] } : {}),
+          ...(normalized.preferences.length > 0
+            ? { preferences: [...normalized.preferences] }
+            : {}),
+        },
+        requestId,
+        { abortSignal: signal },
+      );
+      return { rawResult: result, observation: formatSearchObservation(result) };
+    }
     default: {
       return {
         rawResult: null,
@@ -1068,6 +1104,7 @@ function formatObservationForTool(toolName: string, result: unknown): string {
     case 'search_semantic':
     case 'search_lexical':
     case 'lookup_wine':
+    case 'similar_to_entity':
       return formatSearchObservation(result);
     default:
       return formatGenericObservation(toolName, result);

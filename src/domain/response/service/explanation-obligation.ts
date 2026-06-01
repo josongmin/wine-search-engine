@@ -118,6 +118,17 @@ const EXPLANATION_OBLIGATION_MAP: Record<QueryFamily, ExplanationObligation> = {
     suppressRawScores: true,
   },
 
+  // Reference similarity ("wines like {entity_id}") — RFC-021 T-PSA-04. The
+  // anchor is explicit (no clarification), but the response must justify WHY
+  // results are similar (evidence) and ideally why the anchor itself / close
+  // rivals were excluded (counterfactual).
+  reference_similarity: {
+    requiresEvidenceItems: true,
+    requiresCounterfactual: true,
+    requiresClarification: false,
+    suppressRawScores: true,
+  },
+
   // Pairing — wine+food, evidence helpful for pairing rationale
   pairing: {
     requiresEvidenceItems: true,
@@ -169,4 +180,15 @@ export function getExplanationObligation(queryFamily: string): ExplanationObliga
     return EXPLANATION_OBLIGATION_MAP[queryFamily as QueryFamily];
   }
   return EXPLANATION_OBLIGATION_MAP.unknown;
+}
+
+/**
+ * True when `queryFamily` has an EXPLICIT obligation entry (NOT the `unknown`
+ * fallback). Exposed so an exhaustiveness rail can assert every
+ * `QUERY_FAMILY_LABELS` value is represented here without depending on the
+ * composite typecheck cache (a stale `.tsbuildinfo` can hide the
+ * `Record<QueryFamily,…>` key-missing error — RFC-021 T-PSA-04 audit).
+ */
+export function hasExplicitExplanationObligation(queryFamily: string): boolean {
+  return Object.hasOwn(EXPLANATION_OBLIGATION_MAP, queryFamily);
 }

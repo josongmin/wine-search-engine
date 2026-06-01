@@ -121,6 +121,42 @@ describe('mapSearchUseCaseInputToSearchRequest', () => {
     });
   });
 
+  it('maps anchorEntityId to a path-authoritative similar_to_entity request (RFC-021 T-PSA-02)', () => {
+    const input: SearchUseCaseInput = {
+      query: 'opus-one-2018',
+      anchorEntityId: 'opus-one-2018',
+      limit: 12,
+    };
+    const req = mapSearchUseCaseInputToSearchRequest(input);
+    expect(req.primitiveRoute).toBe('similar_to_entity');
+    expect(req.anchorEntityId).toBe('opus-one-2018');
+    expect(req.limit).toBe(12);
+    // Reference similarity is path-authoritative — NOT a callerInterpretation
+    // and NOT a lane mode.
+    expect(req.callerInterpretation).toBeUndefined();
+    expect(req.options).toBeUndefined();
+    expect(req.retrieval_mode).toBeUndefined();
+  });
+
+  it('threads structured residual filters/preferences through the similar_to_entity mapping', () => {
+    const pref = {
+      attribute: 'price_usd',
+      operator: '<=' as const,
+      value: 40,
+      source_phrase: '50000원 이하',
+      confidence: 1.0,
+      mapping_version: 'reference_similarity_tool_v1',
+    };
+    const input: SearchUseCaseInput = {
+      query: 'opus-one-2018',
+      anchorEntityId: 'opus-one-2018',
+      preferences: [pref],
+    };
+    const req = mapSearchUseCaseInputToSearchRequest(input);
+    expect(req.primitiveRoute).toBe('similar_to_entity');
+    expect(req.preferences).toEqual([pref]);
+  });
+
   it('forwards limit and representativeConcept', () => {
     const input: SearchUseCaseInput = {
       query: 'q',

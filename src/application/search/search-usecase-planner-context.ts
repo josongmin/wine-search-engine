@@ -33,5 +33,9 @@ export function buildPlannerContextFromSearchRequest(
     ...((request.options?.explain === true || options?.debugRequest === true)
       ? { enablePlannerTrace: true }
       : {}),
+    // RFC-021 T-PSA-03: a path-selected retrieval lane (set ONLY by the public
+    // primitive discovery routes) locks the planner onto the hybrid lane so a
+    // similarity heuristic can never override the caller's chosen primitive.
+    ...(request.retrievalLane !== undefined ? { lockDiscoveryLane: true } : {}),
   };
 }
