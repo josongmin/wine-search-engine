@@ -6,6 +6,7 @@ import { hasExactLikeLookupStrategy } from '../../query/service/lookup-strategy-
 const SHORT_FORM_NOISY_SUPPORT_GAP_CAP = 0.01;
 /** Decimal places when serializing gap for traces. */
 const RESOLVER_GAP_TRACE_DECIMAL_PLACES = 4;
+const RESOLVER_GAP_TRACE_SCALE = 10 ** RESOLVER_GAP_TRACE_DECIMAL_PLACES;
 
 const LOOKUP_STRATEGY_SCORE_WEIGHTS = {
   exact: 0.06,
@@ -59,7 +60,7 @@ export function computeLookupStrategyAdjustment(
     return Math.min(delta, SHORT_FORM_NOISY_SUPPORT_GAP_CAP);
   }
 
-  return Number(delta.toFixed(RESOLVER_GAP_TRACE_DECIMAL_PLACES));
+  return Math.round(delta * RESOLVER_GAP_TRACE_SCALE) / RESOLVER_GAP_TRACE_SCALE;
 }
 
 export function applyLookupStrategyAdjustments(

@@ -195,7 +195,7 @@ describe('rule-based-constraint-extractor — mixed positive + negative', () => 
     const positives = findAll(bundle, 'sweetness');
     const cap = findConstraint(bundle, 'sweetness_max', '<=');
     expect(positives.length).toBeGreaterThan(0);
-    expect(positives.some((c) => c.value === 'sweet')).toBe(true);
+    expect(positives.some((c) => c.operator === '>=' && typeof c.value === 'number')).toBe(true);
     expect(cap).toBeDefined();
     expect(cap?.value).toBe(NEGATION_SOFT_CAP_QUANTILE);
   });

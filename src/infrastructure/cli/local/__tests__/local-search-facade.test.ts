@@ -49,6 +49,7 @@ describe('LocalSearchFacade', () => {
     expect(seen[0]).toEqual({
       query: 'opus one 2018',
       options: { mode: 'auto', explain: false, clarification: false },
+      primitiveRoute: 'lookup_wine',
       retrieval_mode: 'entity',
     });
   });

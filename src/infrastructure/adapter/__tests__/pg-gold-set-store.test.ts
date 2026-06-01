@@ -57,7 +57,7 @@ describe('PgGoldSetStore', () => {
       .mockResolvedValueOnce({
         rows: [
           {
-            source_record_id: 'vivino-123',
+            requested_id: 'vivino-123',
             entity_id: 'wine-ce-opus',
           },
         ],
@@ -71,7 +71,7 @@ describe('PgGoldSetStore', () => {
 
     expect(query).toHaveBeenNthCalledWith(
       3,
-      expect.stringContaining('FROM entities e'),
+      expect.stringContaining('WITH requested AS'),
       ['search-snapshot:v1:test', ['vivino-123']],
     );
     expect(cases).toEqual([

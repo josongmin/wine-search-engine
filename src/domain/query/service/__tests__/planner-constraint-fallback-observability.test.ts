@@ -87,7 +87,8 @@ describe('Planner constraint-compiler fallback observability', () => {
     // The silent fallback is now observable.
     expect(warnMock).toHaveBeenCalledTimes(1);
     const [payload, message] = warnMock.mock.calls[0] ?? [];
-    expect(payload).toMatchObject({ err: 'nl-mapper boom' });
+    expect(payload).toMatchObject({ err: expect.any(Error) });
+    expect((payload as { err?: Error }).err?.message).toBe('nl-mapper boom');
     expect(String(message)).toContain('constraint compiler failed');
   });
 

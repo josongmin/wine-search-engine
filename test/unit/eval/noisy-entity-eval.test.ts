@@ -140,6 +140,34 @@ describe('noisy entity benchmark eval', () => {
     expect(report.misses).toHaveLength(0);
   });
 
+  it('treats fail-closed abstention as a match for expected ambiguous rows', () => {
+    const cases: NoisyEntityBenchmarkCase[] = [
+      {
+        benchmark_id: 'case-ambiguous',
+        query: 'barolo',
+        expected_entity_id: 'barolo-doc',
+        category: 'noisy_short_form',
+        language: 'en',
+        difficulty: 'hard',
+        expected_resolution: 'ambiguous',
+      },
+    ];
+
+    const predictions = new Map([
+      ['case-ambiguous', {
+        rankedEntities: [],
+        decisionStatus: 'failed' as const,
+      }],
+    ]);
+
+    const report = scoreNoisyEntityBenchmark(cases, predictions);
+
+    expect(report.resolution_checked_count).toBe(1);
+    expect(report.resolution_match_rate).toBe(1);
+    expect(report.false_exact_rate).toBe(0);
+    expect(report.resolution_misses).toHaveLength(0);
+  });
+
   it('rejects duplicate benchmark ids in the benchmark artifact', () => {
     const duplicateCases: NoisyEntityBenchmarkCase[] = [
       {

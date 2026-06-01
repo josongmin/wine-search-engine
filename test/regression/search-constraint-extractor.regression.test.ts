@@ -905,10 +905,12 @@ describe('Korean verbal negation patterns (아닌/아니고/않고/않은)', () 
     expect(c.excludeCountries).toContain('Italy');
   });
 
-  it('R-NEG-VERBAL-08: "프랑스 않은 와인" → country exclude "France"', () => {
-    // "않은" is a verbal negation suffix (past adjective form of 않다)
+  it('R-NEG-VERBAL-08: "프랑스 않은 와인" does not fabricate a country exclusion', () => {
+    // `않다` forms are intentionally NOT normalized into exclusion clauses:
+    // they are unsafe as a global subject-rewrite and can mean local attribute
+    // negation rather than "except X".
     const c = extractSearchConstraints('프랑스 않은 와인');
-    expect(c.excludeCountries).toContain('France');
+    expect(c.excludeCountries).toBeUndefined();
   });
 
   it('R-NEG-VERBAL-09: "샴페인 아닌 스파클링" → exclude wine_type "sparkling" for 샴페인', () => {

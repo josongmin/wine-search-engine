@@ -45,10 +45,23 @@ export interface AliasMatchResult {
 
 export type AliasLookupScope = 'surface' | 'span';
 export type AliasRecallMode = 'surface_only';
+type DeterministicConstraintEntityType = 'country' | 'region' | 'wine_type';
+
+const DETERMINISTIC_CONSTRAINT_ENTITY_TYPES: ReadonlySet<DeterministicConstraintEntityType> = new Set([
+  'country',
+  'region',
+  'wine_type',
+]);
 
 export interface AliasLookupOptions {
   readonly scope?: AliasLookupScope;
   readonly recallMode?: AliasRecallMode | undefined;
+}
+
+function isDeterministicConstraintEntityType(
+  value: string,
+): value is DeterministicConstraintEntityType {
+  return DETERMINISTIC_CONSTRAINT_ENTITY_TYPES.has(value as DeterministicConstraintEntityType);
 }
 
 /**
@@ -402,7 +415,10 @@ export class AnchorExtractor {
     }
     for (const span of parseSpans(normalizedQuery)) {
       const resolved = resolveEntity(span.text, { preferEntityOverStyle: true });
-      if (!isDirectEntityResolution(resolved)) {
+      if (
+        !isDirectEntityResolution(resolved)
+        || !isDeterministicConstraintEntityType(resolved.entityType)
+      ) {
         continue;
       }
       for (const token of tokenizeConstraintSurface(resolved.matchedSurface)) {
@@ -472,6 +488,7 @@ export class AnchorExtractor {
     const longerResolved = resolveEntity(longerSpanText, { preferEntityOverStyle: true });
     if (
       isDirectEntityResolution(longerResolved)
+      && isDeterministicConstraintEntityType(longerResolved.entityType)
       && tokenizeConstraintSurface(longerResolved.matchedSurface).includes(atomicToken)
     ) {
       return true;

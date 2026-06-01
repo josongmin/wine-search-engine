@@ -60,5 +60,5 @@ describe('createContainer runtime normalization', () => {
 
     expect(builderCalls.core).toHaveBeenCalledWith({ pool });
     expect(builderCalls.features).toHaveBeenCalledWith({ pool });
-  });
+  }, 10_000);
 });

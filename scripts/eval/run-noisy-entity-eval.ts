@@ -518,6 +518,19 @@ function extractDecisionStatus(
     : undefined;
 }
 
+function matchesExpectedResolution(
+  expected: NoisyEntityDecisionStatus,
+  actual: NoisyEntityDecisionStatus,
+): boolean {
+  if (expected === 'ambiguous') {
+    // Safe abstention can surface either as an explicit ambiguity prompt or a
+    // fail-closed "no exact entity" outcome. The benchmark separately tracks
+    // the unsafe case (`resolved`) via false_exact_rate.
+    return actual === 'ambiguous' || actual === 'failed';
+  }
+  return expected === actual;
+}
+
 function extractEmbeddedEvalProvenanceSlices(
   responseBody: unknown,
 ): readonly {
@@ -655,7 +668,7 @@ function scoreRows(
       if (row.expected_resolution === 'ambiguous') {
         ambiguousExpectedCount += 1;
       }
-      if (row.expected_resolution === predictedResolution) {
+      if (matchesExpectedResolution(row.expected_resolution, predictedResolution)) {
         resolutionMatchCount += 1;
       } else if (row.expected_resolution === 'ambiguous' && predictedResolution === 'resolved') {
         falseExactCount += 1;

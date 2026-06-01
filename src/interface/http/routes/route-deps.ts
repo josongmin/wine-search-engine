@@ -1,9 +1,14 @@
 import type { SearchExecutorPort } from '../../../application/search/port/search-executor.port.js';
+import type { ResolveUseCasePort } from '../../../application/search/port/search-route-usecases.port.js';
 import type { EvalRunnerContract } from '../../../config/container-eval-contracts.js';
 import type { WineSearchContainerServices } from '../../../config/container.js';
 
 export interface SearchRouteDeps {
   readonly searchUseCase: SearchExecutorPort;
+}
+
+export interface ResolveRouteDeps {
+  readonly resolveUseCase: ResolveUseCasePort;
 }
 
 export interface HttpServerDeps

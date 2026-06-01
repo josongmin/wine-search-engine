@@ -644,7 +644,7 @@ describe('Planner – suggestedRoute matches expected routing', () => {
     );
   });
 
-  it('keeps occasion recommendation queries on semantic discovery instead of pairing_search', async () => {
+  it('routes occasion recommendation queries through pairing_search', async () => {
     const planner = new Planner(
       noAmbiguityDict,
       new AnchorExtractor(new ExactAliasMatcher()),
@@ -654,9 +654,9 @@ describe('Planner – suggestedRoute matches expected routing', () => {
 
     const plan = await planner.plan('기념일 선물용 와인 추천');
 
-    expect(plan.intent).toBe('semantic_discovery');
+    expect(plan.intent).toBe('pairing_search');
     expect(plan.suggestedRoute).toBe('hybrid');
-    expect(plan.suggestedRetrievalMode).toBe('attribute_search');
+    expect(plan.suggestedRetrievalMode).toBe('recommendation');
     expect(plan.queryClass).toBe('semantic_preference');
     expect(plan.constraints.soft).toEqual(
       expect.arrayContaining([

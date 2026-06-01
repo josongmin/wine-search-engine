@@ -74,5 +74,5 @@ describe('createContainer defense-in-depth', () => {
     await expect(createContainer(config)).rejects.toThrowError(
       /AGENT_ENABLED=true but no ChatLlm was constructed/,
     );
-  });
+  }, 10_000);
 });

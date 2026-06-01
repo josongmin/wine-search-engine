@@ -94,9 +94,9 @@ describe('C3 regression: planner ambiguity lookup batching', () => {
     // Seed multiple anchor surface forms so the previous code would have
     // emitted N singular calls (N > 1) inside computeUncertainty.
     const aliases = new Map<string, AliasMatchResult>([
-      ['cabernet sauvignon', makeAnchorEntry('cabernet sauvignon')],
-      ['napa valley', makeAnchorEntry('napa valley')],
-      ['reserve', makeAnchorEntry('reserve')],
+      ['opus one', makeAnchorEntry('opus one')],
+      ['david arthur', makeAnchorEntry('david arthur')],
+      ['screaming eagle', makeAnchorEntry('screaming eagle')],
     ]);
     const dict = new InstrumentedAmbiguityDict();
     const planner = new Planner(
@@ -106,7 +106,7 @@ describe('C3 regression: planner ambiguity lookup batching', () => {
       noOpNLMapper,
     );
 
-    const plan = await planner.plan('cabernet sauvignon napa valley reserve');
+    const plan = await planner.plan('opus one david arthur screaming eagle');
 
     // Sanity: the planner did surface multiple anchors so the regression
     // would have been observable on the old per-anchor path.

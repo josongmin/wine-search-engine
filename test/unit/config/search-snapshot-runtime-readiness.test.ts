@@ -366,7 +366,7 @@ describe('search snapshot runtime readiness', () => {
       NODE_ENV: 'test',
     });
 
-    const health = buildHealthRouteOptions(config, {}, undefined, {
+    const health = buildHealthRouteOptions(config, {}, {
       modelVersion: 'unloaded',
       predict: () => ({
         drinkingWindowStart: 2020,
@@ -388,7 +388,7 @@ describe('search snapshot runtime readiness', () => {
       NODE_ENV: 'test',
     });
 
-    const health = buildHealthRouteOptions(config, {}, undefined, {
+    const health = buildHealthRouteOptions(config, {}, {
       modelVersion: 'deterministic:structural-slot-v2',
       predict: () => ({
         drinkingWindowStart: 2020,

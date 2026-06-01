@@ -963,7 +963,12 @@ export function adaptSearchInput(
     adaptiveRetrievalKDefault,
     includeCallerInterpretation: true,
   });
-  const { mode: _mode, ...laneScoped } = built;
+  const laneScoped = retrievalLane !== undefined
+    ? (() => {
+        const { mode: _mode, ...withoutMode } = built;
+        return withoutMode;
+      })()
+    : built;
   return {
     ...laneScoped,
     ...(laneScoped.filters !== undefined ? { filters: [...laneScoped.filters] } : {}),

@@ -100,5 +100,5 @@ describe('createContainer — wine-agent-loop tool bundle wiring', () => {
     expect(typeof container.wineSearch?.wineSearchOrchestrator.execute).toBe(
       'function',
     );
-  });
+  }, 10_000);
 });

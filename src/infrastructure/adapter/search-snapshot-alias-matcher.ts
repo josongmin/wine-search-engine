@@ -459,6 +459,9 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
       queryTokens.length === 1
       && queryTokens[0] !== undefined
       && !queryTokens[0].includes(' ');
+    const shouldUsePhoneticBroadRecall =
+      queryTokens.length > 0
+      && queryTokens.length <= 3;
     const exactSet = new Set(tokens);
     const compactSet = new Set(compactTokens);
     const transliteratedSet = new Set(transliteratedTokens);
@@ -487,7 +490,7 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
         }
       }
       if (allowBroadRecall) {
-        if (isAtomicAliasQuery) {
+        if (isAtomicAliasQuery || shouldUsePhoneticBroadRecall) {
           this.ensureBroadRecallIndexes();
         }
 
@@ -503,7 +506,7 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
           }
         }
 
-        if (isAtomicAliasQuery) {
+        if (shouldUsePhoneticBroadRecall) {
           const nextDmKeys = new Set<string>();
           for (const variant of views.lookupVariants) {
             for (const dmKey of doubleMetaphoneKeys(variant)) {
@@ -511,11 +514,6 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
             }
           }
           queryDmKeys = nextDmKeys;
-          prefixTokens = buildAliasPrefixTerms([views.strict])
-            .filter((token) => isEligiblePrefixQuery(token));
-          transliteratedPrefixTokens = views.transliterated !== undefined
-            ? buildAliasPrefixTerms([views.transliterated]).filter((token) => isEligiblePrefixQuery(token))
-            : [];
 
           for (const token of phoneticTokens) {
             for (const alias of this.phoneticIndex.get(token) ?? []) {
@@ -528,6 +526,14 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
               candidateAliases.set(alias.aliasId, alias);
             }
           }
+        }
+
+        if (isAtomicAliasQuery) {
+          prefixTokens = buildAliasPrefixTerms([views.strict])
+            .filter((token) => isEligiblePrefixQuery(token));
+          transliteratedPrefixTokens = views.transliterated !== undefined
+            ? buildAliasPrefixTerms([views.transliterated]).filter((token) => isEligiblePrefixQuery(token))
+            : [];
 
           for (const token of [...prefixTokens, ...transliteratedPrefixTokens]) {
             for (const record of this.prefixLookupRecords) {

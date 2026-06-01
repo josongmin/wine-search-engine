@@ -67,20 +67,20 @@ describe('detectQueryIntent', () => {
     expect(detectQueryIntent('Cured Meat에 어울리는 와인', [], noopExtractor)).toBe('pairing_search');
   });
 
-  it('keeps occasion-driven recommendation queries out of pairing_search when no food evidence exists', () => {
+  it('routes occasion-driven recommendation queries to pairing_search even without food evidence', () => {
     const weakAnchor = anchor((ANCHOR_PRESENT_CONFIDENCE + EXACT_ANCHOR_CONFIDENCE) / 2);
     expect(
       detectQueryIntent('회사 회식 10명 레드 와인 추천 party', [weakAnchor], noopExtractor),
-    ).toBe('semantic_discovery');
+    ).toBe('pairing_search');
     expect(
       detectQueryIntent('캠핑 가는데 스크류캡이고 차갑게 마실 수 있는 거', [weakAnchor], noopExtractor),
-    ).toBe('semantic_discovery');
+    ).toBe('pairing_search');
   });
 
-  it('treats strong anchored occasion queries as mixed_query rather than pairing_search', () => {
+  it('treats strong anchored occasion queries as pairing_search', () => {
     expect(
       detectQueryIntent('opus one anniversary gift', [anchor(EXACT_ANCHOR_CONFIDENCE + 0.05)], noopExtractor),
-    ).toBe('mixed_query');
+    ).toBe('pairing_search');
   });
 
   it('does not collapse prestige-only recommendation queries into budget_search', () => {

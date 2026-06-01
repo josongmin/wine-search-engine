@@ -361,13 +361,11 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
     });
   } else if (
     /(?:^|[^\p{L}\p{N}])(?:sweet wine|달콤한|달달한|달달|달큰한|단맛(?:\s*(?:있는|나는))?|스위트|demi[\s-]?sec|semi[\s-]?sweet)(?=$|[^\p{L}\p{N}])/iu.test(q)
-    // Bare "sweet" qualifies as a positive sweetness preference when it is
-    // NOT immediately preceded by an aversion modifier ("too"/"not"/"no").
-    // This allows "sweet but not too sweet" to emit BOTH sweetness=sweet
-    // (positive intent) AND sweetness_max=SOFT cap (the "not too sweet"
-    // qualifier). Negative lookbehind avoids false-positives where the
-    // ONLY occurrence is in the negated phrase.
-    || /(?:^|[^\p{L}\p{N}])(?<!too\s)(?<!not\s)(?<!no\s)sweet(?=$|[^\p{L}\p{N}])/iu.test(q)
+    || /(?:^|[^\p{L}\p{N}])sweet(?=$|[^\p{L}\p{N}])/iu.test(
+      q
+        .replace(/(?:^|[^\p{L}\p{N}])not\s+too\s+sweet(?=$|[^\p{L}\p{N}])/giu, ' ')
+        .replace(/(?:^|[^\p{L}\p{N}])no\s+sweet(?:\s+wines?)?(?=$|[^\p{L}\p{N}])/giu, ' '),
+    )
   ) {
     soft.push({
       attribute: 'sweetness',

@@ -271,7 +271,9 @@ describe('Property: positive adjective + soft-negative qualifier co-emit (100 ru
         const bundle = extractRuleBasedConstraints(query);
         const positives = findAll(bundle, 'sweetness');
         const cap = findConstraint(bundle, 'sweetness_max', '<=');
-        const hasPositive = positives.some((c) => c.value === 'sweet');
+        const hasPositive = positives.some(
+          (c) => c.operator === '>=' && typeof c.value === 'number',
+        );
         const capIsSoft = cap !== undefined && cap.value === NEGATION_SOFT_CAP_QUANTILE;
         return hasPositive && capIsSoft;
       }),

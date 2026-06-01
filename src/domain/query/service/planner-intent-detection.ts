@@ -155,7 +155,7 @@ export function detectQueryIntent(
   }
 
   if (hasOccasionKeyword) {
-    return hasStrongAnchor ? 'mixed_query' : 'semantic_discovery';
+    return 'pairing_search';
   }
 
   if (hasStrongAnchor && hasExactEntityLookupSignal) {

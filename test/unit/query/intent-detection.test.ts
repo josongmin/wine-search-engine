@@ -426,42 +426,42 @@ describe('Intent Detection — SOTA++ Improvements', () => {
   describe('Confidence threshold boundaries', () => {
     it('should treat 0.85 as exact anchor threshold', async () => {
       const matcher = new StubAliasMatcher(
-        new Map([['wine', makeMatchResult('Wine', 0.85)]]),
+        new Map([['david arthur', makeMatchResult('David Arthur', 0.85)]]),
       );
       const planner = createPlanner(matcher);
 
-      const plan = await planner.plan('wine');
+      const plan = await planner.plan('david arthur');
       expect(plan.intent).toBe('entity_exact');
     });
 
     it('should treat 0.84 as weak anchor', async () => {
       const matcher = new StubAliasMatcher(
-        new Map([['wine', makeMatchResult('Wine', 0.84)]]),
+        new Map([['david arthur', makeMatchResult('David Arthur', 0.84)]]),
       );
       const planner = createPlanner(matcher);
 
-      const plan = await planner.plan('wine');
+      const plan = await planner.plan('david arthur');
       expect(plan.intent).toBe('entity_fuzzy');
     });
 
     it('should treat 0.5 as minimum anchor presence threshold', async () => {
       const matcher = new StubAliasMatcher(
-        new Map([['wine', makeMatchResult('Wine', 0.50)]]),
+        new Map([['david arthur', makeMatchResult('David Arthur', 0.50)]]),
       );
       const planner = createPlanner(matcher);
 
-      const plan = await planner.plan('wine cabernet');
+      const plan = await planner.plan('david arthur cabernet');
       // With constraint keywords and weak anchor ≥0.5
       expect(['entity_fuzzy', 'mixed_query']).toContain(plan.intent);
     });
 
     it('should ignore anchors below 0.5 threshold', async () => {
       const matcher = new StubAliasMatcher(
-        new Map([['wine', makeMatchResult('Wine', 0.49)]]),
+        new Map([['david arthur', makeMatchResult('David Arthur', 0.49)]]),
       );
       const planner = createPlanner(matcher);
 
-      const plan = await planner.plan('wine');
+      const plan = await planner.plan('david arthur');
       // Below threshold = no anchor detected
       expect(plan.intent).toBe('semantic_discovery');
     });
