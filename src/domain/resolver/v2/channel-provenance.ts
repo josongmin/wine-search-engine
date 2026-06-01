@@ -132,6 +132,14 @@ export function buildChannelHitsForEntity(
     if (!anchor.candidateEntityIds.some((id) => String(id) === idStr)) {
       continue;
     }
+    // `matched_view` is `.min(1)` at the wire boundary; an empty normalized
+    // form (unenforced AnchorCandidate invariant) would 500 a valid resolve.
+    // Skip such a malformed anchor rather than emit a schema-invalid hit.
+    const matchedView = anchor.normalizedForm;
+    if (matchedView.length === 0) {
+      continue;
+    }
+    const matchedAlias = anchor.surfaceForm;
     const strategies = anchor.lookupStrategies ?? [];
     for (const strategy of strategies) {
       const channel = mapLookupStrategyToChannel(strategy);
@@ -141,8 +149,9 @@ export function buildChannelHitsForEntity(
       if (existing === undefined || channelScore > existing.channelScore) {
         byChannel.set(channel, {
           channel,
-          matchedView: anchor.normalizedForm,
-          matchedAlias: anchor.surfaceForm,
+          matchedView,
+          // matched_alias is `.min(1).optional()` — omit when empty.
+          ...(matchedAlias.length > 0 ? { matchedAlias } : {}),
           channelScore,
           channelRank: candidateRank,
         });

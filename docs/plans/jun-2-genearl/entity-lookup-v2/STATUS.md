@@ -82,9 +82,10 @@ pnpm run catalog:validate   # retrieval.entity-lookup-v2 통과 (기타 6건은 
 | R1 `w06v3pg9i` | 103 | 59351652 | untrusted raw-score wrong-resolve → exact-evidence 게이트 외 |
 | R2 `w9x8ofhm8` | 27 | f4360ddd | exact-identity substring-map 위조 → strict allowlist; 교착어 한국어 회귀 → soft boundary |
 | R3 `w8a4z0uhl` | 22 | 12bd38ce | planner fuzzy-fallback 'exact' 위조 → fuzzy-marker 제외; SSoT 카베르네; josa/숫자 |
-| R4 `wwrvk4yz3` | 7 (**0 HIGH**) | (this) | 추천해줘 strip 순서; bare-count residual |
+| R4 `wwrvk4yz3` | 7 (**0 HIGH**) | fcab3f0b | 추천해줘 strip 순서; bare-count residual |
+| R5 `wqacyi00a` | 12 (**0 HIGH**) | (this) | empty-form wire-500 guard; mode/clarification 계약 정직성 |
 
-**R4에서 HIGH 0건 → wrong-resolve bypass 수렴.** 핵심 정밀도 경로(untrusted 시 exact-identity 위조)는 2겹(fuzzy-marker 제외 + strict 전략 allowlist)으로 차단됨.
+**R4·R5 연속 HIGH 0건 → wrong-resolve bypass 수렴 확정.** 핵심 정밀도 경로(untrusted 시 exact-identity 위조)는 2겹(fuzzy-marker 제외 + strict 전략 allowlist)으로 차단됨. 5라운드 적대적 감사 종료.
 
 ### 미수정(문서화된 한계)
 

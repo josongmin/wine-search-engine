@@ -68,7 +68,13 @@ import {
   mapResolverStatusToLookupStatus,
 } from './entity-lookup-v2-mapping.js';
 
-/** Max clarification options surfaced for an ambiguous lookup (domain cap). */
+/**
+ * Max clarification options surfaced for an ambiguous lookup — a UX cap (a
+ * disambiguation prompt with >8 options is not actionable). MUST stay <= the
+ * wire bound MAX_LOOKUP_V2_CLARIFICATION_OPTIONS (20) in the HTTP schema; kept
+ * as a local domain constant rather than importing the interface-layer bound to
+ * avoid an application→interface layer dependency.
+ */
 const LOOKUP_V2_MAX_CLARIFICATION_OPTIONS = 8;
 
 export interface EntityLookupV2UseCaseDeps {

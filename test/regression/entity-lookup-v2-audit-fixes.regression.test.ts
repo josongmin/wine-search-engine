@@ -18,7 +18,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { classifyConcept } from '../../src/domain/resolver/v2/concept-lexicon.js';
 import { CalibratedAbstainDecider } from '../../src/domain/resolver/v2/calibrated-abstain-decider.js';
-import { anchorsHaveExactIdentityEvidence } from '../../src/domain/resolver/v2/channel-provenance.js';
+import { anchorsHaveExactIdentityEvidence, buildChannelHitsForEntity } from '../../src/domain/resolver/v2/channel-provenance.js';
 import { ConceptAdmissionGate } from '../../src/domain/resolver/v2/concept-admission-gate.js';
 import { EntityLookupV2UseCase } from '../../src/application/search/entity-lookup-v2/entity-lookup-v2.usecase.js';
 import { createEntityId } from '../../src/domain/shared/types/index.js';
@@ -213,6 +213,21 @@ describe('audit R2 HIGH — untrusted resolve is not forgeable by a recall strat
   it('RESOLVES when untrusted top candidate has a strict exact strategy', async () => {
     const out = await untrustedUseCase('exact').execute({ query: 'margaux', maxCandidates: 5, mode: 'default' });
     expect(out.status).toBe('resolved');
+  });
+});
+
+// ── R5: empty anchor form must not emit a schema-invalid channel hit ─────────
+
+describe('audit R5 — empty anchor form does not produce a wire-invalid hit', () => {
+  it('skips an anchor with empty normalizedForm and omits empty matchedAlias', () => {
+    const eid = createEntityId('opus-one-2018');
+    // empty normalizedForm → hit skipped entirely
+    expect(buildChannelHitsForEntity(eid, 1, [{ surfaceForm: 'x', normalizedForm: '', candidateEntityIds: [eid], lookupStrategies: ['exact'], confidence: 0.95 }], false)).toHaveLength(0);
+    // empty surfaceForm → matchedAlias omitted (not '')
+    const hits = buildChannelHitsForEntity(eid, 1, [{ surfaceForm: '', normalizedForm: 'opus one', candidateEntityIds: [eid], lookupStrategies: ['exact'], confidence: 0.95 }], false);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].matchedAlias).toBeUndefined();
+    expect(hits[0].matchedView).toBe('opus one');
   });
 });
 

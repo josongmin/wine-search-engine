@@ -46,8 +46,11 @@ export const EntityLookupV2RequestSchema = z
       .default(LOOKUP_V2_DEFAULT_MAX_CANDIDATES),
     /**
      * Trusted/internal diagnostics knob ONLY — never a public ranking override
-     * (RFC §5.1). `diagnostic` asks the engine to populate the full evidence
-     * rail; it does not change the decision.
+     * (RFC §5.1). Reserved for forward-looking per-mode response shaping; it
+     * NEVER changes the decision. NOTE: the full evidence rail (channel_hits,
+     * channel_coverage, evidence_summary) is currently populated UNCONDITIONALLY,
+     * so `default` and `diagnostic` return identical payloads today — the knob is
+     * accepted and reserved, not yet behaviorally distinct.
      */
     mode: z.enum(['default', 'diagnostic']).default('default'),
   })
