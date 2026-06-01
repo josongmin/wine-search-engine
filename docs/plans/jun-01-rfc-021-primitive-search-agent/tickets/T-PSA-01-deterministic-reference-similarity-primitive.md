@@ -50,6 +50,24 @@ src/domain/retrieval/service/__tests__/candidate-pool-reference-similarity.test.
 src/interface/claude-tools/__tests__/tool-executor.test.ts
 ```
 
+## 반드시 건드릴 파일
+
+1. `src/application/search/search-tool-contract.ts`
+2. `src/application/search/search-usecase-caller-controlled-plan.ts`
+3. `src/application/search/search-request.dto.ts`
+4. `src/domain/retrieval/service/candidate-pool.ts`
+5. `src/interface/claude-tools/tool-executor.ts`
+
+## 가능하면 건드리지 말아야 할 파일 / 레이어
+
+1. `src/interface/http/routes/**`
+2. `src/application/wine-search/**`
+3. `src/domain/query/service/planner-intent-detection.ts`
+4. `src/domain/query/service/planner-routing.ts`
+5. `data/**`
+
+이 티켓은 primitive 추가 티켓이지, public route/agent/planner cleanup 티켓이 아니다.
+
 ## 구현 범위
 
 1. `similar_to_entity` input schema / DTO
@@ -71,6 +89,19 @@ src/interface/claude-tools/__tests__/tool-executor.test.ts
 3. `similar_to_entity`는 `mixed` alias wrapper가 아니라 독립 primitive여야 한다.
 4. same entity exclusion은 prompt가 아니라 search core가 보장해야 한다.
 
+## 절대 하지 말아야 할 구현
+
+1. `similar_to_entity` 내부에서 `lookup_wine`를 다시 호출하는 구현
+2. `similar_to_entity`를 사실상 `search_hybrid` thin wrapper로 만드는 구현
+3. primitive 입력에 `query`, `anchor_query`, `anchor_name` 같은 free-text anchor를 다시 노출하는 구현
+4. exclusion/diversification을 response post-processing에서만 처리하는 구현
+
+## 실패 패턴
+
+1. 테스트는 통과하지만 실제로는 planner fallback을 타는 경우
+2. tool executor는 추가됐는데 candidate-pool/ranking provenance는 기존 `similar_items` 경로를 암묵 공유하는 경우
+3. same-entity exclusion이 top-level response projection에서만 일어나는 경우
+
 ## 구현 순서
 
 1. input contract / DTO 추가
@@ -91,6 +122,13 @@ src/interface/claude-tools/__tests__/tool-executor.test.ts
 pnpm run typecheck
 pnpm exec vitest run src/application/search/__tests__/reference-similarity-execution.test.ts src/domain/retrieval/service/__tests__/candidate-pool-reference-similarity.test.ts src/interface/claude-tools/__tests__/tool-executor.test.ts
 ```
+
+## 리뷰어 체크포인트
+
+1. primitive contract가 `entity_id` 필수인지
+2. planner heuristic 없이도 실행 가능한지
+3. search core trace에 anchor provenance가 남는지
+4. HTTP route/agent runtime을 불필요하게 건드리지 않았는지
 
 ## DoD
 

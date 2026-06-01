@@ -55,6 +55,39 @@
 5. `mixed` / `similar_items`를 새 primary product surface로 승격하는 것 금지
 6. wrapper를 한 겹 더 씌워 owner seam을 흐리는 것 금지
 
+## 공통 owning seam 규칙
+
+1. search core 티켓이면 `src/application/search/**`, `src/domain/retrieval/**`, `src/domain/ranking/**` 안에서 닫아야 한다.
+2. agent 티켓이면 `src/application/wine-search/**`, `src/application/agent/**`, `src/interface/claude-tools/**` 안에서 닫아야 한다.
+3. public-search 티켓이면 `src/interface/http/routes/**`, `src/application/search/**`, `src/domain/query/service/**` 안에서 닫아야 한다.
+4. eval/trace 티켓이면 `data/**`, `test/**`, `src/domain/query/model/**`, `src/application/search/**` 안에서 닫아야 한다.
+5. closeout 티켓은 public/tool/docs/tests surface purge가 목적이지, core algorithm 재작성 티켓이 아니다.
+
+## 공통 건드리지 말아야 할 것
+
+1. unrelated deploy/runtime infra
+   - `scripts/deploy/**`
+   - `docs/runbook-aws-cli-direct-deploy.md`
+   - `docs/runbook-dedicated-app-host-deploy.md`
+2. unrelated ETL/snapshot publish path
+   - `scripts/etl/**`
+   - `tools/**`
+3. unrelated web UI styling/UX
+   - `web/**`는 해당 티켓에 명시된 경우만 수정
+4. repo-wide benchmark framework 전체 재작성
+5. Vespa schema/ETL contract 재설계
+
+## 작업자용 최소 보고 포맷
+
+완료 보고는 최소 아래를 분리해야 한다.
+
+1. owner-local green
+2. 미실행 rail
+3. 의도적으로 안 건드린 레이어
+4. 남은 compatibility residue
+
+`대충 다 됨` 식 보고 금지.
+
 ## 작업자 체크리스트
 
 착수 전:
@@ -74,6 +107,7 @@
 1. 티켓 문서의 검증 명령 실행
 2. banned surface grep 또는 allowlist rail 확인
 3. owner-local green과 ambient repo red를 분리해서 보고
+4. 자신이 안 건드리기로 한 파일/레이어가 실제로 untouched인지 확인
 
 ## 티켓 목록
 

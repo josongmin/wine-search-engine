@@ -46,6 +46,24 @@ src/domain/query/service/__tests__/planner-v2.test.ts
 test/integration/http/routes/search.route.test.ts
 ```
 
+## 반드시 건드릴 파일
+
+1. `src/interface/http/routes/search-request-mappers.ts`
+2. `src/application/search/search-usecase-pre-route-phase.ts`
+3. `src/application/search/search-usecase-route-resolution.ts`
+4. `src/application/search/search-usecase-caller-controlled-plan.ts`
+5. `test/integration/http/routes/search.route.test.ts`
+
+## 가능하면 건드리지 말아야 할 파일 / 레이어
+
+1. `src/application/wine-search/**`
+2. `src/interface/claude-tools/**`
+3. `src/domain/retrieval/**`
+4. `src/domain/ranking/**`
+5. `data/**`
+
+이 티켓은 public-search lane authority 티켓이지, agent/retrieval/eval data 티켓이 아니다.
+
 ## 구현 범위
 
 1. discovery primitive caller-authority hardening
@@ -65,6 +83,19 @@ test/integration/http/routes/search.route.test.ts
 2. planner는 primitive route에서 lane을 `mixed`/`similar_items`로 승격시키지 못한다.
 3. public search는 non-agentic이어야 하며, composition semantics를 암묵 수행하는 척하면 안 된다.
 4. generic public search 품질 개선이 필요하면 retrieval/rerank로 해결하지, heuristic route-magic으로 해결하지 않는다.
+
+## 절대 하지 말아야 할 구현
+
+1. path-authority 문제를 prompt copy/doc 문구 수정으로만 해결하는 구현
+2. public primitive route에서 hidden `mixed-solver` fast path를 유지하는 구현
+3. route test만 속이기 위해 response/meta만 바꾸고 실제 execution lane은 그대로 두는 구현
+4. agent-only composition semantics를 public route mapper에 슬쩍 넣는 구현
+
+## 실패 패턴
+
+1. request mapper는 caller-authoritative인데 pre-route/route-resolution이 다시 planner로 덮는 경우
+2. planner tests는 바뀌었지만 integration route test가 실제 registration/behavior를 못 보는 경우
+3. public search 품질 문제를 heuristic intent rule 추가로 때우는 경우
 
 ## 구현 순서
 
@@ -86,6 +117,13 @@ pnpm run typecheck
 pnpm exec vitest run src/application/search/__tests__/search-usecase-pre-route-phase.test.ts src/domain/query/service/__tests__/planner-v2.test.ts
 pnpm run test:integration:file -- test/integration/http/routes/search.route.test.ts
 ```
+
+## 리뷰어 체크포인트
+
+1. path-selected lane이 end-to-end 유지되는지
+2. planner가 더 이상 primitive route lane을 override하지 않는지
+3. agent runtime layer를 불필요하게 안 건드렸는지
+4. hidden mixed fallback이 남아 있지 않은지
 
 ## DoD
 

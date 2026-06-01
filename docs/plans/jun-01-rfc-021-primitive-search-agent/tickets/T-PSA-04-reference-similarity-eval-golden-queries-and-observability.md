@@ -49,6 +49,24 @@ test/regression/reference-similarity-public-search.test.ts
 docs/runbook-reference-similarity-smoke.md
 ```
 
+## 반드시 건드릴 파일
+
+1. `data/golden-queries-gate.jsonl`
+2. `data/golden-queries-val.jsonl`
+3. `src/application/search/post-route-phase-audit-extension.ts`
+4. `src/domain/query/model/query-observability-vocab.ts`
+5. `test/regression/reference-similarity-agent.test.ts`
+
+## 가능하면 건드리지 말아야 할 파일 / 레이어
+
+1. `src/domain/retrieval/**`
+2. `src/domain/ranking/**`
+3. `src/interface/http/routes/**`
+4. `src/application/wine-search/**`
+5. `src/domain/query/service/planner*.ts`
+
+이 티켓은 eval/trace 티켓이지, retrieval/planner/public route behavior 자체를 재설계하는 티켓이 아니다.
+
 ## 구현 범위
 
 1. golden query / scenario 추가
@@ -68,6 +86,19 @@ docs/runbook-reference-similarity-smoke.md
 2. similarity 품질 평가는 top-1 exact hit 하나로 환원하지 않는다.
 3. observability는 primitive chain을 숨기지 않는다.
 4. owner-local proof rail과 live smoke는 분리해 기록한다.
+
+## 절대 하지 말아야 할 구현
+
+1. failing query를 corpus에서 빼서 green으로 만드는 것
+2. operator smoke 문서에만 남기고 automated regression rail을 안 추가하는 것
+3. trace를 human summary 한 줄로만 남겨서 machine-checkable provenance를 없애는 것
+4. similarity regression을 exact lookup regression으로 대체하는 것
+
+## 실패 패턴
+
+1. golden queries는 추가됐는데 benchmark scenarios와 이름/의도가 맞지 않는 경우
+2. trace field는 늘었는데 tool/evidence builder가 그 필드를 소비하지 않는 경우
+3. smoke runbook은 있는데 regression rail이 없어 다시 live에서만 터지는 경우
 
 ## 구현 순서
 
@@ -89,6 +120,13 @@ pnpm run typecheck
 pnpm exec vitest run test/regression/reference-similarity-agent.test.ts test/regression/reference-similarity-public-search.test.ts
 pnpm run test:unit:file -- test/benchmark/agent/scenarios.coverage.ts
 ```
+
+## 리뷰어 체크포인트
+
+1. Korean/English reference-similarity 케이스가 모두 있는지
+2. anchor loss / same-entity leakage 회귀가 실제로 검출되는지
+3. retrieval/planner behavior를 몰래 수정하지 않았는지
+4. operator용 smoke와 automated rail이 둘 다 있는지
 
 ## DoD
 

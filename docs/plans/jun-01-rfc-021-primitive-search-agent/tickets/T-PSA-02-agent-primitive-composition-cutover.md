@@ -42,6 +42,24 @@ src/application/wine-search/__tests__/wine-agent-loop.test.ts
 src/config/__tests__/wine-search-tool-bundle-wiring.test.ts
 ```
 
+## 반드시 건드릴 파일
+
+1. `src/application/wine-search/wine-agent-loop-tool-bundle.ts`
+2. `src/application/wine-search/wine-agent-loop.ts`
+3. `src/domain/agent/model/agent-tool-attempt-schema.ts`
+4. `src/application/agent/agent-tool-execution-support.ts`
+5. `src/application/wine-search/__tests__/wine-agent-loop.test.ts`
+
+## 가능하면 건드리지 말아야 할 파일 / 레이어
+
+1. `src/domain/retrieval/**`
+2. `src/domain/ranking/**`
+3. `src/interface/http/routes/**`
+4. `src/domain/query/service/planner*.ts`
+5. `data/**`
+
+이 티켓은 agent orchestration 티켓이지, retrieval algorithm/public route/planner ticket이 아니다.
+
 ## 구현 범위
 
 1. tool definition / schema 추가
@@ -63,6 +81,19 @@ src/config/__tests__/wine-search-tool-bundle-wiring.test.ts
 3. `compare_wines` convenience tool을 되살리지 않는다.
 4. tool trace에는 `lookup_wine`, `similar_to_entity`, `search_*` 같은 실제 primitive 이름만 남긴다.
 
+## 절대 하지 말아야 할 구현
+
+1. prompt만 바꾸고 tool/runtime wire는 그대로 두는 구현
+2. `"X 비슷한 와인"`일 때 agent가 문자열 anchor를 직접 `similar_to_entity`에 넣는 구현
+3. `compare_wines`를 active loop에 다시 넣는 구현
+4. primitive chain을 숨기기 위해 trace/tool attempt schema를 generic 이름으로 뭉개는 구현
+
+## 실패 패턴
+
+1. tool bundle은 바뀌었는데 runtime system prompt는 옛 taxonomy를 말하는 경우
+2. compare residue를 "unsupported branch"로만 남겨서 회귀 테스트가 계속 흔들리는 경우
+3. agent가 lookup result의 `entity_id` 대신 label string을 재사용하는 경우
+
 ## 구현 순서
 
 1. tool bundle/schema에 `similar_to_entity` 추가
@@ -83,6 +114,13 @@ src/config/__tests__/wine-search-tool-bundle-wiring.test.ts
 pnpm run typecheck
 pnpm exec vitest run src/application/wine-search/__tests__/wine-agent-loop-tool-bundle.test.ts src/application/wine-search/__tests__/wine-agent-loop.test.ts src/config/__tests__/wine-search-tool-bundle-wiring.test.ts
 ```
+
+## 리뷰어 체크포인트
+
+1. active tool set에 convenience tool이 다시 들어오지 않았는지
+2. reference similarity가 실제로 `lookup_wine -> similar_to_entity` chain을 타는지
+3. retrieval/ranking core를 불필요하게 건드리지 않았는지
+4. trace naming이 primitive taxonomy와 일치하는지
 
 ## DoD
 
