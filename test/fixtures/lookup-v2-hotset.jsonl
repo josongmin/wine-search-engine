@@ -1,0 +1,15 @@
+{"qid": "elv2-001", "query": "Opus One 2018", "expected_status": "resolved", "expected_entity_hint": "opus one 2018", "class": "exact_entity", "note": "exact canonical — must resolve"}
+{"qid": "elv2-002", "query": "오푸스원", "expected_status": "resolved", "expected_entity_hint": "opus one", "class": "transliteration", "note": "Korean transliteration of a hot entity"}
+{"qid": "elv2-003", "query": "opu one", "expected_status": "failed", "class": "noisy_typo", "note": "DoD #1 — must NOT wrong-resolve to Opus One"}
+{"qid": "elv2-004", "query": "까쇼", "expected_status": "redirect_discovery", "class": "concept_grape", "note": "DoD #3 — grape concept, must redirect not resolve"}
+{"qid": "elv2-005", "query": "Cabernet Sauvignon", "expected_status": "redirect_discovery", "class": "concept_grape", "note": "bare grape concept"}
+{"qid": "elv2-006", "query": "full bodied red", "expected_status": "redirect_discovery", "class": "concept_style", "note": "style facet concept"}
+{"qid": "elv2-007", "query": "Napa Valley", "expected_status": "redirect_discovery", "class": "concept_region", "note": "region-as-concept"}
+{"qid": "elv2-008", "query": "Dom Perignon", "expected_status": "resolved", "expected_entity_hint": "dom perignon", "class": "hot_entity_coverage", "note": "DoD #2 — coverage hole candidate; resolved IFF alias covered, else surfaces in coverage report"}
+{"qid": "elv2-009", "query": "돔페리뇽", "expected_status": "resolved", "expected_entity_hint": "dom perignon", "class": "hot_entity_coverage", "note": "DoD #2 — Korean transliteration coverage hole candidate"}
+{"qid": "elv2-010", "query": "Penfolds Grange", "expected_status": "resolved", "expected_entity_hint": "penfolds grange", "class": "producer_wine", "note": "producer + label"}
+{"qid": "elv2-011", "query": "Sassicaia 2019", "expected_status": "resolved", "expected_entity_hint": "sassicaia 2019", "class": "exact_entity", "note": "famous Super Tuscan"}
+{"qid": "elv2-012", "query": "a", "expected_status": "failed", "class": "under_specified", "note": "too short to be an entity reference"}
+{"qid": "elv2-013", "query": "wine", "expected_status": "redirect_discovery", "class": "generic", "note": "generic non-entity → discovery"}
+{"qid": "elv2-014", "query": "Caymus Cabernet Sauvignon", "expected_status": "resolved", "expected_entity_hint": "caymus", "class": "producer_grape", "note": "producer token must NOT be swept up as concept (false-positive guard)"}
+{"qid": "elv2-015", "query": "오퍼스원 2019", "expected_status": "ambiguous", "class": "multi_vintage_noisy", "note": "noisy + possible multi-vintage — ambiguous or failed acceptable, never wrong-resolve"}

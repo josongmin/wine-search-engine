@@ -1,0 +1,97 @@
+id: retrieval.entity-lookup-v2
+name: Entity Lookup V2 (Dedicated Resolution Stack)
+category: retrieval
+summary: |
+  `POST /v2/entity-lookup` — wine entity lookup를 generic search wrapper가 아니라
+  전용 entity-resolution stack으로 재구축. 전용 contract + front-door admission/
+  concept gate + 다채널 candidate provenance + calibrated-abstain 4-state 결정
+  (resolved | ambiguous | failed | redirect_discovery). precision-first:
+  wrong-positive보다 abstain을 우선.
+
+maturity: 3
+maturity_rationale: |
+  코어 스파인이 production에 wiring되고(container → route → catalog v7.1.0)
+  단위 회귀로 고정됨. 4개 티켓이 완료되어 RFC 전역 DoD 중 #1/#3/#4/#5를 충족:
+
+    1. **T-ELV2-01 dedicated contract** — `/v2/entity-lookup`가 primitive-search
+       스키마를 재사용하지 않는 전용 request/response. 4-state superRefine 불변식
+       (resolved ⇔ top_candidate, clarify ⇔ ambiguous)으로 wire 경계에서 정직성
+       강제. catalog fingerprint 게이트 통과.
+    2. **T-ELV2-02 admission/concept gate** — `concept-lexicon.ts`가 기존
+       GRAPE/REGION/COUNTRY attribute vocab + `KOREAN_GRAPE_ALIASES`(까쇼 포함)를
+       SSoT 재사용(rule 25/30, 중복 없음). concept-only 쿼리는 retrieval 이전에
+       redirect_discovery로 닫힘 → `까쇼`류가 entity lane에 진입하지 않음(DoD #3).
+       producer 토큰은 residual로 남아 admit (false-positive guard, rule 23).
+    3. **T-ELV2-05 calibrated-abstain 결정 권한** — `CalibratedAbstainDecider`가
+       resolver의 advisory status 위에 precision-first downgrade-only 가드를 적용:
+       confidence floor / top1-top2 margin / calibration-trust 게이트(미신뢰 시
+       raw score를 확률로 취급하지 않음). `opu one`류 noisy typo가 wrong-resolve
+       대신 failed/ambiguous로 닫힘(DoD #1/#5). 절대 upgrade 안 함 → V2는 resolver
+       보다 결코 덜 보수적이지 않음.
+    4. **T-ELV2-04 다채널 provenance** — 기존 anchor recall을 7개 선언 채널
+       (exact/compact/transliteration/jamo-phonetic/fuzzy/family/dense)로 분해,
+       candidate별 channel-hit UNION + per-channel coverage rail(DoD #4).
+
+  maturity 4가 아닌 이유(정직): (a) 다채널은 기존 anchor recall을 **재투영**한
+  것이고 독립 timed retrieval runtime(per-channel native score)은 아직
+  `LookupCandidateRetrievalPort` seam 뒤의 다음 단계다. (b) shadow-compare gate
+  로직(`lookup-v2-shadow-metrics.ts`)은 unit-tested지만 live runner(V1+V2 실행)와
+  hotset eval 실측은 미완 — 따라서 V1 대비 우위가 아직 **증명되지 않음**(DoD #7).
+  (c) DoD #2(`dom perignon` coverage hole)와 #6(operator plane)은 미구현.
+
+status: active
+since: 2026-06
+last_reviewed: 2026-06-02
+owner: core
+
+surfaces:
+  - "POST /v2/entity-lookup"
+
+key_files:
+  - src/domain/resolver/v2/lookup-v2-types.ts
+  - src/domain/resolver/v2/concept-lexicon.ts
+  - src/domain/resolver/v2/concept-admission-gate.ts
+  - src/domain/resolver/v2/calibrated-abstain-decider.ts
+  - src/domain/resolver/v2/channel-provenance.ts
+  - src/interface/http/schemas/entity-lookup-v2.schema.ts
+  - src/application/search/entity-lookup-v2/entity-lookup-v2.usecase.ts
+  - src/interface/http/routes/entity-lookup-v2.route.ts
+  - scripts/eval/lookup-v2-shadow-metrics.ts
+
+tests:
+  unit:
+    - test/unit/entity-lookup-v2/entity-lookup-v2-contract.test.ts
+    - test/unit/entity-lookup-v2/concept-admission-gate.test.ts
+    - test/unit/entity-lookup-v2/calibrated-abstain-decider.test.ts
+    - test/unit/entity-lookup-v2/channel-provenance.test.ts
+    - test/unit/entity-lookup-v2/shadow-metrics.test.ts
+  regression:
+    - test/regression/http-contract-catalog-properties.regression.test.ts
+
+depends_on:
+  - retrieval.entity-lookup
+
+related_rfcs:
+  - docs/plans/jun-2-genearl/entity-lookup-v2/rfc.md
+
+known_limitations:
+  - "다채널 provenance는 기존 anchor recall 재투영 — 독립 timed channel runtime(per-channel native score) 미구현 (LookupCandidateRetrievalPort seam)"
+  - "shadow-compare live runner + hotset eval 실측 미완 — V1 대비 우위 미증명 (DoD #7, cutover 금지)"
+  - "DoD #2: dedicated alias registry v2 + dom perignon coverage report 미구현 (T-ELV2-03)"
+  - "DoD #6: trusted operator plane + curation write plane 미구현 (T-ELV2-07)"
+  - "family graph / ambiguity graph 미구현 (T-ELV2-06) — clarification은 현재 candidate label 기반"
+  - "V1 /v1/lookup/wine가 여전히 authority — cutover는 shadow proof 이후"
+
+next_steps:
+  - "T-ELV2-04 심화: LookupCandidateRetrievalPort 뒤 독립 timed 채널 runtime + native score"
+  - "T-ELV2-08: live shadow runner(run-lookup-v2-shadow-compare.ts) wiring + hotset eval 실측"
+  - "T-ELV2-03: dedicated alias registry v2 + hot-entity coverage report (dom perignon hole)"
+  - "T-ELV2-06: family/ambiguity graph로 graph-backed clarification"
+  - "T-ELV2-07: trusted operator read/curation plane + web console"
+
+tags:
+  - retrieval
+  - entity-resolution
+  - precision-first
+  - calibrated-abstain
+  - korean-i18n
