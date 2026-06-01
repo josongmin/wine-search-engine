@@ -10,6 +10,7 @@ import type {
   AutocompleteUseCasePort,
   BatchSearchUseCasePort,
   DecomposedSearchUseCasePort,
+  EntityLookupV2UseCasePort,
   HybridUseCasePort,
   InterpretUseCasePort,
   ResolveUseCasePort,
@@ -24,6 +25,7 @@ interface FeatureContainerServices {
   readonly searchUseCase: SearchExecutorPort;
   readonly interpretUseCase: InterpretUseCasePort;
   readonly resolveUseCase: ResolveUseCasePort;
+  readonly entityLookupV2UseCase: EntityLookupV2UseCasePort;
   readonly autocompleteUseCase: AutocompleteUseCasePort;
   readonly hybridUseCase: HybridUseCasePort;
   readonly decomposedSearchUseCase: DecomposedSearchUseCasePort;

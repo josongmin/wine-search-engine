@@ -12,6 +12,10 @@ import {
   SearchResponseSchema,
 } from '../schemas/search-response.schema.js';
 import {
+  EntityLookupV2RequestSchema,
+  EntityLookupV2ResponseSchema,
+} from '../schemas/entity-lookup-v2.schema.js';
+import {
   HTTP_STATUS_BAD_REQUEST,
   HTTP_STATUS_FORBIDDEN,
   HTTP_STATUS_INTERNAL_SERVER_ERROR,
@@ -119,6 +123,28 @@ export const ResolveRouteContract = defineRouteContract({
   capabilities: ['security', 'planner', 'resolver_only'],
   responses: {
     [HTTP_STATUS_OK]: ResolveResponseSchema,
+    [HTTP_STATUS_BAD_REQUEST]: ErrorResponseSchema,
+    [HTTP_STATUS_FORBIDDEN]: ErrorResponseSchema,
+    [HTTP_STATUS_REQUEST_TIMEOUT]: ErrorResponseSchema,
+    [HTTP_STATUS_TOO_MANY_REQUESTS]: ErrorResponseSchema,
+    [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
+    [HTTP_STATUS_SERVICE_UNAVAILABLE]: ErrorResponseSchema,
+  },
+});
+
+// ---------------------------------------------------------------------------
+// T-ELV2-01 — dedicated entity-lookup V2 surface (`POST /v2/entity-lookup`).
+// NOT part of the primitive-search family: lookup is an entity-resolution task
+// with its own 4-state outcome contract, not a discovery search.
+// ---------------------------------------------------------------------------
+
+export const EntityLookupV2RouteContract = defineRouteContract({
+  operationId: 'entity.lookup.v2',
+  apiVersion: '2',
+  body: EntityLookupV2RequestSchema,
+  capabilities: ['security', 'planner', 'resolver_only'],
+  responses: {
+    [HTTP_STATUS_OK]: EntityLookupV2ResponseSchema,
     [HTTP_STATUS_BAD_REQUEST]: ErrorResponseSchema,
     [HTTP_STATUS_FORBIDDEN]: ErrorResponseSchema,
     [HTTP_STATUS_REQUEST_TIMEOUT]: ErrorResponseSchema,

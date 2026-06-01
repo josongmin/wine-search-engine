@@ -11,6 +11,10 @@ import type { InterpretRequest } from '../interpret-request.dto.js';
 import type { InterpretResultWithV2 } from '../interpret.usecase.js';
 import type { ResolveRequest } from '../resolve-request.dto.js';
 import type { ResolveResponse } from '../resolve-response.dto.js';
+import type {
+  EntityLookupV2Command,
+  EntityLookupV2Result,
+} from '../entity-lookup-v2/entity-lookup-v2.dto.js';
 import type { AutocompleteResponse } from '../autocomplete-response.dto.js';
 import type { RequestExecutionContext } from '../../../domain/shared/request-execution-context.js';
 import type { HybridSearchRequest } from '../hybrid-request.dto.js';
@@ -90,6 +94,16 @@ export type ResolveExecutionOptions = RequestExecutionContext;
 
 export interface ResolveUseCasePort {
   execute(request: ResolveRequest, options?: ResolveExecutionOptions): Promise<ResolveResponse>;
+}
+
+export type EntityLookupV2ExecutionOptions = RequestExecutionContext;
+
+/** Port for the dedicated `/v2/entity-lookup` use case (T-ELV2-01). */
+export interface EntityLookupV2UseCasePort {
+  execute(
+    command: EntityLookupV2Command,
+    options?: EntityLookupV2ExecutionOptions,
+  ): Promise<EntityLookupV2Result>;
 }
 
 export type AutocompleteExecutionOptions = RequestExecutionContext;

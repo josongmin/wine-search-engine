@@ -20,6 +20,7 @@ import {
   registerLookupWineRoute,
   registerSemanticSearchRoute,
 } from './routes/primitive-search.route.js';
+import { registerEntityLookupV2Route } from './routes/entity-lookup-v2.route.js';
 import {
   registerHealthRoutes,
   startEventLoopHeartbeat,
@@ -366,6 +367,12 @@ export async function createServer(
   registerSemanticSearchRoute(app, deps);
   registerLexicalSearchRoute(app, deps);
   registerLookupWineRoute(app, deps);
+  // T-ELV2-01: dedicated entity-lookup V2 surface. Always present in production
+  // (the container always constructs the use case); guarded so lightweight
+  // server-construction tests can omit it.
+  if (deps.entityLookupV2UseCase !== undefined) {
+    registerEntityLookupV2Route(app, { entityLookupV2UseCase: deps.entityLookupV2UseCase });
+  }
   if (deps.wineSearch !== undefined) {
     // Canonical agent surface — `POST /v1/agent` for caller-managed history,
     // plus `POST /v1/agent/sessions*` for server-managed history custody.

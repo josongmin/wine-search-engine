@@ -6,6 +6,7 @@ import {
   AgentSessionTurnRouteContract,
 } from './agent.contract.js';
 import {
+  EntityLookupV2RouteContract,
   HealthRouteContract,
   HybridSearchRouteContract,
   LexicalSearchRouteContract,
@@ -74,8 +75,12 @@ interface DeclaredHttpRouteContract {
  *   7.0.0 — retire non-core public/admin surfaces (2026-06-01):
  *           remaining runtime contract is the minimal
  *           search + agent + liveness/readiness set. Remaining: 9.
+ *   7.1.0 — T-ELV2-01: add the dedicated entity-lookup V2 surface
+ *           (`POST /v2/entity-lookup`) (2026-06-02). Additive — V1
+ *           `/v1/lookup/wine` is unchanged and remains the authority until the
+ *           T-ELV2-08 shadow-compare cutover. Remaining: 10.
  */
-export const HTTP_CONTRACT_CATALOG_VERSION = '7.0.0';
+export const HTTP_CONTRACT_CATALOG_VERSION = '7.1.0';
 
 export const DeclaredHttpRouteContractCatalog: readonly DeclaredHttpRouteContract[] = [
   { method: 'GET', url: '/health', contract: HealthRouteContract },
@@ -84,6 +89,7 @@ export const DeclaredHttpRouteContractCatalog: readonly DeclaredHttpRouteContrac
   { method: 'POST', url: '/v1/search/semantic', contract: SemanticSearchRouteContract },
   { method: 'POST', url: '/v1/search/lexical', contract: LexicalSearchRouteContract },
   { method: 'POST', url: '/v1/lookup/wine', contract: LookupWineRouteContract },
+  { method: 'POST', url: '/v2/entity-lookup', contract: EntityLookupV2RouteContract },
   { method: 'POST', url: '/v1/agent', contract: AgentRunRouteContract },
   { method: 'POST', url: '/v1/agent/sessions', contract: AgentSessionCreateRouteContract },
   { method: 'POST', url: '/v1/agent/sessions/:sessionId/turns', contract: AgentSessionTurnRouteContract },
@@ -192,7 +198,7 @@ export function computeHttpContractCatalogFingerprint(
  * failing test.
  */
 export const HTTP_CONTRACT_CATALOG_FINGERPRINT =
-  'b72c3bdb47de19cf845ff597f4abdbeb373e848f28547d2c7e3db872a51a9818';
+  '529522d1f91beeb4189b75f83caf81cbef522f3d7f3bccdecc4fe1250ea657f1';
 
 export function buildDeclaredHttpRouteContractManifest(): HttpRouteContractManifest {
   const routes: RegisteredHttpRouteContract[] = DeclaredHttpRouteContractCatalog.map((entry) => {

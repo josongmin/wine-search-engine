@@ -310,3 +310,47 @@ export const MAX_AUDIT_POLICY_OUTCOMES = 100;
  * Named "top5" in the domain model but we allow a generous bound for schema stability.
  */
 export const MAX_AUDIT_RANKING_TOP_N = 20;
+
+// ───────────────────────────────────────────────────────────────────────────
+// Entity Lookup V2 (`/v2/entity-lookup`) — dedicated contract bounds.
+//
+// These are independent of the primitive-search bounds on purpose: the V2
+// surface is an entity-resolution task, not a discovery search, so its caps
+// are derived from resolution-domain facts, not result-list ergonomics.
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * Default candidate fan-out for a V2 lookup when the caller does not specify
+ * `max_candidates`. A precision-first entity resolver rarely needs a wide
+ * window: the top handful carry virtually all the decision-relevant mass
+ * (top1-top2 margin drives the calibrated abstain). 10 leaves head-room for
+ * multi-vintage / family clusters without inviting long-tail noise.
+ */
+export const LOOKUP_V2_DEFAULT_MAX_CANDIDATES = 10;
+
+/**
+ * Hard ceiling on `max_candidates`. A lookup is not a browse; beyond this the
+ * union is dominated by fuzzy/dense long-tail that the reranker would discard
+ * anyway. Shares the resolve-domain ceiling so the HTTP bound and the resolver
+ * pool bound agree (rule 13 — schema/parser bound parity).
+ */
+export const MAX_LOOKUP_V2_CANDIDATES = MAX_RESOLVE_CANDIDATES;
+
+/**
+ * Max channel-hit provenance rows surfaced per candidate. There are 7 declared
+ * retrieval channels (RFC §5.4); a candidate can be recalled by every channel
+ * plus head-room for multi-view hits within a channel.
+ */
+export const MAX_LOOKUP_V2_CHANNEL_HITS = 16;
+
+/**
+ * Max clarification options surfaced for an `ambiguous` lookup. Mirrors the
+ * discovery clarification cap so both surfaces agree on disambiguation width.
+ */
+export const MAX_LOOKUP_V2_CLARIFICATION_OPTIONS = MAX_CLARIFICATION_CANDIDATES;
+
+/**
+ * Max per-channel coverage rail rows in the evidence summary — one per declared
+ * channel, with the same head-room rationale as {@link MAX_LOOKUP_V2_CHANNEL_HITS}.
+ */
+export const MAX_LOOKUP_V2_COVERAGE_ROWS = 16;

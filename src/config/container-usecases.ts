@@ -3,6 +3,8 @@ import type { MultiQueryGenerator } from '../domain/retrieval/service/multi-quer
 import type { HydeGenerator } from '../domain/retrieval/service/hyde-generator.js';
 import { InterpretUseCase } from '../application/search/interpret.usecase.js';
 import { ResolveUseCase } from '../application/search/resolve.usecase.js';
+import { EntityLookupV2UseCase } from '../application/search/entity-lookup-v2/entity-lookup-v2.usecase.js';
+import { ConceptAdmissionGate } from '../domain/resolver/v2/concept-admission-gate.js';
 import { AutocompleteUseCase } from '../application/search/autocomplete.usecase.js';
 import { HybridUseCase } from '../application/search/hybrid.usecase.js';
 import { DecomposedSearchUseCase } from '../application/search/decomposed-search.usecase.js';
@@ -18,6 +20,7 @@ import type {
   AutocompleteUseCasePort,
   BatchSearchUseCasePort,
   DecomposedSearchUseCasePort,
+  EntityLookupV2UseCasePort,
   HybridUseCasePort,
   InterpretUseCasePort,
   ResolveUseCasePort,
@@ -29,6 +32,7 @@ export interface UseCaseContainerServices {
   readonly searchUseCase: SearchExecutorPort;
   readonly interpretUseCase: InterpretUseCasePort;
   readonly resolveUseCase: ResolveUseCasePort;
+  readonly entityLookupV2UseCase: EntityLookupV2UseCasePort;
   readonly autocompleteUseCase: AutocompleteUseCasePort;
   readonly hybridUseCase: HybridUseCasePort;
   readonly decomposedSearchUseCase: DecomposedSearchUseCasePort;
@@ -116,8 +120,25 @@ export function buildUseCaseContainerServices(
     queryEntrySecurityObserver,
   });
 
+  // T-ELV2-01: dedicated `/v2/entity-lookup` use case. Sibling stack to the
+  // discovery primitives — reuses the resolver primitives as substrate, owns
+  // the admission gate + 4-state calibrated decision.
+  const entityLookupV2UseCase = new EntityLookupV2UseCase({
+    admissionGate: new ConceptAdmissionGate(),
+    queryPlanner: core.queryPlanner,
+    blocker: core.blocker,
+    entityResolver: core.entityResolver,
+    entityLookup: core.entityLookup,
+    querySanitizer: core.querySanitizer,
+    injectionJudge: core.injectionJudge,
+    judgeFailureMode: config.queryEntrySecurity.judgeFailureMode,
+    judgeTimeoutMs: config.queryEntrySecurity.judgeTimeoutMs,
+    queryEntrySecurityObserver,
+  });
+
   return {
     searchUseCase,
+    entityLookupV2UseCase,
     interpretUseCase: new InterpretUseCase({
       queryPlanner: core.queryPlanner,
       querySanitizer: core.querySanitizer,
