@@ -73,6 +73,25 @@ pnpm run test:file -- test/regression/http-contract-catalog-properties.regressio
 pnpm run catalog:validate   # retrieval.entity-lookup-v2 통과 (기타 6건은 사전 존재 에러)
 ```
 
+## 적대적 감사 (4 라운드, 수렴)
+
+병렬 multi-dim adversarial audit workflow를 4회 돌려 매 라운드 verified findings를 수정·회귀잠금:
+
+| 라운드 | confirmed | 적용 커밋 | 핵심 |
+|---|---|---|---|
+| R1 `w06v3pg9i` | 103 | 59351652 | untrusted raw-score wrong-resolve → exact-evidence 게이트 외 |
+| R2 `w9x8ofhm8` | 27 | f4360ddd | exact-identity substring-map 위조 → strict allowlist; 교착어 한국어 회귀 → soft boundary |
+| R3 `w8a4z0uhl` | 22 | 12bd38ce | planner fuzzy-fallback 'exact' 위조 → fuzzy-marker 제외; SSoT 카베르네; josa/숫자 |
+| R4 `wwrvk4yz3` | 7 (**0 HIGH**) | (this) | 추천해줘 strip 순서; bare-count residual |
+
+**R4에서 HIGH 0건 → wrong-resolve bypass 수렴.** 핵심 정밀도 경로(untrusted 시 exact-identity 위조)는 2겹(fuzzy-marker 제외 + strict 전략 allowlist)으로 차단됨.
+
+### 미수정(문서화된 한계)
+
+- **[MED] containment-exact** (`src/infrastructure/adapter/search-index-alias-matcher.ts`): 쿼리가 후보의 2-토큰 canonical을 sub-phrase로 *포함*하면 strategy `exact` 라벨 → untrusted 시 resolve 인증. 단 (a) 포함된 엔티티는 보통 intent-aligned(틀린 엔티티 아님), (b) margin gate 적용. **공유 infra matcher라 blast radius가 커 야간 변경 보류** — 후속에서 containment를 recall 라벨(`phrase_contained`)로 분리 권장.
+- **[LOW] 어휘 커버리지**: 단일어 region/appellation 중 attribute vocab 미포함(예: 'Rhône' 단독)은 redirect 안 됨(admit→abstain, wrong-positive 아님). 어휘 확장(T-03 registry)에서 해소.
+- **[LOW] fuzzy-marker over-rejection**: genuine exact가 같은 anchor에서 다른 recall 전략과 공존하면 untrusted 시 abstain(recall 손실). precision-first 의도적 선택(wrong-positive보다 abstain 우선).
+
 ## 주의
 
 - `pnpm run catalog:validate`의 6개 에러는 **사전 존재**(agent/di/tools feature가 동시

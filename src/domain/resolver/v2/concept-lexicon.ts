@@ -140,10 +140,28 @@ function boundedPhraseRegex(phrase: string): RegExp {
 const KOREAN_GRAPE_STRIP_REGEXES: ReadonlyArray<readonly [RegExp, string]> =
   KOREAN_GRAPE_ALIASES.map(([re, grape]) => [boundedSource(re.source), grape] as const);
 
-const CONCEPT_PHRASE_REGEXES: ReadonlyArray<readonly [RegExp, string]> = CONCEPT_PHRASES.map(
-  (phrase) => [boundedPhraseRegex(phrase), phrase] as const,
-);
-const STOPWORD_REGEXES: readonly RegExp[] = GENERIC_STOPWORDS.map((w) => boundedPhraseRegex(normalizeConceptTerm(w)));
+/**
+ * One strip rule. `term` is the concept label recorded when it fires (undefined
+ * for a pure stopword). Concept phrases and stopwords are stripped in a SINGLE
+ * longest-first pass so a longer agglutinated stopword (`추천해줘`) wins over a
+ * shorter concept prefix (`추천`) — otherwise the prefix fires first and leaves
+ * a verb-ending residual that leaks past the gate (audit R4).
+ */
+interface ConceptStripRule {
+  readonly re: RegExp;
+  readonly term: string | undefined;
+}
+
+const COMBINED_STRIP_RULES: readonly ConceptStripRule[] = [
+  ...CONCEPT_PHRASES.map((phrase) => ({ re: boundedPhraseRegex(phrase), term: phrase, phrase })),
+  ...GENERIC_STOPWORDS.map((w) => {
+    const phrase = normalizeConceptTerm(w);
+    return { re: boundedPhraseRegex(phrase), term: undefined, phrase };
+  }),
+]
+  .slice()
+  .sort((a, b) => b.phrase.length - a.phrase.length)
+  .map(({ re, term }) => ({ re, term }));
 
 export interface ConceptClassification {
   /** True when the query, stripped of concept tokens + stopwords, has no residual. */
@@ -182,26 +200,26 @@ export function classifyConcept(views: NormalizedQueryViews): ConceptClassificat
     }
   }
 
-  for (const [re, phrase] of CONCEPT_PHRASE_REGEXES) {
+  // Single longest-first pass over concept phrases + stopwords (audit R4 — so
+  // `추천해줘` strips before the shorter concept `추천`).
+  for (const { re, term } of COMBINED_STRIP_RULES) {
     if (re.test(residual)) {
-      terms.add(phrase);
+      if (term !== undefined) {
+        terms.add(term);
+      }
       residual = ` ${residual.replace(re, ' ')} `;
     }
   }
 
-  for (const re of STOPWORD_REGEXES) {
-    residual = ` ${residual.replace(re, ' ')} `;
-  }
-
-  // Drop residual tokens that are nothing but a Korean particle (josa) left
-  // over from an agglutinated concept query (e.g. `까쇼는` → 까쇼 stripped → `는`).
-  // Whole-token only — never strips a josa syllable from inside a real name
-  // (audit R3). NOTE: bare numeric tokens are NOT dropped — pure-numeric wine
-  // brands ("1865", "707") are entity references, not stray vintages (the
-  // vintageStripped view already removed real vintage years).
+  // Drop residual tokens that carry no entity signal:
+  //  - a bare Korean particle (josa) left from an agglutinated concept
+  //    (`까쇼는` → 까쇼 stripped → `는`); whole-token only, never substring.
+  //  - a bare 1-2 digit count (`까쇼 3` → `3`); a 3-4+ digit token is KEPT
+  //    because pure-numeric wine brands ("707", "1865") are entity references
+  //    (the vintageStripped view already removed real 4-digit vintage years).
   const residualTokens = collapse(residual)
     .split(' ')
-    .filter((token) => token.length > 0 && !JOSA_ONLY_TOKENS.has(token));
+    .filter((token) => token.length > 0 && !JOSA_ONLY_TOKENS.has(token) && !/^\d{1,2}$/u.test(token));
 
   const cleaned = residualTokens.join(' ');
   return {

@@ -261,3 +261,25 @@ describe('audit R3 — concept-lexicon Korean spelling + josa + numeric brand', 
     expect(gate.classify({ rawQuery: '707', views: makeViews('707') }).decision).toBe('admit');
   });
 });
+
+// ── R4: recommendation-verb leak + bare-count residual ───────────────────────
+
+describe('audit R4 — recommendation verbs & bare counts redirect (single-pass strip)', () => {
+  const gate = new ConceptAdmissionGate();
+
+  it('redirects agglutinated Korean recommendation queries (추천해줘 wins over 추천)', () => {
+    for (const q of ['와인 추천해줘', '레드와인 추천해줘', '추천해줘', '추천해']) {
+      expect(gate.classify({ rawQuery: q, views: makeViews(q) }).decision).toBe('redirect_discovery');
+    }
+  });
+
+  it('redirects a concept + bare small count (까쇼 3) but still admits a numeric brand (1865)', () => {
+    expect(classifyConcept(makeViews('까쇼 3')).isConceptOnly).toBe(true);
+    expect(gate.classify({ rawQuery: '1865', views: makeViews('1865') }).decision).toBe('admit');
+  });
+
+  it('still admits a real producer (does not over-strip recommendation syllables)', () => {
+    // Penfolds Grange must NOT be swept up by the recommendation-verb vocab.
+    expect(gate.classify({ rawQuery: 'Penfolds Grange', views: makeViews('Penfolds Grange') }).decision).toBe('admit');
+  });
+});
