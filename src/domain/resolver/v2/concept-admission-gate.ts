@@ -17,6 +17,7 @@ import type {
   LookupAdmissionInput,
   LookupAdmissionVerdict,
 } from './lookup-v2-types.js';
+import { classifyConcept } from './concept-lexicon.js';
 
 /**
  * Minimum number of alphanumeric (incl. CJK) characters for a query to be a
@@ -61,13 +62,37 @@ export class ConceptAdmissionGate implements LookupAdmissionGatePort {
       };
     }
 
-    // T-ELV2-02 deepens this with the concept/facet lexicon (grape/style/region
-    // concepts → redirect_discovery). Until then we admit any input that
-    // carries enough signal to be an entity reference.
+    // Concept / facet gate: a query composed ENTIRELY of concept tokens
+    // (grape / region / style / occasion) carries no entity signal and must
+    // redirect to discovery search rather than attempt entity resolution.
+    const concept = classifyConcept(input.views);
+    if (concept.isConceptOnly) {
+      if (concept.hasConceptTerm) {
+        return {
+          decision: 'redirect_discovery',
+          reasonCode: 'concept_query',
+          detail: `This describes a class of wines (${concept.terms.join(', ')}) — redirected to discovery search.`,
+          conceptTermsMatched: concept.terms,
+        };
+      }
+      // No concept term and no residual proper-name token: a bare generic
+      // ("wine", "와인 추천") with no resolvable identity. Still a discovery
+      // intent, not an entity reference.
+      return {
+        decision: 'redirect_discovery',
+        reasonCode: 'generic_non_entity_query',
+        detail: 'The query is generic and does not reference a specific wine — redirected to discovery search.',
+      };
+    }
+
+    // A residual proper-name token remains → plausible entity reference. Admit
+    // it to resolution; the calibrated decision layer (T-ELV2-05) closes noisy
+    // non-matches as failed/ambiguous rather than wrong-resolving.
     return {
       decision: 'admit',
       reasonCode: 'admitted_entity_reference',
       detail: 'The query carries an entity-reference signal.',
+      ...(concept.terms.length > 0 ? { conceptTermsMatched: concept.terms } : {}),
     };
   }
 }
