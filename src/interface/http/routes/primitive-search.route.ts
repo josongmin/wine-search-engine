@@ -34,7 +34,6 @@ import {
 import {
   toHybridSearchRequest,
   toLexicalSearchRequest,
-  toLookupWineRequest,
   toSemanticSearchRequest,
 } from './search-request-mappers.js';
 import { getRequestId } from '../request-id.js';
@@ -131,46 +130,31 @@ export function registerLookupWineRoute(app: FastifyInstance, deps: SearchRouteD
       const stageTimer = createStageTimer();
       const abortSignal = abortSignalFromFastifyRequest(request, reply);
 
-      const response = deps.lookupWineV2CompatibilityUseCase !== undefined
-        ? await raceWithRequestAbort(
-            deps.lookupWineV2CompatibilityUseCase.execute(
-              {
-                query: parsed.query,
-                ...(parsed.limit !== undefined ? { limit: parsed.limit } : {}),
-                ...(parsed.context?.locale !== undefined ? { locale: parsed.context.locale } : {}),
-                requestId,
-              },
-              {
-                abortSignal,
-                debugRequest: request.debugRequest,
-                stageTimer,
-                requestId,
-              },
-            ),
-            abortSignal,
-            'Lookup request aborted',
-          )
-        : await raceWithRequestAbort(
-            deps.searchUseCase.execute(toLookupWineRequest(parsed), requestId, {
-              abortSignal,
-              debugRequest: request.debugRequest,
-              stageTimer,
-            }),
-            abortSignal,
-            'Lookup request aborted',
-          );
-
-      // Decomposition runs upstream of route-dispatch and may bubble a
-      // comparison response even with `retrieval_mode='entity'`. Lookup is an
-      // exact wine-identity surface — reject comparison results explicitly
-      // rather than letting the caller infer "this is two wines" from the
-      // response shape.
-      if (response.queryType === 'comparison') {
+      if (deps.lookupWineV2CompatibilityUseCase === undefined) {
         throw new DomainError(
-          'INVALID_REQUEST',
-          'lookup does not support comparison queries — use POST /v1/search/hybrid for "A vs B" queries',
+          'INTERNAL_ERROR',
+          'lookup route requires lookupWineV2CompatibilityUseCase wiring',
         );
       }
+
+      const response = await raceWithRequestAbort(
+        deps.lookupWineV2CompatibilityUseCase.execute(
+          {
+            query: parsed.query,
+            ...(parsed.limit !== undefined ? { limit: parsed.limit } : {}),
+            ...(parsed.context?.locale !== undefined ? { locale: parsed.context.locale } : {}),
+            requestId,
+          },
+          {
+            abortSignal,
+            debugRequest: request.debugRequest,
+            stageTimer,
+            requestId,
+          },
+        ),
+        abortSignal,
+        'Lookup request aborted',
+      );
 
       sendRouteContractResponse(request, reply, LookupWineRouteContract, HTTP_STATUS_OK, response);
     },

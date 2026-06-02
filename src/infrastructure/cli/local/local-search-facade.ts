@@ -47,27 +47,31 @@ export class LocalSearchFacade implements SearchFacadePort {
     input: PrimitiveSearchInput,
     options: CliFacadeRequestOptions,
   ): Promise<PrimitiveSearchResult> {
-    return await this.runtime.withContainer(async (container) =>
-      deepKeysToSnake(
-        kind === 'lookupWine' && container.lookupWineV2CompatibilityUseCase !== undefined
-          ? await container.lookupWineV2CompatibilityUseCase.execute(
-              {
-                query: input.query,
-                ...(input.limit !== undefined ? { limit: input.limit } : {}),
-                ...(input.context?.locale !== undefined ? { locale: input.context.locale } : {}),
-                requestId: options.requestId,
-              },
-              {
-                requestId: options.requestId,
-                abortSignal: options.abortSignal,
-              },
-            )
-          : await container.searchUseCase.execute(toSearchRequest(input, kind), options.requestId, {
+    return await this.runtime.withContainer(async (container) => {
+      if (kind === 'lookupWine') {
+        return deepKeysToSnake(
+          await container.lookupWineV2CompatibilityUseCase.execute(
+            {
+              query: input.query,
+              ...(input.limit !== undefined ? { limit: input.limit } : {}),
+              ...(input.context?.locale !== undefined ? { locale: input.context.locale } : {}),
+              requestId: options.requestId,
+            },
+            {
               requestId: options.requestId,
               abortSignal: options.abortSignal,
-            }),
-      ),
-    );
+            },
+          ),
+        );
+      }
+
+      return deepKeysToSnake(
+        await container.searchUseCase.execute(toSearchRequest(input, kind), options.requestId, {
+          requestId: options.requestId,
+          abortSignal: options.abortSignal,
+        }),
+      );
+    });
   }
 
   async hybrid(input: PrimitiveSearchInput, options: CliFacadeRequestOptions): Promise<PrimitiveSearchResult> {

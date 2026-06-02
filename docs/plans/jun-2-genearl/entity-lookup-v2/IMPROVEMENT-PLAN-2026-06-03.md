@@ -23,6 +23,8 @@ V2 품질 gate를 실제로 통과시킨 뒤, lookup authority를 V1에서 V2로
   hotset is not the cutover authority.
 - Public `/v1/lookup/wine`, local CLI `lookupWine`, and agent `lookup_wine`
   are now compatibility-backed V2 authority surfaces.
+- Earlier `V1 93.5%` numbers are historical only; the current explicit
+  `legacy_core` rerun is `V1 46.5%`.
 
 ## Authority Docs
 
@@ -72,8 +74,8 @@ V2 품질 gate를 실제로 통과시킨 뒤, lookup authority를 V1에서 V2로
 - **Track C — surface cutover**: complete for public/local/agent lookup via the
   compatibility seam.
 - **Track D — proof-lane cleanup**: completed for executable lane/doc alignment.
-  Remaining residue is operational closeout (live canary + legacy purge), not
-  missing or misleading bench/doc entrypoints.
+  Remaining residue is operational closeout (live canary + post-release legacy
+  resolver deletion), not missing or misleading bench/doc entrypoints.
 
 ## Ticket ELV2-C1 — Close the `no_match` wrong-positive
 

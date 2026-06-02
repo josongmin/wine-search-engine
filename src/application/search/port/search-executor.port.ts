@@ -25,7 +25,14 @@ export interface SearchExecutorEvaluationResult {
   readonly runtimeClassification?: SearchExecutorRuntimeClassification | undefined;
 }
 
-export type SearchExecutionOptions = RequestExecutionContext;
+export interface SearchExecutionOptions extends RequestExecutionContext {
+  /**
+   * `lookup_wine` direct SearchUseCase callers default to the current
+   * compatibility-backed authority path. Benchmark/debug lanes that need the
+   * pre-cutover resolver core must opt in explicitly.
+   */
+  readonly lookupAuthorityMode?: 'current_route_authority' | 'legacy_core' | undefined;
+}
 
 export interface SearchExecutorPort {
   execute(

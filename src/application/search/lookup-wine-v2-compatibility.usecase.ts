@@ -29,7 +29,7 @@ import type {
   LookupV2ChannelHitView,
 } from './entity-lookup-v2/entity-lookup-v2.dto.js';
 import { LOOKUP_WINE_LIMIT_MAX } from './search-tool-contract.js';
-import type { EvidenceItem } from '../../domain/shared/types/index.js';
+import type { CanonicalEntityId, EvidenceItem } from '../../domain/shared/types/index.js';
 import { createCanonicalEntityId } from '../../domain/shared/types/entity-id.js';
 import { deterministicHash } from '../../domain/shared/utils/hash.js';
 import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
@@ -269,7 +269,7 @@ function buildEntitySummary(
     ...(doc?.criticScoreNormalized !== undefined ? { criticScore: doc.criticScoreNormalized } : {}),
     ...(doc?.availability !== undefined ? { availability: doc.availability } : {}),
     ...(doc?.vintageYear !== undefined ? { vintage: doc.vintageYear } : {}),
-    ...(doc?.grapes.length > 0 ? { grapes: doc.grapes } : {}),
+    ...(doc?.grapes !== undefined && doc.grapes.length > 0 ? { grapes: doc.grapes } : {}),
     ...(doc?.priceBand !== undefined ? { priceRange: doc.priceBand } : {}),
     ...(doc?.sourceRecordRefs !== undefined ? { sourceRecordRefs: doc.sourceRecordRefs } : {}),
   };
@@ -378,9 +378,9 @@ export class LookupWineV2CompatibilityUseCase {
     const candidateIds = shouldExposeResults(result)
       ? result.candidates.map((candidate) => createCanonicalEntityId(candidate.entityId))
       : [];
-    const docs = candidateIds.length > 0
+    const docs: ReadonlyMap<CanonicalEntityId, RetrievalDocument> = candidateIds.length > 0
       ? await this.deps.entityLookup.getDocuments(candidateIds)
-      : new Map();
+      : new Map<CanonicalEntityId, RetrievalDocument>();
     const results = shouldExposeResults(result)
       ? result.candidates.map((candidate) => toResultItem(candidate, docs.get(createCanonicalEntityId(candidate.entityId)), result))
       : [];

@@ -13,7 +13,7 @@
   - lookup authority full-distribution gate
 - `pnpm run eval:lookup-v2:shadow -- --output /tmp/lookup-v2-shadow-report.json`
   - lookup hotset smoke gate
-  - direct `searchUseCase` legacy core vs dedicated V2 비교이며, cutover 이후 public `/v1/lookup/wine` route parity proof와는 다르다
+  - explicit `lookupAuthorityMode='legacy_core'` baseline vs dedicated V2 비교이며, cutover 이후 public `/v1/lookup/wine` route parity proof와는 다르다
 
 ## Non-current / fail-closed
 
@@ -21,6 +21,9 @@
   - 현재 checkout에 없다
 - `scripts/eval/freeze-agent-baseline.ts`
   - runner 부재를 감지하면 fail-closed 한다
+- direct `SearchUseCase.execute({ primitiveRoute: 'lookup_wine' })`
+  - current compatibility authority가 기본값이다
+  - legacy-core 비교가 필요하면 명시 opt-in(`lookupAuthorityMode='legacy_core'`)이 필요하다
 - runner-based archive / compare / power-analysis docs
   - historical or dormant design notes only until a real runner is restored
 

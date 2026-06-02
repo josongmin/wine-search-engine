@@ -1,4 +1,4 @@
-/** One-off: run a single query through V2 (and V1) and dump the full decision. */
+/** One-off: run a single query through V2 and explicit legacy-core lookup, then dump the full decision. */
 import 'dotenv/config';
 import process from 'node:process';
 import { loadConfig } from '../../src/config/env.js';
@@ -24,7 +24,9 @@ async function main(): Promise<void> {
   process.stderr.write(`V2 full result:\n${JSON.stringify(v2, null, 2).slice(0, 4000)}\n`);
 
   const v1Req: SearchRequest = { query, primitiveRoute: 'lookup_wine' };
-  const v1 = await container.searchUseCase.execute(v1Req, 'debug-1', {});
+  const v1 = await container.searchUseCase.execute(v1Req, 'debug-1', {
+    lookupAuthorityMode: 'legacy_core',
+  });
   if (v1.queryType === 'search') {
     process.stderr.write(`\nV1 status=${v1.engineDecision.decisionStatus}\n`);
     process.stderr.write(`V1 reasons=${JSON.stringify(v1.engineDecision.degradationReasons ?? [])}\n`);

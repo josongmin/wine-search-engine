@@ -27,7 +27,12 @@ typecheck + lint + 64개 V2 단위 테스트). 나머지(#2 alias-registry 심�
   cutover authority.
 - Public `/v1/lookup/wine`, local CLI `lookupWine`, and agent `lookup_wine`
   are now compatibility-backed V2 authority surfaces.
+- Public `/v1/lookup/wine` and local CLI `lookupWine` no longer carry a
+  generic `SearchUseCase` fallback; a regression rail locks that authority
+  seam and requires explicit `legacy_core` opt-in for compare lanes.
 - Bench/doc SSOT for executable lanes moved to `docs/bench/STATUS.md`.
+- Older `V1 93.5%` comparison numbers are historical only; the current explicit
+  `legacy_core` rerun is `V1 46.5%`.
 
 ## 커밋 (feat/entity-lookup-v2)
 

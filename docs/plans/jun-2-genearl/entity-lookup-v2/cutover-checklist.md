@@ -28,6 +28,9 @@
     exact-head false ambiguity closed at the shared ambiguity seam
 - **15-row hotset smoke** is still PASS and still non-authoritative:
   `V2 wrong+=0` after blocker closure
+- note: the older `V1 93.5%` comparison is now historical. The current codebase's
+  explicit `legacy_core` rerun is `V1 46.5%`, so cutover docs must not quote the
+  older baseline as current truth.
 
 구현 완료(테스트·타입체크·린트 green, production wiring 완료):
 
@@ -48,10 +51,12 @@
 | 산출물 | 위치 | 상태 |
 |---|---|---|
 | hotset corpus | `test/fixtures/lookup-v2-hotset.jsonl` | ✅ (15 labeled; DoD exemplars 포함) |
-| full authority report | `/tmp/entity-resolution-validation-2026-06-03-post-cutover.json` | ✅ **AUTHORITY PASS**: `V1 100/215 (46.5%), wrong=0, miss=115` vs `V2 215/215 (100%), wrong=0, miss=0`, fingerprint `bd8abea5871dcede17272c3cc0bd1dcebcf93ea658d2d4b2ab930e5ba4f26cae` |
+| full authority report | `/tmp/entity-resolution-validation-2026-06-03-post-cutover.json` | ✅ **AUTHORITY PASS**: explicit `legacy_core` baseline `V1 100/215 (46.5%), wrong=0, miss=115` vs `V2 215/215 (100%), wrong=0, miss=0`, fingerprint `bd8abea5871dcede17272c3cc0bd1dcebcf93ea658d2d4b2ab930e5ba4f26cae` |
+| full authority revalidation (direct-lookup RCA) | `/tmp/entity-resolution-validation-2026-06-03-post-rca-authority.json` | ✅ same verdict revalidated after direct `SearchUseCase.execute({ primitiveRoute: 'lookup_wine' })` authority-routing fix; fingerprint unchanged (`bd8abea5871dcede17272c3cc0bd1dcebcf93ea658d2d4b2ab930e5ba4f26cae`) |
 | shadow-compare 메트릭 (pure) | `scripts/eval/lookup-v2-shadow-metrics.ts` | ✅ unit-tested |
 | live shadow runner (V1+V2 실행) | `scripts/eval/run-lookup-v2-shadow-compare.ts` | ✅ 구현·실행됨 |
-| shadow compare report | `/tmp/lookup-v2-shadow-2026-06-03-post-cutover.json` | ✅ **SMOKE PASS (post-cutover), NOT cutover authority**: `rows=15`, `V2 correct=10`, `wrongPositive=0`, `concept_redirect_acc=1.000`, gate PASS. **주의**: 현재 shadow lane의 `V1`은 public `/v1/lookup/wine` route가 아니라 direct `searchUseCase` legacy core 비교다. 즉 이 lane은 post-cutover에는 public route parity proof가 아니라 legacy-core smoke다. |
+| shadow compare report | `/tmp/lookup-v2-shadow-2026-06-03-post-cutover.json` | ✅ **SMOKE PASS (post-cutover), NOT cutover authority**: `rows=15`, `V2 correct=10`, `wrongPositive=0`, `concept_redirect_acc=1.000`, gate PASS. **주의**: 현재 shadow lane의 `V1`은 public `/v1/lookup/wine` route가 아니라 explicit `lookupAuthorityMode='legacy_core'` baseline이다. 즉 이 lane은 post-cutover에는 public route parity proof가 아니라 legacy-core smoke다. |
+| product-edge purge rail | `test/regression/lookup-wine-authority-surface.regression.test.ts` | ✅ public `/v1/lookup/wine` + local CLI `lookupWine` are locked to the compatibility-backed V2 seam; legacy-core compare lanes must opt in explicitly |
 | operator smoke | `/v2/entity-lookup/ops/inspect` + web `/ops/*` | ✅ (T-07 trusted plane) |
 | live canary replay | — | ⬜ (정상 stack 미러 트래픽 필요) |
 
@@ -64,7 +69,7 @@
 
 현재 authority run의 결론은 전체 분포 기준 **PASS**다. hotset은 여전히 smoke일 뿐이고,
 cutover truth는 전체 `eval_cases` 분포에 묶인다. 최신 ground-truth
-(`expected_entity_id` exact match) 숫자는 **V2 100.0% vs V1 46.5%** 이다.
+(`expected_entity_id` exact match) 숫자는 **V2 100.0% vs explicit legacy-core V1 46.5%** 이다.
 
 - **Authority 스코어러**: `pnpm run eval:lookup-v2:authority -- --output <file>` (`scripts/eval/run-entity-resolution-validation.ts`) — 전체
   `eval_cases` 를 per-class 로 채점하고, per-class 게이트 verdict(`gate.pass` + `reasons`)와
@@ -74,8 +79,8 @@ cutover truth는 전체 `eval_cases` 분포에 묶인다. 최신 ground-truth
   fingerprint 가 달라져 PASS 가 무효임을 드러낸다. **게이트 PASS 는 특정 fingerprint 에 묶인다.**
 - **Fast smoke (비-authority)**: `pnpm run eval:lookup-v2:shadow -- --output <file>` +
   15-hotset → `buildShadowReport`. 빠른 sanity check 용이며, 단독으로 cutover 를 승인할 수 없다.
-  cutover 이후 이 lane은 public `/v1/lookup/wine` route parity가 아니라 direct legacy
-  `searchUseCase` core vs dedicated V2 smoke 비교라는 점을 명시한다.
+  cutover 이후 이 lane은 public `/v1/lookup/wine` route parity가 아니라 explicit
+  `legacy_core` baseline vs dedicated V2 smoke 비교라는 점을 명시한다.
 
 ### 2.1 Overall 게이트 (`buildShadowReport`, `DEFAULT_CUTOVER_GATE`, precision-first)
 
@@ -110,10 +115,11 @@ exact_entity 상승이 덮음). 이를 막기 위해 per-class 게이트를 추�
    `/v1/lookup/wine`, local CLI, agent `lookup_wine` → V2 authority 완료.
 3. live smoke: 운영자 trusted plane(T-07)에서 DoD exemplar 쿼리 수동 확인.
 4. canary: 트래픽 일부를 V2로 미러링(shadow) — 로그상 wrong-positive 0 유지 확인.
-5. `docs` + catalog 갱신, 남은 legacy purge 항목만 추적한다.
+5. `docs` + catalog 갱신, 남은 항목은 release-cycle 이후 legacy resolver deletion만 추적한다.
 
 ## 4. Legacy purge 조건
 
+- product edge (`/v1/lookup/wine`, local CLI `lookupWine`) fallback purge는 완료되었다.
 - cutover 후 **최소 1 release cycle** V2 authority 무사고 운영.
 - compatibility route `/v1/lookup/wine` 호출량과 error mix를 telemetry로 본다.
 - 확인 후에만 V1 resolver path purge + catalog major bump.

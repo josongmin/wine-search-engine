@@ -67,68 +67,9 @@ export function buildUseCaseContainerServices(
   config: Config,
   extensions: UseCaseExtensions = {},
 ): UseCaseContainerServices {
+  const aliasRegistryVersion = core.aliasMatcher.getRegistryVersion?.();
   const drinkingWindowUseCase = new DrinkingWindowUseCase(core.drinkingWindowPredictor);
   const queryEntrySecurityObserver = getQueryEntrySecurityMetricsCollector();
-
-  // T1.3b: Use DecomposedSearchAdapter to break the circular dependency.
-  // SearchUseCase needs decomposedSearch; DecomposedSearchUseCase needs SearchUseCase.
-  const decomposedRef: { impl?: DecomposedSearchUseCase } = {};
-  const decomposedAdapter = new DecomposedSearchAdapter(() => {
-    const impl = decomposedRef.impl;
-    if (impl === undefined) {
-      throw new Error('[DecomposedSearchAdapter] wiring incomplete — impl not set');
-    }
-    return impl;
-  });
-
-  const searchUseCase = new SearchUseCase({
-    queryPlanner: core.queryPlanner,
-    entityLookupAnchorRefresh: core.entityLookupAnchorRefresh,
-    blocker: core.blocker,
-    entityResolver: core.entityResolver,
-    entityLookup: core.entityLookup,
-    candidatePool: core.candidatePool,
-    browseRetriever: core.browseRetriever,
-    compareRetriever: core.compareRetriever,
-    ranker: core.ranker,
-    decisionEngine: core.decisionEngine,
-    responseBuilder: core.responseBuilder,
-    mixedSolver: core.mixedSolver,
-    snapshotVersions: core.snapshotVersions,
-    querySanitizer: core.querySanitizer,
-    injectionJudge: core.injectionJudge,
-    judgeFailureMode: config.queryEntrySecurity.judgeFailureMode,
-    judgeTimeoutMs: config.queryEntrySecurity.judgeTimeoutMs,
-    queryEntrySecurityObserver,
-    drinkingWindow: drinkingWindowUseCase,
-    fieldAvailability: core.fieldAvailability,
-    cacheService: core.cacheService,
-    cacheLookupRuntimeState: core.cacheLookupRuntimeState,
-    cacheLookupRuntimeStateProvider: core.cacheLookupRuntimeStateProvider,
-    ltrModels: core.ltrModels,
-    decomposedSearch: decomposedAdapter,
-    ...(extensions.multiQueryGenerator !== undefined
-      ? { multiQueryGenerator: extensions.multiQueryGenerator }
-      : {}),
-    ...(extensions.hydeGenerator !== undefined
-      ? { hydeGenerator: extensions.hydeGenerator }
-      : {}),
-  });
-
-  decomposedRef.impl = new DecomposedSearchUseCase(searchUseCase);
-  const decomposedSearchUseCase = decomposedRef.impl;
-  const resolveUseCase = new ResolveUseCase({
-    queryPlanner: core.queryPlanner,
-    blocker: core.blocker,
-    entityResolver: core.entityResolver,
-    entityLookup: core.entityLookup,
-    snapshotVersions: core.snapshotVersions,
-    querySanitizer: core.querySanitizer,
-    injectionJudge: core.injectionJudge,
-    judgeFailureMode: config.queryEntrySecurity.judgeFailureMode,
-    judgeTimeoutMs: config.queryEntrySecurity.judgeTimeoutMs,
-    queryEntrySecurityObserver,
-  });
 
   // T-ELV2-01: dedicated `/v2/entity-lookup` use case. Sibling stack to the
   // discovery primitives — reuses the resolver primitives as substrate, owns
@@ -166,8 +107,8 @@ export function buildUseCaseContainerServices(
     // T-ELV2-03: dedicated alias-registry version identity read from the live
     // alias substrate (delegated through the CachedAliasMatcher chain), surfaced
     // on the V2 response meta. undefined when the matcher carries no version.
-    ...(core.aliasMatcher?.getRegistryVersion?.() !== undefined
-      ? { aliasRegistryVersion: core.aliasMatcher.getRegistryVersion() }
+    ...(aliasRegistryVersion !== undefined
+      ? { aliasRegistryVersion }
       : {}),
     querySanitizer: core.querySanitizer,
     injectionJudge: core.injectionJudge,
@@ -180,6 +121,67 @@ export function buildUseCaseContainerServices(
     entityLookupV2UseCase,
     entityLookup: core.entityLookup,
     snapshotVersions: core.snapshotVersions,
+  });
+
+  // T1.3b: Use DecomposedSearchAdapter to break the circular dependency.
+  // SearchUseCase needs decomposedSearch; DecomposedSearchUseCase needs SearchUseCase.
+  const decomposedRef: { impl?: DecomposedSearchUseCase } = {};
+  const decomposedAdapter = new DecomposedSearchAdapter(() => {
+    const impl = decomposedRef.impl;
+    if (impl === undefined) {
+      throw new Error('[DecomposedSearchAdapter] wiring incomplete — impl not set');
+    }
+    return impl;
+  });
+
+  const searchUseCase = new SearchUseCase({
+    queryPlanner: core.queryPlanner,
+    entityLookupAnchorRefresh: core.entityLookupAnchorRefresh,
+    blocker: core.blocker,
+    entityResolver: core.entityResolver,
+    entityLookup: core.entityLookup,
+    candidatePool: core.candidatePool,
+    browseRetriever: core.browseRetriever,
+    compareRetriever: core.compareRetriever,
+    ranker: core.ranker,
+    decisionEngine: core.decisionEngine,
+    responseBuilder: core.responseBuilder,
+    mixedSolver: core.mixedSolver,
+    snapshotVersions: core.snapshotVersions,
+    querySanitizer: core.querySanitizer,
+    injectionJudge: core.injectionJudge,
+    judgeFailureMode: config.queryEntrySecurity.judgeFailureMode,
+    judgeTimeoutMs: config.queryEntrySecurity.judgeTimeoutMs,
+    queryEntrySecurityObserver,
+    drinkingWindow: drinkingWindowUseCase,
+    fieldAvailability: core.fieldAvailability,
+    cacheService: core.cacheService,
+    cacheLookupRuntimeState: core.cacheLookupRuntimeState,
+    cacheLookupRuntimeStateProvider: core.cacheLookupRuntimeStateProvider,
+    lookupWineV2CompatibilityUseCase,
+    ltrModels: core.ltrModels,
+    decomposedSearch: decomposedAdapter,
+    ...(extensions.multiQueryGenerator !== undefined
+      ? { multiQueryGenerator: extensions.multiQueryGenerator }
+      : {}),
+    ...(extensions.hydeGenerator !== undefined
+      ? { hydeGenerator: extensions.hydeGenerator }
+      : {}),
+  });
+
+  decomposedRef.impl = new DecomposedSearchUseCase(searchUseCase);
+  const decomposedSearchUseCase = decomposedRef.impl;
+  const resolveUseCase = new ResolveUseCase({
+    queryPlanner: core.queryPlanner,
+    blocker: core.blocker,
+    entityResolver: core.entityResolver,
+    entityLookup: core.entityLookup,
+    snapshotVersions: core.snapshotVersions,
+    querySanitizer: core.querySanitizer,
+    injectionJudge: core.injectionJudge,
+    judgeFailureMode: config.queryEntrySecurity.judgeFailureMode,
+    judgeTimeoutMs: config.queryEntrySecurity.judgeTimeoutMs,
+    queryEntrySecurityObserver,
   });
 
   // T-ELV2-07: operator curation plane. DB-only — wired solely when a PG pool

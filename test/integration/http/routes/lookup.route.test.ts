@@ -75,6 +75,9 @@ function buildEmptyLookupResponse(overrides?: {
 function makeDeps(executeMock = vi.fn().mockResolvedValue(buildEmptyLookupResponse())): SearchRouteDeps {
   return {
     searchUseCase: {
+      execute: vi.fn(),
+    },
+    lookupWineV2CompatibilityUseCase: {
       execute: executeMock,
     },
   };
@@ -120,29 +123,31 @@ describe('POST /v1/lookup/wine', () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(deps.searchUseCase.execute).not.toHaveBeenCalled();
+    expect(deps.lookupWineV2CompatibilityUseCase?.execute).not.toHaveBeenCalled();
   });
 
   it('forwards the same observability execution options shape as the discovery primitives', async () => {
     const response = await post(app, '/v1/lookup/wine', { query: 'Opus One 2018' });
 
     expect(response.statusCode).toBe(200);
-    expect(deps.searchUseCase.execute).toHaveBeenCalledTimes(1);
-    const args = (deps.searchUseCase.execute as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(args?.[2]).toMatchObject({
+    expect(deps.lookupWineV2CompatibilityUseCase?.execute).toHaveBeenCalledTimes(1);
+    const args = (deps.lookupWineV2CompatibilityUseCase?.execute as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(args?.[1]).toMatchObject({
       abortSignal: expect.any(AbortSignal),
       stageTimer: expect.any(Object),
     });
-    expect(args?.[2]).toHaveProperty('debugRequest');
+    expect(args?.[1]).toHaveProperty('debugRequest');
   });
 
   it('returns 200 with empty results when the entity is not found (not 404)', async () => {
     // Lookup never returns 404 — a miss surfaces as the SearchResponseV1
     // empty-result + failure_reason envelope. Callers detect "not found" via
     // results.length === 0 and engine_decision.failure_reason.
-    deps.searchUseCase.execute = vi
-      .fn()
-      .mockResolvedValue(buildEmptyLookupResponse({ failureReason: 'NO_RESULTS' }));
+    deps.lookupWineV2CompatibilityUseCase = {
+      execute: vi
+        .fn()
+        .mockResolvedValue(buildEmptyLookupResponse({ failureReason: 'NO_RESULTS' })),
+    };
 
     const response = await post(app, '/v1/lookup/wine', { query: 'this-wine-does-not-exist-9999' });
 
@@ -152,7 +157,7 @@ describe('POST /v1/lookup/wine', () => {
     expect(body.engine_decision.failure_reason).toBe('NO_RESULTS');
   });
 
-  it('prefers the V2 compatibility seam when it is wired', async () => {
+  it('uses the V2 compatibility seam as the lookup authority', async () => {
     const compatibilityResponse = buildEmptyLookupResponse({ decisionStatus: 'resolved' });
     const compatibilityExecute = vi.fn().mockResolvedValue(compatibilityResponse);
     deps = {
@@ -201,8 +206,8 @@ describe('POST /v1/lookup/wine', () => {
     const response = await post(app, '/v1/lookup/wine', { query: koreanQuery });
 
     expect(response.statusCode).toBe(200);
-    const args = (deps.searchUseCase.execute as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(args?.[0]).toMatchObject({ query: koreanQuery, retrieval_mode: 'entity' });
+    const args = (deps.lookupWineV2CompatibilityUseCase?.execute as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(args?.[0]).toMatchObject({ query: koreanQuery });
   });
 
   it('preserves Korean NFC and NFD forms verbatim at the route boundary', async () => {
@@ -220,7 +225,7 @@ describe('POST /v1/lookup/wine', () => {
     await post(app, '/v1/lookup/wine', { query: SHA_NFC });
     await post(app, '/v1/lookup/wine', { query: SHA_NFD });
 
-    const calls = (deps.searchUseCase.execute as ReturnType<typeof vi.fn>).mock.calls;
+    const calls = (deps.lookupWineV2CompatibilityUseCase?.execute as ReturnType<typeof vi.fn>).mock.calls;
     expect(calls).toHaveLength(2);
     // Each call gets the EXACT Unicode form the client sent — the route does
     // not auto-collapse NFD into NFC at the boundary.
@@ -238,7 +243,7 @@ describe('POST /v1/lookup/wine', () => {
     expect(body.error.code).toBe('VALIDATION_ERROR');
     expect(body.error.request_id).toEqual(expect.any(String));
     expect(body.error.request_id.length).toBeGreaterThan(0);
-    expect(deps.searchUseCase.execute).not.toHaveBeenCalled();
+    expect(deps.lookupWineV2CompatibilityUseCase?.execute).not.toHaveBeenCalled();
   });
 
   it('rejects empty-string query with 400 + RFC-014 VALIDATION_ERROR envelope', async () => {
@@ -248,7 +253,7 @@ describe('POST /v1/lookup/wine', () => {
     const body = response.json();
     expect(ErrorResponseSchema.safeParse(body).success).toBe(true);
     expect(body.error.code).toBe('VALIDATION_ERROR');
-    expect(deps.searchUseCase.execute).not.toHaveBeenCalled();
+    expect(deps.lookupWineV2CompatibilityUseCase?.execute).not.toHaveBeenCalled();
   });
 
   it('rejects oversized query (> MAX_QUERY_LENGTH chars) with 400 + RFC-014 envelope', async () => {
@@ -260,7 +265,7 @@ describe('POST /v1/lookup/wine', () => {
     const body = response.json();
     expect(ErrorResponseSchema.safeParse(body).success).toBe(true);
     expect(body.error.code).toBe('VALIDATION_ERROR');
-    expect(deps.searchUseCase.execute).not.toHaveBeenCalled();
+    expect(deps.lookupWineV2CompatibilityUseCase?.execute).not.toHaveBeenCalled();
   });
 
   it('accepts a query of EXACTLY MAX_QUERY_LENGTH chars (boundary just inside)', async () => {
@@ -272,7 +277,7 @@ describe('POST /v1/lookup/wine', () => {
     const response = await post(app, '/v1/lookup/wine', { query: boundary });
 
     expect(response.statusCode).toBe(200);
-    expect(deps.searchUseCase.execute).toHaveBeenCalledTimes(1);
+    expect(deps.lookupWineV2CompatibilityUseCase?.execute).toHaveBeenCalledTimes(1);
   });
 
   it('rejects a comparison-typed use-case response with 400 INVALID_REQUEST', async () => {
@@ -296,7 +301,9 @@ describe('POST /v1/lookup/wine', () => {
       },
     } as unknown as ComparisonSearchResponse;
 
-    deps.searchUseCase.execute = vi.fn().mockResolvedValue(comparison);
+    deps.lookupWineV2CompatibilityUseCase = {
+      execute: vi.fn().mockResolvedValue(comparison),
+    };
 
     const response = await post(app, '/v1/lookup/wine', { query: 'Opus One vs Caymus' });
 
@@ -308,21 +315,21 @@ describe('POST /v1/lookup/wine', () => {
   });
 
   it('threads requestId through to the use case and into the response meta', async () => {
-    deps.searchUseCase.execute = vi
-      .fn()
-      .mockImplementation(async (_req: unknown, requestId: string) => {
+    deps.lookupWineV2CompatibilityUseCase = {
+      execute: vi.fn().mockImplementation(async (_req: unknown, options?: { requestId?: string }) => {
         const r = buildEmptyLookupResponse({ failureReason: 'NO_RESULTS' });
         return {
           ...r,
-          meta: { ...r.meta, requestId },
+          meta: { ...r.meta, requestId: options?.requestId ?? 'missing-request-id' },
         };
-      });
+      }),
+    };
 
     const response = await post(app, '/v1/lookup/wine', { query: 'Opus One 2018' });
 
     expect(response.statusCode).toBe(200);
-    const args = (deps.searchUseCase.execute as ReturnType<typeof vi.fn>).mock.calls[0];
-    const usedRequestId = args?.[1] as string;
+    const args = (deps.lookupWineV2CompatibilityUseCase?.execute as ReturnType<typeof vi.fn>).mock.calls[0];
+    const usedRequestId = args?.[1]?.requestId as string;
     expect(usedRequestId).toEqual(expect.any(String));
     expect(usedRequestId.length).toBeGreaterThan(0);
     const body = response.json();
@@ -337,7 +344,7 @@ describe('POST /v1/lookup/wine', () => {
     const response = await post(app, '/v1/lookup/wine', { query });
 
     expect(response.statusCode).toBe(200);
-    const args = (deps.searchUseCase.execute as ReturnType<typeof vi.fn>).mock.calls[0];
+    const args = (deps.lookupWineV2CompatibilityUseCase?.execute as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(args?.[0]).toMatchObject({ query });
   });
 
@@ -345,12 +352,14 @@ describe('POST /v1/lookup/wine', () => {
     // The route plumbs request-abort into the use case. Without this signal,
     // long-running lookups cannot be cancelled when the client disconnects.
     let capturedSignal: AbortSignal | undefined;
-    deps.searchUseCase.execute = vi.fn().mockImplementation(
-      async (_req: unknown, _requestId: string, options?: { abortSignal?: AbortSignal }) => {
-        capturedSignal = options?.abortSignal;
-        return buildEmptyLookupResponse();
-      },
-    );
+    deps.lookupWineV2CompatibilityUseCase = {
+      execute: vi.fn().mockImplementation(
+        async (_req: unknown, options?: { abortSignal?: AbortSignal }) => {
+          capturedSignal = options?.abortSignal;
+          return buildEmptyLookupResponse();
+        },
+      ),
+    };
 
     const response = await post(app, '/v1/lookup/wine', { query: 'Opus One' });
 

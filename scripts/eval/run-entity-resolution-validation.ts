@@ -1,7 +1,8 @@
 /**
- * Expanded entity-resolution validation: V1 (`/v1/lookup/wine`) vs V2
- * (`/v2/entity-lookup`) over the PG `eval_cases` ground truth, scored by EXACT
- * `expected_entity_id` match — far more rigorous than the 15-query hotset.
+ * Expanded entity-resolution validation: explicit legacy-core `lookup_wine`
+ * vs dedicated V2 (`/v2/entity-lookup`) over the PG `eval_cases` ground truth,
+ * scored by EXACT `expected_entity_id` match — far more rigorous than the
+ * 15-query hotset.
  *
  * Scope (entity-semantic classes only — others lack a target entity and
  * conflate with concept-redirect, so they are excluded from the resolution
@@ -19,6 +20,10 @@
  * Usage:
  *   pnpm run eval:lookup-v2:authority -- \
  *     [--limit-per-class N] [--output <file.json>]
+ *
+ * Post-cutover note: direct SearchUseCase callers default to the
+ * compatibility-backed current authority path. This script opts into
+ * `legacy_core` explicitly so the comparison remains honest.
  */
 import 'dotenv/config';
 import process from 'node:process';
@@ -161,7 +166,9 @@ async function main(): Promise<void> {
     let v1: SideOutcome = { status: 'failed' };
     try {
       const req: SearchRequest = { query: c.query, primitiveRoute: 'lookup_wine' };
-      const resp = await container.searchUseCase.execute(req, requestId, {});
+      const resp = await container.searchUseCase.execute(req, requestId, {
+        lookupAuthorityMode: 'legacy_core',
+      });
       if (resp.queryType === 'search') {
         const status = resp.engineDecision.decisionStatus;
         const top = resp.results[0]?.entity;

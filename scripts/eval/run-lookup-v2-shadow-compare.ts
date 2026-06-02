@@ -1,7 +1,7 @@
 /**
  * Entity Lookup V2 — live V1↔V2 shadow-compare runner (T-ELV2-08).
  *
- * Executes BOTH the legacy `/v1/lookup/wine` path (`searchUseCase`) and the
+ * Executes BOTH the explicit legacy-core `lookup_wine` path and the
  * `/v2/entity-lookup` path (`entityLookupV2UseCase`) over the labeled hotset
  * corpus, normalizes each into a {@link ShadowSideOutcome}, scores the run with
  * the pure {@link buildShadowReport} gate, writes a JSON report, and EXITS
@@ -14,9 +14,9 @@
  *
  *   pnpm run eval:lookup-v2:shadow [-- --corpus <path> --output <path>]
  *
- * Post-cutover note: this lane compares direct `searchUseCase` legacy core vs
- * dedicated `entityLookupV2UseCase`. It is not a public `/v1/lookup/wine`
- * route-parity proof after compatibility-backed cutover.
+ * Post-cutover note: this lane opts into `legacy_core` explicitly. It is not a
+ * public `/v1/lookup/wine` route-parity proof after compatibility-backed
+ * cutover.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -120,7 +120,9 @@ async function main(): Promise<void> {
     let v1: ShadowSideOutcome = { status: 'failed' };
     try {
       const v1Request: SearchRequest = { query: row.query, primitiveRoute: 'lookup_wine' };
-      const v1Response = await container.searchUseCase.execute(v1Request, requestId, {});
+      const v1Response = await container.searchUseCase.execute(v1Request, requestId, {
+        lookupAuthorityMode: 'legacy_core',
+      });
       if (v1Response.queryType === 'search') {
         v1 = v1Outcome(v1Response);
       }
