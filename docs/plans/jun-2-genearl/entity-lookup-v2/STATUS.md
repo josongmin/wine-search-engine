@@ -35,8 +35,8 @@ typecheck + lint + 64개 V2 단위 테스트). 나머지(#2 alias-registry 심�
 | #3 까쇼류 concept → resolve 안 함 | ✅ | ConceptAdmissionGate (pre-retrieval redirect) |
 | #4 exact/translit/fuzzy/family/dense 다채널 union | ✅(재투영) | channel-provenance; 독립 timed runtime은 다음 단계 |
 | #5 learned scorer + calibrated abstain contract | ✅(calibrated abstain) | CalibratedAbstainDecider; learned reranker(LTR)는 다음 단계 |
-| #6 operator trusted plane | ❌ | T-ELV2-07 미착수 |
-| #7 shadow + hotset 후 cutover | 🟡 게이트 완료 | shadow-metrics gate + cutover-checklist 완료; live runner 실측 미완 — **cutover 금지 유지** |
+| #6 operator trusted plane | ✅(read) | `POST /v2/entity-lookup/ops/inspect` (X-Debug-Key gated) — decision spine 반환. curation WRITE plane은 미완(T-03 migration) |
+| #7 shadow + hotset 후 cutover | 🟡 rail 완료 | shadow-metrics gate + **live runner**(run-lookup-v2-shadow-compare.ts) + package/gate script 완료(infra-gated 실행); 실측 canary 미완 — **cutover 금지 유지** |
 
 ## 아키텍처 (frozen seams)
 
@@ -48,6 +48,24 @@ CalibratedAbstainDecider → 4-state 응답. `LookupCandidateRetrievalPort` /
 
 V2는 V1 wrapper가 아님: 전용 contract + admission(resolve 이전) + 4-state(redirect 포함)
 + calibrated 결정을 소유. resolver의 scoring/calibration **primitive만** 기반으로 재사용.
+
+## 2026-06-02 후속 라운드 (review-driven)
+
+전문 리뷰(rr/codex) 피드백을 코드로 반영:
+- **admission front-door 수정 (P1)**: 이전엔 gate 전에 `queryPlanner.plan()`(alias-refresh 포함)을 돌려 concept 쿼리가 planner를 거쳤음. 이제 standalone `buildNormalizedQueryViews`로 gate를 **planner 이전**에 실행 — 비-admit 쿼리는 planner 미호출(회귀로 잠금: 까쇼 → queryPlanner.plan NOT called).
+- **T-ELV2-07 ops plane 코드로 ship (P1)**: `/v2/entity-lookup/ops/inspect`(X-Debug-Key gated, diagnostic) + catalog v7.2.0 + server 등록 + integration test.
+- **T-ELV2-08 live runner ship (P1)**: `run-lookup-v2-shadow-compare.ts`(V1+V2 실행→gate, 실패 시 exit≠0) + `eval:lookup-v2:shadow` / `lookup-v2:cutover-gate` scripts.
+- **route-level HTTP rail (P2)**: `test/integration/http/routes/entity-lookup-v2.route.test.ts` — Fastify wiring/snake_case/400/403/diagnostic.
+- **mode 제거 (P3)**: public schema에서 inert `mode` 제거; ops plane 전용.
+- **T-ELV2-06 clarification**: 후보 클러스터 label-diff 기반 distinguishing feature + kind(deterministic, heuristic-approx 아님).
+
+### 아직 남은 deep infra phase (정직)
+
+리뷰 P2 중 아래는 **라이브 인프라 빌드**라 별도 phase 필요(이번 세션 미완, seam은 고정됨):
+- **T-ELV2-04 real**: 독립 timed multi-channel retrieval runtime(`LookupCandidateRetrievalPort` 구현). 현재는 anchor recall 재투영 + `latencyMs:0`. 필요: `AliasRepository`(현재 container 미노출, live는 `adapters.aliasMatcher`) 또는 Vespa 채널을 V2에 노출 → per-channel 실측 score/latency.
+- **T-ELV2-05 real**: learned reranker(LTR) — `LookupRerankDecisionPort` + feature pipeline + 모델. 현재는 calibrated-abstain만.
+- **T-ELV2-03 deepen**: alias-registry-v2 migration(030) + curation WRITE plane(proposal→review→publish, 기존 `alias_proposals` 확장).
+- **T-ELV2-06 deepen**: persisted family/ambiguity substrate(ETL) + `kind`/`ambiguity_types` wire 노출 여부 contract 확정. 현재 in-process label-graph.
 
 ## 남은 작업 (이어받기)
 
