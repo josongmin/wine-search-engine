@@ -307,6 +307,7 @@ export class Resolver {
       reasonCodes,
       lookupStrategyAdjustments,
       learnedMatcherOutputs,
+      top1Entry.rawScore,
     );
 
     const conformalSetSize = computeConformalSetSize(
@@ -749,7 +750,8 @@ export class Resolver {
     thresholds: ThresholdEntry,
     reasonCodes: readonly string[],
     lookupStrategyAdjustments: readonly LookupStrategyAdjustment[],
-    learnedOutputs?: readonly LearnedMatcherOutput[],
+    learnedOutputs: readonly LearnedMatcherOutput[] | undefined,
+    top1RawScore: number,
   ): ResolverDecisionTrace {
     const anchorLookupVariants = this.collectAnchorLookupVariants(input.anchorCandidates);
     const anchorLookupStrategies = this.collectAnchorLookupStrategies(input.anchorCandidates);
@@ -806,6 +808,7 @@ export class Resolver {
       top2CalibratedScore: calibrated.top2CalibratedScore,
       calibratedGap: calibrated.calibratedGap,
       decisionConfidenceC: calibrated.decisionConfidenceC,
+      ...(Number.isFinite(top1RawScore) ? { top1RawScore } : {}),
       calibrationTrusted: calibrated.calibrationTrusted,
       ambiguityDetected: ambiguity.detected,
       ambiguityTypes: ambiguity.types,

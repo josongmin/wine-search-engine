@@ -47,6 +47,14 @@ export interface DecisionOutput {
    */
   readonly calibrationTrusted?: boolean;
 
+  /**
+   * Raw (pre-calibration) top-1 resolver score, propagated from
+   * {@link ResolverDecisionTrace.top1RawScore}. Eval-only signal: persisted to
+   * `eval_results.top1_raw_score` for the calibration trainer. Undefined when
+   * no candidate was scored. MUST NOT be treated as a probability.
+   */
+  readonly top1RawScore?: number;
+
   /** The selected entity, present only when status is 'resolved'. */
   readonly selectedEntity?: {
     readonly entityId: CanonicalEntityId;

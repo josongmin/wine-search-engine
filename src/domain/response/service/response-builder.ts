@@ -346,6 +346,9 @@ export class ResponseBuilder {
       ...(output.calibrationTrusted !== undefined
         ? { calibrationTrusted: output.calibrationTrusted }
         : {}),
+      ...(output.top1RawScore !== undefined
+        ? { top1RawScore: output.top1RawScore }
+        : {}),
       decisionTraceRef: output.decisionTraceRef,
       authorityTraceRef: output.decisionTraceRef,
       decisionSnapshot: output.decisionSnapshot,

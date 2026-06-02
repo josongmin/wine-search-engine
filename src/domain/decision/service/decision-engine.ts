@@ -1252,6 +1252,9 @@ export class DecisionEngine {
         resolverTrace.calibrationTrusted,
       ),
       calibrationTrusted: resolverTrace.calibrationTrusted,
+      ...(resolverTrace.top1RawScore !== undefined
+        ? { top1RawScore: resolverTrace.top1RawScore }
+        : {}),
       ...(isResolved
         ? {
             selectedEntity: {

@@ -124,6 +124,14 @@ export interface SearchPipelineOutput {
   /** Score components from the top-ranked result, for LTR training. */
   readonly topResultScoreComponents?: LTRScoreComponents;
 
+  /**
+   * Raw (pre-calibration) top-1 resolver score, surfaced from
+   * `SearchResponse.engineDecision.top1RawScore`. Persisted to
+   * `eval_results.top1_raw_score`; the calibration trainer consumes
+   * (top1RawScore, isCorrectResolve) pairs. Undefined when no candidate scored.
+   */
+  readonly top1RawScore?: number;
+
   /** T5.6: Stage-aware funnel metrics emitted by the ranking pipeline when available. */
   readonly funnelMetrics?: FunnelMetrics;
 
@@ -414,6 +422,9 @@ export class EvalRunner {
         : {}),
       ...(output.topResultScoreComponents !== undefined
         ? { topResultScoreComponents: output.topResultScoreComponents }
+        : {}),
+      ...(output.top1RawScore !== undefined
+        ? { top1RawScore: output.top1RawScore }
         : {}),
       ...(output.funnelMetrics !== undefined
         ? { funnelMetrics: output.funnelMetrics }
