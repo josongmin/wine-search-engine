@@ -33,6 +33,11 @@ describe('mapLookupStrategyToChannel', () => {
     // fire first). It is a recall strategy → fuzzy_alias.
     ['transliterated_fuzzy', 'fuzzy_alias'],
     ['index_transliterated_fuzzy', 'fuzzy_alias'],
+    // transliterated_prefix is emitted LIVE by both wired matchers — it is a
+    // recall variant, not identity-grade, so it must NOT map to transliteration_exact
+    // (self-review C1 found the original guard let it through).
+    ['transliterated_prefix', 'fuzzy_alias'],
+    ['index_transliterated_prefix', 'fuzzy_alias'],
     ['lexical_exact', 'fuzzy_alias'],
     ['phonetic_fuzzy', 'jamo_phonetic'],
     ['fuzzy_char_ngram', 'fuzzy_alias'],

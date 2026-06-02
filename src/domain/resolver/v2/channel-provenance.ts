@@ -27,11 +27,13 @@ import type { LookupChannelHit, LookupRetrievalChannel } from './lookup-v2-types
 export function mapLookupStrategyToChannel(strategy: string): LookupRetrievalChannel | undefined {
   const s = strategy.toLowerCase();
   if (s.includes('compact')) return 'compact_exact';
-  // `transliterated_fuzzy` (emitted live by SearchIndex/SearchSnapshot matchers)
-  // must NOT be labeled transliteration_exact — the bare `translit` branch fired
-  // before the fuzzy check below and forged a fuzzy recall as an exact channel
-  // (T-04 audit). Exclude fuzzy/inexact translit so they fall through to fuzzy_alias.
-  if (s.includes('translit') && !/fuzzy|inexact/u.test(s)) return 'transliteration_exact';
+  // Only WHOLE-string transliterated_exact is identity-grade. Recall/expansion
+  // translit variants emitted LIVE by the wired matchers — transliterated_fuzzy
+  // AND transliterated_prefix (search-index-alias-matcher.ts / search-snapshot-
+  // alias-matcher.ts) — must NOT be forged as exact; they fall through to
+  // fuzzy_alias. The exclusion mirrors the recall vocabulary of the fuzzy branch
+  // below (fuzzy/inexact/prefix/lexical). (T-04 audit + self-review C1.)
+  if (s.includes('translit') && !/fuzzy|inexact|prefix|lexical/u.test(s)) return 'transliteration_exact';
   // NOTE: jamo_phonetic is a NEAR-exact (not identity-grade) channel, so a
   // phonetic_fuzzy hit stays here rather than routing to fuzzy_alias — unlike
   // transliteration_exact, which IS identity-grade and must exclude fuzzy.

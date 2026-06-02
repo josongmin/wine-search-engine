@@ -7,12 +7,13 @@
  * curation flow as alias/registry proposals (RFC DoD §2 — `dom perignon` /
  * `돔페리뇽`류 hole이 coverage report와 curation flow에서 다뤄진다).
  *
- * This is the SSoT for coverage classification. The ETL script
- * (`scripts/etl/lookup-v2-coverage-report.ts`) and the operator coverage/health
- * use-case (T-ELV2-07) both import from here — no duplicated logic. The script's
- * live wrapper runs `/v2/entity-lookup` over the hotset corpus
- * (`test/fixtures/lookup-v2-hotset.jsonl`) and feeds the observed statuses in;
- * keeping the classification pure makes the report deterministic and testable.
+ * This is the SSoT for coverage classification. Its sole production consumer is
+ * the live coverage runner `scripts/eval/run-lookup-v2-coverage-report.ts`
+ * (`pnpm run eval:lookup-v2:coverage`), which runs `/v2/entity-lookup` over the
+ * hotset corpus (`test/fixtures/lookup-v2-hotset.jsonl`), feeds the observed
+ * statuses in here, and pipes the resulting holes into `buildCurationTasks` for
+ * the T-07 operator write-plane queue. Keeping the classification pure makes the
+ * report deterministic and testable.
  *
  * Domain leaf: this module imports nothing outside the domain (pure).
  */

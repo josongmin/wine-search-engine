@@ -108,9 +108,11 @@ export const FeaturesEnvSchema = z.object({
    * /v2 lookup feature projection (toRankingFeatures) is OUT-OF-DISTRIBUTION
    * (e.g. the bm25Score slot is trained as constant 0.0). Activation requires a
    * LOOKUP-domain-trained model whose featureSchemaHash === LTR_FEATURE_SCHEMA_HASH,
-   * or explicit owner approval of the projection. See the train-serve blocker in
-   * the T-ELV2-05 runbook. The secondary schema-hash+dimension verification in the
-   * loader/registry is a structural gate only — it does NOT detect OOD.
+   * or explicit owner approval of the projection. TRAIN-SERVE BLOCKER (inlined):
+   * the lookup→ranking projection (toRankingFeatures) puts normalizedAliasEvidence
+   * in the bm25Score slot that a search-trained model only ever saw as 0.0 — out of
+   * distribution. The loader/registry schema-hash+dimension verification is a
+   * structural gate only — it does NOT detect OOD.
    */
   LTR_SERVING_ENABLED: z
     .enum(['true', 'false'])

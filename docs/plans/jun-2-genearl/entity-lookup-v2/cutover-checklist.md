@@ -27,7 +27,7 @@
 | hotset corpus | `test/fixtures/lookup-v2-hotset.jsonl` | ✅ (15 labeled; DoD exemplars 포함) |
 | shadow-compare 메트릭 (pure) | `scripts/eval/lookup-v2-shadow-metrics.ts` | ✅ unit-tested |
 | live shadow runner (V1+V2 실행) | `scripts/eval/run-lookup-v2-shadow-compare.ts` | ✅ 구현·실행됨 |
-| shadow compare report | `shadow-results-2026-06-02.md` | 🟡 실행됨이나 **degenerate**(V1·V2 둘 다 15/15 abstain, degraded substrate) — 비교 무의미. 이제 non-degeneracy 게이트(아래 Gate 4)가 이런 run의 PASS를 차단. **정상 stack에서 재실행 필요** |
+| shadow compare report | `shadow-results-2026-06-02.md` | 🟡 실행됨·**PASS**(V2 correct=7 > V1=3, wrong-positive 0, non-degenerate) but degraded-substrate caveat(untrusted calibration). raw JSON은 `/tmp`만(미커밋). Gate 4(non-degeneracy)가 향후 0-resolve run의 PASS를 차단. cutover 전 **fresh 정상-stack 재실행 + raw artifact 커밋** 권장 |
 | operator smoke | `/v2/entity-lookup/ops/inspect` + web `/ops/*` | ✅ (T-07 trusted plane) |
 | live canary replay | — | ⬜ (정상 stack 미러 트래픽 필요) |
 

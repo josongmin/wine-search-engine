@@ -141,9 +141,17 @@ export function buildUseCaseContainerServices(
       aliasMatcher: core.aliasMatcher,
       entityLookup: core.entityLookup,
     }),
-    // T-ELV2-05: learned reranker over the trained LambdaMART models (graceful
-    // lexical fallback when no model for the query class).
-    reranker: new LtrRerankDecider({ ...(core.ltrModels !== undefined ? { ltrModels: core.ltrModels } : {}) }),
+    // T-ELV2-05: learned reranker — wired ONLY when LTR serving is on AND a model
+    // is loaded (core.ltrModels present). When absent we OMIT the reranker entirely
+    // so the calibrated-abstain decision stands alone: otherwise the decider's
+    // lexicalFallback would apply its (self-admitted UNVALIDATED) 0.5/0.1 thresholds
+    // to calibratedScore on every live request and downgrade-only combine could flip
+    // a calibrated resolve — the exact threshold-tweak the ticket forbids. The
+    // learned branch is reached only with a real loaded model (or in tests via an
+    // injected model).
+    ...(core.ltrModels !== undefined
+      ? { reranker: new LtrRerankDecider({ ltrModels: core.ltrModels }) }
+      : {}),
     // T-ELV2-06: persisted ambiguity substrate (registry-backed) enriches the
     // clarification contract with authoritative types + severity.
     ambiguityDictionary: core.ambiguityDictionary,
