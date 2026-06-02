@@ -48,6 +48,7 @@ import type {
 } from '../../../domain/resolver/v2/lookup-v2-types.js';
 import { CalibratedAbstainDecider } from '../../../domain/resolver/v2/calibrated-abstain-decider.js';
 import { extractLookupFeatures } from '../../../domain/resolver/v2/lookup-feature-extractor.js';
+import { shouldDowngradeForVintageMismatch, VINTAGE_MISMATCH_REASON_CODE } from '../../../domain/resolver/v2/vintage-guard.js';
 import { anchorsHaveExactIdentityEvidence, buildChannelHitsForEntity } from '../../../domain/resolver/v2/channel-provenance.js';
 import { buildClarification } from '../../../domain/resolver/v2/clarification-graph.js';
 import type { AmbiguityDictionary, AmbiguityInfo } from '../../../domain/query/port/ambiguity-dictionary.port.js';
@@ -437,7 +438,18 @@ export class EntityLookupV2UseCase {
 
     // Authority order: a forced status (admission/SAT) wins; otherwise the
     // calibrated-abstain decision; otherwise the resolver's advisory status.
-    const status = forcedStatus ?? decision?.status ?? mapResolverStatusToLookupStatus(result?.status ?? 'failed');
+    let status = forcedStatus ?? decision?.status ?? mapResolverStatusToLookupStatus(result?.status ?? 'failed');
+    // Precision-first vintage guard: a resolve to an entity whose vintage differs
+    // from the query's EXPLICIT vintage token is NOT a confident single resolve —
+    // downgrade to ambiguous (multi-vintage). Exact year compare, downgrade-only.
+    // Closes the 2026-06-02 shadow cutover blocker (오퍼스원 2019 → Opus One 2018).
+    const vintageMismatch =
+      status === 'resolved'
+      && shouldDowngradeForVintageMismatch(command.query, result?.candidates[0]?.canonicalLabel);
+    if (vintageMismatch) {
+      status = 'ambiguous';
+    }
+    const effectiveDecisionReasonCode = vintageMismatch ? VINTAGE_MISMATCH_REASON_CODE : decisionReasonCode;
     const trace = result?.decisionTrace;
     const anchors = plan.anchors;
     // Build the FULL candidate view first (channel provenance per candidate);
@@ -496,8 +508,9 @@ export class EntityLookupV2UseCase {
 
     // Prefer the decision's human detail on the resolve path; fall back to the
     // canonical reason text for forced (admission/SAT) outcomes.
-    const decisionReason =
-      decision !== undefined && forcedStatus === undefined
+    const decisionReason = vintageMismatch
+      ? 'The matched wine is a different vintage than the one requested; clarify which vintage you mean.'
+      : decision !== undefined && forcedStatus === undefined
         ? decision.detail
         : decisionReasonText(status, decisionReasonCode, admission);
     const topConfidence = decision?.topConfidence ?? trace?.top1CalibratedScore;
@@ -512,7 +525,7 @@ export class EntityLookupV2UseCase {
       clarificationOptions,
       evidenceSummary: {
         admissionReasonCode: admission.reasonCode,
-        decisionReasonCode,
+        decisionReasonCode: effectiveDecisionReasonCode,
         ...(topConfidence !== undefined ? { topConfidence: clamp01(topConfidence) } : {}),
         ...(top1Top2Margin !== undefined ? { top1Top2Margin: clamp01(top1Top2Margin) } : {}),
         calibrationTrusted: decision?.calibrationTrusted ?? trace?.calibrationTrusted ?? false,
