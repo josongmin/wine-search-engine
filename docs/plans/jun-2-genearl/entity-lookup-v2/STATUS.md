@@ -31,11 +31,11 @@ typecheck + lint + 64개 V2 단위 테스트). 나머지(#2 alias-registry 심�
 | DoD | 상태 | 근거 |
 |---|---|---|
 | #1 opu one wrong-positive → ambiguous/failed | ✅ | CalibratedAbstainDecider (downgrade-only) |
-| #2 dom perignon hole → coverage/curation | 🟡 부분 | coverage-report core 완료; alias-registry-v2 migration + 라이브 curation write plane 미완 |
+| #2 dom perignon hole → coverage/curation | 🟡 부분 | coverage-report core(도메인 SSoT) + curation write plane(migration 030 staging: proposal→review→publish) 완료; dedicated alias-registry-v2 심층 schema + published proposal 소비 ETL은 미완 |
 | #3 까쇼류 concept → resolve 안 함 | ✅ | ConceptAdmissionGate (pre-retrieval redirect) |
 | #4 exact/translit/fuzzy/family/dense 다채널 union | ✅(재투영) | channel-provenance; 독립 timed runtime은 다음 단계 |
 | #5 learned scorer + calibrated abstain contract | ✅(calibrated abstain) | CalibratedAbstainDecider; learned reranker(LTR)는 다음 단계 |
-| #6 operator trusted plane | ✅(read) | `POST /v2/entity-lookup/ops/inspect` (X-Debug-Key gated) — decision spine 반환. curation WRITE plane은 미완(T-03 migration) |
+| #6 operator trusted plane | ✅ | read: `ops/inspect`(X-Debug-Key) decision spine. WRITE: `ops/{alias-audit,coverage-health,proposals[/submit\|/review\|/publish]}` — read=X-Debug-Key, write=**별도 X-Ops-Write-Key**; proposal 전이그래프 SSoT + optimistic guard + migration 030 staging 테이블. web `/ops/{inspect,curation,coverage}` 콘솔 |
 | #7 shadow + hotset 후 cutover | 🟡 rail 완료 | shadow-metrics gate + **live runner**(run-lookup-v2-shadow-compare.ts) + package/gate script 완료(infra-gated 실행); 실측 canary 미완 — **cutover 금지 유지** |
 
 ## 아키텍처 (frozen seams)
@@ -64,7 +64,7 @@ V2는 V1 wrapper가 아님: 전용 contract + admission(resolve 이전) + 4-stat
 리뷰 P2 중 아래는 **라이브 인프라 빌드**라 별도 phase 필요(이번 세션 미완, seam은 고정됨):
 - **T-ELV2-04 real**: 독립 timed multi-channel retrieval runtime(`LookupCandidateRetrievalPort` 구현). 현재는 anchor recall 재투영 + `latencyMs:0`. 필요: `AliasRepository`(현재 container 미노출, live는 `adapters.aliasMatcher`) 또는 Vespa 채널을 V2에 노출 → per-channel 실측 score/latency.
 - **T-ELV2-05 real**: learned reranker(LTR) — `LookupRerankDecisionPort` + feature pipeline + 모델. 현재는 calibrated-abstain만.
-- **T-ELV2-03 deepen**: alias-registry-v2 migration(030) + curation WRITE plane(proposal→review→publish, 기존 `alias_proposals` 확장).
+- **T-ELV2-03 deepen**: curation WRITE plane은 완료(migration 030: `alias_proposals` lifecycle 확장 + `ambiguity_proposals`/`suppression_proposals` staging; proposal→review→publish; X-Ops-Write-Key). 남은 것은 **dedicated alias-registry-v2 심층 schema**와 `published` proposal을 runtime으로 반영하는 **ETL publish 소비 경로**.
 - **T-ELV2-06 deepen**: persisted family/ambiguity substrate(ETL) + `kind`/`ambiguity_types` wire 노출 여부 contract 확정. 현재 in-process label-graph.
 
 ## 남은 작업 (이어받기)
