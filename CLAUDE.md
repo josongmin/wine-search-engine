@@ -167,6 +167,7 @@ When adding or modifying shared logic (channel names, scoring formulae, type gua
 | Deterministic score comparators | `src/domain/shared/utils/stable-comparator.ts` |
 | Circuit breaker registry | `src/observability/circuit-breaker-registry.ts` |
 | Silent-skip counters | `src/observability/silent-skip-counters.ts` |
+| Calibration health (per-class trust + downgrade counter) | `src/domain/observability/calibration-health-registry.ts` |
 | Sparse hit → HybridCandidate mapping | `src/domain/retrieval/service/sparse-hit-to-candidate.ts` |
 
 **Do NOT duplicate** these into private functions. Import from the SSoT module. If the SSoT module is missing a function you need, add it there — not locally.

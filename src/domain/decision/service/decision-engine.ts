@@ -18,6 +18,7 @@ import {
   deriveDecisionConfidenceSemantics,
   isCorruptedSnapshot,
 } from '../../shared/types/index.js';
+import { globalCalibrationHealthRegistry } from '../../observability/calibration-health-registry.js';
 import { isLegacyRequireClarificationHardGate } from '../../query/model/query-policy.js';
 import type { ExecutionRetrievalMode } from '../../query/model/engine-execution-contract.js';
 import { isExploratoryRetrievalMode } from '../../query/model/retrieval-mode-classification.js';
@@ -920,6 +921,13 @@ export class DecisionEngine {
       return state;
     }
 
+    // True calibration-caused downgrade: reached only after the exact-identity,
+    // fuzzy, and exploratory-semantic bypasses above have all been ruled out.
+    // Record here (not earlier) so the health counter reflects calibration
+    // causality, not evidence/policy downgrades — operators can alert when a
+    // query class accrues downgrades, i.e. it is served with no trusted
+    // calibration (the silent recall-killer this whole pass uncovered).
+    globalCalibrationHealthRegistry.recordTrustGateDowngrade(input.queryPlan.queryClass);
     rulesApplied.push('CALIBRATION_TRUST_GATE_DOWNGRADE');
     return {
       status: 'ambiguous',
