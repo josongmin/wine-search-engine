@@ -3,7 +3,7 @@ import {
   buildCoverageReport,
   formatCoverageReport,
   type CoverageInputRow,
-} from '../../../scripts/etl/lookup-v2-coverage-report.js';
+} from '../../../src/domain/resolver/v2/coverage-report.js';
 
 const rows: CoverageInputRow[] = [
   { qid: '1', query: 'Opus One 2018', expectedStatus: 'resolved', class: 'exact_entity', observedStatus: 'resolved' },
