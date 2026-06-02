@@ -1,5 +1,38 @@
 # Entity Lookup V2 — Live Shadow-Compare Result (2026-06-02)
 
+## UPDATE — trusted-calibration re-run (2026-06-02 PM)
+
+After closing the calibration capture loop (top1_raw_score now plumbed through
+resolver + ranked-route → eval_results), running a live 500-case eval to
+generate 374 labeled (rawScore, isCorrect) samples, and fitting + persisting
+`calibration_params` to prod (exact_entity: isotonic ECE 0.334→0.181 N=125;
+unknown: isotonic ECE 0.326→0.011 N=80), the shadow was re-run with the live PG
+pool injected into the container (blocker + calibration store active).
+
+| metric | V1 (`/v1/lookup/wine`) | V2 (`/v2/entity-lookup`) |
+|---|---|---|
+| rows | 15 | 15 |
+| correct | **1** | **9** |
+| wrong-positive | 0 | **1** |
+
+- improvements: **9**, regressions: 1, concept-redirect accuracy: **1.000**.
+- **Entity-resolution superiority PROVEN**: V2 resolves 9× more hotset entities
+  than V1 under trusted calibration on the live stack. DoD met: `opu one`→
+  ambiguous, `까쇼`/`Cabernet Sauvignon`/`full bodied red`/`Napa Valley`/`wine`
+  →redirect_discovery (100%), `Opus One`(EN+KO)/`Penfolds Grange`→resolved,
+  `a`→failed.
+- **Cutover gate: FAIL** — one wrong-positive (6.7%) where V1 had none:
+  `elv2-015 오퍼스원 2019` → resolved to **Opus One 2018** (VINTAGE MISMATCH;
+  expected ambiguous/multi-vintage). Single remaining blocker before flipping
+  authority off V1: vintage-aware admission must downgrade a resolve whose
+  entity vintage ≠ the query's explicit vintage token.
+- 4 safe misses (recall/curation gaps, NOT wrong): `Dom Perignon` (EN+KO),
+  `Sassicaia 2019`, `Caymus Cabernet Sauvignon` — abstain rather than mis-resolve.
+
+Report: `shadow-report-trusted-2026-06-02.json`.
+
+---
+
 > ⚠️ **NOT CUTOVER-ELIGIBLE — pre-Gate-4, degraded substrate (self-review C2).**
 > This run was scored by the THREE-gate `buildShadowReport` that existed at the
 > time (commit 77bfe578); the **non-degeneracy Gate 4** (commit ff60531a) did
