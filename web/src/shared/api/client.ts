@@ -9,6 +9,21 @@ import type {
   AgentSessionTurnRequest,
   AgentSessionTurnResponse,
 } from './types';
+import type {
+  AliasAuditResponse,
+  CoverageHealthResponse,
+  ListProposalsRequest,
+  ListProposalsResponse,
+  OpsInspectResponse,
+  ProposalResponse,
+  PublishProposalRequest,
+  ReviewProposalRequest,
+  SubmitProposalRequest,
+} from './ops-types';
+
+/** Trusted-operator credentials. Read uses X-Debug-Key; write uses X-Ops-Write-Key. */
+const DEBUG_KEY_HEADER = 'X-Debug-Key';
+const WRITE_KEY_HEADER = 'X-Ops-Write-Key';
 
 // Direct backend URL — set NEXT_PUBLIC_API_URL in .env.local
 // Default: http://localhost:4000 (Fastify dev server)
@@ -203,6 +218,70 @@ export const api = {
           WINE_SEARCH_EXECUTE_TIMEOUT_MS,
         );
       },
+    },
+  },
+
+  /**
+   * Trusted operator curation plane (`/v2/entity-lookup/ops/*`, T-ELV2-07).
+   * Reads pass the X-Debug-Key; writes pass the (separate) X-Ops-Write-Key.
+   * Keys are supplied per-call by the operator console — never persisted server-side.
+   */
+  ops: {
+    inspect(query: string, debugKey: string, opts: ApiCallOptions = {}) {
+      return request<OpsInspectResponse>('/v2/entity-lookup/ops/inspect', {
+        method: 'POST',
+        headers: { [DEBUG_KEY_HEADER]: debugKey },
+        body: JSON.stringify({ query }),
+        externalSignal: opts.signal,
+      });
+    },
+    aliasAudit(entityId: string, debugKey: string, opts: ApiCallOptions = {}) {
+      return request<AliasAuditResponse>('/v2/entity-lookup/ops/alias-audit', {
+        method: 'POST',
+        headers: { [DEBUG_KEY_HEADER]: debugKey },
+        body: JSON.stringify({ entity_id: entityId }),
+        externalSignal: opts.signal,
+      });
+    },
+    coverageHealth(debugKey: string, opts: ApiCallOptions = {}) {
+      return request<CoverageHealthResponse>('/v2/entity-lookup/ops/coverage-health', {
+        method: 'POST',
+        headers: { [DEBUG_KEY_HEADER]: debugKey },
+        body: JSON.stringify({}),
+        externalSignal: opts.signal,
+      });
+    },
+    listProposals(filter: ListProposalsRequest, debugKey: string, opts: ApiCallOptions = {}) {
+      return request<ListProposalsResponse>('/v2/entity-lookup/ops/proposals', {
+        method: 'POST',
+        headers: { [DEBUG_KEY_HEADER]: debugKey },
+        body: JSON.stringify(filter),
+        externalSignal: opts.signal,
+      });
+    },
+    submitProposal(body: SubmitProposalRequest, writeKey: string, opts: ApiCallOptions = {}) {
+      return request<ProposalResponse>('/v2/entity-lookup/ops/proposals/submit', {
+        method: 'POST',
+        headers: { [WRITE_KEY_HEADER]: writeKey },
+        body: JSON.stringify(body),
+        externalSignal: opts.signal,
+      });
+    },
+    reviewProposal(body: ReviewProposalRequest, writeKey: string, opts: ApiCallOptions = {}) {
+      return request<ProposalResponse>('/v2/entity-lookup/ops/proposals/review', {
+        method: 'POST',
+        headers: { [WRITE_KEY_HEADER]: writeKey },
+        body: JSON.stringify(body),
+        externalSignal: opts.signal,
+      });
+    },
+    publishProposal(body: PublishProposalRequest, writeKey: string, opts: ApiCallOptions = {}) {
+      return request<ProposalResponse>('/v2/entity-lookup/ops/proposals/publish', {
+        method: 'POST',
+        headers: { [WRITE_KEY_HEADER]: writeKey },
+        body: JSON.stringify(body),
+        externalSignal: opts.signal,
+      });
     },
   },
 } as const;
