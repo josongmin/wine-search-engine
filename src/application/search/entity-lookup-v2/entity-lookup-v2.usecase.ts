@@ -216,7 +216,7 @@ export class EntityLookupV2UseCase {
       ? await this.runRetrieval(this.deps.candidateRetrieval, plan, command, options)
       : undefined;
 
-    const result = await this.resolveCandidatePool(plan, options);
+    const result = await this.resolveCandidatePool(plan, retrieval, options);
     throwIfAborted(options?.abortSignal, 'Entity lookup V2 aborted');
 
     // Establish EXACT-identity evidence for the top candidate from a STRICT
@@ -309,14 +309,30 @@ export class EntityLookupV2UseCase {
    */
   private async resolveCandidatePool(
     plan: QueryPlanV1,
+    retrieval: LookupRetrievalResult | undefined,
     options?: RequestExecutionContext,
   ): Promise<EntityResolveResult> {
-    let blockerOnlyIds: readonly CanonicalEntityId[] = [];
+    // Seed the resolver pool from EVERY recall source not already covered by an
+    // alias anchor: the high-recall blocker AND the T-ELV2-04 independent
+    // multi-channel retrieval engine. This makes V2 resolve over the union of
+    // channels — not just the planner's anchor extraction (reviewer P2 #3:
+    // "replace planner/resolver reuse with the real multi-channel retriever").
+    const anchorCovered = new Set(plan.anchors.flatMap((a) => a.candidateEntityIds.map(String)));
+    const seeds = new Map<string, CanonicalEntityId>();
+
     if (this.deps.blocker !== undefined && !shouldSuppressBlockerSeedExpansion(plan.anchors)) {
       const allBlockerIds = await this.deps.blocker.block(plan.rawQuery, plan.normalizedQuery);
-      const anchorCovered = new Set(plan.anchors.flatMap((a) => a.candidateEntityIds.map(String)));
-      blockerOnlyIds = allBlockerIds.filter((id) => !anchorCovered.has(String(id)));
+      for (const id of allBlockerIds) {
+        if (!anchorCovered.has(String(id))) seeds.set(String(id), id);
+      }
     }
+    if (retrieval !== undefined) {
+      for (const candidate of retrieval.candidates) {
+        const key = String(candidate.entityId);
+        if (!anchorCovered.has(key)) seeds.set(key, candidate.entityId);
+      }
+    }
+    const blockerOnlyIds: readonly CanonicalEntityId[] = [...seeds.values()];
 
     const candidateEntities = await buildResolverCandidatesFromGenerator(
       {
