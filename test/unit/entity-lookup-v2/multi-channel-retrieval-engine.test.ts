@@ -95,4 +95,36 @@ describe('MultiChannelRetrievalEngine (T-ELV2-04 real)', () => {
     const compact = result.coverage.find((c) => c.channel === 'compact_exact');
     expect(compact?.firing).toBe(false);
   });
+
+  // T-04 honest provenance: the per-candidate channel comes from the matcher's
+  // REAL lookupStrategy, NOT the view binding — so a fuzzy/lexical recall on the
+  // strict view is labeled fuzzy_alias, never forged as exact_alias.
+  function channelsFor(strategy: string | undefined): Promise<readonly string[]> {
+    const matcher = matcherReturning({
+      'opus one': [{ surfaceForm: 'Opus One', normalizedForm: 'opus one', entityIds: [opus], matchConfidence: 0.8, ...(strategy !== undefined ? { lookupStrategy: strategy } : {}) }],
+    });
+    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, entityLookup });
+    return engine.retrieve(input()).then((r) => (r.candidates[0]?.channelHits ?? []).map((h) => h.channel).sort());
+  }
+
+  it('labels transliterated_fuzzy on the strict view as fuzzy_alias (not exact)', async () => {
+    expect(await channelsFor('transliterated_fuzzy')).toEqual(['fuzzy_alias']);
+  });
+
+  it('labels lexical_exact as fuzzy_alias (recall, not identity) — from strategy not binding', async () => {
+    expect(await channelsFor('lexical_exact')).toEqual(['fuzzy_alias']);
+  });
+
+  it('strips the index_ prefix the SearchIndex matcher adds (index_transliterated_fuzzy → fuzzy_alias)', async () => {
+    expect(await channelsFor('index_transliterated_fuzzy')).toEqual(['fuzzy_alias']);
+  });
+
+  it('decomposes a compound strategy into distinct channels (exact+transliterated_fuzzy)', async () => {
+    expect(await channelsFor('exact+transliterated_fuzzy')).toEqual(['exact_alias', 'fuzzy_alias']);
+  });
+
+  it('falls back to the binding channel only when the matcher emits no strategy', async () => {
+    // strict view binding is exact_alias; no lookupStrategy → fallback.
+    expect(await channelsFor(undefined)).toEqual(['exact_alias']);
+  });
 });

@@ -28,6 +28,12 @@ describe('mapLookupStrategyToChannel', () => {
     ['exact', 'exact_alias'],
     ['compact_exact', 'compact_exact'],
     ['transliterated_exact', 'transliteration_exact'],
+    // T-04 regression: transliterated_fuzzy must NOT be forged as the
+    // identity-grade transliteration_exact (the bare `translit` branch used to
+    // fire first). It is a recall strategy → fuzzy_alias.
+    ['transliterated_fuzzy', 'fuzzy_alias'],
+    ['index_transliterated_fuzzy', 'fuzzy_alias'],
+    ['lexical_exact', 'fuzzy_alias'],
     ['phonetic_fuzzy', 'jamo_phonetic'],
     ['fuzzy_char_ngram', 'fuzzy_alias'],
     ['semantic_hybrid', 'dense'],

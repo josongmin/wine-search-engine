@@ -104,9 +104,16 @@ export const LOOKUP_RETRIEVAL_CHANNELS = [
   'compact_exact', // whitespace/punctuation-folded exact match
   'transliteration_exact', // transliterated-view exact match
   'jamo_phonetic', // jamo / phonetic-skeleton near-exact match
-  'fuzzy_alias', // trigram / edit-distance fuzzy alias
-  'family_graph', // producer/label family-graph recall
-  'dense', // char-aware dense / late-interaction (long-tail misspellings)
+  // fuzzy_alias: recall/expansion strategies the WIRED substrate emits —
+  // transliterated_fuzzy / lexical_exact / prefix_exact (NOT trigram/edit-distance,
+  // which require the unwired PgAliasMatcher).
+  'fuzzy_alias',
+  // family_graph: RESERVED — no family-graph traversal port is wired into the
+  // lookup lane yet (T-ELV2-06 family substrate). Never fired by the current engine.
+  'family_graph',
+  // dense: RESERVED — no dense/late-interaction index in the lookup lane. Emitted
+  // ONLY by the reuse-path blocker-seed projection (BLOCKER_SEED_CHANNEL).
+  'dense',
 ] as const;
 
 export type LookupRetrievalChannel = (typeof LOOKUP_RETRIEVAL_CHANNELS)[number];
