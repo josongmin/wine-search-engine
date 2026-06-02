@@ -114,8 +114,11 @@ const CASCADE_MEDIUM_ANCHOR_CONFIDENCE = 0.8;
 //     is the SOTA++ heuristic prior baseline.
 
 /** Multiplier applied to log(1+orBreadth) when computing
- *  effectiveConstraintComplexity. See block comment above for derivation. */
-const LOG_FACTOR = 0.7;
+ *  effectiveConstraintComplexity. See block comment above for derivation.
+ *  Heuristic prior pending an offline difficulty-sweep calibration; exported
+ *  + drift-locked by a regression test so the value cannot change silently
+ *  without an explicit, intentional test amendment. */
+export const LOG_FACTOR = 0.7;
 
 // NOTE: there is intentionally no live CASCADE_EASY_THRESHOLD constant.
 // An 'easy' (sparse-only) graph-aware route was prototyped (W4) but removed
