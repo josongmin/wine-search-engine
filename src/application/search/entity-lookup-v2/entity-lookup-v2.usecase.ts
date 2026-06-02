@@ -47,7 +47,7 @@ import type {
   LookupV2Status,
 } from '../../../domain/resolver/v2/lookup-v2-types.js';
 import { CalibratedAbstainDecider } from '../../../domain/resolver/v2/calibrated-abstain-decider.js';
-import { extractLookupFeatures } from '../../../domain/resolver/v2/lookup-feature-extractor.js';
+import { ambiguityClusterMembershipScore, extractLookupFeatures } from '../../../domain/resolver/v2/lookup-feature-extractor.js';
 import { shouldDowngradeForVintageMismatch, VINTAGE_MISMATCH_REASON_CODE } from '../../../domain/resolver/v2/vintage-guard.js';
 import { anchorsHaveExactIdentityEvidence, buildChannelHitsForEntity } from '../../../domain/resolver/v2/channel-provenance.js';
 import { buildClarification } from '../../../domain/resolver/v2/clarification-graph.js';
@@ -236,9 +236,13 @@ export class EntityLookupV2UseCase {
     // audit-hardened calibrated gates.
     let decision = calibrated;
     if (this.deps.reranker !== undefined && result.candidates.length > 0) {
+      // Reranker-gated: populate the persisted ambiguity-cluster membership feature
+      // ONLY when the learned reranker actually consumes it — zero PG/feature cost
+      // in the default LTR-OFF build (the reranker is omitted there).
+      const clusterMembership = await this.buildClusterMembership(plan.normalizedQuery, options?.abortSignal);
       const learned = await this.deps.reranker.decide({
         queryClass: plan.queryClass,
-        scored: buildScoredCandidates(result, retrieval),
+        scored: buildScoredCandidates(result, retrieval, clusterMembership),
       });
       decision = combineDecisions(calibrated, learned);
     }
@@ -277,6 +281,27 @@ export class EntityLookupV2UseCase {
       decisionReasonCode: decision.reasonCode,
       startedAt,
     });
+  }
+
+  /**
+   * Build a per-entity ambiguity-cluster membership signal from the persisted
+   * ambiguity graph (T-ELV2-06 Half A). Returns a constant-0 function when no
+   * dictionary is wired or the query has no known cluster (≥2 members), so the
+   * caller pays nothing extra in that case. Degradation-safe (0 on fetch error).
+   */
+  private async buildClusterMembership(
+    normalizedQuery: string,
+    signal: AbortSignal | undefined,
+  ): Promise<(entityId: string) => number> {
+    if (this.deps.ambiguityDictionary === undefined) return () => 0;
+    const info = await this.deps.ambiguityDictionary
+      .getAmbiguityInfo(normalizedQuery, signal)
+      .catch(() => null);
+    const ids = info?.entityIds;
+    if (ids === undefined || ids.length < 2) return () => 0;
+    const members = new Set<string>(ids);
+    const size = ids.length;
+    return (entityId: string) => ambiguityClusterMembershipScore(members.has(entityId), size);
   }
 
   /** Run the multi-channel retrieval engine; never let it sink the request. */
@@ -565,6 +590,8 @@ export class EntityLookupV2UseCase {
 function buildScoredCandidates(
   result: EntityResolveResult,
   retrieval: LookupRetrievalResult | undefined,
+  /** Persisted ambiguity-cluster membership signal per entity (0 when unknown). */
+  clusterMembership: (entityId: string) => number = () => 0,
 ): readonly LookupScoredCandidate[] {
   const hitsByEntity = new Map<string, { hits: readonly LookupChannelHit[]; entityType: string }>();
   if (retrieval !== undefined) {
@@ -581,7 +608,7 @@ function buildScoredCandidates(
       entityType: engine?.entityType ?? 'unknown',
       calibratedScore: c.calibratedScore,
       rank: c.rank,
-      features: extractLookupFeatures(channelHits, c.calibratedScore),
+      features: extractLookupFeatures(channelHits, c.calibratedScore, clusterMembership(String(c.entityId))),
       channelHits,
     };
   });

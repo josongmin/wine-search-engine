@@ -29,9 +29,18 @@ function parseAmbiguityRow(row: QueryResultRow): AmbiguityInfo | null {
       `PgAmbiguityDictionary: unknown severity "${String(severityRaw)}" — schema drift or corrupted row`,
     );
   }
+  // entity_ids (ambiguity cluster members) — present on the singular SELECT *
+  // path, absent on the batch projection. Validate the TEXT[] shape rather than
+  // trusting the driver; omit (NOT empty) when absent/invalid (T-ELV2-06 Half A).
+  const entityIdsRaw: unknown = Reflect.get(row, 'entity_ids');
+  const entityIds =
+    Array.isArray(entityIdsRaw) && entityIdsRaw.every((e): e is string => typeof e === 'string')
+      ? entityIdsRaw
+      : undefined;
   return {
     types: typesRaw,
     severity: severityRaw,
+    ...(entityIds !== undefined ? { entityIds } : {}),
   };
 }
 

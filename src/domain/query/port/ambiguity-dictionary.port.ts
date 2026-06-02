@@ -2,6 +2,14 @@
 export interface AmbiguityInfo {
   readonly types: string[];
   readonly severity: 'low' | 'medium' | 'high';
+  /**
+   * Member entity ids of the ambiguity cluster (the surface form maps to ≥2
+   * distinct entities). Optional — only PG-backed implementations that persist
+   * `entity_ids` populate it; omitted (NOT empty) when the substrate does not
+   * carry cluster membership. Consumed by the T-ELV2-06 cluster-membership
+   * feature; omit-when-absent for exactOptionalPropertyTypes.
+   */
+  readonly entityIds?: readonly string[];
 }
 
 /**
