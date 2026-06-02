@@ -62,6 +62,7 @@ import type {
   EntityLookupV2Result,
   LookupV2CandidateView,
   LookupV2ChannelCoverageView,
+  LookupV2ChannelHitView,
   LookupV2ClarificationOptionView,
   NormalizedQueryViewsView,
 } from './entity-lookup-v2.dto.js';

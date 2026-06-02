@@ -1,4 +1,5 @@
 import type { QueryPlannerPort, RankingPort } from '../application/search/port/search-pipeline-deps.port.js';
+import type { AliasMatcher } from '../domain/query/service/anchor-extractor.js';
 import {
   PlannerV1Adapter,
   buildAnchorRefreshCallbackFromAliasOverlay,
@@ -70,6 +71,8 @@ export interface CoreContainerServices {
   readonly browseRetriever: BrowseRetrieverPort;
   readonly compareRetriever: CompareRetrieverPort;
   readonly entityLookup: EntityDocumentLookupPort;
+  /** Live alias substrate matcher — exposed for the T-ELV2-04 V2 retrieval engine. */
+  readonly aliasMatcher: AliasMatcher;
   readonly snapshotVersions: SnapshotVersions;
   readonly querySanitizer: RuntimeSupportServices['querySanitizer'];
   readonly injectionJudge?: RuntimeSupportServices['injectionJudge'];
@@ -148,6 +151,7 @@ export async function buildCoreContainerServices(
     browseRetriever,
     compareRetriever,
     entityLookup,
+    aliasMatcher: adapters.aliasMatcher,
     ...(adapters.chatLlm !== undefined ? { chatLlm: adapters.chatLlm } : {}),
     ranker,
     decisionEngine: buildDecisionEngine(adapters, config),

@@ -120,4 +120,58 @@ describe('EntityLookupV2UseCase — channel provenance surfaced end-to-end', () 
     expect(coverageChannels).toContain('transliteration_exact');
     expect(out.evidenceSummary.channelCoverage.every((c) => c.firing && c.hitCount > 0)).toBe(true);
   });
+
+  it('T-04: prefers the REAL timed retrieval engine coverage/provenance over the anchor reprojection', async () => {
+    const eid = createEntityId('opus-one-2018');
+    const doc = { entityId: eid, entityType: 'wine' as const, canonicalLabel: 'Opus One 2018' };
+    const resolver: EntityResolverPort = {
+      resolve: vi.fn().mockResolvedValue({
+        status: 'resolved',
+        candidates: [{ entityId: eid, canonicalLabel: 'Opus One 2018', calibratedScore: 0.96, rank: 1, evidenceRefs: [] }],
+        topEntity: { entityId: eid, canonicalLabel: 'Opus One 2018', calibratedScore: 0.96 },
+        decisionTrace: {
+          queryClass: 'known-item', top1CalibratedScore: 0.96, top2CalibratedScore: undefined, calibratedGap: undefined,
+          decisionConfidenceC: 0.96, calibrationTrusted: true, ambiguityDetected: false, ambiguityTypes: [],
+          appliedThresholds: { resolveThreshold: 0.5, gapThreshold: 0.1 }, outcomeReasonCodes: ['exact_identity'],
+        },
+        conformalSetSize: 1,
+      }),
+    };
+    const queryPlanner: QueryPlannerPort = {
+      plan: vi.fn().mockResolvedValue({
+        rawQuery: 'opus one', normalizedQuery: 'opus one', intent: 'known_item', route: 'entity',
+        retrievalMode: 'entity_lookup', queryClass: 'known-item',
+        anchors: [{ surfaceForm: 'opus one', normalizedForm: 'opus one', candidateEntityIds: [eid], lookupStrategies: ['exact'], confidence: 0.97 }],
+        constraints: { hard: [], soft: [], inferred: [] }, expansions: { lexical: [], semantic: [] },
+        policy: {}, uncertainty: {}, normalizedQueryViews: makeViews('opus one'),
+        plannerVersion: '1', policyRuleVersion: '1', thresholdProfileId: 'default',
+      }),
+    };
+    // Engine returns REAL coverage with non-zero latency + a fuzzy_alias channel
+    // that the anchor reprojection (strategy 'exact') would NOT produce.
+    const candidateRetrieval = {
+      retrieve: vi.fn().mockResolvedValue({
+        candidates: [{ entityId: eid, canonicalLabel: 'Opus One 2018', entityType: 'wine', channelHits: [
+          { channel: 'fuzzy_alias', matchedView: 'opus one', channelScore: 0.8, channelRank: 1 },
+        ] }],
+        coverage: [{ channel: 'fuzzy_alias', firing: true, hitCount: 1, latencyMs: 4.2 }],
+      }),
+    };
+    const useCase = new EntityLookupV2UseCase({
+      admissionGate: new ConceptAdmissionGate(),
+      queryPlanner,
+      entityResolver: resolver,
+      candidateRetrieval,
+      entityLookup: { getDocument: vi.fn().mockResolvedValue(doc), getDocuments: vi.fn().mockResolvedValue(new Map([[eid, doc]])) },
+      querySanitizer: { sanitize: vi.fn((q: string) => ({ safe: true, sanitizedQuery: q })) } as never,
+    });
+
+    const out = await useCase.execute({ query: 'opus one', maxCandidates: 10, mode: 'default' });
+
+    expect(candidateRetrieval.retrieve).toHaveBeenCalledOnce();
+    // coverage comes from the ENGINE (real latency, not the 0 reprojection)
+    expect(out.evidenceSummary.channelCoverage).toEqual([{ channel: 'fuzzy_alias', firing: true, hitCount: 1, latencyMs: 4.2 }]);
+    // candidate channel hits come from the engine, not the anchor 'exact' strategy
+    expect(out.candidates[0]?.channelHits.map((h) => h.channel)).toEqual(['fuzzy_alias']);
+  });
 });

@@ -4,6 +4,7 @@ import type { HydeGenerator } from '../domain/retrieval/service/hyde-generator.j
 import { InterpretUseCase } from '../application/search/interpret.usecase.js';
 import { ResolveUseCase } from '../application/search/resolve.usecase.js';
 import { EntityLookupV2UseCase } from '../application/search/entity-lookup-v2/entity-lookup-v2.usecase.js';
+import { MultiChannelRetrievalEngine } from '../application/search/entity-lookup-v2/multi-channel-retrieval-engine.js';
 import { ConceptAdmissionGate } from '../domain/resolver/v2/concept-admission-gate.js';
 import { AutocompleteUseCase } from '../application/search/autocomplete.usecase.js';
 import { HybridUseCase } from '../application/search/hybrid.usecase.js';
@@ -129,6 +130,12 @@ export function buildUseCaseContainerServices(
     blocker: core.blocker,
     entityResolver: core.entityResolver,
     entityLookup: core.entityLookup,
+    // T-ELV2-04: real independent timed multi-channel retrieval over the live
+    // alias substrate (per-channel latency/score; replaces the latencyMs:0 reproj).
+    candidateRetrieval: new MultiChannelRetrievalEngine({
+      aliasMatcher: core.aliasMatcher,
+      entityLookup: core.entityLookup,
+    }),
     querySanitizer: core.querySanitizer,
     injectionJudge: core.injectionJudge,
     judgeFailureMode: config.queryEntrySecurity.judgeFailureMode,
