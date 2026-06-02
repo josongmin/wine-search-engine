@@ -150,7 +150,13 @@ function toRankingFeatures(f: LookupCandidateFeatures): RankingFeatures {
     recencyScore: 0,
     classMatchScore: clamp01(f.channelAgreement / LOOKUP_CHANNEL_COUNT),
     attributeMatchScore: f.exactAliasEvidence,
-    diversityScore: 0,
+    // Reuse the (otherwise-unused-in-lookup) diversityScore slot to carry the
+    // persisted ambiguity-cluster membership signal (T-06 Half A) — otherwise it
+    // is computed but DROPPED before scoring. Same OOD-projection caveat as the
+    // whole mapping (a lookup-domain model must be trained on this distribution;
+    // see the train-serve blocker above), consistent with familyGraphProximity →
+    // laneCorroborationScore below.
+    diversityScore: clamp01(f.ambiguityClusterMembership),
     multilingualScore: f.transliterationConsistency,
     entityPosteriorScore: f.editDistanceScore,
     identityExactnessTierScore: Math.max(f.exactAliasEvidence, f.phoneticConsistency),

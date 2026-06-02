@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildFamilyGraphRows,
   hasRealProducer,
+  mapEntityRowToInput,
   type FamilyGraphInputRecord,
 } from '../../../scripts/etl/family-graph-builder.js';
 
@@ -66,6 +67,19 @@ describe('buildFamilyGraphRows', () => {
     const r2 = buildFamilyGraphRows([...recs].reverse());
     expect(r1).toEqual(r2);
     expect(r1.map((r) => r.memberEntityId)).toEqual(['a', 'z']);
+  });
+
+  it('mapEntityRowToInput maps a runtime entities row (CanonicalEntityId id-space)', () => {
+    const r = mapEntityRowToInput({ entity_id: 'wine:opus-one-2018', canonical_label: 'Opus One 2018', producer: 'Opus One Winery' });
+    expect(r).toEqual({ entityId: 'wine:opus-one-2018', canonicalLabel: 'Opus One 2018', producer: 'Opus One Winery' });
+  });
+
+  it('mapEntityRowToInput handles a null producer + rejects a malformed row', () => {
+    expect(mapEntityRowToInput({ entity_id: 'e1', canonical_label: 'X', producer: null })?.producer).toBe('');
+    // A silver-shaped row (sourceId, no entity_id) MUST be rejected — it would
+    // publish ids that never match runtime anchors (the part-B id-space bug).
+    expect(mapEntityRowToInput({ sourceId: 'vivino:123', canonicalLabel: 'X', producer: 'P' })).toBeNull();
+    expect(mapEntityRowToInput({ entity_id: '', canonical_label: 'X' })).toBeNull();
   });
 
   it('dedupes a member that appears twice under the same producer', () => {

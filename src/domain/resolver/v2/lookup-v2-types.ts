@@ -108,8 +108,10 @@ export const LOOKUP_RETRIEVAL_CHANNELS = [
   // transliterated_fuzzy / lexical_exact / prefix_exact (NOT trigram/edit-distance,
   // which require the unwired PgAliasMatcher).
   'fuzzy_alias',
-  // family_graph: RESERVED — no family-graph traversal port is wired into the
-  // lookup lane yet (T-ELV2-06 family substrate). Never fired by the current engine.
+  // family_graph: producer family recall (T-ELV2-06 Half B). The engine walks
+  // alias-recalled anchors to their persisted producer family (PgFamilyGraph) and
+  // emits co-producer siblings. Fires when the entity_family substrate is
+  // populated (operator ETL); dormant otherwise.
   'family_graph',
   // dense: RESERVED — no dense/late-interaction index in the lookup lane. Emitted
   // ONLY by the reuse-path blocker-seed projection (BLOCKER_SEED_CHANNEL).

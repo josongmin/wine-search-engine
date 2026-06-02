@@ -15,6 +15,7 @@
  * shared-producer cluster. Singletons (size < 2) are dropped.
  */
 
+import { z } from 'zod';
 import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
 import { ambiguityClusterMembershipScore } from '../../src/domain/resolver/v2/lookup-feature-extractor.js';
 import { deterministicHash } from '../../src/domain/shared/utils/hash.js';
@@ -24,6 +25,29 @@ export interface FamilyGraphInputRecord {
   readonly canonicalLabel: string;
   /** Producer as carried by the snapshot record (may be the canonicalLabel fallback). */
   readonly producer: string;
+}
+
+/**
+ * Map a runtime `entities` row (entity_id, canonical_label, attributes->>'producer')
+ * to a builder input. The runtime entity_id is the CanonicalEntityId the alias
+ * substrate/engine anchors use — the family members MUST be in this id-space (NOT
+ * silver's source-namespace sourceId, which would never match an anchor). Returns
+ * null on a malformed row (shape-guarded, no `as`).
+ */
+const EntityRowSchema = z.object({
+  entity_id: z.string().min(1),
+  canonical_label: z.string().min(1),
+  producer: z.string().nullable().optional(),
+}).passthrough();
+
+export function mapEntityRowToInput(row: unknown): FamilyGraphInputRecord | null {
+  const parsed = EntityRowSchema.safeParse(row);
+  if (!parsed.success) return null;
+  return {
+    entityId: parsed.data.entity_id,
+    canonicalLabel: parsed.data.canonical_label,
+    producer: parsed.data.producer ?? '',
+  };
 }
 
 export interface FamilyGraphRow {

@@ -96,13 +96,20 @@ function makeResolver(
   };
 }
 
-function makeUseCase(plannerPlan: Record<string, unknown>, resolver: EntityResolverPort): EntityLookupV2UseCase {
+function makeUseCase(
+  plannerPlan: Record<string, unknown>,
+  resolver: EntityResolverPort,
+  extra: Partial<{ reranker: unknown; ambiguityDictionary: unknown; aliasRegistryVersion: unknown }> = {},
+): EntityLookupV2UseCase {
   const queryPlanner: QueryPlannerPort = { plan: vi.fn().mockResolvedValue(plannerPlan) };
   return new EntityLookupV2UseCase({
     admissionGate: new ConceptAdmissionGate(),
     queryPlanner,
     entityResolver: resolver,
     querySanitizer: { sanitize: vi.fn((q: string) => ({ safe: true, sanitizedQuery: q })) } as never,
+    ...(extra.reranker !== undefined ? { reranker: extra.reranker as never } : {}),
+    ...(extra.ambiguityDictionary !== undefined ? { ambiguityDictionary: extra.ambiguityDictionary as never } : {}),
+    ...(extra.aliasRegistryVersion !== undefined ? { aliasRegistryVersion: extra.aliasRegistryVersion as never } : {}),
   });
 }
 
@@ -371,6 +378,62 @@ describe('T-ELV2-06 clarification contract on the wire', () => {
     const out = await useCase.execute({ query: 'Opus One', maxCandidates: 10, mode: 'default' });
     expect(out.evidenceSummary.ambiguityTypes).toEqual(['alias_collision']);
     expect(out.evidenceSummary.ambiguitySeverity).toBe('high');
+  });
+
+  // T-ELV2 vintage guard — the WIRED downgrade cascade (not just the predicate).
+  it('downgrades a resolve to ambiguous when the query vintage ≠ the entity vintage', async () => {
+    const resolver = makeResolver('resolved', [{ id: 'opus-one-2018', label: 'Opus One 2018', score: 0.97 }]);
+    const out = await makeUseCase(makePlan(), resolver).execute({ query: '오퍼스원 2019', maxCandidates: 10, mode: 'default' });
+    expect(out.status).toBe('ambiguous');
+    expect(out.topCandidate).toBeNull();
+    expect(out.evidenceSummary.decisionReasonCode).toBe('vintage_mismatch_downgrade');
+  });
+
+  it('does NOT downgrade when the query vintage matches the entity vintage', async () => {
+    const resolver = makeResolver('resolved', [{ id: 'opus-one-2018', label: 'Opus One 2018', score: 0.97 }]);
+    const out = await makeUseCase(makePlan(), resolver).execute({ query: 'Opus One 2018', maxCandidates: 10, mode: 'default' });
+    expect(out.status).toBe('resolved');
+    expect(out.topCandidate?.entityId).toBe('opus-one-2018');
+  });
+
+  // T-06 Half A — the ambiguity-cluster-membership feature actually reaches the
+  // reranker's scored candidates (the un-hardcoded wiring, reranker-gated).
+  it('feeds real cluster-membership into the reranker feature vector', async () => {
+    const resolver = makeResolver('resolved', [
+      { id: 'a', label: 'Wine A', score: 0.9 },
+      { id: 'b', label: 'Wine B', score: 0.8 },
+    ]);
+    let capturedA: number | undefined;
+    const reranker = {
+      decide: vi.fn((input: { scored: ReadonlyArray<{ entityId: unknown; features: { ambiguityClusterMembership: number } }> }) => {
+        capturedA = input.scored.find((s) => String(s.entityId) === 'a')?.features.ambiguityClusterMembership;
+        return { status: 'resolved' as const, reasonCode: 'learned_rerank', detail: 'ok', topConfidence: 0.9, calibrationTrusted: false };
+      }),
+    };
+    const ambiguityDictionary = {
+      isKnownAmbiguous: vi.fn().mockResolvedValue(true),
+      // cluster of 2 members {a,b} → membership = 1 - 1/2 = 0.5 for a member.
+      getAmbiguityInfo: vi.fn().mockResolvedValue({ types: ['alias_collision'], severity: 'high', entityIds: ['a', 'b'] }),
+      getAmbiguityInfoBatch: vi.fn().mockResolvedValue(new Map()),
+    };
+    await makeUseCase(makePlan(), resolver, { reranker, ambiguityDictionary }).execute({ query: 'Opus One', maxCandidates: 10, mode: 'default' });
+    expect(reranker.decide).toHaveBeenCalled();
+    expect(capturedA).toBeCloseTo(0.5);
+  });
+
+  // T-03 — the alias-registry version stamp surfaces on meta (rule-33 wire proof).
+  it('surfaces the alias-registry version on meta when wired', async () => {
+    const resolver = makeResolver('resolved', [{ id: 'opus-one-2018', label: 'Opus One 2018', score: 0.97 }]);
+    const aliasRegistryVersion = {
+      schemaVersion: 'alias_registry.v2' as const,
+      source: 'snapshot_manifest' as const,
+      snapshotId: 'snap-1',
+      aliasCount: 42,
+    };
+    const out = await makeUseCase(makePlan(), resolver, { aliasRegistryVersion }).execute({ query: 'Opus One', maxCandidates: 10, mode: 'default' });
+    expect(out.meta.aliasRegistry?.schemaVersion).toBe('alias_registry.v2');
+    expect(out.meta.aliasRegistry?.snapshotId).toBe('snap-1');
+    expect(out.meta.aliasRegistry?.aliasCount).toBe(42);
   });
 });
 

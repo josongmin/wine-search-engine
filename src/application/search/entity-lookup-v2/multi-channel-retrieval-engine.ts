@@ -22,8 +22,10 @@
  * Cascading matcher) the emitted strategies are exact / compact_exact /
  * lexical_exact / prefix_exact / transliterated_exact / transliterated_fuzzy /
  * phonetic_exact — NOT trigram/edit-distance fuzzy (those live in PgAliasMatcher,
- * which is NOT wired into the lookup lane). `family_graph` and `dense` channels
- * are reserved (no family-graph port; dense only via the reuse-path blocker seed).
+ * which is NOT wired into the lookup lane). The `family_graph` channel (T-06 Half
+ * B) fires when a FamilyGraphPort is wired and the entity_family substrate is
+ * populated, emitting co-producer siblings; `dense` remains reserved (emitted only
+ * via the reuse-path blocker seed).
  *
  * Candidate recall is the UNION across channels; the final resolve authority
  * remains the reranker + calibrator (never a single channel's top-1).
