@@ -238,6 +238,19 @@ export interface RetrievalDocument extends RetrievalHitProjection, RetrievalFeat
   /** Critic score normalised from 0-100 scale to [0, 1]. */
   readonly criticScoreNormalized?: number | undefined;
 
+  /**
+   * Confidence-derived rerank weight in [0, 1] for the critic signal.
+   *
+   * Track-C critic proxies are ALWAYS synthetic (LLM-estimated, not real
+   * Parker/WS data — `CriticProxy.isSynthetic` is a `true` literal), so the
+   * usable trust signal is the LLM's self-reported `confidence`
+   * (high/medium/low). This field maps that confidence to a multiplier
+   * (see CRITIC_CONFIDENCE_WEIGHT in the ETL) so the `wine_aware` second-phase
+   * down-weights low-confidence synthetic critic scores instead of trusting
+   * them as much as high-confidence ones. Absent → ranking defaults to 1.0.
+   */
+  readonly criticConfidenceWeight?: number | undefined;
+
   /** Source average rating on the native 1–5 scale. */
   readonly ratingAvg?: number | undefined;
 

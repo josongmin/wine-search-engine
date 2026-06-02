@@ -628,6 +628,27 @@ interface CriticProxy {
   readonly isSynthetic: boolean;
 }
 
+/**
+ * Confidence → critic rerank weight, in [0, 1].
+ *
+ * Track-C critic proxies are ALWAYS synthetic (LLM-estimated), so `isSynthetic`
+ * carries no discriminative signal (it is a constant `true`). The usable trust
+ * lever is the LLM's self-reported `confidence`. This multiplier feeds the
+ * `wine_aware` second-phase critic term so a low-confidence synthetic proxy is
+ * trusted less than a high-confidence one (see retrieval-document.ts
+ * criticConfidenceWeight + wine_entity.sd critic_confidence_weight).
+ *
+ * Curve: linear-ish decay (high=1.0, medium=0.66, low=0.33). An unknown /
+ * absent confidence resolves to 1.0 at rank time (back-compat for documents
+ * indexed before this field existed) — so we only EMIT the field for the three
+ * known values, never a fabricated default.
+ */
+const CRITIC_CONFIDENCE_WEIGHT: ReadonlyMap<string, number> = new Map([
+  ['high', 1.0],
+  ['medium', 0.66],
+  ['low', 0.33],
+]);
+
 interface CertificationResult {
   readonly organic: boolean;
   readonly biodynamic: boolean;
@@ -820,6 +841,16 @@ export function silverToIndexable(
     return undefined;
   })();
 
+  // Confidence-derived rerank weight for the synthetic critic proxy. Only
+  // emitted when (a) the critic score actually came from a Track-C proxy and
+  // (b) that proxy's confidence is one of the known levels. When it came from
+  // the Vivino ratingAvg fallback, there is no proxy confidence to speak of, so
+  // we leave the weight absent and the ranker defaults to 1.0.
+  const criticConfidenceWeight: number | undefined =
+    gold.criticProxy?.proxyScore != null
+      ? CRITIC_CONFIDENCE_WEIGHT.get(gold.criticProxy.confidence)
+      : undefined;
+
   const certTags: readonly string[] | undefined =
     gold.certifications != null ? buildCertificationTags(gold.certifications) : undefined;
   const style = deriveStyle(gold);
@@ -898,6 +929,7 @@ export function silverToIndexable(
     ...(rec.acidity != null ? { acidity: rec.acidity } : {}),
     ...(rec.tannin != null ? { tannin: rec.tannin } : {}),
     ...(criticScoreNormalized !== undefined ? { criticScoreNormalized } : {}),
+    ...(criticConfidenceWeight !== undefined ? { criticConfidenceWeight } : {}),
     ...(gold.drinkingWindow != null
       ? {
           drinkingWindowStart: gold.drinkingWindow.drinkingWindowStart,
