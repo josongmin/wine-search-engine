@@ -65,7 +65,9 @@ V2는 V1 wrapper가 아님: 전용 contract + admission(resolve 이전) + 4-stat
 - **T-ELV2-04 real**: 독립 timed multi-channel retrieval runtime(`LookupCandidateRetrievalPort` 구현). 현재는 anchor recall 재투영 + `latencyMs:0`. 필요: `AliasRepository`(현재 container 미노출, live는 `adapters.aliasMatcher`) 또는 Vespa 채널을 V2에 노출 → per-channel 실측 score/latency.
 - **T-ELV2-05 real**: learned reranker(LTR) — `LookupRerankDecisionPort` + feature pipeline + 모델. 현재는 calibrated-abstain만.
 - **T-ELV2-03 deepen**: curation WRITE plane은 완료(migration 030: `alias_proposals` lifecycle 확장 + `ambiguity_proposals`/`suppression_proposals` staging; proposal→review→publish; X-Ops-Write-Key). 남은 것은 **dedicated alias-registry-v2 심층 schema**와 `published` proposal을 runtime으로 반영하는 **ETL publish 소비 경로**.
-- **T-ELV2-06 deepen**: persisted family/ambiguity substrate(ETL) + `kind`/`ambiguity_types` wire 노출 여부 contract 확정. 현재 in-process label-graph.
+- **T-ELV2-06 deepen**: ✅ persisted **family graph** 빌드 완료 — migration 031 `entity_family` + `PgFamilyGraph` + 엔진 `family_graph` 채널(reserved sibling budget) + REAL-producer-only builder/publisher(`pnpm run etl:family-graph:publish`, 휴리스틱 0) + `familyGraphProximity` real read-through. ambiguity cluster-membership feature도 un-hardcode(Half A). entity_family population만 operator 실행(live-PG, infra-gated). (커밋 3efd51dc·b0a2a7e3)
+  
+  추가 보완(2026-06-02): T-05 LTR 구조적 언게이팅(flag OFF, OOD 차단), T-04 honest provenance, T-08 non-degeneracy gate + vintage-mismatch 가드, T-03 alias-registry-v2 version-identity stamp(meta.alias_registry). 자세히는 feature-catalog YAML known_limitations 참조.
 
 ## 남은 작업 (이어받기)
 

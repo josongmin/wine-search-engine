@@ -126,6 +126,7 @@ known_limitations:
   - "shadow-compare live runner + hotset eval 실측 미완 — V1 대비 우위 미증명 (DoD #7, cutover 금지)"
   - "DoD #2: alias registry v2 VERSION-IDENTITY는 됨(meta.alias_registry: schema_version+source+snapshot_id+alias_count, 라이브 read 경로 배선). 미완은 (a) resolver가 공유 snapshot 대신 읽는 SEPARATE 큐레이션 registry 아티팩트(Option-B fork) + (b) 심층 curation substrate (T-ELV2-03 심화)"
   - "curation publish는 staging 마커만 — runtime 반영은 snapshot ETL 소비 경로에 의존(직접 runtime write 없음, RFC §5 의도)"
+  - "family_graph 채널: 코드/배선/테스트 완료(migration 031 + PgFamilyGraph + 엔진 채널 + REAL-producer-only builder/publisher). entity_family population은 operator가 `pnpm run etl:family-graph:publish` 실행(live-PG, infra-gated) — 미실행 시 채널 dormant·familyGraphProximity=0으로 degrade"
   - "V1 /v1/lookup/wine가 여전히 authority — cutover는 shadow proof 이후"
 
 next_steps:
