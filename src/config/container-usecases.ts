@@ -6,6 +6,7 @@ import { ResolveUseCase } from '../application/search/resolve.usecase.js';
 import { EntityLookupV2UseCase } from '../application/search/entity-lookup-v2/entity-lookup-v2.usecase.js';
 import { MultiChannelRetrievalEngine } from '../application/search/entity-lookup-v2/multi-channel-retrieval-engine.js';
 import { ConceptAdmissionGate } from '../domain/resolver/v2/concept-admission-gate.js';
+import { LtrRerankDecider } from '../domain/resolver/v2/ltr-rerank-decider.js';
 import { AutocompleteUseCase } from '../application/search/autocomplete.usecase.js';
 import { HybridUseCase } from '../application/search/hybrid.usecase.js';
 import { DecomposedSearchUseCase } from '../application/search/decomposed-search.usecase.js';
@@ -136,6 +137,9 @@ export function buildUseCaseContainerServices(
       aliasMatcher: core.aliasMatcher,
       entityLookup: core.entityLookup,
     }),
+    // T-ELV2-05: learned reranker over the trained LambdaMART models (graceful
+    // lexical fallback when no model for the query class).
+    reranker: new LtrRerankDecider({ ...(core.ltrModels !== undefined ? { ltrModels: core.ltrModels } : {}) }),
     querySanitizer: core.querySanitizer,
     injectionJudge: core.injectionJudge,
     judgeFailureMode: config.queryEntrySecurity.judgeFailureMode,

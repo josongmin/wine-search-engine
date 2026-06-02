@@ -39,10 +39,15 @@ import type {
   LookupAdmissionGatePort,
   LookupAdmissionVerdict,
   LookupCandidateRetrievalPort,
+  LookupChannelHit,
   LookupDecision,
+  LookupRerankDecisionPort,
   LookupRetrievalResult,
+  LookupScoredCandidate,
+  LookupV2Status,
 } from '../../../domain/resolver/v2/lookup-v2-types.js';
 import { CalibratedAbstainDecider } from '../../../domain/resolver/v2/calibrated-abstain-decider.js';
+import { extractLookupFeatures } from '../../../domain/resolver/v2/lookup-feature-extractor.js';
 import { anchorsHaveExactIdentityEvidence, buildChannelHitsForEntity } from '../../../domain/resolver/v2/channel-provenance.js';
 import { buildClarification } from '../../../domain/resolver/v2/clarification-graph.js';
 import { clamp01 } from '../../../domain/shared/utils/clamp.js';
@@ -96,6 +101,13 @@ export interface EntityLookupV2UseCaseDeps {
    * use case falls back to deriving channels from planner anchors.
    */
   readonly candidateRetrieval?: LookupCandidateRetrievalPort | undefined;
+  /**
+   * T-ELV2-05: learned reranker. When present its learned decision is COMBINED
+   * with the calibrated-abstain decision via "most conservative wins" — the
+   * model can only TIGHTEN the outcome, never make V2 less precise than the
+   * audit-hardened calibrated gates.
+   */
+  readonly reranker?: LookupRerankDecisionPort | undefined;
   readonly querySanitizer: QuerySanitizer;
   readonly injectionJudge?: InjectionJudgePort | undefined;
   readonly judgeFailureMode?: 'fail_open' | 'fail_closed' | undefined;
@@ -207,8 +219,20 @@ export class EntityLookupV2UseCase {
     const topExactEvidence = top !== undefined && anchorsHaveExactIdentityEvidence(top.entityId, plan.anchors);
 
     // V2 calibrated-abstain authority — precision-first, downgrade-only over the
-    // resolver's advisory status (T-ELV2-05).
-    const decision = this.decider.decide(result, plan.queryClass, topExactEvidence);
+    // resolver's advisory status.
+    const calibrated = this.decider.decide(result, plan.queryClass, topExactEvidence);
+
+    // T-ELV2-05: combine with the learned reranker (when wired) — most
+    // conservative status wins, so the model can only tighten, never relax the
+    // audit-hardened calibrated gates.
+    let decision = calibrated;
+    if (this.deps.reranker !== undefined && result.candidates.length > 0) {
+      const learned = await this.deps.reranker.decide({
+        queryClass: plan.queryClass,
+        scored: buildScoredCandidates(result, retrieval),
+      });
+      decision = combineDecisions(calibrated, learned);
+    }
 
     pipelineDebug(
       {
@@ -473,6 +497,56 @@ export class EntityLookupV2UseCase {
       },
     };
   }
+}
+
+/**
+ * Build the learned-reranker input from the resolver candidates + the engine's
+ * per-entity channel provenance (features derived from real channel hits).
+ */
+function buildScoredCandidates(
+  result: EntityResolveResult,
+  retrieval: LookupRetrievalResult | undefined,
+): readonly LookupScoredCandidate[] {
+  const hitsByEntity = new Map<string, { hits: readonly LookupChannelHit[]; entityType: string }>();
+  if (retrieval !== undefined) {
+    for (const rc of retrieval.candidates) {
+      hitsByEntity.set(String(rc.entityId), { hits: rc.channelHits, entityType: rc.entityType });
+    }
+  }
+  return result.candidates.map((c) => {
+    const engine = hitsByEntity.get(String(c.entityId));
+    const channelHits = engine?.hits ?? [];
+    return {
+      entityId: c.entityId,
+      canonicalLabel: c.canonicalLabel,
+      entityType: engine?.entityType ?? 'unknown',
+      calibratedScore: c.calibratedScore,
+      rank: c.rank,
+      features: extractLookupFeatures(channelHits, c.calibratedScore),
+      channelHits,
+    };
+  });
+}
+
+/** Conservatism rank — lower is more conservative (failed < ambiguous < resolved). */
+const DECISION_CONSERVATISM: Readonly<Record<Exclude<LookupV2Status, 'redirect_discovery'>, number>> = {
+  failed: 0,
+  ambiguous: 1,
+  resolved: 2,
+};
+
+/**
+ * Combine the calibrated and learned decisions — the MORE conservative status
+ * wins (downgrade-only over both), so the learned reranker can only tighten the
+ * audit-hardened calibrated outcome, never relax it. On a tie the learned
+ * decision is surfaced (so its reason/score is visible).
+ */
+function combineDecisions(calibrated: LookupDecision, learned: LookupDecision): LookupDecision {
+  const calRank = DECISION_CONSERVATISM[calibrated.status];
+  const learnedRank = DECISION_CONSERVATISM[learned.status];
+  if (learnedRank < calRank) return learned;
+  if (calRank < learnedRank) return calibrated;
+  return learned;
 }
 
 /**
