@@ -275,4 +275,84 @@ describe('AmbiguityClassifier', () => {
       expect(['medium', 'high']).toContain(state.severity);
     });
   });
+
+  describe('producer_family_collision — score-competitiveness gate', () => {
+    // Mirrors the module-private STRONG_MATCH_RATIO in ambiguity-classifier.ts.
+    // The gate counts a same-producer sibling only when
+    // canonicalNormalizedMatch / topScore >= this ratio.
+    const STRONG_MATCH_RATIO = 0.85;
+
+    function makeProducerWine(
+      id: string,
+      label: string,
+      producer: string,
+      canonicalNormalizedMatch: number,
+    ): ResolverCandidate {
+      return {
+        entityId: id as any,
+        entityType: 'wine',
+        canonicalLabel: label,
+        aliasMatches: [],
+        sourceSignals: makeSignals({ canonicalNormalizedMatch }),
+        attributeHints: { producer },
+      };
+    }
+
+    it('zero-signal family_graph siblings do NOT trigger producer_family_collision', () => {
+      // Live symptom (Penfolds Grange): an exact head match plus recall-only
+      // family_graph siblings that carry ZERO identity signal must NOT be
+      // folded into a "which Penfolds did you mean?" cluster — that wrongly
+      // abstained on an otherwise-resolvable exact head match.
+      const producer = 'Penfolds';
+      const candidates: ResolverCandidate[] = [
+        makeProducerWine('grange', '2019 Penfolds Grange', producer, 1.0),
+        makeProducerWine('bin389', 'Penfolds Bin 389', producer, 0),
+        makeProducerWine('bin28', 'Penfolds Bin 28', producer, 0),
+        makeProducerWine('bin128', 'Penfolds Bin 128', producer, 0),
+        makeProducerWine('st-henri', 'Penfolds St Henri', producer, 0),
+      ];
+      const state = classifier.classify(candidates, 'exact_entity');
+      expect(state.types).not.toContain('producer_family_collision');
+    });
+
+    it('counts a sibling at exactly STRONG_MATCH_RATIO*topScore (boundary just-inside)', () => {
+      const producer = 'Penfolds';
+      const topScore = 1.0;
+      const boundary = STRONG_MATCH_RATIO * topScore; // counts (>=)
+      const candidates: ResolverCandidate[] = [
+        makeProducerWine('a', 'Penfolds A', producer, topScore),
+        makeProducerWine('b', 'Penfolds B', producer, boundary),
+        makeProducerWine('c', 'Penfolds C', producer, boundary),
+      ];
+      const state = classifier.classify(candidates, 'short_entity');
+      expect(state.types).toContain('producer_family_collision');
+    });
+
+    it('excludes a sibling just below STRONG_MATCH_RATIO*topScore (boundary just-outside)', () => {
+      const producer = 'Penfolds';
+      const topScore = 1.0;
+      const justBelow = (STRONG_MATCH_RATIO - 0.01) * topScore; // does NOT count
+      const candidates: ResolverCandidate[] = [
+        makeProducerWine('a', 'Penfolds A', producer, topScore),
+        makeProducerWine('b', 'Penfolds B', producer, justBelow),
+        makeProducerWine('c', 'Penfolds C', producer, justBelow),
+      ];
+      // Only 1 competitive (the top) → below MIN_COUNT(3) → no collision.
+      const state = classifier.classify(candidates, 'short_entity');
+      expect(state.types).not.toContain('producer_family_collision');
+    });
+
+    it('preserves the topScore===0 conservative escape (no-signal edge unchanged)', () => {
+      // No candidate carries any canonicalNormalizedMatch signal: the gate
+      // bails (cannot divide by zero) and does not fabricate a collision.
+      const producer = 'Penfolds';
+      const candidates: ResolverCandidate[] = [
+        makeProducerWine('a', 'Penfolds A', producer, 0),
+        makeProducerWine('b', 'Penfolds B', producer, 0),
+        makeProducerWine('c', 'Penfolds C', producer, 0),
+      ];
+      const state = classifier.classify(candidates, 'short_entity');
+      expect(state.types).not.toContain('producer_family_collision');
+    });
+  });
 });

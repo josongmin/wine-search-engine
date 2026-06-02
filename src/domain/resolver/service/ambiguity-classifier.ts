@@ -24,6 +24,14 @@ const AMBIGUITY_TYPE_COLLISION_SCAN_K = 3;
  * Minimum number of same-producer wines among the top scan window to call a
  * producer-family collision. 3 = a clear cluster (not a coincidental pair),
  * suggesting the query targets the producer rather than one specific wine.
+ *
+ * Only **score-competitive** occurrences count toward this threshold (siblings
+ * within STRONG_MATCH_RATIO of the top candidate's canonicalNormalizedMatch) —
+ * this implements the detector's stated "score similarly" contract. Recall-only
+ * seeds (e.g. family_graph siblings carrying zero identity signals) are NOT a
+ * collision: the user did not type something that matches them strongly, so
+ * surfacing a "which one did you mean?" clarification over them is a false
+ * positive that needlessly abstains on an otherwise-resolvable head match.
  */
 const PRODUCER_FAMILY_COLLISION_MIN_COUNT = 3;
 /** ≥ this many distinct ambiguity types → 'high' severity (compounding ambiguity). */
@@ -173,14 +181,39 @@ export class AmbiguityClassifier {
   }
 
   /**
-   * Detects when multiple wines from the same producer score similarly,
+   * Detects when multiple wines from the same producer **score similarly**,
    * suggesting the query refers to the producer rather than a specific wine.
+   *
+   * Score-competitiveness is mandatory, not incidental: only siblings within
+   * STRONG_MATCH_RATIO of the top candidate's canonicalNormalizedMatch count
+   * toward the cluster. Bare producer-name counting (ignoring score) silently
+   * folds recall-only seeds — notably zero-signal family_graph siblings that
+   * the user never matched on — into a false "producer family" cluster,
+   * forcing a needless clarification/abstain over an otherwise-resolvable
+   * exact head match. This mirrors detectUnderspecifiedShortForm's gate using
+   * the same canonicalNormalizedMatch proxy and STRONG_MATCH_RATIO constant.
    */
   private detectProducerFamilyCollision(candidates: readonly ResolverCandidate[]): boolean {
+    // Conservative escape identical to detectUnderspecifiedShortForm: no top
+    // candidate, or a top whose proxy score is zero (odd-ranking / no-signal
+    // edge) — leave behaviour unchanged rather than divide by zero.
+    const top = candidates[0];
+    if (top === undefined) return false;
+    const topScore = top.sourceSignals.canonicalNormalizedMatch;
+    if (topScore === 0) {
+      return false;
+    }
+
     const producerCounts = new Map<string, number>();
     for (const candidate of candidates.slice(0, AMBIGUITY_TOP_CANDIDATE_SCAN_K)) {
       const producer = candidate.attributeHints?.['producer'];
-      if (typeof producer === 'string') {
+      if (typeof producer !== 'string') {
+        continue;
+      }
+      // Only a score-competitive sibling is part of the producer-family
+      // cluster. Zero-signal recall seeds (canonicalNormalizedMatch=0) yield
+      // 0/topScore = 0 < STRONG_MATCH_RATIO and are excluded.
+      if (candidate.sourceSignals.canonicalNormalizedMatch / topScore >= STRONG_MATCH_RATIO) {
         producerCounts.set(producer, (producerCounts.get(producer) ?? 0) + 1);
       }
     }
