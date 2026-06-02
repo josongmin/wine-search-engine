@@ -125,6 +125,7 @@
     "eval:entity:fixtures:live": "tsx scripts/eval/run-entity-retrieval-fixture-eval.ts",
     "eval:lookup-v2:shadow": "node --import tsx scripts/eval/run-lookup-v2-shadow-compare.ts",
     "eval:lookup-v2:coverage": "node --import tsx scripts/eval/run-lookup-v2-coverage-report.ts",
+    "etl:family-graph:publish": "node --import tsx scripts/etl/run-family-graph-publish.ts",
     "lookup-v2:cutover-gate": "node --import tsx scripts/eval/run-lookup-v2-shadow-compare.ts --output /tmp/lookup-v2-cutover-gate.json",
     "eval:search-feature:fixtures": "tsx scripts/eval/run-search-feature-behavior-fixture-eval.ts --smoke-predictions",
     "eval:search-feature:fixtures:live": "tsx scripts/eval/run-search-feature-behavior-fixture-eval.ts",
