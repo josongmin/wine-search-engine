@@ -1,0 +1,189 @@
+/**
+ * Expanded entity-resolution validation: V1 (`/v1/lookup/wine`) vs V2
+ * (`/v2/entity-lookup`) over the PG `eval_cases` ground truth, scored by EXACT
+ * `expected_entity_id` match — far more rigorous than the 15-query hotset.
+ *
+ * Scope (entity-semantic classes only — others lack a target entity and
+ * conflate with concept-redirect, so they are excluded from the resolution
+ * metric):
+ *   should-resolve  : exact_entity, noisy_recall   (expected_entity_id present)
+ *   should-NOT-resolve: ambiguous_short_form, no_match
+ *
+ * Per side, per case:
+ *   should-resolve     → CORRECT if resolved AND entityId == expected_entity_id
+ *                        WRONG   if resolved to a different entity
+ *                        MISS    if not resolved
+ *   should-not-resolve → CORRECT if not resolved (ambiguous/failed/redirect)
+ *                        WRONG   if resolved (a wrong-positive)
+ *
+ * Usage:
+ *   npx tsx --env-file=.env scripts/eval/run-entity-resolution-validation.ts \
+ *     [--limit-per-class N] [--output <file.json>]
+ */
+import 'dotenv/config';
+import process from 'node:process';
+import { writeFileSync } from 'node:fs';
+
+import { loadConfig } from '../../src/config/env.js';
+import { createContainer } from '../../src/config/container.js';
+import { getPgPool } from '../../src/infrastructure/db/pg-pool.js';
+import { LOOKUP_V2_DEFAULT_MAX_CANDIDATES } from '../../src/interface/http/constants.js';
+import type { SearchRequest } from '../../src/application/search/search-request.dto.js';
+
+const SHOULD_RESOLVE_CLASSES = ['exact_entity', 'noisy_recall'] as const;
+const SHOULD_NOT_RESOLVE_CLASSES = ['ambiguous_short_form', 'no_match'] as const;
+const ENTITY_CLASSES = [...SHOULD_RESOLVE_CLASSES, ...SHOULD_NOT_RESOLVE_CLASSES];
+
+interface CaseRow {
+  readonly query: string;
+  readonly queryClass: string;
+  readonly expectedStatus: string;
+  readonly expectedEntityId: string | null;
+}
+
+interface SideOutcome {
+  status: string;
+  entityId?: string;
+}
+
+type Verdict = 'correct' | 'wrong' | 'miss';
+
+function scoreVerdict(shouldResolve: boolean, expectedEntityId: string | null, o: SideOutcome): Verdict {
+  if (shouldResolve) {
+    if (o.status !== 'resolved') return 'miss';
+    return o.entityId !== undefined && o.entityId === expectedEntityId ? 'correct' : 'wrong';
+  }
+  // should NOT resolve
+  return o.status === 'resolved' ? 'wrong' : 'correct';
+}
+
+function parseLimit(argv: readonly string[]): { limitPerClass: number; output: string } {
+  let limitPerClass = 1000;
+  let output = '/tmp/entity-resolution-validation.json';
+  for (let i = 0; i < argv.length; i += 1) {
+    if (argv[i] === '--limit-per-class') {
+      const n = Number.parseInt(argv[i + 1] ?? '', 10);
+      if (Number.isFinite(n) && n > 0) limitPerClass = n;
+      i += 1;
+    } else if (argv[i] === '--output') {
+      output = argv[i + 1] ?? output;
+      i += 1;
+    }
+  }
+  return { limitPerClass, output };
+}
+
+async function main(): Promise<void> {
+  const { limitPerClass, output } = parseLimit(process.argv.slice(2));
+  const config = loadConfig();
+  const pool = getPgPool();
+  const container = await createContainer(config, pool);
+
+  const { rows: caseRows } = await pool.query<CaseRow>(
+    `SELECT query, query_class AS "queryClass", expected_status AS "expectedStatus",
+            expected_entity_id AS "expectedEntityId"
+       FROM eval_cases
+      WHERE query_class = ANY($1::text[])
+      ORDER BY query_class, created_at ASC`,
+    [ENTITY_CLASSES],
+  );
+
+  // Cap per class for quick runs.
+  const perClassCount = new Map<string, number>();
+  const cases = caseRows.filter((c) => {
+    const n = (perClassCount.get(c.queryClass) ?? 0) + 1;
+    perClassCount.set(c.queryClass, n);
+    return n <= limitPerClass;
+  });
+
+  process.stderr.write(`[er-validation] scoring ${String(cases.length)} entity-semantic cases\n`);
+
+  interface Tally { correct: number; wrong: number; miss: number; total: number }
+  const mk = (): Tally => ({ correct: 0, wrong: 0, miss: 0, total: 0 });
+  const byClass: Record<string, { v1: Tally; v2: Tally }> = {};
+  const detail: unknown[] = [];
+
+  let i = 0;
+  for (const c of cases) {
+    i += 1;
+    const requestId = `er-val-${String(i)}`;
+    const shouldResolve = (SHOULD_RESOLVE_CLASSES as readonly string[]).includes(c.queryClass);
+
+    let v1: SideOutcome = { status: 'failed' };
+    try {
+      const req: SearchRequest = { query: c.query, primitiveRoute: 'lookup_wine' };
+      const resp = await container.searchUseCase.execute(req, requestId, {});
+      if (resp.queryType === 'search') {
+        const status = resp.engineDecision.decisionStatus;
+        const top = resp.results[0]?.entity;
+        v1 = status === 'resolved' && top !== undefined
+          ? { status: 'resolved', entityId: String(top.entityId) }
+          : { status: status === 'ambiguous' ? 'ambiguous' : 'failed' };
+      }
+    } catch {
+      v1 = { status: 'error' };
+    }
+
+    let v2: SideOutcome = { status: 'failed' };
+    try {
+      const res = await container.entityLookupV2UseCase.execute(
+        { query: c.query, maxCandidates: LOOKUP_V2_DEFAULT_MAX_CANDIDATES, mode: 'default', requestId },
+        {},
+      );
+      v2 = res.topCandidate !== null
+        ? { status: res.status, entityId: String(res.topCandidate.entityId) }
+        : { status: res.status };
+    } catch {
+      v2 = { status: 'error' };
+    }
+
+    const v1Verdict = scoreVerdict(shouldResolve, c.expectedEntityId, v1);
+    const v2Verdict = scoreVerdict(shouldResolve, c.expectedEntityId, v2);
+
+    byClass[c.queryClass] ??= { v1: mk(), v2: mk() };
+    const slot = byClass[c.queryClass]!;
+    slot.v1[v1Verdict] += 1; slot.v1.total += 1;
+    slot.v2[v2Verdict] += 1; slot.v2.total += 1;
+
+    detail.push({ query: c.query, queryClass: c.queryClass, expectedStatus: c.expectedStatus,
+      expectedEntityId: c.expectedEntityId, v1, v1Verdict, v2, v2Verdict });
+
+    if (i % 20 === 0) process.stderr.write(`[er-validation] ${String(i)}/${String(cases.length)}\n`);
+  }
+
+  // Aggregate.
+  const overall = { v1: mk(), v2: mk() };
+  for (const k of Object.keys(byClass)) {
+    for (const side of ['v1', 'v2'] as const) {
+      const t = byClass[k]![side];
+      overall[side].correct += t.correct; overall[side].wrong += t.wrong;
+      overall[side].miss += t.miss; overall[side].total += t.total;
+    }
+  }
+
+  const pct = (n: number, d: number): string => (d === 0 ? '—' : `${((100 * n) / d).toFixed(1)}%`);
+  process.stderr.write('\n=== Entity-resolution validation (exact expected_entity_id match) ===\n');
+  for (const k of ENTITY_CLASSES) {
+    const b = byClass[k];
+    if (b === undefined) continue;
+    process.stderr.write(
+      `${k} (n=${String(b.v1.total)}):\n` +
+      `  V1: correct=${String(b.v1.correct)} (${pct(b.v1.correct, b.v1.total)}) wrong=${String(b.v1.wrong)} miss=${String(b.v1.miss)}\n` +
+      `  V2: correct=${String(b.v2.correct)} (${pct(b.v2.correct, b.v2.total)}) wrong=${String(b.v2.wrong)} miss=${String(b.v2.miss)}\n`,
+    );
+  }
+  process.stderr.write(
+    `OVERALL (n=${String(overall.v1.total)}):\n` +
+    `  V1: correct=${String(overall.v1.correct)} (${pct(overall.v1.correct, overall.v1.total)}) wrong=${String(overall.v1.wrong)} miss=${String(overall.v1.miss)}\n` +
+    `  V2: correct=${String(overall.v2.correct)} (${pct(overall.v2.correct, overall.v2.total)}) wrong=${String(overall.v2.wrong)} miss=${String(overall.v2.miss)}\n`,
+  );
+
+  writeFileSync(output, `${JSON.stringify({ byClass, overall, detail }, null, 2)}\n`, 'utf8');
+  process.stderr.write(`[er-validation] report → ${output}\n`);
+  await pool.end();
+}
+
+main().catch((err: unknown) => {
+  process.stderr.write(`[er-validation] failed: ${(err as Error).message}\n`);
+  process.exitCode = 1;
+});
