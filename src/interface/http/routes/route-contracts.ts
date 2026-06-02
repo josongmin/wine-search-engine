@@ -16,9 +16,23 @@ import {
   EntityLookupV2ResponseSchema,
 } from '../schemas/entity-lookup-v2.schema.js';
 import {
+  AliasAuditRequestSchema,
+  AliasAuditResponseSchema,
+  CoverageHealthRequestSchema,
+  CoverageHealthResponseSchema,
+  ListProposalsRequestSchema,
+  ListProposalsResponseSchema,
+  ProposalResponseSchema,
+  PublishProposalRequestSchema,
+  ReviewProposalRequestSchema,
+  SubmitProposalRequestSchema,
+} from '../schemas/entity-lookup-v2-ops.schema.js';
+import {
   HTTP_STATUS_BAD_REQUEST,
+  HTTP_STATUS_CONFLICT,
   HTTP_STATUS_FORBIDDEN,
   HTTP_STATUS_INTERNAL_SERVER_ERROR,
+  HTTP_STATUS_NOT_FOUND,
   HTTP_STATUS_OK,
   HTTP_STATUS_REQUEST_TIMEOUT,
   HTTP_STATUS_SERVICE_UNAVAILABLE,
@@ -173,6 +187,81 @@ export const EntityLookupV2OpsInspectRouteContract = defineRouteContract({
     [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
     [HTTP_STATUS_SERVICE_UNAVAILABLE]: ErrorResponseSchema,
   },
+});
+
+// ---------------------------------------------------------------------------
+// T-ELV2-07 — operator curation plane (`/v2/entity-lookup/ops/*`).
+// Reads are X-Debug-Key gated; writes are X-Ops-Write-Key gated at the handler.
+// All POST-with-body, matching the ops/inspect read contract above.
+// ---------------------------------------------------------------------------
+
+/** Common error statuses for the trusted read ops endpoints. */
+const OPS_READ_ERROR_RESPONSES = {
+  [HTTP_STATUS_BAD_REQUEST]: ErrorResponseSchema,
+  [HTTP_STATUS_FORBIDDEN]: ErrorResponseSchema,
+  [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
+  [HTTP_STATUS_SERVICE_UNAVAILABLE]: ErrorResponseSchema,
+} as const;
+
+/** Write endpoints add 404 (unknown proposal) + 409 (illegal transition / lost race). */
+const OPS_WRITE_ERROR_RESPONSES = {
+  ...OPS_READ_ERROR_RESPONSES,
+  [HTTP_STATUS_NOT_FOUND]: ErrorResponseSchema,
+  [HTTP_STATUS_CONFLICT]: ErrorResponseSchema,
+} as const;
+
+export const EntityLookupV2OpsAliasAuditRouteContract = defineRouteContract({
+  operationId: 'entity.lookup.v2.ops.alias_audit',
+  apiVersion: '2',
+  responseType: 'interpret',
+  body: AliasAuditRequestSchema,
+  capabilities: ['analysis'],
+  responses: { [HTTP_STATUS_OK]: AliasAuditResponseSchema, ...OPS_READ_ERROR_RESPONSES },
+});
+
+export const EntityLookupV2OpsCoverageHealthRouteContract = defineRouteContract({
+  operationId: 'entity.lookup.v2.ops.coverage_health',
+  apiVersion: '2',
+  responseType: 'interpret',
+  body: CoverageHealthRequestSchema,
+  capabilities: ['analysis'],
+  responses: { [HTTP_STATUS_OK]: CoverageHealthResponseSchema, ...OPS_READ_ERROR_RESPONSES },
+});
+
+export const EntityLookupV2OpsListProposalsRouteContract = defineRouteContract({
+  operationId: 'entity.lookup.v2.ops.proposals.list',
+  apiVersion: '2',
+  responseType: 'interpret',
+  body: ListProposalsRequestSchema,
+  capabilities: ['analysis'],
+  responses: { [HTTP_STATUS_OK]: ListProposalsResponseSchema, ...OPS_READ_ERROR_RESPONSES },
+});
+
+export const EntityLookupV2OpsSubmitProposalRouteContract = defineRouteContract({
+  operationId: 'entity.lookup.v2.ops.proposals.submit',
+  apiVersion: '2',
+  responseType: 'interpret',
+  body: SubmitProposalRequestSchema,
+  capabilities: ['analysis'],
+  responses: { [HTTP_STATUS_OK]: ProposalResponseSchema, ...OPS_READ_ERROR_RESPONSES },
+});
+
+export const EntityLookupV2OpsReviewProposalRouteContract = defineRouteContract({
+  operationId: 'entity.lookup.v2.ops.proposals.review',
+  apiVersion: '2',
+  responseType: 'interpret',
+  body: ReviewProposalRequestSchema,
+  capabilities: ['analysis'],
+  responses: { [HTTP_STATUS_OK]: ProposalResponseSchema, ...OPS_WRITE_ERROR_RESPONSES },
+});
+
+export const EntityLookupV2OpsPublishProposalRouteContract = defineRouteContract({
+  operationId: 'entity.lookup.v2.ops.proposals.publish',
+  apiVersion: '2',
+  responseType: 'interpret',
+  body: PublishProposalRequestSchema,
+  capabilities: ['analysis'],
+  responses: { [HTTP_STATUS_OK]: ProposalResponseSchema, ...OPS_WRITE_ERROR_RESPONSES },
 });
 
 // ---------------------------------------------------------------------------

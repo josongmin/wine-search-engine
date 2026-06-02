@@ -26,6 +26,7 @@ import type {
   EntityDocumentLookupPort,
 } from '../application/search/port/search-pipeline-deps.port.js';
 import type { Config } from './env.js';
+import type { Pool } from 'pg';
 import type { RuntimeHandles } from './runtime-handles.js';
 import { buildCoreAdapterServices } from './container-adapters.js';
 import {
@@ -91,6 +92,12 @@ export interface CoreContainerServices {
    * cached across requests.
    */
   readonly budgetLedgerFactory: (options?: BudgetLedgerOptions) => BudgetLedger;
+  /**
+   * Live PG pool when DB-backed (undefined in snapshot/in-memory modes).
+   * Exposed so DB-only planes (e.g. the T-ELV2-07 curation write plane) can be
+   * wired only when a pool exists.
+   */
+  readonly pool?: Pool;
 }
 
 export async function buildCoreContainerServices(
@@ -143,6 +150,7 @@ export async function buildCoreContainerServices(
     : adapters.searchIndex;
 
   return {
+    ...(runtime.pool !== undefined ? { pool: runtime.pool } : {}),
     queryPlanner,
     entityLookupAnchorRefresh,
     blocker: buildBlockingUseCaseAdapter(adapters),

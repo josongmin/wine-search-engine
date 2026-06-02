@@ -15,6 +15,7 @@ import type {
   InterpretUseCasePort,
   ResolveUseCasePort,
 } from '../application/search/port/search-route-usecases.port.js';
+import type { CurationUseCase } from '../application/curation/curation.usecase.js';
 import { buildEvalRunner } from './container-aux-features.js';
 import {
   buildUseCaseContainerServices,
@@ -26,6 +27,7 @@ interface FeatureContainerServices {
   readonly interpretUseCase: InterpretUseCasePort;
   readonly resolveUseCase: ResolveUseCasePort;
   readonly entityLookupV2UseCase: EntityLookupV2UseCasePort;
+  readonly curationUseCase?: CurationUseCase | undefined;
   readonly autocompleteUseCase: AutocompleteUseCasePort;
   readonly hybridUseCase: HybridUseCasePort;
   readonly decomposedSearchUseCase: DecomposedSearchUseCasePort;

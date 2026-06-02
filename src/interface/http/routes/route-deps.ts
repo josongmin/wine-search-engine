@@ -5,9 +5,15 @@ import type {
 } from '../../../application/search/port/search-route-usecases.port.js';
 import type { EvalRunnerContract } from '../../../config/container-eval-contracts.js';
 import type { WineSearchContainerServices } from '../../../config/container.js';
+import type { CurationUseCase } from '../../../application/curation/curation.usecase.js';
 
 export interface SearchRouteDeps {
   readonly searchUseCase: SearchExecutorPort;
+}
+
+/** Dependencies for the operator curation plane routes (T-ELV2-07). */
+export interface CurationOpsRouteDeps {
+  readonly curationUseCase: CurationUseCase;
 }
 
 export interface ResolveRouteDeps {
@@ -28,6 +34,12 @@ export interface HttpServerDeps
    * kept optional here so lightweight server-construction tests need not stub it.
    */
   readonly entityLookupV2UseCase?: EntityLookupV2UseCasePort | undefined;
+  /**
+   * Operator curation plane use case (T-ELV2-07). Optional so lightweight
+   * server-construction tests need not stub it; when present the ops curation
+   * routes are registered.
+   */
+  readonly curationUseCase?: CurationUseCase | undefined;
   /** Agentic orchestrator — present when AGENT_ENABLED=true and ChatLlmPort is available. */
   /**
    * Plan-then-Execute wine-search slice — present when

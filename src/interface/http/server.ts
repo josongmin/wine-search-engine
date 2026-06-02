@@ -22,6 +22,7 @@ import {
   registerSemanticSearchRoute,
 } from './routes/primitive-search.route.js';
 import { registerEntityLookupV2OpsRoute, registerEntityLookupV2Route } from './routes/entity-lookup-v2.route.js';
+import { registerEntityLookupV2OpsCurationRoutes } from './routes/entity-lookup-v2-ops.route.js';
 import {
   registerHealthRoutes,
   startEventLoopHeartbeat,
@@ -385,6 +386,12 @@ export async function createServer(
     registerEntityLookupV2Route(app, elv2Deps);
     // Trusted operator read plane — X-Debug-Key gated at the handler (T-ELV2-07).
     registerEntityLookupV2OpsRoute(app, elv2Deps);
+  }
+  // T-ELV2-07: operator curation plane (alias-audit/coverage-health/proposals).
+  // Reads X-Debug-Key gated, writes X-Ops-Write-Key gated — registered when the
+  // curation use case is wired (requires a PG pool).
+  if (deps.curationUseCase !== undefined) {
+    registerEntityLookupV2OpsCurationRoutes(app, { curationUseCase: deps.curationUseCase });
   }
   if (deps.wineSearch !== undefined) {
     // Canonical agent surface — `POST /v1/agent` for caller-managed history,

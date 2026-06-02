@@ -6,7 +6,13 @@ import {
   AgentSessionTurnRouteContract,
 } from './agent.contract.js';
 import {
+  EntityLookupV2OpsAliasAuditRouteContract,
+  EntityLookupV2OpsCoverageHealthRouteContract,
   EntityLookupV2OpsInspectRouteContract,
+  EntityLookupV2OpsListProposalsRouteContract,
+  EntityLookupV2OpsPublishProposalRouteContract,
+  EntityLookupV2OpsReviewProposalRouteContract,
+  EntityLookupV2OpsSubmitProposalRouteContract,
   EntityLookupV2RouteContract,
   HealthRouteContract,
   HybridSearchRouteContract,
@@ -83,8 +89,13 @@ interface DeclaredHttpRouteContract {
  *   7.2.0 — T-ELV2-07: add the trusted operator read plane
  *           (`POST /v2/entity-lookup/ops/inspect`, X-Debug-Key gated) (2026-06-02).
  *           Additive. Remaining: 11.
+ *   7.3.0 — T-ELV2-07: add the operator curation plane (2026-06-02):
+ *           `POST /v2/entity-lookup/ops/{alias-audit,coverage-health}` and
+ *           `POST /v2/entity-lookup/ops/proposals[/{review,publish}]`. Reads
+ *           X-Debug-Key gated, writes X-Ops-Write-Key gated. Additive.
+ *           Remaining: 17.
  */
-export const HTTP_CONTRACT_CATALOG_VERSION = '7.2.0';
+export const HTTP_CONTRACT_CATALOG_VERSION = '7.3.0';
 
 export const DeclaredHttpRouteContractCatalog: readonly DeclaredHttpRouteContract[] = [
   { method: 'GET', url: '/health', contract: HealthRouteContract },
@@ -95,6 +106,12 @@ export const DeclaredHttpRouteContractCatalog: readonly DeclaredHttpRouteContrac
   { method: 'POST', url: '/v1/lookup/wine', contract: LookupWineRouteContract },
   { method: 'POST', url: '/v2/entity-lookup', contract: EntityLookupV2RouteContract },
   { method: 'POST', url: '/v2/entity-lookup/ops/inspect', contract: EntityLookupV2OpsInspectRouteContract },
+  { method: 'POST', url: '/v2/entity-lookup/ops/alias-audit', contract: EntityLookupV2OpsAliasAuditRouteContract },
+  { method: 'POST', url: '/v2/entity-lookup/ops/coverage-health', contract: EntityLookupV2OpsCoverageHealthRouteContract },
+  { method: 'POST', url: '/v2/entity-lookup/ops/proposals', contract: EntityLookupV2OpsListProposalsRouteContract },
+  { method: 'POST', url: '/v2/entity-lookup/ops/proposals/submit', contract: EntityLookupV2OpsSubmitProposalRouteContract },
+  { method: 'POST', url: '/v2/entity-lookup/ops/proposals/review', contract: EntityLookupV2OpsReviewProposalRouteContract },
+  { method: 'POST', url: '/v2/entity-lookup/ops/proposals/publish', contract: EntityLookupV2OpsPublishProposalRouteContract },
   { method: 'POST', url: '/v1/agent', contract: AgentRunRouteContract },
   { method: 'POST', url: '/v1/agent/sessions', contract: AgentSessionCreateRouteContract },
   { method: 'POST', url: '/v1/agent/sessions/:sessionId/turns', contract: AgentSessionTurnRouteContract },
@@ -203,7 +220,7 @@ export function computeHttpContractCatalogFingerprint(
  * failing test.
  */
 export const HTTP_CONTRACT_CATALOG_FINGERPRINT =
-  '6d7794d7ca1f28dbf28958372e231cd5aff6e4ae76cfd0f7a0d1a8aacf58b9d5';
+  '1c8be20cf59af8c2a45057ddb2a26ec4a3356042b5563442f3359276a4dfdec1';
 
 export function buildDeclaredHttpRouteContractManifest(): HttpRouteContractManifest {
   const routes: RegisteredHttpRouteContract[] = DeclaredHttpRouteContractCatalog.map((entry) => {

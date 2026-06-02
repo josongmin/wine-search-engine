@@ -13,6 +13,7 @@ import type { RuntimeReadinessSnapshot } from './container-runtime-support.js';
 import type { DrinkingWindowUseCasePort } from '../application/drinking-window/port/drinking-window-usecase.port.js';
 import type { DrinkingWindowPredictorPort } from '../domain/drinking-window/port/drinking-window-predictor.port.js';
 import type { SearchExecutorPort } from '../application/search/port/search-executor.port.js';
+import type { CurationUseCase } from '../application/curation/curation.usecase.js';
 import type {
   AutocompleteUseCasePort,
   BatchSearchUseCasePort,
@@ -80,6 +81,8 @@ export interface Container {
   readonly interpretUseCase: InterpretUseCasePort;
   readonly resolveUseCase: ResolveUseCasePort;
   readonly entityLookupV2UseCase: EntityLookupV2UseCasePort;
+  /** Operator curation plane (T-ELV2-07); present only when a PG pool is wired. */
+  readonly curationUseCase?: CurationUseCase | undefined;
   readonly autocompleteUseCase: AutocompleteUseCasePort;
   readonly hybridUseCase: HybridUseCasePort;
   readonly decomposedSearchUseCase: DecomposedSearchUseCasePort;

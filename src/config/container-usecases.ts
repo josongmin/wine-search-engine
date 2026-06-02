@@ -4,6 +4,8 @@ import type { HydeGenerator } from '../domain/retrieval/service/hyde-generator.j
 import { InterpretUseCase } from '../application/search/interpret.usecase.js';
 import { ResolveUseCase } from '../application/search/resolve.usecase.js';
 import { EntityLookupV2UseCase } from '../application/search/entity-lookup-v2/entity-lookup-v2.usecase.js';
+import { CurationUseCase } from '../application/curation/curation.usecase.js';
+import { PgCurationStore } from '../infrastructure/curation/pg-curation-store.js';
 import { MultiChannelRetrievalEngine } from '../application/search/entity-lookup-v2/multi-channel-retrieval-engine.js';
 import { ConceptAdmissionGate } from '../domain/resolver/v2/concept-admission-gate.js';
 import { LtrRerankDecider } from '../domain/resolver/v2/ltr-rerank-decider.js';
@@ -35,6 +37,8 @@ export interface UseCaseContainerServices {
   readonly interpretUseCase: InterpretUseCasePort;
   readonly resolveUseCase: ResolveUseCasePort;
   readonly entityLookupV2UseCase: EntityLookupV2UseCasePort;
+  /** Operator curation plane (T-ELV2-07); present only when a PG pool is wired. */
+  readonly curationUseCase?: CurationUseCase | undefined;
   readonly autocompleteUseCase: AutocompleteUseCasePort;
   readonly hybridUseCase: HybridUseCasePort;
   readonly decomposedSearchUseCase: DecomposedSearchUseCasePort;
@@ -147,9 +151,17 @@ export function buildUseCaseContainerServices(
     queryEntrySecurityObserver,
   });
 
+  // T-ELV2-07: operator curation plane. DB-only — wired solely when a PG pool
+  // exists (snapshot/in-memory modes leave it undefined and the ops routes are
+  // not registered).
+  const curationUseCase = core.pool !== undefined
+    ? new CurationUseCase(new PgCurationStore(core.pool))
+    : undefined;
+
   return {
     searchUseCase,
     entityLookupV2UseCase,
+    ...(curationUseCase !== undefined ? { curationUseCase } : {}),
     interpretUseCase: new InterpretUseCase({
       queryPlanner: core.queryPlanner,
       querySanitizer: core.querySanitizer,
