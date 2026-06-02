@@ -343,7 +343,20 @@ function buildSignals(
     ? anchorMatchesIdentitySafeProjection(rawQuery, normalizedQuery, anchor, doc)
     : undefined;
   const exactSignalAllowed = identitySafeMatch !== false;
-  const identityNormalizedMatch = identitySafeMatch === false || phoneticOnly ? 0 : anchor.confidence;
+  // `canonicalNormalizedMatch` is the IDENTITY-normalized lane (scorer weight
+  // 0.9, second only to canonicalExactMatch). It must carry confidence ONLY for
+  // an identity-bearing (exactLike) strategy that cleared the identity-key gate.
+  // The prior `… ? 0 : anchor.confidence` default leaked full confidence into
+  // this lane for NON-exactLike matches: a fuzzy/substring hit has
+  // identitySafeMatch === undefined (the gate never runs for non-exactLike), so
+  // neither `=== false` nor `phoneticOnly` fired and the lane defaulted to
+  // anchor.confidence. That let a single fuzzy alias hit (e.g. the generic
+  // "Viña"→"Vinas" token) populate the identity lane at 0.9 and resolve a wholly
+  // different wine. Fuzzy evidence already flows through aliasFuzzyMatch +
+  // editDistanceScore; the identity lane is 0 for it by definition.
+  // `exactLike` already implies `!phoneticOnly` (exactLike = !phoneticOnly && …),
+  // so testing exactLike is sufficient to exclude both fuzzy and phonetic.
+  const identityNormalizedMatch = exactLike && exactSignalAllowed ? anchor.confidence : 0;
 
   return {
     ...ZERO_SIGNALS,

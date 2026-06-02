@@ -125,6 +125,53 @@ describe('buildResolverCandidatesFromGenerator', () => {
     expect(candidates[0]?.aliasMatches).toHaveLength(2);
   });
 
+  it('does NOT populate the identity-normalized lane for a PURE fuzzy anchor (lane-leak guard)', async () => {
+    // Regression: a candidate matched ONLY via a fuzzy strategy (no exactLike
+    // strategy in the set) used to leak full anchor confidence into
+    // canonicalNormalizedMatch (the identity lane, scorer weight 0.9), because
+    // the gate that zeroes that lane only fired for exactLike-that-failed or
+    // phonetic — not for fuzzy (identitySafeMatch === undefined). That let a
+    // generic token fuzzy hit (e.g. "Viña"→"Vinas") score identity-grade and
+    // wrong-resolve a different wine. Fuzzy evidence must flow ONLY through the
+    // aliasFuzzyMatch + editDistanceScore lanes; the identity lane is 0.
+    const entityId = createEntityId('vinas-mora-kaamen-iii-2022');
+    const lookup = makeBatchLookup(async () => ({
+      entityId,
+      entityType: 'wine',
+      canonicalLabel: '2022 Vinas Mora kaamen III',
+      producer: 'Vinas Mora',
+      aliasesIdentitySafe: ['Vinas Mora kaamen III', '2022 Vinas Mora kaamen III'],
+    } as unknown as RetrievalDocument));
+
+    const candidates = await buildResolverCandidatesFromGenerator(
+      {
+        rawQuery: 'Viña Espectro Maipo Valley Carmenere',
+        normalizedQuery: 'vina espectro maipo valley carmenere',
+        anchors: [
+          {
+            surfaceForm: '2022 Vinas Mora kaamen III',
+            normalizedForm: '2022 vinas mora kaamen iii',
+            candidateEntityIds: [entityId],
+            lookupStrategies: ['fuzzy_char_ngram'],
+            aliasType: 'misspelling',
+            confidence: 0.9,
+            source: 'alias',
+          },
+        ],
+      },
+      lookup,
+    );
+
+    const signals = candidates[0]?.sourceSignals;
+    // identity lanes must be ZERO for a pure-fuzzy hit
+    expect(signals?.canonicalNormalizedMatch).toBe(0);
+    expect(signals?.canonicalExactMatch).toBe(0);
+    expect(signals?.aliasExactMatch).toBe(0);
+    // fuzzy evidence still flows through its designed lanes
+    expect(signals?.aliasFuzzyMatch).toBeCloseTo(0.9);
+    expect(signals?.editDistanceScore).toBeGreaterThan(0);
+  });
+
   it('keeps exact identity signal only for candidates whose identity-safe projection matches the anchor', async () => {
     const grandVinId = createEntityId('chateau-margaux-grand-vin');
     const secondWineId = createEntityId('pavillon-rouge-du-chateau-margaux');
