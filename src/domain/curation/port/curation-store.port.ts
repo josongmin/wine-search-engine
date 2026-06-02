@@ -59,6 +59,7 @@ export interface ProposalTransition {
   readonly expectedFrom: ProposalStatus;
   readonly to: ProposalStatus;
   readonly reviewedBy?: string;
+  readonly reviewedAt?: Date;
   readonly decisionReason?: string;
   readonly publishedAt?: Date;
   readonly targetSnapshotVersion?: string;

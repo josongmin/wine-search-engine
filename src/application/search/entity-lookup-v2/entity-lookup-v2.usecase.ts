@@ -38,7 +38,9 @@ import type { NormalizedQueryViews } from '../../../domain/query/model/query-vie
 import type {
   LookupAdmissionGatePort,
   LookupAdmissionVerdict,
+  LookupCandidateRetrievalPort,
   LookupDecision,
+  LookupRetrievalResult,
 } from '../../../domain/resolver/v2/lookup-v2-types.js';
 import { CalibratedAbstainDecider } from '../../../domain/resolver/v2/calibrated-abstain-decider.js';
 import { anchorsHaveExactIdentityEvidence, buildChannelHitsForEntity } from '../../../domain/resolver/v2/channel-provenance.js';
@@ -86,6 +88,13 @@ export interface EntityLookupV2UseCaseDeps {
   readonly entityResolver: EntityResolverPort;
   readonly entityLookup?: EntityDocumentLookupPort | undefined;
   readonly blocker?: BlockingUseCasePort | undefined;
+  /**
+   * T-ELV2-04: independent timed multi-channel retrieval. When present, the
+   * response's per-channel coverage + per-candidate channel provenance come
+   * from REAL timed channels (not the anchor re-projection); when absent the
+   * use case falls back to deriving channels from planner anchors.
+   */
+  readonly candidateRetrieval?: LookupCandidateRetrievalPort | undefined;
   readonly querySanitizer: QuerySanitizer;
   readonly injectionJudge?: InjectionJudgePort | undefined;
   readonly judgeFailureMode?: 'fail_open' | 'fail_closed' | undefined;
@@ -179,6 +188,13 @@ export class EntityLookupV2UseCase {
       });
     }
 
+    // T-ELV2-04: run the independent timed multi-channel retrieval engine (when
+    // wired) for REAL per-channel coverage + provenance, alongside the resolver
+    // which scores/calibrates. Channel failures are isolated inside the engine.
+    const retrieval = this.deps.candidateRetrieval !== undefined
+      ? await this.runRetrieval(this.deps.candidateRetrieval, plan, command, options)
+      : undefined;
+
     const result = await this.resolveCandidatePool(plan, options);
     throwIfAborted(options?.abortSignal, 'Entity lookup V2 aborted');
 
@@ -212,9 +228,34 @@ export class EntityLookupV2UseCase {
       admission,
       result,
       decision,
+      ...(retrieval !== undefined ? { retrieval } : {}),
       decisionReasonCode: decision.reasonCode,
       startedAt,
     });
+  }
+
+  /** Run the multi-channel retrieval engine; never let it sink the request. */
+  private async runRetrieval(
+    engine: LookupCandidateRetrievalPort,
+    plan: QueryPlanV1,
+    command: EntityLookupV2Command,
+    options?: RequestExecutionContext,
+  ): Promise<LookupRetrievalResult | undefined> {
+    try {
+      return await engine.retrieve(
+        {
+          rawQuery: plan.rawQuery,
+          views: plan.normalizedQueryViews ?? buildNormalizedQueryViews(plan.rawQuery),
+          queryClass: plan.queryClass,
+          maxCandidates: command.maxCandidates,
+          ...(command.locale !== undefined ? { locale: command.locale } : {}),
+        },
+        options?.abortSignal,
+      );
+    } catch {
+      // Provenance is best-effort: fall back to the anchor re-projection.
+      return undefined;
+    }
   }
 
   /**
@@ -306,11 +347,32 @@ export class EntityLookupV2UseCase {
     admission: LookupAdmissionVerdict;
     result: EntityResolveResult | undefined;
     decision?: LookupDecision | undefined;
+    retrieval?: LookupRetrievalResult | undefined;
     forcedStatus?: 'failed' | 'redirect_discovery';
     decisionReasonCode: string;
     startedAt: number;
   }): EntityLookupV2Result {
-    const { command, plan, viewsView, admission, result, decision, forcedStatus, decisionReasonCode } = args;
+    const { command, plan, viewsView, admission, result, decision, retrieval, forcedStatus, decisionReasonCode } = args;
+
+    // T-ELV2-04: when the independent timed retrieval engine ran, index its REAL
+    // per-channel hits by entity so resolved candidates carry real provenance
+    // (and the coverage rail carries real latency) instead of the anchor
+    // re-projection.
+    const retrievalHitsByEntity = new Map<string, readonly LookupV2ChannelHitView[]>();
+    if (retrieval !== undefined) {
+      for (const rc of retrieval.candidates) {
+        retrievalHitsByEntity.set(
+          String(rc.entityId),
+          rc.channelHits.map((h) => ({
+            channel: h.channel,
+            matchedView: h.matchedView,
+            ...(h.matchedAlias !== undefined ? { matchedAlias: h.matchedAlias } : {}),
+            channelScore: h.channelScore,
+            channelRank: h.channelRank,
+          })),
+        );
+      }
+    }
 
     // Authority order: a forced status (admission/SAT) wins; otherwise the
     // calibrated-abstain decision; otherwise the resolver's advisory status.
@@ -324,28 +386,28 @@ export class EntityLookupV2UseCase {
     const allCandidates: readonly LookupV2CandidateView[] = result === undefined
       ? []
       : result.candidates.map((c) => {
-          // T-ELV2-04: decompose the recall that produced this candidate into
-          // the declared V2 channels (exact/compact/transliteration/jamo/fuzzy/
-          // family/dense) so the per-channel union is an explicit artifact.
-          const channelHits = buildChannelHitsForEntity(
+          // Prefer REAL independent-channel hits from the retrieval engine
+          // (T-ELV2-04); fall back to decomposing the planner anchor recall.
+          const realHits = retrievalHitsByEntity.get(String(c.entityId));
+          const channelHits: readonly LookupV2ChannelHitView[] = realHits ?? buildChannelHitsForEntity(
             c.entityId,
             c.rank,
             anchors,
             c.blockerSeed === true,
-          );
+          ).map((h) => ({
+            channel: h.channel,
+            matchedView: h.matchedView,
+            ...(h.matchedAlias !== undefined ? { matchedAlias: h.matchedAlias } : {}),
+            channelScore: h.channelScore,
+            channelRank: h.channelRank,
+          }));
           return {
             entityId: String(c.entityId),
             canonicalLabel: c.canonicalLabel,
             calibratedScore: clamp01(c.calibratedScore),
             rank: c.rank,
             channelAgreement: channelHits.length,
-            channelHits: channelHits.map((h) => ({
-              channel: h.channel,
-              matchedView: h.matchedView,
-              ...(h.matchedAlias !== undefined ? { matchedAlias: h.matchedAlias } : {}),
-              channelScore: h.channelScore,
-              channelRank: h.channelRank,
-            })),
+            channelHits,
           };
         });
 
@@ -391,7 +453,16 @@ export class EntityLookupV2UseCase {
         calibrationTrusted: decision?.calibrationTrusted ?? trace?.calibrationTrusted ?? false,
         queryClass: plan.queryClass,
         candidatePoolSize: result?.candidates.length ?? 0,
-        channelCoverage: buildChannelCoverage(allCandidates),
+        // Real per-channel coverage (latency/hitCount) from the timed retrieval
+        // engine when it ran; else derive a rail from the anchor re-projection.
+        channelCoverage: retrieval !== undefined
+          ? retrieval.coverage.map((c) => ({
+              channel: c.channel,
+              firing: c.firing,
+              hitCount: c.hitCount,
+              latencyMs: c.latencyMs,
+            }))
+          : buildChannelCoverage(allCandidates),
       },
       meta: {
         ...(command.requestId !== undefined ? { requestId: command.requestId } : {}),
