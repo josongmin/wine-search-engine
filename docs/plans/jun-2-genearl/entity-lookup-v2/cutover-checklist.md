@@ -31,10 +31,30 @@
 | operator smoke | `/v2/entity-lookup/ops/inspect` + web `/ops/*` | ✅ (T-07 trusted plane) |
 | live canary replay | — | ⬜ (정상 stack 미러 트래픽 필요) |
 
-## 2. Cutover 게이트 (자동 — `buildShadowReport`)
+## 2. Cutover 게이트 (자동)
 
-`scripts/eval/lookup-v2-shadow-metrics.ts`의 `buildShadowReport`가 다음을 강제한다
-(`DEFAULT_CUTOVER_GATE`, precision-first):
+### 2.0 권위(authority) — FULL `eval_cases` distribution
+
+**cutover 게이트의 authority는 전체 `eval_cases` 분포(2026-06-02 기준 215 entity-semantic
+케이스)다. 15-query hotset은 fast smoke check 일 뿐 authority 가 아니다.**
+
+이유: hotset은 in-corpus famous wine 만 골라서(`V2 9 vs V1 1`) V2 의 우위를 **과장**했고,
+V1 의 precision 버그(ambiguous 12 wrong-positive)와 noisy_recall 60% ceiling 을 **숨겼다**.
+전체 분포 ground-truth(`expected_entity_id` exact match)는 **V2 92.6% vs V1 77.2%, V2 wrong-positive 0
+vs V1 12** 로, hotset 과 다른 결론을 준다. 상세: `entity-resolution-validation-2026-06-02.md`.
+
+- **Authority 스코어러**: `scripts/eval/run-entity-resolution-validation.ts` — 전체
+  `eval_cases` 를 per-class 로 채점하고, per-class 게이트 verdict(`gate.pass` + `reasons`)와
+  선택된 eval row 들의 **SHA-256 content fingerprint**(`evalCasesFingerprint`)를 JSON 으로 출력.
+  fingerprint 는 `query|query_class|expected_entity_id` 를 sort·join 해서 해싱하므로 row 순서에
+  무관하다. `eval_cases` 는 DB 에서 버전 관리되지 않으므로, 두 run 사이 row 가 추가/수정/삭제되면
+  fingerprint 가 달라져 PASS 가 무효임을 드러낸다. **게이트 PASS 는 특정 fingerprint 에 묶인다.**
+- **Fast smoke (비-authority)**: `run-lookup-v2-shadow-compare.ts` + 15-hotset →
+  `buildShadowReport`. 빠른 sanity check 용이며, 단독으로 cutover 를 승인할 수 없다.
+
+### 2.1 Overall 게이트 (`buildShadowReport`, `DEFAULT_CUTOVER_GATE`, precision-first)
+
+`scripts/eval/lookup-v2-shadow-metrics.ts`의 `buildShadowReport`가 다음을 강제한다:
 
 1. **wrong-positive**: V2 wrong-positive rate ≤ V1 (V1이 0이면 V2도 0이어야 함).
    — V2 존재 이유. `opu one`류 wrong-resolve 금지.
@@ -43,7 +63,20 @@
 4. **non-degeneracy**: expected-resolve row이 있는데 V1·V2 **둘 다 단 한 건도 resolve 못 한** run은
    거부(degraded substrate에서의 hollow PASS 차단 — 적대적 감사가 잡은 15/15-abstain 케이스).
 
-네 게이트 모두 통과해야 `gate.pass === true`.
+### 2.2 PER-CLASS no-regression 게이트 (`evaluatePerClassGate`)
+
+overall 게이트는 한 클래스의 회귀를 전체 lift 로 가릴 수 있다(예: noisy_recall 하락을
+exact_entity 상승이 덮음). 이를 막기 위해 per-class 게이트를 추가로 강제한다
+(authority 스코어러와 `buildShadowReport` 모두 적용; `DEFAULT_PER_CLASS_GATE`):
+
+5. **per-class correct-rate no-regression**: **모든** query class 에서 V2 correct-rate ≥
+   V1 correct-rate × **0.98**(overall correct-rate 게이트와 동일한 2% tolerance). 한 클래스라도
+   이 아래로 떨어지면 FAIL.
+6. **abstain 클래스 0-wrong-positive**: should-NOT-resolve 클래스
+   (`ambiguous_short_form`, `no_match`)는 V2 wrong-positive 가 **정확히 0** 이어야 한다.
+   단 1건의 wrong-positive 라도 FAIL(overall rate 와 무관한 hard precision 실패).
+
+위 게이트 전부 통과해야 `gate.pass === true`.
 
 ## 3. Cutover 절차 (게이트 통과 후)
 

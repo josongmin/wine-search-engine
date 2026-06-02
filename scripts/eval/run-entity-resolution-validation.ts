@@ -23,12 +23,19 @@
 import 'dotenv/config';
 import process from 'node:process';
 import { writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 
 import { loadConfig } from '../../src/config/env.js';
 import { createContainer } from '../../src/config/container.js';
 import { getPgPool } from '../../src/infrastructure/db/pg-pool.js';
 import { LOOKUP_V2_DEFAULT_MAX_CANDIDATES } from '../../src/interface/http/constants.js';
 import type { SearchRequest } from '../../src/application/search/search-request.dto.js';
+import {
+  evaluatePerClassGate,
+  type ClassTally,
+  type PerClassEntry,
+} from './lookup-v2-shadow-metrics.js';
 
 const SHOULD_RESOLVE_CLASSES = ['exact_entity', 'noisy_recall'] as const;
 const SHOULD_NOT_RESOLVE_CLASSES = ['ambiguous_short_form', 'no_match'] as const;
@@ -55,6 +62,48 @@ function scoreVerdict(shouldResolve: boolean, expectedEntityId: string | null, o
   }
   // should NOT resolve
   return o.status === 'resolved' ? 'wrong' : 'correct';
+}
+
+/**
+ * SHA-256 content fingerprint over the SELECTED eval rows. eval_cases is NOT
+ * versioned in the DB, so a row added/edited/deleted between two runs silently
+ * invalidates a V1-vs-V2 comparison. The fingerprint pins a gate verdict to a
+ * specific snapshot: each row is `query|query_class|expected_entity_id`
+ * (empty string for a null id), the lines are SORTED so row ORDER does not
+ * affect the hash, then joined with `\n` and hashed. Same rows ⇒ same hash;
+ * any changed expected_entity_id ⇒ different hash.
+ */
+export function fingerprintEvalRows(
+  rows: ReadonlyArray<{ query: string; queryClass: string; expectedEntityId: string | null }>,
+): string {
+  const lines = rows
+    .map((r) => `${r.query}|${r.queryClass}|${r.expectedEntityId ?? ''}`)
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  return createHash('sha256').update(lines.join('\n'), 'utf8').digest('hex');
+}
+
+/**
+ * Map the per-class verdict tallies into the shared {@link PerClassEntry} shape
+ * so the SAME pure per-class gate that guards the hotset run guards the full
+ * eval_cases distribution. `shouldResolve` follows the class's resolve
+ * semantics (exact_entity / noisy_recall resolve; ambiguous_short_form /
+ * no_match must abstain).
+ */
+export function toPerClassEntries(
+  byClass: Record<string, { v1: ClassTally; v2: ClassTally }>,
+  shouldResolveClasses: readonly string[],
+): PerClassEntry[] {
+  return Object.keys(byClass)
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+    .map((queryClass) => {
+      const slot = byClass[queryClass]!;
+      return {
+        queryClass,
+        shouldResolve: shouldResolveClasses.includes(queryClass),
+        v1: slot.v1,
+        v2: slot.v2,
+      };
+    });
 }
 
 function parseLimit(argv: readonly string[]): { limitPerClass: number; output: string } {
@@ -178,12 +227,39 @@ async function main(): Promise<void> {
     `  V2: correct=${String(overall.v2.correct)} (${pct(overall.v2.correct, overall.v2.total)}) wrong=${String(overall.v2.wrong)} miss=${String(overall.v2.miss)}\n`,
   );
 
-  writeFileSync(output, `${JSON.stringify({ byClass, overall, detail }, null, 2)}\n`, 'utf8');
+  // Gate-eligibility verdict: the FULL distribution is the authority, not the
+  // 15-hotset. Per-class no-regression gate (incl. 0-wrong-positive on the
+  // abstain classes) decides cutover eligibility.
+  const perClass = toPerClassEntries(byClass, SHOULD_RESOLVE_CLASSES);
+  const gate = evaluatePerClassGate(perClass);
+  // Pin the verdict to the exact eval_cases snapshot it was computed over.
+  const evalCasesFingerprint = fingerprintEvalRows(
+    cases.map((c) => ({ query: c.query, queryClass: c.queryClass, expectedEntityId: c.expectedEntityId })),
+  );
+
+  process.stderr.write(
+    `\n=== Cutover gate (full-distribution authority) ===\n` +
+    `  verdict: ${gate.pass ? 'PASS (cutover-eligible)' : 'FAIL'}\n` +
+    (gate.reasons.length > 0 ? `  reasons:\n${gate.reasons.map((r) => `    - ${r}`).join('\n')}\n` : '') +
+    `  eval_cases fingerprint (sha256): ${evalCasesFingerprint}\n`,
+  );
+
+  writeFileSync(
+    output,
+    `${JSON.stringify({ byClass, overall, perClass, gate, evalCasesFingerprint, detail }, null, 2)}\n`,
+    'utf8',
+  );
   process.stderr.write(`[er-validation] report → ${output}\n`);
   await pool.end();
 }
 
-main().catch((err: unknown) => {
-  process.stderr.write(`[er-validation] failed: ${(err as Error).message}\n`);
-  process.exitCode = 1;
-});
+// Only run the live DB-backed validation when invoked as the entrypoint. Pure
+// helpers above (gate + fingerprint) are imported by unit tests, which must NOT
+// trigger a PG connection.
+const entrypoint = process.argv[1];
+if (entrypoint !== undefined && import.meta.url === pathToFileURL(entrypoint).href) {
+  main().catch((err: unknown) => {
+    process.stderr.write(`[er-validation] failed: ${(err as Error).message}\n`);
+    process.exitCode = 1;
+  });
+}
