@@ -82,6 +82,12 @@ const DOMAIN_ERROR_STATUS_MAP: Readonly<Record<string, number>> = {
   // fall through to a generic 500. Not retryable — the store must be
   // configured (AGENT_SESSION_DB_PATH); a blind retry will not succeed.
   SERVICE_UNAVAILABLE: HTTP_STATUS_SERVICE_UNAVAILABLE,
+  // T-ELV2-07 curation write plane: a proposal id that does not exist → 404;
+  // an illegal lifecycle step (e.g. publish a pending proposal) or a lost
+  // optimistic transition race → 409 Conflict.
+  PROPOSAL_NOT_FOUND: HTTP_STATUS_NOT_FOUND,
+  ILLEGAL_PROPOSAL_TRANSITION: HTTP_STATUS_CONFLICT,
+  PROPOSAL_CONFLICT: HTTP_STATUS_CONFLICT,
 };
 
 const RETRYABLE_DOMAIN_CODES: ReadonlySet<string> = new Set([
@@ -108,6 +114,9 @@ const SAFE_DOMAIN_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   INVALID_REQUEST: 'The request is not valid for this endpoint.',
   SERVICE_UNAVAILABLE: 'This capability is currently unavailable.',
   [CIRCUIT_BREAKER_OPEN_CODE]: 'A downstream dependency is temporarily degraded. Please retry shortly.',
+  PROPOSAL_NOT_FOUND: 'The requested curation proposal was not found.',
+  ILLEGAL_PROPOSAL_TRANSITION: 'That curation proposal cannot move to the requested state.',
+  PROPOSAL_CONFLICT: 'The curation proposal changed concurrently. Reload and retry.',
 };
 
 /**
