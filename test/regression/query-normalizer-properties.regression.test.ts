@@ -49,6 +49,7 @@
 import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
 import { QueryNormalizer } from '../../src/domain/query/service/query-normalizer.js';
+import { Transliterator } from '../../src/domain/alias/service/transliterator.js';
 
 const normalizer = new QueryNormalizer();
 
@@ -358,6 +359,58 @@ describe('QueryNormalizer documented locked behaviors', () => {
         expect(v.lookupVariants).toEqual(expect.arrayContaining([expected]));
       });
     }
+  });
+
+  describe('Transliterator SSoT — curated exact romanizations enter lookupVariants', () => {
+    // Regression: the query-side transliteration used a private rule table that
+    // had drifted from the Transliterator SSoT the alias-matcher recall path
+    // uses (CLAUDE.md rules 25/30). It lacked "돔페리뇽"→"dom pérignon", so the
+    // query produced NO Latin identity surface; the resolver's identity-key
+    // overlap gate then zeroed every identity lane and abstained (recall hole
+    // vs V1). Fix sources curated exact romanizations from Transliterator.
+    // Identity-surface comparison strips diacritics (normalizeIdentitySurface
+    // NFKD + \p{Diacritic}), so the accented "dom pérignon" overlaps the doc's
+    // accentless "dom perignon" — assert via the same diacritic-folded form.
+    const foldDiacritics = (s: string): string =>
+      s.normalize('NFKD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+
+    const hasLatinDomPerignon = (variants: readonly string[]): boolean =>
+      variants.some((v) => foldDiacritics(v).includes('dom perignon'));
+
+    it('"돔페리뇽" yields a Latin "dom pérignon" identity surface', () => {
+      const v = normalizer.normalize('돔페리뇽');
+      expect(v.lookupVariants).toEqual(
+        expect.arrayContaining([expect.stringMatching(/dom\s*p[ée]rignon/iu)]),
+      );
+      expect(hasLatinDomPerignon(v.lookupVariants)).toBe(true);
+    });
+
+    it('"돔 페리뇽" (spaced) yields the same Latin surface', () => {
+      expect(hasLatinDomPerignon(normalizer.normalize('돔 페리뇽').lookupVariants)).toBe(true);
+    });
+
+    it('"돔페리뇽 2012" (vintage-bearing) still romanizes (vintage stripped)', () => {
+      expect(hasLatinDomPerignon(normalizer.normalize('돔페리뇽 2012').lookupVariants)).toBe(true);
+    });
+
+    it('PRECISION: romanizeWineTerm is EXACT-key — returns undefined on a bare prefix', () => {
+      // Pins the exact-key contract that keeps the fix precision-safe: the
+      // curated romanizer can only inject a Latin surface when the WHOLE query
+      // equals a curated exception, so it cannot manufacture a complete Latin
+      // identity surface (e.g. "opus one") from an incomplete query like "오푸".
+      // This guards against a future swap to the recall-phase prefix expander
+      // (romanizeWineTermPrefix) leaking into the query identity-key set.
+      expect(Transliterator.romanizeWineTerm('오푸')).toBeUndefined();
+      expect(Transliterator.romanizeWineTerm('돔페리뇽')).toBe('dom pérignon');
+    });
+
+    it('FALLBACK retained: a compositional term not in the curated index still romanizes via the local rule table', () => {
+      // "카베르네 소비뇽" is produced by the local KOREAN_TRANSLITERATION_* rule
+      // tables (compositional), proving the SSoT addition did not shadow the
+      // fallback path that handles terms outside the curated exception index.
+      const v = normalizer.normalize('카베르네 소비뇽');
+      expect(v.lookupVariants).toEqual(expect.arrayContaining(['cabernet sauvignon']));
+    });
   });
 
   describe('emoji passthrough (locked behavior)', () => {

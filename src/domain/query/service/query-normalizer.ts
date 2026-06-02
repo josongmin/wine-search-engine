@@ -11,6 +11,7 @@ import {
 import { globalSilentSkipCounter } from '../../../domain/observability/silent-skip-counters.js';
 import { correctKoreanWineTypos } from './korean-wine-aliases.js';
 import { expandVintageVariants } from './vintage-normalizer.js';
+import { Transliterator } from '../../alias/service/transliterator.js';
 
 const PUNCTUATION_STRIP_RE = /[^\p{L}\p{N}\s]+/gu;
 const COMPACT_RE = /[^\p{L}\p{N}]+/gu;
@@ -235,7 +236,22 @@ const transliterateByComponents = (value: string): string | undefined => {
 };
 
 const buildTransliterationVariants = (value: string): readonly string[] => {
+  // SSoT: curated Korean→Latin exact romanizations come from the SAME
+  // Transliterator the alias-matcher recall path uses (rules 25/30). The local
+  // KOREAN_TRANSLITERATION_* rule tables below are kept ONLY as a compositional
+  // fallback for terms NOT in the curated exception index — they had drifted
+  // and lacked entries like "돔페리뇽"→"dom pérignon", so the query produced no
+  // Latin identity surface and the resolver's identity-key overlap gate zeroed
+  // every identity lane (a recall hole vs V1).
+  //
+  // EXACT-key only (romanizeWineTerm): whole Korean query → whole Latin term,
+  // returns undefined on partials. We deliberately do NOT use
+  // romanizeWineTermPrefix here — it is a recall-phase IME prefix expander
+  // ("오푸"→"opus one") and injecting a complete Latin surface for a bare
+  // prefix into the query identity-key set would bypass the
+  // isStrictPrefixOfAnchorSurface ambiguity downgrade and wrong-resolve.
   const variants = dedupeVariants([
+    Transliterator.romanizeWineTerm(value),
     transliterateExact(value),
     transliterateByComponents(value),
   ].filter((variant): variant is string => variant !== undefined));
