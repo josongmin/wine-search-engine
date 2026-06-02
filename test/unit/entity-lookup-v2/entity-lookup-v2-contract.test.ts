@@ -41,7 +41,24 @@ function makePlan(overrides: Record<string, unknown> = {}) {
     route: 'entity',
     retrievalMode: 'entity_lookup',
     queryClass: 'known-item',
-    anchors: [],
+    // Default: the planner anchored "Opus One" to opus-one-2018 via an
+    // exact-alias hit — the identity-grade evidence the calibrated decider now
+    // requires to certify a resolve (recall-only channels cannot self-certify).
+    // The stubbed resolver still dictates status; this anchor only supplies the
+    // evidence grade. Abstain tests set the RESOLVER to failed/ambiguous, which
+    // the decider honours before the evidence gate. (makeUseCase provides the
+    // matching entityLookup stub the anchor-driven generator needs.)
+    anchors: [
+      {
+        surfaceForm: 'opus one',
+        normalizedForm: 'opus one',
+        candidateEntityIds: [createEntityId('opus-one-2018')],
+        lookupStrategies: ['exact'],
+        aliasType: 'canonical',
+        confidence: 0.97,
+        source: 'alias',
+      },
+    ],
     constraints: { hard: [], soft: [], inferred: [] },
     expansions: { lexical: [], semantic: [] },
     policy: {},
@@ -102,10 +119,23 @@ function makeUseCase(
   extra: Partial<{ reranker: unknown; ambiguityDictionary: unknown; aliasRegistryVersion: unknown }> = {},
 ): EntityLookupV2UseCase {
   const queryPlanner: QueryPlannerPort = { plan: vi.fn().mockResolvedValue(plannerPlan) };
+  // Anchor-driven candidate generation needs an entityLookup port. The stubbed
+  // resolver ignores the generated candidates (it returns a canned result), so
+  // this only satisfies the generator and lets the anchor supply evidence grade.
+  const entityLookup = {
+    getDocuments: vi.fn(async (ids: readonly unknown[]) => {
+      const map = new Map<unknown, unknown>();
+      for (const id of ids) {
+        map.set(id, { entityId: id, entityType: 'wine', canonicalLabel: 'Opus One 2018' });
+      }
+      return map;
+    }),
+  };
   return new EntityLookupV2UseCase({
     admissionGate: new ConceptAdmissionGate(),
     queryPlanner,
     entityResolver: resolver,
+    entityLookup: entityLookup as never,
     querySanitizer: { sanitize: vi.fn((q: string) => ({ safe: true, sanitizedQuery: q })) } as never,
     ...(extra.reranker !== undefined ? { reranker: extra.reranker as never } : {}),
     ...(extra.ambiguityDictionary !== undefined ? { ambiguityDictionary: extra.ambiguityDictionary as never } : {}),
@@ -368,6 +398,13 @@ describe('T-ELV2-06 clarification contract on the wire', () => {
       admissionGate: new ConceptAdmissionGate(),
       queryPlanner,
       entityResolver: resolver,
+      entityLookup: {
+        getDocuments: vi.fn(async (ids: readonly unknown[]) => {
+          const map = new Map<unknown, unknown>();
+          for (const id of ids) map.set(id, { entityId: id, entityType: 'wine', canonicalLabel: 'Opus One 2018' });
+          return map;
+        }),
+      } as never,
       ambiguityDictionary: {
         isKnownAmbiguous: vi.fn().mockResolvedValue(true),
         getAmbiguityInfo: vi.fn().mockResolvedValue({ types: ['alias_collision'], severity: 'high' }),
