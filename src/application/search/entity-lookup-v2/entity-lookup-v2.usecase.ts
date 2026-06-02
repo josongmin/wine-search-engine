@@ -42,6 +42,7 @@ import type {
 } from '../../../domain/resolver/v2/lookup-v2-types.js';
 import { CalibratedAbstainDecider } from '../../../domain/resolver/v2/calibrated-abstain-decider.js';
 import { anchorsHaveExactIdentityEvidence, buildChannelHitsForEntity } from '../../../domain/resolver/v2/channel-provenance.js';
+import { buildClarification } from '../../../domain/resolver/v2/clarification-graph.js';
 import { clamp01 } from '../../../domain/shared/utils/clamp.js';
 import { LOOKUP_RETRIEVAL_CHANNELS } from '../../../domain/resolver/v2/lookup-v2-types.js';
 import type { LookupRetrievalChannel } from '../../../domain/resolver/v2/lookup-v2-types.js';
@@ -330,9 +331,14 @@ export class EntityLookupV2UseCase {
     const topCandidate = status === 'resolved' ? (candidates[0] ?? null) : null;
     const clarificationOptions: readonly LookupV2ClarificationOptionView[] =
       status === 'ambiguous'
-        ? allCandidates.slice(0, LOOKUP_V2_MAX_CLARIFICATION_OPTIONS).map((c) => ({
-            entityId: c.entityId,
-            label: c.canonicalLabel,
+        ? buildClarification(
+            allCandidates
+              .slice(0, LOOKUP_V2_MAX_CLARIFICATION_OPTIONS)
+              .map((c) => ({ entityId: c.entityId, canonicalLabel: c.canonicalLabel })),
+          ).options.map((o) => ({
+            entityId: o.entityId,
+            label: o.label,
+            ...(o.distinguishingFeature !== undefined ? { distinguishingFeature: o.distinguishingFeature } : {}),
           }))
         : [];
 
