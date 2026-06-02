@@ -15,6 +15,11 @@ declare module 'fastify' {
      * True when `HTTP_DEBUG_SECRET` is set and `X-Debug-Key` matched (see `registerHttpDebugMode`).
      */
     debugRequest: boolean;
+    /**
+     * True when `HTTP_OPS_WRITE_SECRET` is set and `X-Ops-Write-Key` matched
+     * (see `registerHttpOpsWriteMode`). Gates the T-ELV2-07 curation write/publish plane.
+     */
+    opsWriteAuthorized: boolean;
     otelSpan?: Span;
   }
 

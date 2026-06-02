@@ -15,6 +15,8 @@ const HTTP_BODY_LIMIT_MAX_BYTES = HTTP_BODY_LIMIT_MAX_MIB * KIBIBYTE * KIBIBYTE;
 const DEFAULT_HTTP_BODY_LIMIT_BYTES = 1_048_576;
 /** Minimum debug secret length so X-Debug-Key cannot be a trivial guess. */
 const ENV_HTTP_DEBUG_SECRET_MIN_LEN = 16;
+/** Minimum operator write secret length (curation write/publish plane). */
+const ENV_HTTP_OPS_WRITE_SECRET_MIN_LEN = 16;
 
 export const HttpEnvSchema = z.object({
   /** Per-IP request cap (RFC-014 §13). Set high for local offline eval; use 0 to disable. */
@@ -41,6 +43,15 @@ export const HttpEnvSchema = z.object({
    * When set (≥16 chars), clients may send `X-Debug-Key: <same value>` for per-request log level `debug`.
    */
   HTTP_DEBUG_SECRET: z.string().min(ENV_HTTP_DEBUG_SECRET_MIN_LEN).optional(),
+
+  /**
+   * Operator curation write/publish credential (T-ELV2-07). When set (≥16 chars),
+   * trusted operators send `X-Ops-Write-Key: <same value>` to submit/review/publish
+   * lookup-V2 curation proposals. Deliberately SEPARATE from `HTTP_DEBUG_SECRET`:
+   * read/inspect uses the debug key, mutation uses this key, so a leaked read key
+   * cannot drive staged runtime changes. Startup rejects reuse of the debug secret.
+   */
+  HTTP_OPS_WRITE_SECRET: z.string().min(ENV_HTTP_OPS_WRITE_SECRET_MIN_LEN).optional(),
 
   /** Register `@fastify/helmet` security headers (recommended on in production). */
   HTTP_SECURITY_HEADERS: z

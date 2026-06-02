@@ -85,6 +85,37 @@ describe('parseEnv invariants', () => {
     }
   }, 15_000);
 
+  // T-ELV2-07: operator curation write credential must be a SEPARATE secret from
+  // the read/inspect debug key, and obey the same ≥16-char floor.
+  it('HTTP_OPS_WRITE_SECRET equal to HTTP_DEBUG_SECRET is rejected at startup', () => {
+    const shared = 'shared-secret-32-characters-long!';
+    expect(() =>
+      parseEnv({ HTTP_DEBUG_SECRET: shared, HTTP_OPS_WRITE_SECRET: shared }),
+    ).toThrowError(/HTTP_OPS_WRITE_SECRET must differ from HTTP_DEBUG_SECRET/);
+  });
+
+  it('distinct ops-write and debug secrets parse and expose opsWriteSecret', () => {
+    const config = parseEnv({
+      HTTP_DEBUG_SECRET: 'debug-secret-16+',
+      HTTP_OPS_WRITE_SECRET: 'ops-write-secret-distinct',
+    });
+    expect(config.http.debugSecret).toBe('debug-secret-16+');
+    expect(config.http.opsWriteSecret).toBe('ops-write-secret-distinct');
+  });
+
+  it('HTTP_OPS_WRITE_SECRET honors the 16-char floor (just inside / just outside)', () => {
+    // 16 chars — exactly at the bound — accepted.
+    expect(parseEnv({ HTTP_OPS_WRITE_SECRET: 'x'.repeat(16) }).http.opsWriteSecret).toBe(
+      'x'.repeat(16),
+    );
+    // 15 chars — one below — rejected by the schema min().
+    expect(() => parseEnv({ HTTP_OPS_WRITE_SECRET: 'x'.repeat(15) })).toThrow();
+  });
+
+  it('omitting HTTP_OPS_WRITE_SECRET leaves the write plane locked (undefined)', () => {
+    expect(parseEnv({}).http.opsWriteSecret).toBeUndefined();
+  });
+
   it('deduplicates OPENAI_API_KEY and OPENAI_API_KEYS in stable order', () => {
     const config = parseEnv({
       OPENAI_API_KEY: 'sk-a',

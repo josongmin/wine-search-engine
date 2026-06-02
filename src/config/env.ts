@@ -125,6 +125,20 @@ function buildConfig(
     );
   }
 
+  // Separation-of-credentials invariant (T-ELV2-07): the operator curation
+  // write/publish key MUST NOT equal the read/inspect debug key. If they were
+  // the same value, a leaked read key would silently grant staged runtime
+  // mutation — defeating the whole point of a distinct write credential.
+  if (
+    parsed.HTTP_OPS_WRITE_SECRET !== undefined
+    && parsed.HTTP_OPS_WRITE_SECRET === parsed.HTTP_DEBUG_SECRET
+  ) {
+    throw new Error(
+      'HTTP_OPS_WRITE_SECRET must differ from HTTP_DEBUG_SECRET — the operator ' +
+        'write/publish credential must be separate from the read/inspect debug key.',
+    );
+  }
+
   return {
     nodeEnv: parsed.NODE_ENV,
     port: parsed.PORT,
@@ -141,6 +155,7 @@ function buildConfig(
       bodyLimitBytes: parsed.HTTP_BODY_LIMIT_BYTES,
       securityHeaders: parsed.HTTP_SECURITY_HEADERS,
       debugSecret: parsed.HTTP_DEBUG_SECRET,
+      opsWriteSecret: parsed.HTTP_OPS_WRITE_SECRET,
     },
 
     /** CORS allowed origins. Empty string means allow all in dev, none in production. */

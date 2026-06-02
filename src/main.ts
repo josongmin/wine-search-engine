@@ -118,6 +118,7 @@ async function main(): Promise<void> {
     bodyLimitBytes: config.http.bodyLimitBytes,
     enableSecurityHeaders: config.http.securityHeaders,
     httpDebugSecret: config.http.debugSecret,
+    httpOpsWriteSecret: config.http.opsWriteSecret,
   });
 
   let shuttingDown = false;

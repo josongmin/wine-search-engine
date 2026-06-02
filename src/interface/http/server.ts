@@ -11,6 +11,7 @@ import {
 } from '@opentelemetry/api';
 import { getTracer } from '../../infrastructure/telemetry/tracer.js';
 import { registerHttpDebugMode } from './middleware/http-debug-mode.js';
+import { registerHttpOpsWriteMode } from './middleware/http-ops-write-mode.js';
 import { registerRequestContext } from './middleware/request-context.js';
 import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
 import { deepKeysToSnake } from './middleware/snake-case-hook.js';
@@ -81,6 +82,12 @@ export interface ServerOptions {
    */
   readonly httpDebugSecret?: string | undefined;
   /**
+   * When set, requests with matching `X-Ops-Write-Key` may submit/review/publish
+   * lookup-V2 curation proposals (T-ELV2-07). Separate from `httpDebugSecret`.
+   * @see registerHttpOpsWriteMode
+   */
+  readonly httpOpsWriteSecret?: string | undefined;
+  /**
    * Maximum time (ms) to wait for a TCP connection to be established before closing it.
    * @default 10000
    */
@@ -134,6 +141,7 @@ async function registerCorsSupport(
       'X-Request-Id',
       'X-Correlation-Id',
       'X-Debug-Key',
+      'X-Ops-Write-Key',
     ],
     exposedHeaders: ['X-Request-Id', 'X-Debug-Active', 'Retry-After'],
     maxAge: CORS_PREFLIGHT_MAX_AGE_SECONDS,
@@ -267,6 +275,8 @@ export async function createServer(
 
   // Register middleware (debug mode first so request_start uses per-request log level)
   registerHttpDebugMode(app, { secret: options?.httpDebugSecret });
+  // Operator curation write/publish gate (T-ELV2-07) — separate credential from debug.
+  registerHttpOpsWriteMode(app, { secret: options?.httpOpsWriteSecret });
   registerRequestContext(app);
 
   if (options?.enableTelemetry ?? true) {
