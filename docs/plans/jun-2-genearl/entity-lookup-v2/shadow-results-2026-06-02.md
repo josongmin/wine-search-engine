@@ -1,5 +1,63 @@
 # Entity Lookup V2 — Live Shadow-Compare Result (2026-06-02)
 
+## UPDATE (2026-06-02, post-fix d6eca27b/bc39d01b) — recall regression ROOT-CAUSED and largely closed
+
+The "recall regression" below was diagnosed (adversarial 12-agent workflow + live
+traces against RDS+Vespa) to be **three distinct causes**, two of which were real
+code bugs now fixed and one of which is a data gap, NOT a V2 defect:
+
+1. **Penfolds Grange (+ the whole exact_entity/noisy_recall classes) — REAL BUG, FIXED**
+   (`bc39d01b`). After this session populated the `entity_family` graph, every exact
+   query recalls same-producer siblings as **zero-signal recall seeds**
+   (`canonicalNormalizedMatch=0`). `detectProducerFamilyCollision` counted them
+   regardless of score → false `producer_family_collision` → mass false-abstain.
+   Fix: count only score-competitive siblings (`>= STRONG_MATCH_RATIO` of top). The
+   classifier is shared, so V1 improved too.
+
+2. **돔페리뇽 — REAL BUG (SSoT drift), FIXED** (`d6eca27b`), but blocked by #3's data
+   gap. The query-side transliteration had drifted from the Transliterator SSoT and
+   produced no Latin identity surface for curated Korean exceptions, so the resolver's
+   identity-key overlap gate zeroed every identity lane (V2-only; V1 has no such gate).
+   Fix sources curated exact-key romanizations from the SSoT. 돔페리뇽 now reaches the
+   same code path as the ASCII query — but cannot resolve because of #3.
+
+3. **Dom Pérignon (ASCII + Korean) — DATA GAP, not a code bug.** There is **no
+   "Dom Pérignon" wine entity in the corpus** (0 rows in `entities`/`aliases`/
+   `canonical_*`). V1's "resolve" to `dom-perignon-2012` comes from a static
+   seed/attribute alias catalog (an appellation-attribute label, not a recallable
+   wine entity), i.e. a **curated illusion**. V2 honestly recalls real documents and
+   correctly **abstains**. `dom perignon`/`페리뇽` is **not an expected-resolve case
+   in the authority `eval_cases`** — so V2's abstain is the correct precision-first
+   outcome, not a regression to fix in code. Closing it requires indexing the entity
+   (ETL/data backfill), surfaced via the coverage report per RFC DoD §2.
+
+### Authority eval after the fixes (`run-entity-resolution-validation`, 100 cases, family_graph populated, same eval_cases fingerprint `bdad1bf1…`)
+
+| class | V2 BEFORE | V2 AFTER | V1 AFTER |
+|---|---|---|---|
+| exact_entity (n=25) | 36.0% | **100.0%** | 100.0% |
+| noisy_recall (n=25) | 52.0% | **92.0%** | 96.0% |
+| ambiguous_short_form (n=25) | 100.0% (0 wrong) | 100.0% (0 wrong) | 76.0% (6 wrong) |
+| no_match (n=25) | 100.0% | 100.0% | 100.0% |
+| **OVERALL (n=100)** | **72.0%, wrong=0** | **98.0%, wrong=0** | 93.0%, wrong=6 |
+
+- **V2 wrong-positive = 0 throughout** (precision-first invariant held across the fix).
+- The before/after split is a clean false-abstention signature: only the should-RESOLVE
+  classes (exact_entity, noisy_recall) moved; the should-NOT-resolve classes were already
+  100%/0-wrong in both runs (rules out infra flakiness).
+- **Per-class gate still FAILS** on `noisy_recall` (V2 92% < V1 96% × 0.98). Both V2
+  misses are **pre-existing ASCII long-noisy-label cases** ("2013 vineyard 29 …" — V1
+  misses it too; "2017 bindi sergardi … 17" — V2 missed it in the BEFORE run as well),
+  unaffected by these Korean-only + abstention-reducing changes. This is a separate,
+  pre-existing V2 weakness on long trailing-noise labels — NOT introduced here, and NOT
+  yet cutover-clearing.
+
+**Net:** large recall recovery (V2 72%→98%) at zero precision cost; Penfolds resolves;
+돔페리뇽 SSoT drift removed (resolves once the entity is indexed); the residual
+noisy_recall gate-fail is pre-existing and out of scope for this recall-gap pass.
+
+---
+
 ## Precision-first gate PASS — but a REAL recall regression (15-row smoke, 2026-06-02, gitSha 9a236030)
 
 `pnpm run eval:lookup-v2:shadow` against the live stack with the CURRENT 4-gate
