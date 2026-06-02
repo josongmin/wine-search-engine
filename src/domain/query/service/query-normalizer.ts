@@ -1,7 +1,8 @@
 import { normalizeUnicodeWithHomoglyphs, stripAccents } from '../../shared/utils/unicode-normalize.js';
 import {
   canonicalizeVintageToken,
-  isPotentialVintageToken,
+  isTwoDigitVintageToken,
+  isVintageYearToken,
 } from '../../shared/utils/vintage.js';
 import type { NormalizedQueryViews } from '../model/query-views.js';
 import {
@@ -190,18 +191,64 @@ const phoneticCompact = (value: string): string =>
 // Vintage canonicalization and stripping delegate to the vintage SSoT
 // (`@domain/shared/utils/vintage`). Any pivot/format change must happen
 // there so query normalization, ETL, and label parsing stay aligned.
-const canonicalizeVintage = (value: string): string => {
-  const tokens = collapseWhitespace(value).split(' ');
-  return collapseWhitespace(tokens.map((token) => canonicalizeVintageToken(token)).join(' '));
+
+/** A token that carries at least one Unicode letter — i.e. a NAME word, not a
+ *  bare numeral. Used to disambiguate name-internal 2-digit numbers from
+ *  trailing 2-digit vintage shorthand. */
+const NAME_WORD_RE = /\p{L}/u;
+
+/**
+ * Decides whether the 2-digit token at `index` is a vintage SHORTHAND
+ * ("Margaux 15" → 2015) versus a NAME-internal number ("Vineyard 29 Estate",
+ * "Numero 89 Gran Selezione", "Bin 28").
+ *
+ * Structural rule (no threshold): a real wine vintage shorthand sits at the
+ * trailing edge of a reference and is NOT followed by more name words —
+ * "Margaux 15", "… Chianti Classico 17". A number that PRECEDES a name word
+ * ("29 Estate", "89 Gran") is part of the entity name, not a year. So a 2-digit
+ * token counts as a vintage only when the NEXT token is absent or itself
+ * numeric (not a name word). 4-digit (19xx/20xx) tokens are unconditional
+ * vintages and never reach this guard.
+ *
+ * This is intentionally one-directional: it only PRESERVES name-internal
+ * numbers that the old all-2-digit-are-vintages rule destroyed. It never strips
+ * MORE than before, so it cannot create a new wrong-match in the identity-key
+ * overlap gate (a preserved "29" makes the surface stricter, not looser).
+ * Trailing-2-digit behaviour (incl. "Bin 28") is unchanged.
+ */
+const isVintageShorthandAtPosition = (tokens: readonly string[], index: number): boolean => {
+  const token = tokens[index];
+  if (token === undefined || !isTwoDigitVintageToken(token)) return false;
+  const next = tokens[index + 1];
+  if (next === undefined) return true;
+  return !NAME_WORD_RE.test(next);
 };
 
-const stripVintage = (value: string): string =>
-  collapseWhitespace(
-    collapseWhitespace(value)
-      .split(' ')
-      .filter((token) => !isPotentialVintageToken(token))
+const canonicalizeVintage = (value: string): string => {
+  const tokens = collapseWhitespace(value).split(' ');
+  return collapseWhitespace(
+    tokens
+      .map((token, i) => {
+        if (isVintageYearToken(token)) return canonicalizeVintageToken(token);
+        if (isVintageShorthandAtPosition(tokens, i)) return canonicalizeVintageToken(token);
+        return token;
+      })
       .join(' '),
   );
+};
+
+const stripVintage = (value: string): string => {
+  const tokens = collapseWhitespace(value).split(' ');
+  return collapseWhitespace(
+    tokens
+      .filter((token, i) => {
+        if (isVintageYearToken(token)) return false;
+        if (isVintageShorthandAtPosition(tokens, i)) return false;
+        return true;
+      })
+      .join(' '),
+  );
+};
 
 const transliterateExact = (value: string): string | undefined => {
   let result = value;

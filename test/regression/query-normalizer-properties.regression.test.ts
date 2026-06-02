@@ -413,6 +413,45 @@ describe('QueryNormalizer documented locked behaviors', () => {
     });
   });
 
+  describe('vintage shorthand vs name-internal numbers (noisy_recall identity surface)', () => {
+    // Regression: every bare 2-digit token was treated as a vintage shorthand
+    // and stripped/expanded, so name-internal numbers ("Vineyard 29",
+    // "Numero 89") were destroyed. That broke the resolver's identity-key
+    // overlap against the doc (which keeps the number) → calibrated score 0 →
+    // abstain, even though the entity was recalled at rank 1. Two live
+    // noisy_recall misses ("…vineyard 29 …13", "…numero 89 …17") had exactly
+    // this shape. Fix: a 2-digit token is a vintage only when NOT followed by a
+    // name word; trailing 2-digit shorthand ("Margaux 15") is unchanged.
+    it('preserves a name-internal 2-digit number followed by a name word', () => {
+      const v = normalizer.normalize('2013 vineyard 29 estate cabernet sauvignon 13');
+      // "29" kept (name component), leading 2013 + trailing 13 dropped.
+      expect(v.vintageStripped).toBe('vineyard 29 estate cabernet sauvignon');
+    });
+
+    it('preserves a name-internal number in a long label (numero 89)', () => {
+      const v = normalizer.normalize('2017 bindi sergardi mocenni numero 89 gran selezione chianti classico 17');
+      expect(v.vintageStripped).toBe('bindi sergardi mocenni numero 89 gran selezione chianti classico');
+    });
+
+    it('still treats a TRAILING 2-digit token as vintage shorthand ("Margaux 15" → 2015)', () => {
+      const v = normalizer.normalize('Margaux 15');
+      expect(v.vintageCanonicalized).toBe('margaux 2015');
+      expect(v.vintageStripped).toBe('margaux');
+    });
+
+    it('still strips a 4-digit (19xx/20xx) vintage regardless of following word', () => {
+      expect(normalizer.normalize('Opus One 2018').vintageStripped).toBe('opus one');
+      // 4-digit followed by a name word is still a vintage (unconditional).
+      expect(normalizer.normalize('2018 Opus One').vintageStripped).toBe('opus one');
+    });
+
+    it('Korean: a 2-digit number before a Hangul name word is preserved (\\p{L} boundary)', () => {
+      // "95" precedes the name word "와인" → not a vintage → kept.
+      const v = normalizer.normalize('보르도 95 와인');
+      expect(v.vintageStripped).toContain('95');
+    });
+  });
+
   describe('emoji passthrough (locked behavior)', () => {
     it('emoji is treated as punctuation and removed by punctuationStripped', () => {
       // 🍷 is category So (Symbol, Other) — not \p{L} nor \p{N}, so it is
