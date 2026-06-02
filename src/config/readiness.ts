@@ -319,7 +319,7 @@ export function buildHealthRouteOptions(
   const runtimePool = runtime.pool;
   const runStartupEval = config.eval.runAtStartup;
   const rerankerConfigured = config.cohere.apiKey !== undefined;
-  const ltrServingEnabled = isLtrServingEnabled();
+  const ltrServingEnabled = isLtrServingEnabled(config);
   const blockerZeroCandidatesBaseline =
     globalSilentSkipCounter.snapshot().blocker_zero_candidates;
 

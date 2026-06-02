@@ -584,15 +584,25 @@ const DECISION_CONSERVATISM: Readonly<Record<Exclude<LookupV2Status, 'redirect_d
 /**
  * Combine the calibrated and learned decisions — the MORE conservative status
  * wins (downgrade-only over both), so the learned reranker can only tighten the
- * audit-hardened calibrated outcome, never relax it. On a tie the learned
- * decision is surfaced (so its reason/score is visible).
+ * audit-hardened calibrated outcome, never relax it.
+ *
+ * On a STATUS TIE we surface the learned decision's reason/scores (visibility),
+ * but PRESERVE the stronger calibration trust: the learned decider always emits
+ * calibrationTrusted=false, so naively returning it would silently downgrade a
+ * calibrated trusted resolve's trust flag for precision-first consumers. A tie
+ * must never downgrade trust — only a strictly-more-conservative learned status
+ * may change the decision. (DECISION_CONSERVATISM and LookupDecision.status are
+ * the same `Exclude<LookupV2Status,'redirect_discovery'>` type, so the rank
+ * lookup can never be undefined — no runtime guard needed; do not widen the type
+ * without re-checking.)
  */
-function combineDecisions(calibrated: LookupDecision, learned: LookupDecision): LookupDecision {
+export function combineDecisions(calibrated: LookupDecision, learned: LookupDecision): LookupDecision {
   const calRank = DECISION_CONSERVATISM[calibrated.status];
   const learnedRank = DECISION_CONSERVATISM[learned.status];
   if (learnedRank < calRank) return learned;
   if (calRank < learnedRank) return calibrated;
-  return learned;
+  // Tie: surface learned, but trust is the OR (a tie cannot downgrade trust).
+  return { ...learned, calibrationTrusted: calibrated.calibrationTrusted || learned.calibrationTrusted };
 }
 
 /**

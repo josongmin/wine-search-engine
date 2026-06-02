@@ -281,6 +281,13 @@ function buildConfig(
     /** Runtime LTR artifact path for bootstrap-mode learned reranker fallback. */
     runtimeLtrModelsPath: parsed.RUNTIME_LTR_MODELS_PATH,
 
+    /**
+     * Master gate for serving the learned LTR reranker on the live path
+     * (T-ELV2-05). Default false; see LTR_SERVING_ENABLED schema doc for the
+     * out-of-distribution train-serve blocker that activation must clear.
+     */
+    ltrServingEnabled: parsed.LTR_SERVING_ENABLED,
+
     /** Agent configuration. */
     agent: {
       enabled: parsed.AGENT_ENABLED,

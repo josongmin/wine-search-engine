@@ -169,7 +169,7 @@ export async function buildRuntimeSupportServices(
 ): Promise<RuntimeSupportServices> {
   const querySanitizer = new QuerySanitizer();
   const { pool, redisClient } = runtime;
-  const ltrServingEnabled = isLtrServingEnabled();
+  const ltrServingEnabled = isLtrServingEnabled(config);
 
   // W2-BUG-03: Instantiate the Redis circuit breaker wrapper so the 'redis'
   // breaker is registered in globalCircuitBreakerRegistry at startup.
@@ -378,13 +378,40 @@ export async function buildRuntimeSupportServices(
     }
   }
 
+  // Effective model selection: registry takes precedence over the runtime
+  // artifact (matches the precedence log above). This is the single source the
+  // live Ranker (/v1) and the /v2 reranker actually serve. When serving is off
+  // or nothing loaded, effective stays 'none' and ltrModels is undefined.
+  const registryUsable =
+    ltrServingEnabled
+    && discoveredRegistryLtrModels !== undefined
+    && discoveredRegistryLtrModels.size > 0;
+  const artifactUsable =
+    ltrServingEnabled
+    && runtimeLtrArtifactModels !== undefined
+    && runtimeLtrArtifactModels.size > 0;
+  const effectiveLtrModels: ReadonlyMap<string, QueryClassWeights> | undefined = registryUsable
+    ? discoveredRegistryLtrModels
+    : artifactUsable
+      ? runtimeLtrArtifactModels
+      : undefined;
+  const effectiveSource: RuntimeLtrEffectiveSource = registryUsable
+    ? 'registry'
+    : artifactUsable
+      ? 'runtime_artifact'
+      : 'none';
+
   bootstrapLogger.info(
     {
       enabled: ltrServingEnabled,
+      effectiveSource,
+      effectiveModelCount: effectiveLtrModels?.size ?? 0,
       registryModelCount: discoveredRegistryLtrModels?.size ?? 0,
       runtimeArtifactModelCount: runtimeLtrArtifactModels?.size ?? 0,
     },
-    '[Container] LTR serving disabled; startup skips model discovery and Ranker wiring',
+    ltrServingEnabled
+      ? '[Container] LTR serving enabled; effective model source resolved'
+      : '[Container] LTR serving disabled; startup skips model discovery and Ranker wiring',
   );
 
   let drinkingWindowPredictor: DrinkingWindowPredictorPort =
@@ -457,7 +484,7 @@ export async function buildRuntimeSupportServices(
       artifact: {
         configured: ltrServingEnabled && config.runtimeLtrModelsPath !== undefined,
         loaded: runtimeLtrArtifactModels !== undefined,
-        selected: false,
+        selected: effectiveSource === 'runtime_artifact',
         ...(runtimeLtrArtifactModels !== undefined
           ? { modelCount: runtimeLtrArtifactModels.size }
           : {}),
@@ -470,11 +497,18 @@ export async function buildRuntimeSupportServices(
             : { issue: 'not_selected' as const }),
       },
       effective: {
-        source: 'none',
-        loaded: false,
+        source: effectiveSource,
+        loaded: effectiveLtrModels !== undefined,
         required: ltrServingEnabled && ltrRequired,
-        modelCount: 0,
-        issue: 'disabled',
+        modelCount: effectiveLtrModels?.size ?? 0,
+        ...(effectiveSource === 'registry' && ltrRegistrySearchSnapshotId !== undefined
+          ? { searchSnapshotId: ltrRegistrySearchSnapshotId }
+          : {}),
+        ...(!ltrServingEnabled
+          ? { issue: 'disabled' as const }
+          : effectiveLtrModels === undefined
+            ? { issue: ltrRegistryIssue ?? 'empty_registry' }
+            : {}),
       },
     },
     benchmarkPersistence: {
@@ -490,7 +524,7 @@ export async function buildRuntimeSupportServices(
     querySanitizer,
     injectionJudge,
     cacheService,
-    ltrModels: undefined,
+    ltrModels: effectiveLtrModels,
     drinkingWindowPredictor,
     ...(phraseCache !== undefined ? { phraseCache } : {}),
     runtimeReadiness,
