@@ -16,6 +16,7 @@
  *   pnpm run eval:lookup-v2:coverage [-- --corpus <path> --output <path>]
  */
 
+import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { loadConfig } from '../../src/config/env.js';
@@ -118,9 +119,15 @@ async function main(): Promise<void> {
     })),
   );
 
+  let gitSha = 'unknown';
+  try {
+    gitSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  } catch {
+    // not in a git checkout — leave 'unknown'
+  }
   writeFileSync(
     outputPath,
-    JSON.stringify({ generatedAtNote: 'stamp externally', report, curationTasks }, null, 2),
+    JSON.stringify({ generatedAt: new Date().toISOString(), gitSha, corpus: corpusPath, report, curationTasks }, null, 2),
     'utf8',
   );
 

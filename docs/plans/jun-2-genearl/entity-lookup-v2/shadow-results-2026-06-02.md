@@ -1,10 +1,27 @@
 # Entity Lookup V2 — Live Shadow-Compare Result (2026-06-02)
 
+> ⚠️ **NOT CUTOVER-ELIGIBLE — pre-Gate-4, degraded substrate (self-review C2).**
+> This run was scored by the THREE-gate `buildShadowReport` that existed at the
+> time (commit 77bfe578); the **non-degeneracy Gate 4** (commit ff60531a) did
+> NOT exist yet and the run was never re-scored under it. The trace below shows a
+> DEGRADED substrate — the blocker returned 0 candidates for every query and every
+> expected-resolve exemplar (Dom Pérignon, Penfolds Grange, Sassicaia 2019, 오퍼스원)
+> was downgraded to ambiguous — i.e. V2 likely resolved **0** expected-resolve hot
+> entities. Under current Gate 4 (V2-resolved-floor) this run would **FAIL**. The
+> "correct=7" below is achieved off the 8 non-resolve rows (failed/redirect), NOT
+> off hot-entity resolution. The raw `/tmp/lookup-v2-shadow-report.json` was not
+> committed and is gone, so these numbers are not independently auditable.
+>
+> **Required before cutover:** re-run `pnpm run eval:lookup-v2:shadow` on a
+> properly-populated stack (blocker index loaded) with current Gate-4 code, and
+> commit the stamped raw artifact (now emits generatedAt + gitSha). Treat the
+> PASS below as historical/unverified only.
+
 > T-ELV2-08 live execution of `pnpm run eval:lookup-v2:shadow` against the real
 > stack (RDS Postgres + self-hosted Vespa + OpenAI embeddings). Reproduce with
 > the same command; report written to `/tmp/lookup-v2-shadow-report.json`.
 
-## Gate outcome: **PASS**
+## Gate outcome (pre-Gate-4, unverified): PASS
 
 | metric | V1 (`/v1/lookup/wine`) | V2 (`/v2/entity-lookup`) |
 |---|---|---|

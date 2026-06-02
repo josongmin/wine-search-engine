@@ -82,12 +82,24 @@ describe('buildShadowReport (T-ELV2-08 cutover gate)', () => {
     expect(report.gate.reasons.join(' ')).toMatch(/degenerate/i);
   });
 
-  it('does NOT fire the non-degeneracy gate when at least one engine resolves correctly', () => {
+  it('does NOT fire the non-degeneracy gate when V2 resolves correctly', () => {
     const r: ShadowRow[] = [
       { qid: 'n1', query: 'Opus One 2018', expectedStatus: 'resolved', expectedEntityId: OPUS, v1: { status: 'failed' }, v2: { status: 'resolved', topEntityId: OPUS } },
     ];
     const report = buildShadowReport(r);
     expect(report.gate.reasons.join(' ')).not.toMatch(/degenerate/i);
+  });
+
+  it('FAILS (asymmetric) when V1 resolves but V2 — the cutover target — resolves none', () => {
+    // Precision-first V2 that abstains on every hot entity must NOT pass vacuously
+    // off redirect/failed rows just because V1 happened to resolve one.
+    const r: ShadowRow[] = [
+      { qid: 'a1', query: 'Opus One 2018', expectedStatus: 'resolved', expectedEntityId: OPUS, v1: { status: 'resolved', topEntityId: OPUS }, v2: { status: 'ambiguous' } },
+      { qid: 'a2', query: '까쇼', expectedStatus: 'redirect_discovery', v1: { status: 'redirect_discovery' }, v2: { status: 'redirect_discovery' } },
+    ];
+    const report = buildShadowReport(r);
+    expect(report.gate.pass).toBe(false);
+    expect(report.gate.reasons.join(' ')).toMatch(/V2 resolved 0/i);
   });
 
   it('does NOT fire the non-degeneracy gate on a corpus with zero expected-resolve rows', () => {

@@ -211,9 +211,13 @@ export function buildShadowReport(
   if (conceptRows.length > 0 && v2ConceptRedirectAccuracy < thresholds.conceptRedirectAccuracyMin) {
     reasons.push(`V2 concept-redirect accuracy ${pct(v2ConceptRedirectAccuracy)} below floor ${pct(thresholds.conceptRedirectAccuracyMin)}`);
   }
-  // Gate 4 (non-degeneracy): if the corpus HAS expected-resolve rows but NEITHER
-  // engine correctly resolved a single one, the substrate is degraded and the
-  // "V2 ≥ V1" comparison is hollow — reject rather than pass a 0-resolve run.
+  // Gate 4 (non-degeneracy): the corpus HAS expected-resolve rows, so a meaningful
+  // cutover run must demonstrate RESOLUTION. Two failure modes:
+  //   (a) neither engine resolved any → degraded substrate, comparison hollow;
+  //   (b) V2 (the cutover TARGET) resolved NONE, even if V1 did → we cannot certify
+  //       V2's resolution capability regardless of V1 (asymmetric escape closed —
+  //       a precision-first abstain-everything V2 would otherwise pass vacuously
+  //       off redirect/failed rows). Both reject the run.
   const expectedResolveRows = rows.filter((r) => r.expectedStatus === 'resolved');
   if (thresholds.requireNonDegenerate && expectedResolveRows.length > 0) {
     const v1ResolvedCorrect = expectedResolveRows.filter((r) => isResolveCorrect(r, r.v1)).length;
@@ -222,6 +226,11 @@ export function buildShadowReport(
       reasons.push(
         `degenerate run: neither engine resolved any of ${expectedResolveRows.length} expected-resolve rows `
           + `(degraded substrate — comparison is uninformative)`,
+      );
+    } else if (v2ResolvedCorrect === 0) {
+      reasons.push(
+        `degenerate run: V2 resolved 0 of ${expectedResolveRows.length} expected-resolve rows `
+          + `(cannot certify the cutover target's resolution capability)`,
       );
     }
   }
