@@ -59,7 +59,7 @@ interface ChannelRunResult {
 export class MultiChannelRetrievalEngine implements LookupCandidateRetrievalPort {
   constructor(private readonly deps: MultiChannelRetrievalDeps) {}
 
-  async retrieve(input: LookupRetrievalInput, signal?: AbortSignal): Promise<LookupRetrievalResult> {
+  async retrieve(input: LookupRetrievalInput, _signal?: AbortSignal): Promise<LookupRetrievalResult> {
     const views = input.views;
     const bindings: readonly ChannelViewBinding[] = [
       { channel: 'exact_alias', view: views.strict },
@@ -80,18 +80,19 @@ export class MultiChannelRetrievalEngine implements LookupCandidateRetrievalPort
     });
 
     const runs = await Promise.all(
-      runnable.map((b) => this.runChannel(b.channel, b.view as string, signal)),
+      runnable.map((b) => this.runChannel(b.channel, b.view as string)),
     );
 
-    // UNION + dedupe by entity, accumulating per-channel provenance.
-    const byEntity = new Map<string, { hits: LookupChannelHit[]; best: number }>();
+    // UNION + dedupe by entity, accumulating per-channel provenance. Keyed by
+    // the stringified id for dedupe, but the branded CanonicalEntityId is kept.
+    const byEntity = new Map<string, { id: CanonicalEntityId; key: string; hits: LookupChannelHit[]; best: number }>();
     const coverage: LookupChannelCoverage[] = [];
 
     for (const run of runs) {
       let hitCount = 0;
       for (const match of run.matches) {
         for (const entityId of match.entityIds) {
-          const id = String(entityId);
+          const key = String(entityId);
           const score = clamp01(match.matchConfidence);
           const hit: LookupChannelHit = {
             channel: run.channel,
@@ -100,9 +101,9 @@ export class MultiChannelRetrievalEngine implements LookupCandidateRetrievalPort
             channelScore: score,
             channelRank: hitCount + 1,
           };
-          const existing = byEntity.get(id);
+          const existing = byEntity.get(key);
           if (existing === undefined) {
-            byEntity.set(id, { hits: [hit], best: score });
+            byEntity.set(key, { id: entityId, key, hits: [hit], best: score });
           } else {
             existing.hits.push(hit);
             if (score > existing.best) existing.best = score;
@@ -120,25 +121,21 @@ export class MultiChannelRetrievalEngine implements LookupCandidateRetrievalPort
 
     // Cap the union to maxCandidates by best per-entity channel score (the
     // reranker/calibrator is the final authority over this pool).
-    const rankedIds = [...byEntity.entries()]
-      .sort((a, b) => b[1].best - a[1].best || a[0].localeCompare(b[0]))
-      .slice(0, Math.max(1, input.maxCandidates))
-      .map(([id]) => id);
+    const ranked = [...byEntity.values()]
+      .sort((a, b) => b.best - a.best || a.key.localeCompare(b.key))
+      .slice(0, Math.max(1, input.maxCandidates));
 
-    const docs = await this.deps.entityLookup.getDocuments(rankedIds as readonly CanonicalEntityId[]);
+    const docs = await this.deps.entityLookup.getDocuments(ranked.map((e) => e.id));
 
-    const candidates: LookupCandidate[] = [];
-    for (const id of rankedIds) {
-      const entry = byEntity.get(id);
-      if (entry === undefined) continue;
-      const doc = docs.get(id as CanonicalEntityId);
-      candidates.push({
-        entityId: id as CanonicalEntityId,
-        canonicalLabel: doc?.canonicalLabel ?? id,
+    const candidates: LookupCandidate[] = ranked.map((entry) => {
+      const doc = docs.get(entry.id);
+      return {
+        entityId: entry.id,
+        canonicalLabel: doc?.canonicalLabel ?? entry.key,
         entityType: doc?.entityType ?? 'unknown',
         channelHits: entry.hits,
-      });
-    }
+      };
+    });
 
     return { candidates, coverage };
   }
@@ -146,12 +143,11 @@ export class MultiChannelRetrievalEngine implements LookupCandidateRetrievalPort
   private async runChannel(
     channel: LookupRetrievalChannel,
     view: string,
-    signal?: AbortSignal,
   ): Promise<ChannelRunResult> {
     const startedAt = performance.now();
     let matches: readonly AliasMatchResult[] = [];
     try {
-      matches = await this.deps.aliasMatcher.findMatches(view, signal !== undefined ? { signal } : undefined);
+      matches = await this.deps.aliasMatcher.findMatches(view);
     } catch {
       // A single channel failure must not sink the union — record an empty,
       // timed run (firing=false) and let the other channels stand.
