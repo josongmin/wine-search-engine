@@ -284,8 +284,12 @@ function toEntityRow(row: {
         : undefined;
   // producer is written to entities.METADATA (build-search-snapshot), NOT
   // attributes — reading attributes['producer'] silently yielded undefined for
-  // every row, suppressing producer-based abbreviations. Prefer metadata, fall
-  // back to attributes defensively. (Same root cause as the family-graph fix.)
+  // every row. SCOPE: EntityRow.producer is consumed ONLY by the opt-in --llm
+  // path (buildLlmUserPrompt) as a producer HINT in the prompt; the deterministic
+  // abbreviation rules derive from canonicalLabel, so the bug left the LLM hint
+  // absent (default-off path) — it did NOT suppress deterministic abbreviations.
+  // Prefer metadata, fall back to attributes defensively. (Same column as the
+  // family-graph fix.)
   const rawProducer = metadata['producer'] ?? attributes['producer'];
   const producer = typeof rawProducer === 'string' ? rawProducer : undefined;
   return {
@@ -662,6 +666,7 @@ function isProposalShape(value: unknown): value is AbbreviationProposal {
 // ---------------------------------------------------------------------------
 
 export {
+  toEntityRow,
   generateDeterministicProposals,
   generateLlmProposals,
   normalizeForLookup,
