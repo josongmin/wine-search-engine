@@ -162,6 +162,15 @@ export class PgEvalResultStore implements EvalResultStore {
   }
 
   async saveResult(result: EvalResult): Promise<void> {
+    // LOAD-BEARING: `runtime_query_class` (persisted below from
+    // `result.runtimeQueryClass`) is the stratification key the nightly
+    // calibration trainer reads. `extract-calibration-trace.ts` keys calibration
+    // by `COALESCE(runtime_query_class, gold_query_class)` — NOT by the gold
+    // class. If this column stops being written, calibration silently reverts to
+    // gold-class keying and re-introduces the eval↔runtime taxonomy mismatch
+    // (migration 025; surfaced as EvalMetrics.goldRuntimeQueryClassMismatchRate).
+    // `gold_runtime_query_class_mismatch` is the precomputed disagreement flag
+    // that EvalMetrics aggregates. Do not drop either column.
     if (isCorruptedSnapshot(result.decisionSnapshot)) {
       bootstrapLogger.warn({ caseId: result.caseId }, '[PgEvalResultStore] Skipping save — corrupted decision snapshot');
       return;
