@@ -42,10 +42,34 @@ scaled win on two axes: higher exact-entity recall (100% vs 72%) and far better
 precision on ambiguous queries (V2 abstains 100%; V1 wrongly resolves 12/60).
 Raw: `entity-resolution-validation-recalibrated-2026-06-02.json`.
 
-Follow-ups: (1) calibration pipeline must key by the RUNTIME query class, not the
-eval gold class (extract-calibration-trace currently joins `ec.query_class`);
-(2) V1's 12 ambiguous_short_form wrong-positives are a V1 precision bug;
-(3) noisy_recall 60% ceiling (both) = real recall gap on noisy variants.
+Follow-ups:
+1. **DONE (code, commit 35fc6c53)** — calibration pipeline now keys by the
+   RUNTIME query class: `extract-calibration-trace` selects
+   `COALESCE(er.runtime_query_class, ec.query_class)`. **Pending user action**:
+   apply migration 025 (`runtime_query_class` columns — additive DDL, classifier-
+   gated) + re-run an eval to populate it; until then the interim fix is to
+   re-key the trace `exact_entity`/`ambiguous_short_form` → `short_entity` before
+   fitting (that is how the recalibrated result above was produced, and the
+   `short_entity` calibration_params are LIVE in prod now).
+2. V1's 12 `ambiguous_short_form` wrong-positives are a V1 precision bug — V1 is
+   the deprecating path; not worth fixing.
+3. **noisy_recall 60% ceiling (both V1 and V2) — root cause PINNED, fix
+   deferred to a dedicated TDD cycle.** The noisy queries append a redundant
+   trailing 2-digit year ("2013 Vineyard 29 Estate Cabernet Sauvignon **13**").
+   Trace (`debug-one-lookup`): the correct entity IS retrieved, but the alias
+   matcher assigns the same `anchor.confidence` (~0.96) to a short prefix alias
+   ("Vineyard 29"), to sibling wines ("...Aida Estate", "...Ceanda"), and to the
+   exact full label — so the resolver's candidate scorer sees a flat tie
+   (gap=0, C=0) → `ambiguous`. The defect is in the SHARED core scoring: alias
+   confidence is not length/coverage/exact-full-label aware. Both candidate fixes
+   carry precision risk that would jeopardise the proven 0-wrong-positive rate
+   and MUST ship with false-positive tests (CLAUDE.md rules 23/24):
+   - (a) reward exact-full-canonical-label match in the shared candidate scorer
+     → high blast radius (V1 + V2 + search);
+   - (b) strip the redundant trailing 2-digit year in V2 normalization → risks
+     re-breaking digit-brands (1865/707), which is exactly why a prior digit-strip
+     rule was removed.
+   Deliberately NOT rushed at session end.
 
 ## Honest conclusions (pre-recalibration run below — SUPERSEDED)
 
