@@ -16,7 +16,38 @@ live stack, trusted calibration. Raw: `entity-resolution-validation-2026-06-02.j
 | noisy_recall (→resolve to X) | 40 | 0% (0/40) | 0% (0/40) | 0 |
 | **OVERALL** | **215** | **46.5% (100)** | **48.4% (104)** | **0** |
 
-## Honest conclusions
+## ⭐ CORRECTED RESULT — recalibrated (the run above was broken)
+
+The 215-case run below scored ~46/48% for BOTH paths because the fitted
+`calibration_params` were keyed to query_class `exact_entity` (the eval gold
+label) while the **runtime resolver looks up calibration by `short_entity`**
+(the classifier's output). Class-key mismatch → calibration never applied →
+the trust gate downgraded even single exact-alias matches (confidence 1,
+pool size 1) to `ambiguous` via `CALIBRATION_TRUST_GATE_DOWNGRADE`. Confirmed
+by `scripts/eval/debug-one-lookup.ts` on `2018 Orin Swift Papillon`.
+
+After re-keying the trace to `short_entity` and refitting/persisting
+(isotonic ECE 0.444→0.050, N=173), the SAME 215 cases:
+
+| class | n | V1 correct | V2 correct |
+|---|---|---|---|
+| exact_entity (→resolve) | 75 | 72.0% (21 miss) | **100%** |
+| ambiguous_short_form (→abstain) | 60 | 80.0% (**12 wrong**) | **100% (0 wrong)** |
+| noisy_recall (→resolve) | 40 | 60.0% | 60.0% (tie) |
+| no_match (→fail) | 40 | 100% | 100% |
+| **OVERALL** | **215** | **77.2% (166), 12 wrong** | **92.6% (199), 0 wrong** |
+
+**V2 beats V1 by +15.4pp AND has 0 wrong-positives vs V1's 12** — a genuine,
+scaled win on two axes: higher exact-entity recall (100% vs 72%) and far better
+precision on ambiguous queries (V2 abstains 100%; V1 wrongly resolves 12/60).
+Raw: `entity-resolution-validation-recalibrated-2026-06-02.json`.
+
+Follow-ups: (1) calibration pipeline must key by the RUNTIME query class, not the
+eval gold class (extract-calibration-trace currently joins `ec.query_class`);
+(2) V1's 12 ambiguous_short_form wrong-positives are a V1 precision bug;
+(3) noisy_recall 60% ceiling (both) = real recall gap on noisy variants.
+
+## Honest conclusions (pre-recalibration run below — SUPERSEDED)
 
 1. **V2's advantage does NOT generalize at scale.** Overall V2 48.4% vs V1
    46.5% — a +1.9pp / +4-case edge, entirely from 4 extra `exact_entity`
