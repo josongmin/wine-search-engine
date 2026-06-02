@@ -1,6 +1,44 @@
 # Entity Lookup V2 — Live Shadow-Compare Result (2026-06-02)
 
+## UPDATE (2026-06-03) — FULL eval_cases distribution: gate FAILS on a PRE-EXISTING fuzzy wrong-positive
+
+The 100-case (25/class) sample below PASSED, but the **full `eval_cases`
+distribution (215 cases, no `--limit-per-class`, fingerprint `bd8abea5…`)** —
+which the checklist names as the true cutover authority — **FAILS**:
+
+| class | V1 | V2 |
+|---|---|---|
+| exact_entity (n=75) | 100% | 98.7% (miss 1: "2018 St. Supéry Élu") |
+| noisy_recall (n=40) | 97.5% | **100%** |
+| ambiguous_short_form (n=60) | 78.3%, **wrong=13** | **100%, wrong=0** |
+| no_match (n=40) | 100% | 97.5%, **wrong=1** |
+| **OVERALL (n=215)** | 93.5%, wrong=13 | **99.1%, wrong=1, miss=1** |
+
+**verdict: FAIL** — sole reason: `no_match` V2 correct-rate 97.5% < V1 100% × 0.98
+(one V2 wrong-positive).
+
+- The blocker is **ONE pre-existing precision bug**, NOT a regression from this
+  session's fixes: **"Viña Espectro Maipo Valley Carmenere"** (a Chilean wine not
+  in corpus) **fuzzy-matches "2022 Viñas Mora kaamen III" at calibratedScore=1.0**
+  via the `fuzzy_alias` channel and resolves. **Confirmed pre-existing** by
+  running the query on the pre-fix commit (`62ee94c0`) — identical wrong-resolve.
+  None of this session's changes (Korean romanization / producer-collision gate /
+  vintage) touch this non-Korean, digit-free, non-collision query. Root issue: a
+  fuzzy edit-distance match is being scored as identity-grade 1.0 (fuzzy
+  confidence not discounted). **This is the real cutover blocker.**
+- Secondary (within 2% tolerance, non-blocking): "2018 St. Supéry Élu" abstains
+  via `producer_family_collision` even though the top is an EXACT cuvée match
+  ("Élu") the family_graph siblings lack — a subtler false-collision (top has
+  distinguishing identity the siblings don't); candidate follow-up.
+- Net this session: V2 99.1% vs V1 93.5%; V2 wrong=1 vs V1 wrong=13. Large net
+  precision+recall win, but **NOT cutover-clear** until the fuzzy_alias
+  identity-grade-1.0 wrong-positive is fixed.
+
 ## UPDATE (2026-06-03, post-fix 526aeee8) — authority gate now PASSES (cutover-eligible)
+
+> SUPERSEDED by the full-distribution run above. The 25/class sample missed the
+> `no_match` fuzzy wrong-positive that only appears in the fuller no_match set.
+> Kept for the per-class lift numbers.
 
 After closing the last noisy_recall miss (`526aeee8` — 2-digit vintage shorthand
 must not consume name-internal numbers), the authority scorer
