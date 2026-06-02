@@ -1,5 +1,28 @@
 # Entity Lookup V2 — Live Shadow-Compare Result (2026-06-02)
 
+## ✅ CUTOVER-ELIGIBLE — fresh live run, post-vintage-fix + Gate-4 (2026-06-02, gitSha 9a236030)
+
+`pnpm run eval:lookup-v2:shadow` against the live stack with the CURRENT 4-gate
+`buildShadowReport` (incl. Gate 4 non-degeneracy) AND the vintage-mismatch guard:
+
+| metric | V1 (`/v1/lookup/wine`) | V2 (`/v2/entity-lookup`) |
+|---|---|---|
+| rows | 15 | 15 |
+| correct | 5 | **9** |
+| wrong-positive | **1** | **0** |
+
+- improvements **7**, regressions 3, concept-redirect accuracy **1.000**.
+- **Cutover gate: PASS** (`gate.pass=true, reasons=[]`) — wrong-positive ≤ V1, correct-rate
+  within tolerance, concept-redirect ≥ floor, AND non-degenerate (V2 resolves ≥1 hot entity).
+- The 2026-06-02 vintage wrong-positive (`오퍼스원 2019` → Opus One 2018) is CLOSED: V2
+  wrong-positive=0 — the vintage guard downgrades it to ambiguous.
+- **Committed raw artifact** (stamped generatedAt + gitSha, auditable):
+  `evidence/shadow-report-2026-06-02-postfix.json`.
+
+This is the DoD #7 cutover proof. The earlier runs below are historical.
+
+---
+
 ## UPDATE — trusted-calibration re-run (2026-06-02 PM)
 
 After closing the calibration capture loop (top1_raw_score now plumbed through

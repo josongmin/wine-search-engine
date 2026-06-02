@@ -225,8 +225,9 @@ async function loadEntitiesFromIds(
     entity_id: string;
     canonical_label: string;
     attributes: unknown;
+    metadata: unknown;
   }>(
-    `SELECT entity_id, canonical_label, attributes
+    `SELECT entity_id, canonical_label, attributes, metadata
        FROM entities
       WHERE search_snapshot_id = (
               SELECT active_snapshot_id
@@ -247,8 +248,9 @@ async function loadAllEntities(
     entity_id: string;
     canonical_label: string;
     attributes: unknown;
+    metadata: unknown;
   }>(
-    `SELECT entity_id, canonical_label, attributes
+    `SELECT entity_id, canonical_label, attributes, metadata
        FROM entities
       WHERE search_snapshot_id = (
               SELECT active_snapshot_id
@@ -267,10 +269,12 @@ function toEntityRow(row: {
   entity_id: string;
   canonical_label: string;
   attributes: unknown;
+  metadata: unknown;
 }): EntityRow {
-  // attributes is JSONB — guard with isRecord and pull vintageYear/producer
-  // via runtime validation (CLAUDE.md rule 11: no direct `as` on JSONB).
+  // attributes/metadata are JSONB — guard with isRecord and pull values via
+  // runtime validation (CLAUDE.md rule 11: no direct `as` on JSONB).
   const attributes = isRecord(row.attributes) ? row.attributes : {};
+  const metadata = isRecord(row.metadata) ? row.metadata : {};
   const rawVintage = attributes['vintage'];
   const vintageYear =
     typeof rawVintage === 'number' && Number.isFinite(rawVintage)
@@ -278,7 +282,11 @@ function toEntityRow(row: {
       : typeof rawVintage === 'string'
         ? safeParseInt(rawVintage)
         : undefined;
-  const rawProducer = attributes['producer'];
+  // producer is written to entities.METADATA (build-search-snapshot), NOT
+  // attributes — reading attributes['producer'] silently yielded undefined for
+  // every row, suppressing producer-based abbreviations. Prefer metadata, fall
+  // back to attributes defensively. (Same root cause as the family-graph fix.)
+  const rawProducer = metadata['producer'] ?? attributes['producer'];
   const producer = typeof rawProducer === 'string' ? rawProducer : undefined;
   return {
     entityId: row.entity_id,

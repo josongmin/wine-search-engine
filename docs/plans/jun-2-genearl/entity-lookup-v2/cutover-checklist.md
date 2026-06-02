@@ -27,7 +27,7 @@
 | hotset corpus | `test/fixtures/lookup-v2-hotset.jsonl` | ✅ (15 labeled; DoD exemplars 포함) |
 | shadow-compare 메트릭 (pure) | `scripts/eval/lookup-v2-shadow-metrics.ts` | ✅ unit-tested |
 | live shadow runner (V1+V2 실행) | `scripts/eval/run-lookup-v2-shadow-compare.ts` | ✅ 구현·실행됨 |
-| shadow compare report | `shadow-results-2026-06-02.md` | ❌ **NOT cutover-eligible**: 2026-06-02 PASS는 **pre-Gate-4**(3-gate)로 채점됐고 substrate degraded(blocker 0-candidate → expected-resolve 전부 ambiguous, V2 hot-entity resolve ≈0). 현 Gate 4(V2-resolve floor)에선 **FAIL**. raw JSON 미커밋·소실로 감사 불가. 런너는 이제 live PG pool 주입 + Gate 4 V2-floor + generatedAt/gitSha 스탬프 적용 — **정상 stack 재실행 + stamped artifact 커밋 필요** |
+| shadow compare report | `evidence/shadow-report-2026-06-02-postfix.json` | ✅ **PASS (cutover-eligible)**: fresh 라이브 재실행(post-vintage-guard + 4-gate incl. non-degeneracy). V2 correct=9 > V1=5, **V2 wrong-positive=0**(vintage 블로커 해소), concept-redirect 1.000, `gate.pass=true`. stamped raw artifact 커밋됨(gitSha 9a236030, 감사 가능) |
 | operator smoke | `/v2/entity-lookup/ops/inspect` + web `/ops/*` | ✅ (T-07 trusted plane) |
 | live canary replay | — | ⬜ (정상 stack 미러 트래픽 필요) |
 
