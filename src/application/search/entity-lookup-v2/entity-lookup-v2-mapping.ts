@@ -7,6 +7,7 @@
 
 import type { DecisionStatus } from '../../../domain/shared/types/index.js';
 import type { QueryPlanV1 } from '../../../domain/query/model/query-plan.js';
+import type { NormalizedQueryViews } from '../../../domain/query/model/query-views.js';
 import type { LookupAdmissionVerdict, LookupV2Status } from '../../../domain/resolver/v2/lookup-v2-types.js';
 import type { NormalizedQueryViewsView } from './entity-lookup-v2.dto.js';
 
@@ -36,7 +37,22 @@ export function mapResolverStatusToLookupStatus(
   }
 }
 
-/** Build the explicit normalized-query-views artifact for the response. */
+/** Project a domain {@link NormalizedQueryViews} into the wire-facing artifact. */
+export function projectNormalizedQueryViews(v: NormalizedQueryViews): NormalizedQueryViewsView {
+  return {
+    raw: v.raw,
+    strict: v.strict,
+    accentless: v.accentless,
+    compact: v.compact,
+    vintageCanonicalized: v.vintageCanonicalized,
+    vintageStripped: v.vintageStripped,
+    ...(v.transliterated !== undefined ? { transliterated: v.transliterated } : {}),
+    ...(v.phoneticCompact !== undefined ? { phoneticCompact: v.phoneticCompact } : {}),
+    lookupVariants: v.lookupVariants,
+  };
+}
+
+/** Build the explicit normalized-query-views artifact from a plan. */
 export function buildNormalizedQueryViewsView(plan: QueryPlanV1): NormalizedQueryViewsView {
   const v = plan.normalizedQueryViews;
   if (v === undefined) {
@@ -51,17 +67,7 @@ export function buildNormalizedQueryViewsView(plan: QueryPlanV1): NormalizedQuer
       lookupVariants: [q],
     };
   }
-  return {
-    raw: v.raw,
-    strict: v.strict,
-    accentless: v.accentless,
-    compact: v.compact,
-    vintageCanonicalized: v.vintageCanonicalized,
-    vintageStripped: v.vintageStripped,
-    ...(v.transliterated !== undefined ? { transliterated: v.transliterated } : {}),
-    ...(v.phoneticCompact !== undefined ? { phoneticCompact: v.phoneticCompact } : {}),
-    lookupVariants: v.lookupVariants,
-  };
+  return projectNormalizedQueryViews(v);
 }
 
 /**

@@ -139,5 +139,9 @@ describe('EntityLookupV2UseCase — concept admission short-circuit', () => {
     expect(out.evidenceSummary.admissionReasonCode).toBe('concept_query');
     expect(out.topCandidate).toBeNull();
     expect(resolver.resolve).not.toHaveBeenCalled();
+    // FRONT-DOOR property (review P1): the gate closes the concept query BEFORE
+    // the planner runs — the planner (NL parse + alias-overlay anchor refresh)
+    // is never invoked for a non-admitted query.
+    expect(queryPlanner.plan).not.toHaveBeenCalled();
   });
 });

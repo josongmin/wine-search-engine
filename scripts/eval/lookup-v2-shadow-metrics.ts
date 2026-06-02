@@ -22,6 +22,8 @@ export interface ShadowSideOutcome {
   readonly status: ShadowStatus;
   /** Selected entity id when status === 'resolved', else undefined. */
   readonly topEntityId?: string | undefined;
+  /** Selected entity label when resolved — enables hint-based correctness. */
+  readonly topLabel?: string | undefined;
 }
 
 /** One labeled hotset query with both engines' normalized outcomes. */
@@ -29,8 +31,14 @@ export interface ShadowRow {
   readonly qid: string;
   readonly query: string;
   readonly expectedStatus: ShadowStatus;
-  /** Required when expectedStatus === 'resolved'. */
+  /** Preferred correctness key when expectedStatus === 'resolved'. */
   readonly expectedEntityId?: string | undefined;
+  /**
+   * Fallback correctness key when canonical ids are unavailable (the hotset
+   * corpus carries human label hints, not ids): a resolve is correct when the
+   * resolved label CONTAINS this normalized hint.
+   */
+  readonly expectedLabelHint?: string | undefined;
   readonly v1: ShadowSideOutcome;
   readonly v2: ShadowSideOutcome;
 }
@@ -82,12 +90,38 @@ export interface CutoverGateResult {
   readonly reasons: readonly string[];
 }
 
+function normalizeForHint(value: string): string {
+  // Lower-case, strip Latin accents (Pérignon ⇒ perignon), fold punctuation to
+  // spaces, recompose so Hangul stays intact. Mirrors the lookup normalizer so
+  // a label hint matches the resolved canonical label.
+  return value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/gu, '')
+    .normalize('NFC')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim();
+}
+
+/** Whether a resolved side matches the gold entity (by id, else by label hint). */
+function resolvedMatchesGold(row: ShadowRow, side: ShadowSideOutcome): boolean {
+  if (row.expectedEntityId !== undefined) {
+    return side.topEntityId === row.expectedEntityId;
+  }
+  if (row.expectedLabelHint !== undefined && side.topLabel !== undefined) {
+    return normalizeForHint(side.topLabel).includes(normalizeForHint(row.expectedLabelHint));
+  }
+  // No correctness key available — cannot confirm a correct resolve.
+  return false;
+}
+
 function isResolveCorrect(row: ShadowRow, side: ShadowSideOutcome): boolean {
   if (row.expectedStatus !== side.status) {
     return false;
   }
   if (row.expectedStatus === 'resolved') {
-    return side.topEntityId !== undefined && side.topEntityId === row.expectedEntityId;
+    return side.status === 'resolved' && resolvedMatchesGold(row, side);
   }
   return true;
 }
@@ -101,7 +135,7 @@ function isWrongPositive(row: ShadowRow, side: ShadowSideOutcome): boolean {
   if (row.expectedStatus !== 'resolved') {
     return true;
   }
-  return side.topEntityId !== row.expectedEntityId;
+  return !resolvedMatchesGold(row, side);
 }
 
 function computeSideMetrics(rows: readonly ShadowRow[], pick: (r: ShadowRow) => ShadowSideOutcome): SideMetrics {

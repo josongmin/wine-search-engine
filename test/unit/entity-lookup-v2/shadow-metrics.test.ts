@@ -65,4 +65,17 @@ describe('buildShadowReport (T-ELV2-08 cutover gate)', () => {
     expect(DEFAULT_CUTOVER_GATE.wrongPositiveRatioMax).toBe(1.0);
     expect(DEFAULT_CUTOVER_GATE.conceptRedirectAccuracyMin).toBeGreaterThanOrEqual(0.9);
   });
+
+  it('scores correctness by label hint when no canonical id is present (hotset path)', () => {
+    const r: ShadowRow[] = [
+      // hint matches the resolved label (case/punctuation-insensitive) → correct
+      { qid: 'h1', query: 'Dom Perignon', expectedStatus: 'resolved', expectedLabelHint: 'dom perignon', v1: { status: 'failed' }, v2: { status: 'resolved', topLabel: 'Dom Pérignon 2013' } },
+      // resolved to a label that does NOT contain the hint → wrong-positive
+      { qid: 'h2', query: 'Sassicaia', expectedStatus: 'resolved', expectedLabelHint: 'sassicaia', v1: { status: 'failed' }, v2: { status: 'resolved', topLabel: 'Tignanello 2019' } },
+    ];
+    const report = buildShadowReport(r);
+    expect(report.v2.correct).toBe(1);
+    expect(report.v2.wrongPositive).toBe(1);
+    expect(report.improvements).toBe(1);
+  });
 });

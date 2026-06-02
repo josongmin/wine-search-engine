@@ -46,6 +46,7 @@ import { buildClarification } from '../../../domain/resolver/v2/clarification-gr
 import { clamp01 } from '../../../domain/shared/utils/clamp.js';
 import { LOOKUP_RETRIEVAL_CHANNELS } from '../../../domain/resolver/v2/lookup-v2-types.js';
 import type { LookupRetrievalChannel } from '../../../domain/resolver/v2/lookup-v2-types.js';
+import { buildNormalizedQueryViews } from '../../../domain/query/service/query-normalizer.js';
 import { buildResolverCandidatesFromGenerator } from '../search-usecase-resolver-candidates.js';
 import { shouldSuppressBlockerSeedExpansion } from '../search-usecase-blocker-seed-policy.js';
 import { buildPlannerContextFromSearchRequest } from '../search-usecase-planner-context.js';
@@ -67,6 +68,7 @@ import {
   buildNormalizedQueryViewsView,
   decisionReasonText,
   mapResolverStatusToLookupStatus,
+  projectNormalizedQueryViews,
 } from './entity-lookup-v2-mapping.js';
 
 /**
@@ -124,7 +126,30 @@ export class EntityLookupV2UseCase {
     const effectiveQuery = await securityGate.getSafeQueryOrThrow(command.query);
     throwIfAborted(options?.abortSignal, 'Entity lookup V2 aborted');
 
-    // ── Stage 1: plan + normalized views (explicit artifact) ────────────────
+    // ── Stage 1: FRONT-DOOR admission — runs on a STANDALONE normalizer BEFORE
+    //    the planner. This is the true pre-retrieval gate: a concept/under-spec
+    //    query is closed here WITHOUT invoking queryPlanner (which, for the
+    //    entity lane, performs NL parse + alias-overlay anchor refresh). The
+    //    planner is reached only for admitted queries.
+    const frontDoorViews = buildNormalizedQueryViews(effectiveQuery);
+    const admission: LookupAdmissionVerdict = this.deps.admissionGate.classify({
+      rawQuery: effectiveQuery,
+      views: frontDoorViews,
+      ...(command.locale !== undefined ? { locale: command.locale } : {}),
+    });
+
+    if (admission.decision !== 'admit') {
+      pipelineDebug(
+        {
+          step: PipelineDebugStep.RESOLVE_USE_CASE_START,
+          admission_reason: admission.reasonCode,
+        },
+        'pipeline entity-lookup-v2 admission stop (front-door, pre-planner)',
+      );
+      return this.buildNonAdmittedResult(command, frontDoorViews, admission, startedAt);
+    }
+
+    // ── Stage 2: plan + normalized views (admitted queries only) ────────────
     const plan = await this.deps.queryPlanner.plan(
       effectiveQuery,
       buildPlannerContextFromSearchRequest(
@@ -137,27 +162,7 @@ export class EntityLookupV2UseCase {
     );
     throwIfAborted(options?.abortSignal, 'Entity lookup V2 aborted');
 
-    const views: NormalizedQueryViews = plan.normalizedQueryViews ?? synthesizeViews(plan);
     const viewsView = buildNormalizedQueryViewsView(plan);
-
-    // ── Stage 2: admission / concept gate (front-door, pre-retrieval) ───────
-    const admission: LookupAdmissionVerdict = this.deps.admissionGate.classify({
-      rawQuery: plan.rawQuery,
-      views,
-      ...(command.locale !== undefined ? { locale: command.locale } : {}),
-    });
-
-    if (admission.decision !== 'admit') {
-      pipelineDebug(
-        {
-          step: PipelineDebugStep.RESOLVE_CONSTRAINT_SAT_CONTRADICTED,
-          query_class: plan.queryClass,
-          admission_reason: admission.reasonCode,
-        },
-        'pipeline entity-lookup-v2 admission stop',
-      );
-      return this.buildNonAdmittedResult(command, plan, viewsView, admission, startedAt);
-    }
 
     // ── Stage 3: candidate union (resolver-backed baseline; T-04 deepens) ───
     const sat = this.constraintSAT.check(plan.constraints);
@@ -256,24 +261,42 @@ export class EntityLookupV2UseCase {
     return this.deps.entityResolver.resolve(resolverInput);
   }
 
+  /**
+   * Build the terminal result for a query the FRONT-DOOR gate did not admit —
+   * WITHOUT a plan, candidates, or any retrieval (the planner was never run).
+   */
   private buildNonAdmittedResult(
     command: EntityLookupV2Command,
-    plan: QueryPlanV1,
-    viewsView: NormalizedQueryViewsView,
+    frontDoorViews: NormalizedQueryViews,
     admission: LookupAdmissionVerdict,
     startedAt: number,
   ): EntityLookupV2Result {
-    const status = admission.decision === 'redirect_discovery' ? 'redirect_discovery' : 'failed';
-    return this.finishResult({
-      command,
-      plan,
-      viewsView,
-      admission,
-      result: undefined,
-      forcedStatus: status,
-      decisionReasonCode: admission.reasonCode,
-      startedAt,
-    });
+    const status: 'redirect_discovery' | 'failed' =
+      admission.decision === 'redirect_discovery' ? 'redirect_discovery' : 'failed';
+    const queryTimeMs = Math.max(0, performance.now() - startedAt);
+    return {
+      status,
+      decisionReason: decisionReasonText(status, admission.reasonCode, admission),
+      normalizedQueryViews: projectNormalizedQueryViews(frontDoorViews),
+      candidates: [],
+      topCandidate: null,
+      clarificationOptions: [],
+      evidenceSummary: {
+        admissionReasonCode: admission.reasonCode,
+        decisionReasonCode: admission.reasonCode,
+        calibrationTrusted: false,
+        // No plan was produced — the gate closed the query before classification.
+        queryClass: 'unspecified',
+        candidatePoolSize: 0,
+        channelCoverage: [],
+      },
+      meta: {
+        ...(command.requestId !== undefined ? { requestId: command.requestId } : {}),
+        queryTimeMs,
+        version: LOOKUP_V2_ENGINE_VERSION,
+        engineSchemaVersion: 'entity_lookup_v2',
+      },
+    };
   }
 
   private finishResult(args: {
@@ -404,25 +427,4 @@ function buildChannelCoverage(
     }
   }
   return rows;
-}
-
-/**
- * The planner normally produces `normalizedQueryViews`; in the rare case it is
- * absent (older planner path), synthesize a minimal view set from the plan so
- * the admission gate still receives a structured input rather than crashing.
- */
-function synthesizeViews(plan: QueryPlanV1): NormalizedQueryViews {
-  const q = plan.normalizedQuery;
-  return {
-    raw: plan.rawQuery,
-    strict: q,
-    accentless: q,
-    collapsedWhitespace: q,
-    punctuationStripped: q,
-    compact: q.replace(/[^\p{L}\p{N}]/gu, ''),
-    vintageCanonicalized: q,
-    vintageStripped: q,
-    semanticVariants: [q],
-    lookupVariants: [q],
-  };
 }

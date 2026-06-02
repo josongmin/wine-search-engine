@@ -324,7 +324,10 @@ describe('EntityLookupV2UseCase', () => {
       resolver,
     );
 
-    const out = await useCase.execute({ query: 'cheap expensive merlot', maxCandidates: 10, mode: 'default' });
+    // Query must ADMIT past the front-door gate (a concept-only query like
+    // "cheap expensive merlot" would redirect before the planner); the stubbed
+    // plan carries the contradictory hard constraints that trip the SAT check.
+    const out = await useCase.execute({ query: 'Opus One', maxCandidates: 10, mode: 'default' });
 
     expect(out.status).toBe('failed');
     expect(out.evidenceSummary.decisionReasonCode).toBe('hard_constraint_violation');
