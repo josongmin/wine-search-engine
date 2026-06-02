@@ -15,10 +15,12 @@
  *   pnpm run eval:lookup-v2:shadow [-- --corpus <path> --output <path>]
  */
 
+import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { loadConfig } from '../../src/config/env.js';
 import { createContainer } from '../../src/config/container.js';
+import { getPgPool } from '../../src/infrastructure/db/pg-pool.js';
 import type { SearchRequest } from '../../src/application/search/search-request.dto.js';
 import type { SearchResponseV1 } from '../../src/domain/response/model/search-response.js';
 import { LOOKUP_V2_DEFAULT_MAX_CANDIDATES } from '../../src/interface/http/constants.js';
@@ -100,7 +102,11 @@ async function main(): Promise<void> {
   }
 
   const config = loadConfig();
-  const container = await createContainer(config);
+  // Inject the live RDS pool so the container's PG-backed blocker, calibration
+  // store, and alias substrate are active. createContainer(config) without a
+  // pool silently degrades (blocker=0 / calibration untrusted) — that is what
+  // understated the 2026-06-02 shadow run.
+  const container = await createContainer(config, getPgPool());
 
   const rows: ShadowRow[] = [];
   for (const row of hotset) {
@@ -143,7 +149,19 @@ async function main(): Promise<void> {
   }
 
   const report = buildShadowReport(rows);
-  writeFileSync(outputPath, JSON.stringify({ generatedAtNote: 'stamp externally', rows, report }, null, 2), 'utf8');
+  // Tamper-evident, self-describing artifact: a committed PASS claim must carry
+  // a real timestamp + git SHA so it can be audited / reproduced (self-review C2).
+  let gitSha = 'unknown';
+  try {
+    gitSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  } catch {
+    // not in a git checkout — leave 'unknown'
+  }
+  writeFileSync(
+    outputPath,
+    JSON.stringify({ generatedAt: new Date().toISOString(), gitSha, corpus: corpusPath, rows, report }, null, 2),
+    'utf8',
+  );
 
   console.log(`[elv2-shadow] rows=${report.rowCount}`);
   console.log(`[elv2-shadow] V1 correct=${report.v1.correct} wrong+=${report.v1.wrongPositive} | V2 correct=${report.v2.correct} wrong+=${report.v2.wrongPositive}`);
