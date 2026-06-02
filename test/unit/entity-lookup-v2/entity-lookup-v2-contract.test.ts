@@ -338,6 +338,42 @@ describe('EntityLookupV2UseCase', () => {
   });
 });
 
+describe('T-ELV2-06 clarification contract on the wire', () => {
+  it('surfaces clarification_kind + ambiguity_types from the in-process graph (no persisted dict)', async () => {
+    const resolver = makeResolver('ambiguous', [
+      { id: 'opus-one-2018', label: 'Opus One 2018', score: 0.6 },
+      { id: 'opus-one-2019', label: 'Opus One 2019', score: 0.55 },
+    ]);
+    const out = await makeUseCase(makePlan(), resolver).execute({ query: 'Opus One', maxCandidates: 10, mode: 'default' });
+    expect(out.status).toBe('ambiguous');
+    expect(out.evidenceSummary.clarificationKind).toBe('multi_vintage');
+    expect(out.evidenceSummary.ambiguityTypes).toContain('multi_vintage');
+    expect(out.evidenceSummary.ambiguitySeverity).toBeUndefined(); // no persisted severity
+  });
+
+  it('prefers the PERSISTED ambiguity graph (types + severity) over the in-process classifier', async () => {
+    const resolver = makeResolver('ambiguous', [
+      { id: 'opus-one-2018', label: 'Opus One 2018', score: 0.6 },
+      { id: 'opus-one-2019', label: 'Opus One 2019', score: 0.55 },
+    ]);
+    const queryPlanner: QueryPlannerPort = { plan: vi.fn().mockResolvedValue(makePlan()) };
+    const useCase = new EntityLookupV2UseCase({
+      admissionGate: new ConceptAdmissionGate(),
+      queryPlanner,
+      entityResolver: resolver,
+      ambiguityDictionary: {
+        isKnownAmbiguous: vi.fn().mockResolvedValue(true),
+        getAmbiguityInfo: vi.fn().mockResolvedValue({ types: ['alias_collision'], severity: 'high' }),
+        getAmbiguityInfoBatch: vi.fn().mockResolvedValue(new Map()),
+      },
+      querySanitizer: { sanitize: vi.fn((q: string) => ({ safe: true, sanitizedQuery: q })) } as never,
+    });
+    const out = await useCase.execute({ query: 'Opus One', maxCandidates: 10, mode: 'default' });
+    expect(out.evidenceSummary.ambiguityTypes).toEqual(['alias_collision']);
+    expect(out.evidenceSummary.ambiguitySeverity).toBe('high');
+  });
+});
+
 describe('mapResolverStatusToLookupStatus', () => {
   it('maps resolver advisory status to terminal lookup status', () => {
     expect(mapResolverStatusToLookupStatus('resolved')).toBe('resolved');

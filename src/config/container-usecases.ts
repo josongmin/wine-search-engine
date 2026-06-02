@@ -144,6 +144,9 @@ export function buildUseCaseContainerServices(
     // T-ELV2-05: learned reranker over the trained LambdaMART models (graceful
     // lexical fallback when no model for the query class).
     reranker: new LtrRerankDecider({ ...(core.ltrModels !== undefined ? { ltrModels: core.ltrModels } : {}) }),
+    // T-ELV2-06: persisted ambiguity substrate (registry-backed) enriches the
+    // clarification contract with authoritative types + severity.
+    ambiguityDictionary: core.ambiguityDictionary,
     querySanitizer: core.querySanitizer,
     injectionJudge: core.injectionJudge,
     judgeFailureMode: config.queryEntrySecurity.judgeFailureMode,

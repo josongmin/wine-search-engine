@@ -354,3 +354,11 @@ export const MAX_LOOKUP_V2_CLARIFICATION_OPTIONS = MAX_CLARIFICATION_CANDIDATES;
  * channel, with the same head-room rationale as {@link MAX_LOOKUP_V2_CHANNEL_HITS}.
  */
 export const MAX_LOOKUP_V2_COVERAGE_ROWS = 16;
+
+/**
+ * Max ambiguity-type strings on a V2 evidence summary. The domain AMBIGUITY_TYPES
+ * enum has 6 members (wine_vs_producer, wine_vs_region, multi_vintage,
+ * alias_collision, producer_family_collision, underspecified_short_form); 8
+ * leaves head-room for future types without a schema bump.
+ */
+export const MAX_LOOKUP_V2_AMBIGUITY_TYPES = 8;

@@ -16,6 +16,7 @@ import { QueryStringSchema } from './search-shared.schema.js';
 import {
   LOOKUP_V2_DEFAULT_MAX_CANDIDATES,
   MAX_ERROR_ENVELOPE_REQUEST_ID_CHARS,
+  MAX_LOOKUP_V2_AMBIGUITY_TYPES,
   MAX_LOOKUP_V2_CANDIDATES,
   MAX_LOOKUP_V2_CHANNEL_HITS,
   MAX_LOOKUP_V2_CLARIFICATION_OPTIONS,
@@ -135,6 +136,13 @@ const LookupV2EvidenceSummarySchema = z
     query_class: z.string().min(1),
     candidate_pool_size: z.number().int().nonnegative(),
     channel_coverage: z.array(LookupV2ChannelCoverageSchema).max(MAX_LOOKUP_V2_COVERAGE_ROWS),
+    // T-ELV2-06: graph-backed clarification contract surfaced for ambiguous
+    // outcomes — the clarification KIND, the ambiguity TYPES (from the persisted
+    // ambiguity graph when available, else the in-process classifier), and the
+    // cluster SEVERITY. Present only when the lookup is ambiguous.
+    clarification_kind: z.enum(['multi_vintage', 'variant_or_collision', 'single']).optional(),
+    ambiguity_types: z.array(z.string().min(1)).max(MAX_LOOKUP_V2_AMBIGUITY_TYPES).optional(),
+    ambiguity_severity: z.enum(['low', 'medium', 'high']).optional(),
   })
   .strict();
 

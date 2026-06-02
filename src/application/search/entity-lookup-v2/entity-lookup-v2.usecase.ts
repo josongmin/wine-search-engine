@@ -50,6 +50,7 @@ import { CalibratedAbstainDecider } from '../../../domain/resolver/v2/calibrated
 import { extractLookupFeatures } from '../../../domain/resolver/v2/lookup-feature-extractor.js';
 import { anchorsHaveExactIdentityEvidence, buildChannelHitsForEntity } from '../../../domain/resolver/v2/channel-provenance.js';
 import { buildClarification } from '../../../domain/resolver/v2/clarification-graph.js';
+import type { AmbiguityDictionary, AmbiguityInfo } from '../../../domain/query/port/ambiguity-dictionary.port.js';
 import { clamp01 } from '../../../domain/shared/utils/clamp.js';
 import { LOOKUP_RETRIEVAL_CHANNELS } from '../../../domain/resolver/v2/lookup-v2-types.js';
 import type { LookupRetrievalChannel } from '../../../domain/resolver/v2/lookup-v2-types.js';
@@ -108,6 +109,13 @@ export interface EntityLookupV2UseCaseDeps {
    * audit-hardened calibrated gates.
    */
   readonly reranker?: LookupRerankDecisionPort | undefined;
+  /**
+   * T-ELV2-06: persisted ambiguity substrate (the existing AmbiguityDictionary,
+   * backed by canonical_ambiguity_registry). When present, an ambiguous outcome
+   * is enriched with the registry's authoritative ambiguity types + severity,
+   * overriding the in-process label-graph classification.
+   */
+  readonly ambiguityDictionary?: AmbiguityDictionary | undefined;
   readonly querySanitizer: QuerySanitizer;
   readonly injectionJudge?: InjectionJudgePort | undefined;
   readonly judgeFailureMode?: 'fail_open' | 'fail_closed' | undefined;
@@ -246,6 +254,16 @@ export class EntityLookupV2UseCase {
       'pipeline entity-lookup-v2',
     );
 
+    // T-ELV2-06: enrich an ambiguous outcome with the PERSISTED ambiguity graph
+    // (registry-backed) — authoritative types + severity override the in-process
+    // label-graph classification. Degradation-safe (null on miss/unavailable).
+    let persistedAmbiguity: AmbiguityInfo | null = null;
+    if (decision.status === 'ambiguous' && this.deps.ambiguityDictionary !== undefined) {
+      persistedAmbiguity = await this.deps.ambiguityDictionary
+        .getAmbiguityInfo(plan.normalizedQuery, options?.abortSignal)
+        .catch(() => null);
+    }
+
     return this.finishResult({
       command,
       plan,
@@ -254,6 +272,7 @@ export class EntityLookupV2UseCase {
       result,
       decision,
       ...(retrieval !== undefined ? { retrieval } : {}),
+      ...(persistedAmbiguity !== null ? { persistedAmbiguity } : {}),
       decisionReasonCode: decision.reasonCode,
       startedAt,
     });
@@ -373,11 +392,12 @@ export class EntityLookupV2UseCase {
     result: EntityResolveResult | undefined;
     decision?: LookupDecision | undefined;
     retrieval?: LookupRetrievalResult | undefined;
+    persistedAmbiguity?: AmbiguityInfo | undefined;
     forcedStatus?: 'failed' | 'redirect_discovery';
     decisionReasonCode: string;
     startedAt: number;
   }): EntityLookupV2Result {
-    const { command, plan, viewsView, admission, result, decision, retrieval, forcedStatus, decisionReasonCode } = args;
+    const { command, plan, viewsView, admission, result, decision, retrieval, persistedAmbiguity, forcedStatus, decisionReasonCode } = args;
 
     // T-ELV2-04: when the independent timed retrieval engine ran, index its REAL
     // per-channel hits by entity so resolved candidates carry real provenance
@@ -439,18 +459,22 @@ export class EntityLookupV2UseCase {
     // The resolver orders by rank, so slicing keeps the strongest candidates.
     const candidates = allCandidates.slice(0, command.maxCandidates);
     const topCandidate = status === 'resolved' ? (candidates[0] ?? null) : null;
+    // T-ELV2-06: graph-backed clarification (kind + distinguishing features) for
+    // ambiguous outcomes; ambiguity types/severity prefer the persisted graph.
+    const clarification = status === 'ambiguous'
+      ? buildClarification(
+          allCandidates
+            .slice(0, LOOKUP_V2_MAX_CLARIFICATION_OPTIONS)
+            .map((c) => ({ entityId: c.entityId, canonicalLabel: c.canonicalLabel })),
+        )
+      : undefined;
     const clarificationOptions: readonly LookupV2ClarificationOptionView[] =
-      status === 'ambiguous'
-        ? buildClarification(
-            allCandidates
-              .slice(0, LOOKUP_V2_MAX_CLARIFICATION_OPTIONS)
-              .map((c) => ({ entityId: c.entityId, canonicalLabel: c.canonicalLabel })),
-          ).options.map((o) => ({
-            entityId: o.entityId,
-            label: o.label,
-            ...(o.distinguishingFeature !== undefined ? { distinguishingFeature: o.distinguishingFeature } : {}),
-          }))
-        : [];
+      clarification?.options.map((o) => ({
+        entityId: o.entityId,
+        label: o.label,
+        ...(o.distinguishingFeature !== undefined ? { distinguishingFeature: o.distinguishingFeature } : {}),
+      })) ?? [];
+    const ambiguityTypes = persistedAmbiguity?.types ?? clarification?.ambiguityTypes;
 
     const queryTimeMs = Math.max(0, performance.now() - args.startedAt);
 
@@ -488,6 +512,12 @@ export class EntityLookupV2UseCase {
               latencyMs: c.latencyMs,
             }))
           : buildChannelCoverage(allCandidates),
+        // T-ELV2-06: surface the structured clarification contract for ambiguous
+        // outcomes (kind + ambiguity types from the persisted graph when available,
+        // else the in-process classifier; severity only from the persisted graph).
+        ...(clarification !== undefined ? { clarificationKind: clarification.kind } : {}),
+        ...(ambiguityTypes !== undefined && ambiguityTypes.length > 0 ? { ambiguityTypes } : {}),
+        ...(persistedAmbiguity !== undefined ? { ambiguitySeverity: persistedAmbiguity.severity } : {}),
       },
       meta: {
         ...(command.requestId !== undefined ? { requestId: command.requestId } : {}),

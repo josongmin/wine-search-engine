@@ -1,5 +1,6 @@
 import type { QueryPlannerPort, RankingPort } from '../application/search/port/search-pipeline-deps.port.js';
 import type { AliasMatcher } from '../domain/query/service/anchor-extractor.js';
+import type { AmbiguityDictionary } from '../domain/query/port/ambiguity-dictionary.port.js';
 import {
   PlannerV1Adapter,
   buildAnchorRefreshCallbackFromAliasOverlay,
@@ -74,6 +75,8 @@ export interface CoreContainerServices {
   readonly entityLookup: EntityDocumentLookupPort;
   /** Live alias substrate matcher — exposed for the T-ELV2-04 V2 retrieval engine. */
   readonly aliasMatcher: AliasMatcher;
+  /** Persisted ambiguity substrate (registry-backed) — for the T-ELV2-06 clarification graph. */
+  readonly ambiguityDictionary: AmbiguityDictionary;
   readonly snapshotVersions: SnapshotVersions;
   readonly querySanitizer: RuntimeSupportServices['querySanitizer'];
   readonly injectionJudge?: RuntimeSupportServices['injectionJudge'];
@@ -160,6 +163,7 @@ export async function buildCoreContainerServices(
     compareRetriever,
     entityLookup,
     aliasMatcher: adapters.aliasMatcher,
+    ambiguityDictionary: adapters.ambiguityDict,
     ...(adapters.chatLlm !== undefined ? { chatLlm: adapters.chatLlm } : {}),
     ranker,
     decisionEngine: buildDecisionEngine(adapters, config),

@@ -69,6 +69,10 @@ export interface LookupV2EvidenceSummaryView {
   readonly queryClass: string;
   readonly candidatePoolSize: number;
   readonly channelCoverage: readonly LookupV2ChannelCoverageView[];
+  /** T-ELV2-06: graph-backed clarification contract (ambiguous outcomes only). */
+  readonly clarificationKind?: 'multi_vintage' | 'variant_or_collision' | 'single' | undefined;
+  readonly ambiguityTypes?: readonly string[] | undefined;
+  readonly ambiguitySeverity?: 'low' | 'medium' | 'high' | undefined;
 }
 
 export interface EntityLookupV2Result {
