@@ -76,6 +76,14 @@ export interface CutoverGateThresholds {
   readonly correctRateRatioMin: number;
   /** Absolute floor for concept-redirect accuracy. */
   readonly conceptRedirectAccuracyMin: number;
+  /**
+   * When true, a run in which NEITHER engine correctly resolved ANY of the
+   * expected-resolve rows (N>0) is rejected as structurally uninformative — a
+   * degraded substrate (e.g. empty blocker index) makes both engines abstain
+   * 15/15, which the precision-first gates would otherwise PASS as a hollow
+   * "V2 ≥ V1". Defends against the degenerate cutover-pass the audit flagged.
+   */
+  readonly requireNonDegenerate: boolean;
 }
 
 /** Conservative default gate — precision-first. */
@@ -83,6 +91,7 @@ export const DEFAULT_CUTOVER_GATE: CutoverGateThresholds = {
   wrongPositiveRatioMax: 1.0,
   correctRateRatioMin: 0.98,
   conceptRedirectAccuracyMin: 0.95,
+  requireNonDegenerate: true,
 };
 
 export interface CutoverGateResult {
@@ -201,6 +210,20 @@ export function buildShadowReport(
   // Gate 3: concept-redirect accuracy floor (only when there are concept rows).
   if (conceptRows.length > 0 && v2ConceptRedirectAccuracy < thresholds.conceptRedirectAccuracyMin) {
     reasons.push(`V2 concept-redirect accuracy ${pct(v2ConceptRedirectAccuracy)} below floor ${pct(thresholds.conceptRedirectAccuracyMin)}`);
+  }
+  // Gate 4 (non-degeneracy): if the corpus HAS expected-resolve rows but NEITHER
+  // engine correctly resolved a single one, the substrate is degraded and the
+  // "V2 ≥ V1" comparison is hollow — reject rather than pass a 0-resolve run.
+  const expectedResolveRows = rows.filter((r) => r.expectedStatus === 'resolved');
+  if (thresholds.requireNonDegenerate && expectedResolveRows.length > 0) {
+    const v1ResolvedCorrect = expectedResolveRows.filter((r) => isResolveCorrect(r, r.v1)).length;
+    const v2ResolvedCorrect = expectedResolveRows.filter((r) => isResolveCorrect(r, r.v2)).length;
+    if (v1ResolvedCorrect === 0 && v2ResolvedCorrect === 0) {
+      reasons.push(
+        `degenerate run: neither engine resolved any of ${expectedResolveRows.length} expected-resolve rows `
+          + `(degraded substrate — comparison is uninformative)`,
+      );
+    }
   }
 
   return {

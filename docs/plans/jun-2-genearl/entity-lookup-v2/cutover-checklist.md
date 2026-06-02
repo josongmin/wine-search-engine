@@ -26,10 +26,10 @@
 |---|---|---|
 | hotset corpus | `test/fixtures/lookup-v2-hotset.jsonl` | ✅ (15 labeled; DoD exemplars 포함) |
 | shadow-compare 메트릭 (pure) | `scripts/eval/lookup-v2-shadow-metrics.ts` | ✅ unit-tested |
-| live shadow runner (V1+V2 실행) | `scripts/eval/run-lookup-v2-shadow-compare.ts` | ⬜ TODO (infra-wired) |
-| shadow compare report | CI 산출물 | ⬜ |
-| operator smoke | `pnpm run ...` | ⬜ (T-07) |
-| live canary replay | — | ⬜ |
+| live shadow runner (V1+V2 실행) | `scripts/eval/run-lookup-v2-shadow-compare.ts` | ✅ 구현·실행됨 |
+| shadow compare report | `shadow-results-2026-06-02.md` | 🟡 실행됨이나 **degenerate**(V1·V2 둘 다 15/15 abstain, degraded substrate) — 비교 무의미. 이제 non-degeneracy 게이트(아래 Gate 4)가 이런 run의 PASS를 차단. **정상 stack에서 재실행 필요** |
+| operator smoke | `/v2/entity-lookup/ops/inspect` + web `/ops/*` | ✅ (T-07 trusted plane) |
+| live canary replay | — | ⬜ (정상 stack 미러 트래픽 필요) |
 
 ## 2. Cutover 게이트 (자동 — `buildShadowReport`)
 
@@ -40,8 +40,10 @@
    — V2 존재 이유. `opu one`류 wrong-resolve 금지.
 2. **correct-rate**: V2 correct rate ≥ V1 × 0.98 (recall 2% 이내 유지).
 3. **concept-redirect**: `까쇼`류 redirect 정확도 ≥ 0.95.
+4. **non-degeneracy**: expected-resolve row이 있는데 V1·V2 **둘 다 단 한 건도 resolve 못 한** run은
+   거부(degraded substrate에서의 hollow PASS 차단 — 적대적 감사가 잡은 15/15-abstain 케이스).
 
-세 게이트 모두 통과해야 `gate.pass === true`.
+네 게이트 모두 통과해야 `gate.pass === true`.
 
 ## 3. Cutover 절차 (게이트 통과 후)
 

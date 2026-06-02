@@ -64,6 +64,38 @@ describe('buildShadowReport (T-ELV2-08 cutover gate)', () => {
   it('uses the conservative default gate thresholds', () => {
     expect(DEFAULT_CUTOVER_GATE.wrongPositiveRatioMax).toBe(1.0);
     expect(DEFAULT_CUTOVER_GATE.conceptRedirectAccuracyMin).toBeGreaterThanOrEqual(0.9);
+    expect(DEFAULT_CUTOVER_GATE.requireNonDegenerate).toBe(true);
+  });
+
+  it('FAILS a degenerate run where neither engine resolved any expected-resolve row', () => {
+    // The exact degraded shape the audit flagged: expected-resolve entities, but
+    // both V1 and V2 abstain on all of them. Precision gates alone would PASS this
+    // (0 wrong-positives, equal correct-rate); the non-degeneracy gate rejects it.
+    const r: ShadowRow[] = [
+      { qid: 'd1', query: 'Opus One 2018', expectedStatus: 'resolved', expectedEntityId: OPUS, v1: { status: 'failed' }, v2: { status: 'failed' } },
+      { qid: 'd2', query: 'Sassicaia 2019', expectedStatus: 'resolved', expectedLabelHint: 'sassicaia', v1: { status: 'failed' }, v2: { status: 'failed' } },
+    ];
+    const report = buildShadowReport(r);
+    expect(report.v1.wrongPositive).toBe(0);
+    expect(report.v2.wrongPositive).toBe(0);
+    expect(report.gate.pass).toBe(false);
+    expect(report.gate.reasons.join(' ')).toMatch(/degenerate/i);
+  });
+
+  it('does NOT fire the non-degeneracy gate when at least one engine resolves correctly', () => {
+    const r: ShadowRow[] = [
+      { qid: 'n1', query: 'Opus One 2018', expectedStatus: 'resolved', expectedEntityId: OPUS, v1: { status: 'failed' }, v2: { status: 'resolved', topEntityId: OPUS } },
+    ];
+    const report = buildShadowReport(r);
+    expect(report.gate.reasons.join(' ')).not.toMatch(/degenerate/i);
+  });
+
+  it('does NOT fire the non-degeneracy gate on a corpus with zero expected-resolve rows', () => {
+    const r: ShadowRow[] = [
+      { qid: 'z1', query: '까쇼', expectedStatus: 'redirect_discovery', v1: { status: 'redirect_discovery' }, v2: { status: 'redirect_discovery' } },
+    ];
+    const report = buildShadowReport(r);
+    expect(report.gate.reasons.join(' ')).not.toMatch(/degenerate/i);
   });
 
   it('scores correctness by label hint when no canonical id is present (hotset path)', () => {
