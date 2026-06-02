@@ -1,5 +1,32 @@
 # Entity Lookup V2 — Live Shadow-Compare Result (2026-06-02)
 
+## UPDATE (2026-06-03, post-fix 526aeee8) — authority gate now PASSES (cutover-eligible)
+
+After closing the last noisy_recall miss (`526aeee8` — 2-digit vintage shorthand
+must not consume name-internal numbers), the authority scorer
+(`run-entity-resolution-validation`, 25/class = 100 cases, same fingerprint
+`bdad1bf1…`) reports **verdict: PASS (cutover-eligible)**:
+
+| class (n=25) | V1 | V2 |
+|---|---|---|
+| exact_entity | 100% | 100% |
+| noisy_recall | 100% | **100%** (was 92%) |
+| ambiguous_short_form | 76%, wrong=6 | 100%, wrong=0 |
+| no_match | 100% | 100% |
+| **OVERALL (n=100)** | 94%, wrong=6 | **100%, wrong=0, miss=0** |
+
+The vintage fix lives in the SHARED query normalizer, so V1 noisy_recall also
+rose (→100%). V2 now dominates or ties every class with zero wrong-positives.
+
+**Honest scope of this PASS:**
+- This is the **25/class = 100-case** authority sample. The full `eval_cases`
+  distribution run (no `--limit-per-class`) is the complete authority — see the
+  full-distribution result below / artifact when available.
+- Gate PASS = **cutover-ELIGIBLE** (may flip authority to V2, demote V1 to
+  shadow). It is **NOT** "delete V1 now". Per §4, V1 PURGE still requires: cutover
+  done → ≥1 release cycle V2-authority no-incident → V1 traffic = 0 telemetry.
+- Dom Pérignon remains a DATA gap (entity not indexed); V2's abstain is correct.
+
 ## UPDATE (2026-06-02, post-fix d6eca27b/bc39d01b) — recall regression ROOT-CAUSED and largely closed
 
 The "recall regression" below was diagnosed (adversarial 12-agent workflow + live
