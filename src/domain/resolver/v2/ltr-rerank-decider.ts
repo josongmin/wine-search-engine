@@ -142,7 +142,7 @@ export class LtrRerankDecider implements LookupRerankDecisionPort {
  * session — it is gated OFF by `LTR_SERVING_ENABLED` (default false), so the
  * learned branch is reached only by tests with injected models, never live.
  */
-function toRankingFeatures(f: LookupCandidateFeatures): RankingFeatures {
+export function toRankingFeatures(f: LookupCandidateFeatures): RankingFeatures {
   return {
     bm25Score: f.normalizedAliasEvidence,
     semanticScore: f.transliterationConsistency,

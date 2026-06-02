@@ -4,8 +4,9 @@
  * Groups entities that share a normalized PRODUCER key into families, emitting
  * the rows that populate the `entity_family` recall plane (migration 031). Pure
  * + deterministic so the grouping logic is unit-testable without infra; the
- * runnable publisher (run-family-graph-publish.ts) feeds it silver records and
- * writes the rows to PG.
+ * runnable publisher (run-family-graph-publish.ts) feeds it RUNTIME entity rows
+ * (entities.entity_id = CanonicalEntityId + metadata->>'producer') and writes the
+ * rows to PG.
  *
  * NO HEURISTIC (per the locked decision): families are built from REAL producers
  * only. The snapshot builder sets `producer = doc.producer ?? canonicalLabel`, so

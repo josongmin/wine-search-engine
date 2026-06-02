@@ -10,8 +10,10 @@
  * MUST be in the runtime CanonicalEntityId id-space — the same ids the alias
  * substrate/engine anchors use — or no anchor would ever match a family member.
  * silver carries source-namespace `sourceId`, so reading it would publish ids
- * that never join. producer comes from attributes->>'producer' (REAL-producer
- * gating excludes the canonicalLabel fallback inside buildFamilyGraphRows).
+ * that never join. producer lives in entities.METADATA (build-search-snapshot
+ * writes `metadata.producer`; the attributes JSONB has no producer key) — read it
+ * from there (COALESCE with attributes as a defensive fallback). REAL-producer
+ * gating excludes the canonicalLabel fallback inside buildFamilyGraphRows.
  *
  *   pnpm run etl:family-graph:publish
  */
@@ -57,9 +59,13 @@ async function main(): Promise<void> {
   try {
     const { activeSnapshotId } = await resolveActiveSnapshot(pool, { bypassCache: true });
 
-    // Runtime entities (CanonicalEntityId id-space) + producer from attributes.
+    // Runtime entities (CanonicalEntityId id-space). producer lives in metadata
+    // (NOT attributes); COALESCE keeps a defensive fallback if a future build
+    // moves it. The runtime entity_id is the same id-space the engine anchors +
+    // PgFamilyGraph join use — members MUST be in it or no anchor would match.
     const entitiesResult = await pool.query(
-      `SELECT entity_id, canonical_label, attributes->>'producer' AS producer
+      `SELECT entity_id, canonical_label,
+              COALESCE(metadata->>'producer', attributes->>'producer') AS producer
          FROM entities
         WHERE search_snapshot_id = $1`,
       [activeSnapshotId],
@@ -72,6 +78,15 @@ async function main(): Promise<void> {
     const rows = buildFamilyGraphRows(records);
     const families = new Set(rows.map((r) => r.familyId)).size;
     console.log(`[elv2-family] entities=${records.length} → family rows=${rows.length} across ${families} families`);
+    // Loud guard: many entities but ZERO families almost always means the producer
+    // JSONB path is wrong (the recurring silent-zero-recall bug) — do not silently
+    // wipe + publish nothing. A genuinely producer-less corpus is rare.
+    const withProducer = records.filter((r) => r.producer.length > 0).length;
+    if (records.length > 0 && withProducer === 0) {
+      throw new Error(
+        `[elv2-family] ${records.length} entities but 0 carry a producer — the producer JSONB path is likely wrong; refusing to wipe entity_family. Verify metadata->>'producer' on a real snapshot.`,
+      );
+    }
 
     // Atomic republish: DELETE + INSERT in one transaction (no partial wipe).
     const client = await pool.connect();
