@@ -37,6 +37,7 @@ import process from 'node:process';
 import { Pool } from 'pg';
 import { z } from 'zod';
 
+import { createScriptPgPool } from '../lib/script-pg-pool.js';
 import { PgCalibrationStore } from '../../src/infrastructure/adapter/pg-calibration-store.js';
 import { buildCalibrationReport } from '../../src/domain/calibration/service/calibration-suite.js';
 import { computeECE } from '../../src/domain/calibration/service/ece.js';
@@ -581,21 +582,7 @@ export function hashDataset(rows: readonly TraceRow[]): string {
 // ────────────────────────────────────────────────────────────────
 
 function createPool(): Pool {
-  const connectionString = process.env['DATABASE_URL'];
-  if (connectionString !== undefined && connectionString.length > 0) {
-    return new Pool({ connectionString });
-  }
-  const port = Number.parseInt(
-    process.env['PG_PORT'] ?? process.env['PGPORT'] ?? '5432',
-    10,
-  );
-  return new Pool({
-    host: process.env['PG_HOST'] ?? process.env['PGHOST'] ?? 'localhost',
-    port,
-    database: process.env['PG_DATABASE'] ?? process.env['PGDATABASE'] ?? 'wine_search',
-    user: process.env['PG_USER'] ?? process.env['PGUSER'] ?? 'postgres',
-    password: process.env['PG_PASSWORD'] ?? process.env['PGPASSWORD'] ?? '',
-  });
+  return createScriptPgPool();
 }
 
 // ────────────────────────────────────────────────────────────────

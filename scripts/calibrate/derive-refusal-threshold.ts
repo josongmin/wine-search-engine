@@ -36,6 +36,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { Pool } from 'pg';
+import { createScriptPgPool } from '../lib/script-pg-pool.js';
 import {
   deriveRefusalThresholds,
   type RefusalDerivationSample,
@@ -405,16 +406,7 @@ export async function runDerive(args: CliArgs, pool: Pool): Promise<DiagnosticRe
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
-  const connectionString = process.env['PG_CONNECTION_STRING'] ?? process.env['DATABASE_URL'];
-  const pool = connectionString !== undefined && connectionString.length > 0
-    ? new Pool({ connectionString })
-    : new Pool({
-        host: process.env['PG_HOST'] ?? 'localhost',
-        port: Number(process.env['PG_PORT'] ?? '5432'),
-        database: process.env['PG_DATABASE'] ?? 'wine',
-        user: process.env['PG_USER'] ?? 'wine',
-        password: process.env['PG_PASSWORD'] ?? '',
-      });
+  const pool = createScriptPgPool(['PG_CONNECTION_STRING', 'DATABASE_URL']);
 
   try {
     const report = await runDerive(args, pool);
