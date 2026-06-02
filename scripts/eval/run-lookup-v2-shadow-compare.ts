@@ -81,8 +81,11 @@ function v1Outcome(response: SearchResponseV1): ShadowSideOutcome {
 }
 
 async function main(): Promise<void> {
+  // `pnpm run X -- --output Y` forwards a literal `--` terminator; drop it so
+  // the forwarded options still parse (parseArgs treats `--` as end-of-options).
+  const argv = process.argv.slice(2).filter((a) => a !== '--');
   const { values } = parseArgs({
-    args: process.argv.slice(2),
+    args: argv,
     options: {
       corpus: { type: 'string', default: 'test/fixtures/lookup-v2-hotset.jsonl' },
       output: { type: 'string', default: '/tmp/lookup-v2-shadow-report.json' },
