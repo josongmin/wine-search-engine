@@ -128,3 +128,71 @@ describe('MultiChannelRetrievalEngine (T-ELV2-04 real)', () => {
     expect(await channelsFor(undefined)).toEqual(['exact_alias']);
   });
 });
+
+// T-ELV2-06 Half B: producer family graph recall channel.
+describe('MultiChannelRetrievalEngine — family_graph channel', () => {
+  function familyGraphReturning(byAnchor: Record<string, { entityId: string; edgeWeight: number }[]>) {
+    return {
+      async getFamilySiblingsBatch(ids: readonly string[]) {
+        const m = new Map<string, readonly { entityId: string; edgeWeight: number }[]>();
+        for (const id of ids) if (byAnchor[id] !== undefined) m.set(id, byAnchor[id]);
+        return m;
+      },
+    };
+  }
+
+  it('emits co-producer siblings on the family_graph channel with the edge weight', async () => {
+    const matcher = matcherReturning({
+      'opus one': [{ surfaceForm: 'Opus One', normalizedForm: 'opus one', entityIds: [opus], matchConfidence: 0.97, lookupStrategy: 'exact' }],
+    });
+    const familyGraph = familyGraphReturning({ 'opus-one-2018': [{ entityId: 'opus-one-2019', edgeWeight: 0.5 }] });
+    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, entityLookup, familyGraph });
+    const result = await engine.retrieve(input());
+    const sibling = result.candidates.find((c) => String(c.entityId) === 'opus-one-2019');
+    expect(sibling).toBeDefined();
+    expect(sibling?.channelHits.some((h) => h.channel === 'family_graph' && h.channelScore === 0.5)).toBe(true);
+    const fam = result.coverage.find((c) => c.channel === 'family_graph');
+    expect(fam?.firing).toBe(true);
+    expect(fam?.hitCount).toBe(1);
+  });
+
+  it('reserves a budget so a family-only sibling is not truncated by higher-scoring alias anchors', async () => {
+    const e1 = createEntityId('e1');
+    const e2 = createEntityId('e2');
+    const matcher = matcherReturning({
+      'opus one': [
+        { surfaceForm: 'E1', normalizedForm: 'opus one', entityIds: [e1], matchConfidence: 0.9, lookupStrategy: 'exact' },
+        { surfaceForm: 'E2', normalizedForm: 'opus one', entityIds: [e2], matchConfidence: 0.8, lookupStrategy: 'exact' },
+      ],
+    });
+    // e1 has a family sibling 'e1-sib' at edge weight 0.5 (below both anchors).
+    const familyGraph = familyGraphReturning({ e1: [{ entityId: 'e1-sib', edgeWeight: 0.5 }] });
+    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, entityLookup, familyGraph });
+    // maxCandidates=2: a pure best-score slice would keep {e1, e2} and drop the sibling.
+    const result = await engine.retrieve(input({ maxCandidates: 2 }));
+    const keys = result.candidates.map((c) => String(c.entityId));
+    expect(keys).toContain('e1-sib'); // reserved slot kept the family-only sibling
+    expect(keys).toContain('e1');
+  });
+
+  it('does not fire the family_graph channel when no family graph is wired', async () => {
+    const matcher = matcherReturning({
+      'opus one': [{ surfaceForm: 'Opus One', normalizedForm: 'opus one', entityIds: [opus], matchConfidence: 0.97 }],
+    });
+    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, entityLookup });
+    const result = await engine.retrieve(input());
+    expect(result.coverage.some((c) => c.channel === 'family_graph')).toBe(false);
+  });
+
+  it('survives a family graph that throws (request not sunk; alias union stands)', async () => {
+    const matcher = matcherReturning({
+      'opus one': [{ surfaceForm: 'Opus One', normalizedForm: 'opus one', entityIds: [opus], matchConfidence: 0.97 }],
+    });
+    const familyGraph = { async getFamilySiblingsBatch(): Promise<never> { throw new Error('family graph down'); } };
+    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, entityLookup, familyGraph });
+    const result = await engine.retrieve(input());
+    expect(result.candidates).toHaveLength(1);
+    const fam = result.coverage.find((c) => c.channel === 'family_graph');
+    expect(fam?.firing).toBe(false);
+  });
+});

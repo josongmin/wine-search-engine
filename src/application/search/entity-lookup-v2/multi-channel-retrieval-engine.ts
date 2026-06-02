@@ -51,11 +51,28 @@ import type {
   LookupRetrievalResult,
 } from '../../../domain/resolver/v2/lookup-v2-types.js';
 import type { EntityDocumentLookupPort } from '../port/search-pipeline-deps.port.js';
+import type { FamilyGraphPort, FamilySibling } from '../../../domain/resolver/v2/family-graph.port.js';
 
 export interface MultiChannelRetrievalDeps {
   readonly aliasMatcher: AliasMatcher;
   readonly entityLookup: EntityDocumentLookupPort;
+  /**
+   * T-ELV2-06 Half B: producer family graph. When wired, the engine walks each
+   * alias-recalled anchor to its persisted family and emits co-producer siblings
+   * on the `family_graph` channel. Optional — absent ⇒ the channel never fires.
+   */
+  readonly familyGraph?: FamilyGraphPort | undefined;
 }
+
+/**
+ * Family siblings carry graph edge weights (~0.5–0.9) below exact alias anchors
+ * (~1.0), so a pure best-score slice would truncate them. Reserve up to
+ * `ceil(maxCandidates / DIVISOR)` (≥1) slots for family-ONLY siblings so
+ * co-producer recall actually surfaces instead of being crowded out (rule 15).
+ */
+const FAMILY_SIBLING_BUDGET_DIVISOR = 3;
+/** Sentinel matchedView for graph-derived (non-view) family hits. */
+const FAMILY_GRAPH_MATCHED_VIEW = 'family_graph';
 
 /** A channel paired with the normalized view it independently queries. */
 interface ChannelViewBinding {
@@ -152,11 +169,68 @@ export class MultiChannelRetrievalEngine implements LookupCandidateRetrievalPort
       });
     }
 
-    // Cap the union to maxCandidates by best per-entity channel score (the
-    // reranker/calibrator is the final authority over this pool).
-    const ranked = [...byEntity.values()]
-      .sort((a, b) => b.best - a.best || a.key.localeCompare(b.key))
-      .slice(0, Math.max(1, input.maxCandidates));
+    // T-ELV2-06 Half B: walk each alias-recalled anchor to its persisted producer
+    // family and emit co-producer SIBLINGS on the family_graph channel. Siblings
+    // not already in the alias union become new family-only candidates. Timed +
+    // degradation-safe (empty when the substrate is unavailable).
+    const aliasRecalledKeys = [...byEntity.keys()];
+    const familyOnlyKeys = new Set<string>();
+    if (this.deps.familyGraph !== undefined && aliasRecalledKeys.length > 0) {
+      const startedAt = performance.now();
+      let familyHitCount = 0;
+      try {
+        const siblingsByAnchor = this.deps.familyGraph.getFamilySiblingsBatch !== undefined
+          ? await this.deps.familyGraph.getFamilySiblingsBatch(aliasRecalledKeys, _signal)
+          : await this.fanoutFamily(aliasRecalledKeys, _signal);
+        for (const [, siblings] of siblingsByAnchor) {
+          for (const sibling of siblings) {
+            const score = clamp01(sibling.edgeWeight);
+            let entry = byEntity.get(sibling.entityId);
+            if (entry === undefined) {
+              entry = { id: sibling.entityId as CanonicalEntityId, key: sibling.entityId, byChannel: new Map(), best: score };
+              byEntity.set(sibling.entityId, entry);
+              familyOnlyKeys.add(sibling.entityId);
+            }
+            const prev = entry.byChannel.get('family_graph');
+            if (prev === undefined || score > prev.score) {
+              entry.byChannel.set('family_graph', { matchedView: FAMILY_GRAPH_MATCHED_VIEW, score });
+            }
+            if (score > entry.best) entry.best = score;
+            familyHitCount += 1;
+          }
+        }
+      } catch (err) {
+        // Family graph must never sink the request — record a dormant timed run.
+        void err; /* intentional: degrade to dormant family channel */
+      }
+      // A sibling that was ALSO alias-recalled is not family-only.
+      for (const key of aliasRecalledKeys) familyOnlyKeys.delete(key);
+      coverage.push({
+        channel: 'family_graph',
+        firing: familyHitCount > 0,
+        hitCount: familyHitCount,
+        latencyMs: Math.max(0, performance.now() - startedAt),
+      });
+    }
+
+    // Cap the union to maxCandidates by best per-entity channel score, but RESERVE
+    // a budget for family-ONLY siblings (edge weights sit below alias anchors, so a
+    // pure best-score slice would truncate them — the channel would fire yet never
+    // hydrate).
+    const max = Math.max(1, input.maxCandidates);
+    const byScore = (a: { best: number; key: string }, b: { best: number; key: string }): number =>
+      b.best - a.best || a.key.localeCompare(b.key);
+    const allEntries = [...byEntity.values()].sort(byScore);
+    let ranked: typeof allEntries;
+    if (familyOnlyKeys.size === 0) {
+      ranked = allEntries.slice(0, max);
+    } else {
+      const reserve = Math.min(familyOnlyKeys.size, Math.max(1, Math.ceil(max / FAMILY_SIBLING_BUDGET_DIVISOR)));
+      const primary = allEntries.filter((e) => !familyOnlyKeys.has(e.key)).slice(0, Math.max(1, max - reserve));
+      const reserved = allEntries.filter((e) => familyOnlyKeys.has(e.key)).slice(0, reserve);
+      const seen = new Set(primary.map((e) => e.key));
+      ranked = [...primary, ...reserved.filter((e) => !seen.has(e.key))].sort(byScore).slice(0, max);
+    }
 
     const docs = await this.deps.entityLookup.getDocuments(ranked.map((e) => e.id));
 
@@ -183,6 +257,19 @@ export class MultiChannelRetrievalEngine implements LookupCandidateRetrievalPort
     });
 
     return { candidates, coverage };
+  }
+
+  /** Fallback family lookup when the port has no batch variant. */
+  private async fanoutFamily(
+    anchorKeys: readonly string[],
+    signal: AbortSignal | undefined,
+  ): Promise<ReadonlyMap<string, readonly FamilySibling[]>> {
+    const out = new Map<string, readonly FamilySibling[]>();
+    if (this.deps.familyGraph === undefined) return out;
+    for (const key of anchorKeys) {
+      out.set(key, await this.deps.familyGraph.getFamilySiblings(key, signal));
+    }
+    return out;
   }
 
   private async runChannel(
