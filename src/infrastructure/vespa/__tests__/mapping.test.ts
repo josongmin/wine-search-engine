@@ -520,6 +520,33 @@ describe('flavorProfiles Vespa mapping (Bug-1 regression)', () => {
   });
 });
 
+describe('criticConfidenceWeight Vespa mapping (F2: confidence-weighted critic rerank)', () => {
+  it('toVespaFields writes critic_confidence_weight when present', () => {
+    const fields = toVespaFields(makeDocument({ criticConfidenceWeight: 0.66 }));
+    expect(fields['critic_confidence_weight']).toBe(0.66);
+  });
+
+  it('roundtrips critic_confidence_weight through fromVespaFields', () => {
+    const doc = makeDocument({ criticConfidenceWeight: 0.33 });
+    const roundTripped = fromVespaFields(toVespaFields(doc));
+    expect(roundTripped.criticConfidenceWeight).toBe(0.33);
+  });
+
+  it('omits the field entirely when absent (legacy doc → ranker defaults to 1.0)', () => {
+    const fields = toVespaFields(makeDocument({ criticConfidenceWeight: undefined }));
+    expect(fields['critic_confidence_weight']).toBeUndefined();
+    expect(fromVespaFields(fields).criticConfidenceWeight).toBeUndefined();
+  });
+
+  it('preserves a legitimate boundary weight of 0 (does not drop via truthiness)', () => {
+    // A 0 weight is semantically "fully distrust this critic signal" — it must
+    // survive the optional-spread (getOptionalNumber !== undefined), not be
+    // dropped as falsy.
+    const roundTripped = fromVespaFields(toVespaFields(makeDocument({ criticConfidenceWeight: 0 })));
+    expect(roundTripped.criticConfidenceWeight).toBe(0);
+  });
+});
+
 describe('source_record_refs_json (entity lineage)', () => {
   const lineage = [{ sourceSystem: SOURCE_SYSTEM_VIVINO_SILVER, sourceRecordId: 'silver-lineage-1' }] as const;
 

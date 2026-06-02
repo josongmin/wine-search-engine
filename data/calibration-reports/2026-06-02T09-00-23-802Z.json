@@ -1,0 +1,83 @@
+{
+  "fittedAt": "2026-06-02T09:00:23.802Z",
+  "datasetHash": "4cf079685ad7b5ae91c950255289e13d2cadec1f0b555347cb0abc75a4979c9f",
+  "totalSamples": 374,
+  "classFits": [
+    {
+      "queryClass": "exact_entity",
+      "method": "isotonic",
+      "params": {
+        "breakpoint_count": 10,
+        "x_0": 0.46404645050975535,
+        "y_0": 0,
+        "x_1": 0.4747622696472562,
+        "y_1": 0,
+        "x_2": 0.4815542437082437,
+        "y_2": 0,
+        "x_3": 0.5090702438203076,
+        "y_3": 0,
+        "x_4": 0.6767797482715006,
+        "y_4": 0.3,
+        "x_5": 0.6897174072399824,
+        "y_5": 0.9,
+        "x_6": 0.6942442482630774,
+        "y_6": 1,
+        "x_7": 0.6984543065684091,
+        "y_7": 1,
+        "x_8": 0.7087193714577354,
+        "y_8": 1,
+        "x_9": 2.164840046491788,
+        "y_9": 1
+      },
+      "eceBefore": 0.33433403405375917,
+      "eceAfter": 0.18055311087852163,
+      "aurc": 0.2991593518566305,
+      "sampleSize": 125
+    },
+    {
+      "queryClass": "unknown",
+      "method": "isotonic",
+      "params": {
+        "breakpoint_count": 10,
+        "x_0": 0.15103206768905333,
+        "y_0": 0,
+        "x_1": 0.15161206768905333,
+        "y_1": 0,
+        "x_2": 0.15215706768905335,
+        "y_2": 0,
+        "x_3": 0.16501985016745982,
+        "y_3": 0,
+        "x_4": 0.18615541512427278,
+        "y_4": 0,
+        "x_5": 0.2958780999050949,
+        "y_5": 0,
+        "x_6": 0.45987591722081844,
+        "y_6": 0,
+        "x_7": 0.5120624865337948,
+        "y_7": 1,
+        "x_8": 0.5179211945766969,
+        "y_8": 1,
+        "x_9": 0.5609965084759135,
+        "y_9": 1
+      },
+      "eceBefore": 0.32609029945874823,
+      "eceAfter": 0.010545522763082033,
+      "aurc": 0.2784967829667933,
+      "sampleSize": 80
+    }
+  ],
+  "skippedClasses": [
+    {
+      "queryClass": "ambiguous_short_form",
+      "reason": "insufficient_class_balance (pos=0, neg=48)"
+    },
+    {
+      "queryClass": "pure_constraint",
+      "reason": "insufficient_class_balance (pos=52, neg=1)"
+    },
+    {
+      "queryClass": "semantic_preference",
+      "reason": "insufficient_class_balance (pos=67, neg=1)"
+    }
+  ]
+}

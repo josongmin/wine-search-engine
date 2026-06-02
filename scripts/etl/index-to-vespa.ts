@@ -27,6 +27,7 @@ import {
 import { EMBEDDING_MODEL, EMBEDDING_DIMENSION } from '../../src/domain/shared/constants/embedding.js';
 import { parseNdjson } from './ndjson.js';
 import { normalizeRegion } from './region-normalizer.js';
+import type { SpladeEncoder } from './splade-encoder.js';
 import { VespaClient } from '../../src/infrastructure/vespa/vespa-client.js';
 import { toVespaFields } from '../../src/infrastructure/vespa/mapping.js';
 import { createCanonicalEntityId } from '../../src/domain/shared/types/entity-id.js';
@@ -827,6 +828,7 @@ export function silverToIndexable(
   rec: EnrichedSilverRecord,
   goldCanonicalLookup: ReadonlyMap<string, string> = new Map(),
   sourceContinuityLookup: ReadonlyMap<SourceRecordId, SourceEntityContinuityRecord> = new Map(),
+  spladeEncoder?: SpladeEncoder,
 ): IndexableWineRecord {
   const gold = rec as GoldRecord;
   const resolvedEntity = resolveWineSnapshotEntity(rec, goldCanonicalLookup, sourceContinuityLookup);
@@ -850,6 +852,18 @@ export function silverToIndexable(
     gold.criticProxy?.proxyScore != null
       ? CRITIC_CONFIDENCE_WEIGHT.get(gold.criticProxy.confidence)
       : undefined;
+
+  // RFC-022 P1: doc-side learned-sparse (SPLADE) encoding seam. When a
+  // SpladeEncoder is injected (P2 wires the real ONNX encoder; tests inject a
+  // stub), encode the English tasting text — SPLADE doc-side is English-only by
+  // design (RFC-022 §3.1), Korean recall stays on alias/BM25/dense channels.
+  // Without an injected encoder we preserve any pre-computed vector on the
+  // record (currently always absent), so production stays byte-identical until
+  // P2. An encoder returning undefined (e.g. empty text) leaves the field off.
+  const learnedSparseWeights =
+    spladeEncoder !== undefined && rec.searchTextEn.length > 0
+      ? spladeEncoder.encode(rec.searchTextEn)
+      : rec.learnedSparseWeights;
 
   const certTags: readonly string[] | undefined =
     gold.certifications != null ? buildCertificationTags(gold.certifications) : undefined;
@@ -975,8 +989,8 @@ export function silverToIndexable(
     ...(certTags !== undefined && certTags.length > 0 ? { certifications: [...certTags] } : {}),
     ...(soilType !== undefined ? { soilType } : {}),
     ...(producerType !== undefined ? { producerType } : {}),
-    ...(rec.learnedSparseWeights !== undefined
-      ? { learnedSparseWeights: rec.learnedSparseWeights }
+    ...(learnedSparseWeights !== undefined
+      ? { learnedSparseWeights }
       : {}),
     ...(rec.syntheticQueries !== undefined && rec.syntheticQueries.length > 0
       ? { syntheticQueries: rec.syntheticQueries }
@@ -1075,9 +1089,10 @@ export function silverToRetrievalDoc(
   searchSnapshotId?: string,
   goldCanonicalLookup?: ReadonlyMap<string, string>,
   sourceContinuityLookup: ReadonlyMap<SourceRecordId, SourceEntityContinuityRecord> = new Map(),
+  spladeEncoder?: SpladeEncoder,
 ): RetrievalDocument {
   const lookup = goldCanonicalLookup ?? new Map();
-  const indexable = silverToIndexable(rec, lookup, sourceContinuityLookup);
+  const indexable = silverToIndexable(rec, lookup, sourceContinuityLookup, spladeEncoder);
 
   const doc: RetrievalDocument = {
     entityId: createCanonicalEntityId(indexable.entityId),
@@ -1126,6 +1141,9 @@ export function silverToRetrievalDoc(
     ...(indexable.flavorProfiles !== undefined ? { flavorProfiles: indexable.flavorProfiles } : {}),
     ...(indexable.criticScoreNormalized !== undefined
       ? { criticScoreNormalized: indexable.criticScoreNormalized }
+      : {}),
+    ...(indexable.criticConfidenceWeight !== undefined
+      ? { criticConfidenceWeight: indexable.criticConfidenceWeight }
       : {}),
     ...(indexable.learnedSparseWeights !== undefined
       ? { learnedSparseWeights: indexable.learnedSparseWeights }

@@ -219,6 +219,20 @@ schema wine_entity {
       indexing: summary | attribute
     }
 
+    # Confidence-derived rerank weight in [0, 1] for the synthetic critic proxy.
+    # Track-C proxies are ALWAYS synthetic (LLM-estimated), so the usable trust
+    # lever is the LLM's self-reported confidence (high/medium/low). The ETL maps
+    # that to this multiplier (high=1.0, medium=0.66, low=0.33 — see
+    # CRITIC_CONFIDENCE_WEIGHT in scripts/etl/index-to-vespa.ts) and the
+    # `wine_aware` second-phase multiplies the critic term by it. Absent for
+    # rating-fallback docs and legacy docs → ranker defaults to 1.0 via isNan().
+    # NOTE: critic_proxy_score/tier/confidence above are currently NOT written by
+    # the ETL (the normalized score flows via critic_score_normalized); this
+    # numeric weight is the live, ranked consumer of the proxy's confidence.
+    field critic_confidence_weight type float {
+      indexing: summary | attribute
+    }
+
     # Standardized food pairing tags
     field pairing_tags type array<string> {
       indexing: summary | attribute | index
@@ -658,7 +672,7 @@ schema wine_entity {
   # --- wine_aware: full domain signals + two-phase reranking ---------------
   #
   # Phase 1 (all candidates): normalized hybrid score + popularity
-  # Phase 2 (top-20 rerank): +critic_score +vintage_freshness
+  # Phase 2 (top-20 rerank): +confidence-weighted critic_score +vintage_freshness
   #                           +drinking_window_proximity bonus
   #
   # Weights in phase 2 are intentionally small relative to phase 1 to avoid
@@ -725,7 +739,9 @@ schema wine_entity {
       rerank-count: 20
       expression {
         firstPhase
-        + 0.05 * if(isNan(attribute(critic_score_normalized)), 0, attribute(critic_score_normalized))
+        + 0.05
+            * if(isNan(attribute(critic_confidence_weight)), 1.0, attribute(critic_confidence_weight))
+            * if(isNan(attribute(critic_score_normalized)), 0, attribute(critic_score_normalized))
         + 0.03 * if(
             attribute(vintage_year) > 0,
             max(0.0, 1.0 - (query(current_year) - attribute(vintage_year)) / 30.0),

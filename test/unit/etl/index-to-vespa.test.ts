@@ -22,8 +22,12 @@ import {
   LEARNED_SPARSE_EVAL_KEY,
   LEARNED_SPARSE_FIELD_KEY,
   LEARNED_SPARSE_ETL_KEY,
+  LEARNED_SPARSE_SCHEMA_VERSION,
   validateLearnedSparseVector,
+  type LearnedSparseEntry,
+  type LearnedSparseVector,
 } from '../../../scripts/etl/learned-sparse-spec.js';
+import type { SpladeEncoder } from '../../../scripts/etl/splade-encoder.js';
 
 afterEach(() => {
   delete process.env['OPENAI_API_KEY'];
@@ -838,5 +842,133 @@ describe('Doc2Query synthetic_queries ingest gate (BUG-02)', () => {
     expect(fields['synthetic_queries']).toEqual(queries);
     // Verify it is a copy, not the original reference (defensive spread)
     expect(fields['synthetic_queries']).not.toBe(queries);
+  });
+});
+
+describe('criticConfidenceWeight derivation (F2: confidence-weighted critic rerank)', () => {
+  // criticProxy is attached by run-track-c.ts and read via a GoldRecord cast
+  // inside silverToRetrievalDoc — mirror that here by attaching it to the record.
+  function recordWithProxy(
+    proxy: { proxyScore: number; confidence: string },
+  ): EnrichedSilverRecord {
+    return {
+      ...makeEnrichedRecord({ ratingAvg: null }),
+      criticProxy: { ...proxy, scoreTier: 'outstanding', isSynthetic: true },
+    } as EnrichedSilverRecord;
+  }
+
+  function docFor(record: EnrichedSilverRecord): ReturnType<typeof silverToRetrievalDoc> {
+    return silverToRetrievalDoc(
+      record,
+      deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin),
+    );
+  }
+
+  it.each([
+    ['high', 1.0],
+    ['medium', 0.66],
+    ['low', 0.33],
+  ])('maps proxy confidence=%s → criticConfidenceWeight %d', (confidence, expected) => {
+    const doc = docFor(recordWithProxy({ proxyScore: 95, confidence }));
+    // proxyScore present → the normalized critic score is the proxy's (÷100)
+    expect(doc.criticScoreNormalized).toBeCloseTo(0.95);
+    expect(doc.criticConfidenceWeight).toBe(expected);
+  });
+
+  it('omits the weight when the critic score came from the Vivino ratingAvg fallback', () => {
+    // No proxy → criticScoreNormalized derives from ratingAvg (4.7 / 5), and
+    // there is no proxy confidence, so the weight must be absent (ranker → 1.0).
+    const doc = docFor(makeEnrichedRecord());
+    expect(doc.criticScoreNormalized).toBeCloseTo(4.7 / 5);
+    expect(doc.criticConfidenceWeight).toBeUndefined();
+  });
+
+  it('omits the weight for an unknown confidence level (no fabricated default)', () => {
+    const doc = docFor(recordWithProxy({ proxyScore: 88, confidence: 'unspecified' }));
+    // The score still flows from the proxy …
+    expect(doc.criticScoreNormalized).toBeCloseTo(0.88);
+    // … but an unrecognized confidence yields no weight rather than a guessed one.
+    expect(doc.criticConfidenceWeight).toBeUndefined();
+  });
+});
+
+describe('learned-sparse doc-side encoding seam (RFC-022 P1)', () => {
+  // Deterministic test double for the SPLADE encoder (the real ONNX model lands
+  // in P2). Lives in the test suite — NOT production code — so it can never be
+  // injected into a real feed. Tokenize → deterministic char-sum pseudo-weight.
+  class StubSpladeEncoder implements SpladeEncoder {
+    readonly modelId = 'stub-splade-v0';
+    readonly schemaVersion = LEARNED_SPARSE_SCHEMA_VERSION;
+
+    encode(text: string): LearnedSparseVector | undefined {
+      // Unicode-safe split (CLAUDE.md rule 8: no \b on non-ASCII).
+      const tokens = [
+        ...new Set(
+          text
+            .toLowerCase()
+            .split(/[^\p{L}\p{N}]+/u)
+            .filter((t) => t.length >= 2),
+        ),
+      ];
+      if (tokens.length === 0) return undefined;
+      const entries: LearnedSparseEntry[] = tokens
+        .map((token) => {
+          let sum = 0;
+          for (const ch of token) sum += ch.codePointAt(0) ?? 0;
+          // Deterministic weight in (0, 1] — no Math.random (would break resume/replay).
+          return { token, weight: ((sum % 100) + 1) / 100 };
+        })
+        .sort((a, b) => b.weight - a.weight || (a.token < b.token ? -1 : a.token > b.token ? 1 : 0));
+      const weightSum = entries.reduce((acc, e) => acc + e.weight, 0);
+      return { entries, weightSum, modelId: this.modelId, schemaVersion: this.schemaVersion };
+    }
+  }
+
+  const encoder = new StubSpladeEncoder();
+
+  function docWith(
+    injected?: SpladeEncoder,
+  ): ReturnType<typeof silverToRetrievalDoc> {
+    const record = makeEnrichedRecord();
+    return silverToRetrievalDoc(
+      record,
+      deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin),
+      undefined,
+      undefined,
+      undefined,
+      injected,
+    );
+  }
+
+  it('omits learnedSparseWeights when no encoder is injected (production stays byte-identical)', () => {
+    const doc = docWith(undefined);
+    expect(doc.learnedSparseWeights).toBeUndefined();
+    expect(toVespaFields(doc)[LEARNED_SPARSE_FIELD_KEY]).toBeUndefined();
+  });
+
+  it('encodes search_text_en into a learned-sparse vector when an encoder is injected', () => {
+    const doc = docWith(encoder);
+    expect(doc.learnedSparseWeights).toBeDefined();
+    expect(doc.learnedSparseWeights?.modelId).toBe('stub-splade-v0');
+    expect(doc.learnedSparseWeights?.entries.length).toBeGreaterThan(0);
+
+    // …and it flows into the Vespa mapped tensor (cells).
+    const tensor = toVespaFields(doc)[LEARNED_SPARSE_FIELD_KEY] as { cells: unknown[] };
+    expect(tensor.cells.length).toBe(doc.learnedSparseWeights?.entries.length);
+  });
+
+  it('stamps the encoder modelId for train/serve skew detection (RFC-022 §2)', () => {
+    const doc = docWith(encoder);
+    expect(doc.learnedSparseWeights?.modelId).toBe(encoder.modelId);
+    expect(doc.learnedSparseWeights?.schemaVersion).toBe(LEARNED_SPARSE_SCHEMA_VERSION);
+  });
+
+  it('is deterministic — identical text yields an identical vector (replay-safe)', () => {
+    const text = 'Full-bodied Napa Cabernet with dark fruit and cedar.';
+    expect(encoder.encode(text)).toEqual(encoder.encode(text));
+  });
+
+  it('returns undefined for text with no usable tokens → field omitted', () => {
+    expect(encoder.encode('   !!  ')).toBeUndefined();
   });
 });
