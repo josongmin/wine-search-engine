@@ -141,11 +141,14 @@ describe('ConceptAdmissionGate (T-ELV2-02 baseline)', () => {
 // ── request/response schema ───────────────────────────────────────────────────
 
 describe('EntityLookupV2RequestSchema', () => {
-  it('applies max_candidates + mode defaults and rejects unknown keys', () => {
+  it('applies the max_candidates default and rejects unknown keys', () => {
     const parsed = EntityLookupV2RequestSchema.parse({ query: 'Opus One' });
     expect(parsed.max_candidates).toBe(10);
-    expect(parsed.mode).toBe('default');
+    // `mode` is NOT on the public surface (review P3) — only the trusted ops plane.
+    expect(parsed).not.toHaveProperty('mode');
     expect(() => EntityLookupV2RequestSchema.parse({ query: 'x', extra: 1 })).toThrow();
+    // a public caller cannot smuggle the internal diagnostics knob
+    expect(() => EntityLookupV2RequestSchema.parse({ query: 'x', mode: 'diagnostic' })).toThrow();
   });
 
   it('rejects empty query and out-of-range max_candidates', () => {

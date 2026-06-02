@@ -20,7 +20,7 @@ import {
   registerLookupWineRoute,
   registerSemanticSearchRoute,
 } from './routes/primitive-search.route.js';
-import { registerEntityLookupV2Route } from './routes/entity-lookup-v2.route.js';
+import { registerEntityLookupV2OpsRoute, registerEntityLookupV2Route } from './routes/entity-lookup-v2.route.js';
 import {
   registerHealthRoutes,
   startEventLoopHeartbeat,
@@ -371,7 +371,10 @@ export async function createServer(
   // (the container always constructs the use case); guarded so lightweight
   // server-construction tests can omit it.
   if (deps.entityLookupV2UseCase !== undefined) {
-    registerEntityLookupV2Route(app, { entityLookupV2UseCase: deps.entityLookupV2UseCase });
+    const elv2Deps = { entityLookupV2UseCase: deps.entityLookupV2UseCase };
+    registerEntityLookupV2Route(app, elv2Deps);
+    // Trusted operator read plane — X-Debug-Key gated at the handler (T-ELV2-07).
+    registerEntityLookupV2OpsRoute(app, elv2Deps);
   }
   if (deps.wineSearch !== undefined) {
     // Canonical agent surface — `POST /v1/agent` for caller-managed history,

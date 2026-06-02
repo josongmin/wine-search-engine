@@ -154,6 +154,27 @@ export const EntityLookupV2RouteContract = defineRouteContract({
   },
 });
 
+// T-ELV2-07 — trusted operator plane (read). `POST /v2/entity-lookup/ops/inspect`
+// returns the FULL decision spine (admission/candidates/scores/decision) for one
+// query, always in diagnostic mode, behind the X-Debug-Key trusted gate. Same
+// response shape as the public surface; 403 when the debug key is absent.
+export const EntityLookupV2OpsInspectRouteContract = defineRouteContract({
+  operationId: 'entity.lookup.v2.ops.inspect',
+  apiVersion: '2',
+  responseType: 'interpret',
+  body: EntityLookupV2RequestSchema,
+  capabilities: ['security', 'planner', 'resolver_only', 'analysis'],
+  responses: {
+    [HTTP_STATUS_OK]: EntityLookupV2ResponseSchema,
+    [HTTP_STATUS_BAD_REQUEST]: ErrorResponseSchema,
+    [HTTP_STATUS_FORBIDDEN]: ErrorResponseSchema,
+    [HTTP_STATUS_REQUEST_TIMEOUT]: ErrorResponseSchema,
+    [HTTP_STATUS_TOO_MANY_REQUESTS]: ErrorResponseSchema,
+    [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
+    [HTTP_STATUS_SERVICE_UNAVAILABLE]: ErrorResponseSchema,
+  },
+});
+
 // ---------------------------------------------------------------------------
 // T-IR-01 primitive surface — `/v1/search/{hybrid,semantic,lexical}` and
 // `/v1/lookup/wine`. The body shape is identical across all four; the URL

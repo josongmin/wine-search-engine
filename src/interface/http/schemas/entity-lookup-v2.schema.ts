@@ -44,15 +44,10 @@ export const EntityLookupV2RequestSchema = z
       .min(1)
       .max(MAX_LOOKUP_V2_CANDIDATES)
       .default(LOOKUP_V2_DEFAULT_MAX_CANDIDATES),
-    /**
-     * Trusted/internal diagnostics knob ONLY — never a public ranking override
-     * (RFC §5.1). Reserved for forward-looking per-mode response shaping; it
-     * NEVER changes the decision. NOTE: the full evidence rail (channel_hits,
-     * channel_coverage, evidence_summary) is currently populated UNCONDITIONALLY,
-     * so `default` and `diagnostic` return identical payloads today — the knob is
-     * accepted and reserved, not yet behaviorally distinct.
-     */
-    mode: z.enum(['default', 'diagnostic']).default('default'),
+    // NOTE: the diagnostics `mode` knob is intentionally NOT on the public
+    // surface (review P3 — no inert internal baggage on the public contract).
+    // It lives only on the trusted ops plane (`/v2/entity-lookup/ops/inspect`),
+    // which always runs in diagnostic mode behind the X-Debug-Key gate.
   })
   .strict();
 
