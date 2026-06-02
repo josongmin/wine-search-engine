@@ -240,6 +240,9 @@ function buildWineSearchContainerServices(
   //       (CLAUDE.md rule 30 — SSoT for tool ports).
   const wineAgentLoopToolBundle = buildWineAgentLoopToolBundle({
     searchUseCase: searchAdapter,
+    // Dedicated lookup authority (V2). `lookup_wine` dispatches here directly;
+    // `searchUseCase` is reserved for discovery + similar_to_entity.
+    lookupWine: features.entityLookupV2UseCase,
     decomposedSearchUseCase: features.decomposedSearchUseCase,
     drinkingWindowUseCase: features.drinkingWindowUseCase,
     entityLookup: _core.entityLookup,

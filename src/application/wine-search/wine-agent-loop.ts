@@ -45,6 +45,7 @@ import type {
 import type { AgentConfig } from '@domain/agent/model/agent-config.js';
 import type { AgentTerminationReason } from '@domain/agent/model/agent-step.js';
 import type { ToolOutcome } from '@domain/agent/model/tool-outcome.js';
+import type { EntityLookupV2Result } from '../search/entity-lookup-v2/entity-lookup-v2.dto.js';
 import { StepBudget } from '@domain/agent/service/step-budget.js';
 import { transitionTerminationReason } from '@domain/agent/service/termination-state-machine.js';
 import { bootstrapLogger } from '@domain/shared/bootstrap-logger.js';
@@ -991,13 +992,13 @@ function buildDeterministicRequiredToolCall(
   const searchInput: SearchUseCaseInput = {
     query: anchorEntityId,
     anchorEntityId,
-    ...(seed?.filters !== undefined && seed.filters.length > 0
+    ...(seed.filters !== undefined && seed.filters.length > 0
       ? { filters: [...seed.filters] }
       : {}),
-    ...(seed?.preferences !== undefined && seed.preferences.length > 0
+    ...(seed.preferences !== undefined && seed.preferences.length > 0
       ? { preferences: [...seed.preferences] }
       : {}),
-    ...(seed?.limit !== undefined ? { limit: Math.min(seed.limit, SIMILAR_TO_ENTITY_LIMIT_MAX) } : {}),
+    ...(seed.limit !== undefined ? { limit: Math.min(seed.limit, SIMILAR_TO_ENTITY_LIMIT_MAX) } : {}),
   };
   return {
     toolCall: {
@@ -1029,13 +1030,13 @@ function extractSuccessfulLookupAnchorEntityId(
 function extractTopSearchResultEntityId(result: unknown): string | undefined {
   if (result === null || typeof result !== 'object') return undefined;
   const record = result as Record<string, unknown>;
-  const results = record['results'];
-  if (!Array.isArray(results) || results.length === 0) return undefined;
-  const first = results[0];
-  if (first === null || typeof first !== 'object') return undefined;
-  const entity = (first as Record<string, unknown>)['entity'];
-  if (entity === null || typeof entity !== 'object') return undefined;
-  const entityId = (entity as Record<string, unknown>)['entityId'];
+  // V2-native lookup result. ONLY a `resolved` lookup yields a
+  // similar_to_entity anchor — ambiguous / failed / redirect_discovery did NOT
+  // pin a single identity, so anchoring on them would fabricate a reference.
+  if (record['status'] !== 'resolved') return undefined;
+  const top = record['topCandidate'];
+  if (top === null || typeof top !== 'object') return undefined;
+  const entityId = (top as Record<string, unknown>)['entityId'];
   return typeof entityId === 'string' && entityId.length > 0 ? entityId : undefined;
 }
 
@@ -1210,16 +1211,20 @@ async function invokeToolPort(
           observation: `Tool "${call.tool}" failed: invalid input — ${normalized.message}`,
         };
       }
-      const result = await ports.searchUseCase.execute(
+      // V2-only lookup authority: dispatch DIRECTLY to the dedicated
+      // EntityLookupV2 use case (not through searchUseCase/primitiveRoute).
+      // The result is the V2-native 4-state contract; the observation +
+      // similar_to_entity anchoring + synthesis grounding read it directly.
+      const result = await ports.lookupWine.execute(
         {
           query: normalized.query,
-          primitiveRoute: 'lookup_wine',
-          limit: normalized.clampedLimit,
+          maxCandidates: normalized.clampedLimit,
+          mode: 'default',
+          requestId,
         },
-        requestId,
         { abortSignal: signal },
       );
-      return { rawResult: result, observation: formatSearchObservation(result) };
+      return { rawResult: result, observation: formatLookupV2Observation(result) };
     }
     case 'similar_to_entity': {
       // RFC-021 T-PSA-02: deterministic reference-similarity. The anchor
@@ -1329,6 +1334,55 @@ function formatSearchObservation(result: unknown): string {
     );
   const body = `search: ${results.length} results; top=${JSON.stringify(preview)}`;
   return clipObservation(body);
+}
+
+/**
+ * V2-native lookup observation (4-state). The agent reads this verbatim, so it
+ * must be unambiguous about WHICH state occurred and what the next move is:
+ *  - resolved: surface entity_id + canonical_label so the agent can copy the
+ *    id into a follow-up similar_to_entity. This is the ONLY state that yields
+ *    a similar_to_entity anchor.
+ *  - ambiguous: surface clarification options (or top candidate previews) and
+ *    explicitly forbid anchoring — the user must disambiguate first.
+ *  - redirect_discovery: the query is a concept/category, not a single wine —
+ *    steer to a discovery search_* primitive.
+ *  - failed: no-match.
+ */
+function formatLookupV2Observation(result: EntityLookupV2Result): string {
+  switch (result.status) {
+    case 'resolved': {
+      const top = result.topCandidate;
+      if (top === null) {
+        // Contract invariant: resolved ⇒ topCandidate present. Degrade safely.
+        return `${WINE_AGENT_LOOP_NO_MATCH_PREFIX}lookup_wine resolved without a top candidate`;
+      }
+      return clipObservation(
+        `lookup_wine: resolved; entity_id=${top.entityId}; canonical_label=${JSON.stringify(top.canonicalLabel)}; confidence=${top.calibratedScore.toFixed(2)}`,
+      );
+    }
+    case 'ambiguous': {
+      const options = result.clarificationOptions.length > 0
+        ? result.clarificationOptions.slice(0, WINE_AGENT_LOOP_RESULT_PREVIEW_LIMIT).map((o) => ({
+            entity_id: o.entityId,
+            label: o.label,
+            ...(o.distinguishingFeature !== undefined ? { distinguishing: o.distinguishingFeature } : {}),
+          }))
+        : result.candidates.slice(0, WINE_AGENT_LOOP_RESULT_PREVIEW_LIMIT).map((c) => ({
+            entity_id: c.entityId,
+            label: c.canonicalLabel,
+          }));
+      return clipObservation(
+        `lookup_wine: ambiguous; the query matches multiple wines — ask the user to disambiguate. Do NOT pass any of these to similar_to_entity. options=${JSON.stringify(options)}`,
+      );
+    }
+    case 'redirect_discovery':
+      return clipObservation(
+        `lookup_wine: redirect_discovery; "${result.normalizedQueryViews.raw}" is a concept/category, not a single wine identity — use a discovery search_* primitive instead of lookup_wine`,
+      );
+    case 'failed':
+    default:
+      return `${WINE_AGENT_LOOP_NO_MATCH_PREFIX}lookup_wine found no matching wine`;
+  }
 }
 
 function formatSearchObservationEntityPreview(

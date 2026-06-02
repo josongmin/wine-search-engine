@@ -212,10 +212,18 @@ function findGroundedTopResult(
     if (typeof result !== 'object' || result === null) continue;
     const record = result as Record<string, unknown>;
     // Accept either { results: [{ entity: { canonicalLabel, producer, region } }] }
-    // (current SearchUseCase shape) or { resultSet: [...] } or a single entity.
+    // (SearchUseCase discovery shape), { resultSet: [...] }, the V2-native
+    // lookup shape { status, topCandidate: { entityId, canonicalLabel } }
+    // (only `resolved` carries a usable topCandidate; ambiguous/failed leave it
+    // null so this falls through and grounds nothing), or a single entity.
+    const v2Top =
+      record['status'] === 'resolved' && typeof record['topCandidate'] === 'object' && record['topCandidate'] !== null
+        ? (record['topCandidate'] as Record<string, unknown>)
+        : undefined;
     const top =
       pickFromArray(record['results']) ??
       pickFromArray(record['resultSet']) ??
+      v2Top ??
       record;
     const entity = pickEntity(top);
     if (entity === undefined) continue;
