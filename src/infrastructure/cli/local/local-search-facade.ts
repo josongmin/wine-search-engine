@@ -49,10 +49,23 @@ export class LocalSearchFacade implements SearchFacadePort {
   ): Promise<PrimitiveSearchResult> {
     return await this.runtime.withContainer(async (container) =>
       deepKeysToSnake(
-        await container.searchUseCase.execute(toSearchRequest(input, kind), options.requestId, {
-          requestId: options.requestId,
-          abortSignal: options.abortSignal,
-        }),
+        kind === 'lookupWine' && container.lookupWineV2CompatibilityUseCase !== undefined
+          ? await container.lookupWineV2CompatibilityUseCase.execute(
+              {
+                query: input.query,
+                ...(input.limit !== undefined ? { limit: input.limit } : {}),
+                ...(input.context?.locale !== undefined ? { locale: input.context.locale } : {}),
+                requestId: options.requestId,
+              },
+              {
+                requestId: options.requestId,
+                abortSignal: options.abortSignal,
+              },
+            )
+          : await container.searchUseCase.execute(toSearchRequest(input, kind), options.requestId, {
+              requestId: options.requestId,
+              abortSignal: options.abortSignal,
+            }),
       ),
     );
   }

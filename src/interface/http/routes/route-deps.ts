@@ -1,6 +1,7 @@
 import type { SearchExecutorPort } from '../../../application/search/port/search-executor.port.js';
 import type {
   EntityLookupV2UseCasePort,
+  LookupWineV2CompatibilityUseCasePort,
   ResolveUseCasePort,
 } from '../../../application/search/port/search-route-usecases.port.js';
 import type { EvalRunnerContract } from '../../../config/container-eval-contracts.js';
@@ -9,6 +10,7 @@ import type { CurationUseCase } from '../../../application/curation/curation.use
 
 export interface SearchRouteDeps {
   readonly searchUseCase: SearchExecutorPort;
+  readonly lookupWineV2CompatibilityUseCase?: LookupWineV2CompatibilityUseCasePort | undefined;
 }
 
 /** Dependencies for the operator curation plane routes (T-ELV2-07). */
@@ -34,6 +36,7 @@ export interface HttpServerDeps
    * kept optional here so lightweight server-construction tests need not stub it.
    */
   readonly entityLookupV2UseCase?: EntityLookupV2UseCasePort | undefined;
+  readonly lookupWineV2CompatibilityUseCase?: LookupWineV2CompatibilityUseCasePort | undefined;
   /**
    * Operator curation plane use case (T-ELV2-07). Optional so lightweight
    * server-construction tests need not stub it; when present the ops curation

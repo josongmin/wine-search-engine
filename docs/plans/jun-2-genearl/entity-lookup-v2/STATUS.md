@@ -3,6 +3,9 @@
 > Branch: **`feat/entity-lookup-v2`** (off `535c9439`). Isolated from the
 > concurrent commit loop on `deploy/aws-ec2-pipeline` / `main`. All work is
 > committed (HEAD-durable); nothing depends on the working tree surviving.
+>
+> Historical build log. Current cutover truth lives in
+> `cutover-checklist.md` and `IMPROVEMENT-PLAN-2026-06-03.md`.
 
 ## TL;DR
 
@@ -13,6 +16,18 @@ typecheck + lint + 64개 V2 단위 테스트). 나머지(#2 alias-registry 심�
 
 **짜치는 코딩 금지 원칙 준수**: 통합·테스트되지 않는 코드는 머지하지 않음. 미완 영역은
 "다 된 척"하지 않고 maturity 3 + next_steps로 정직하게 표기.
+
+## Current Truth (2026-06-03)
+
+- Full authority eval (`run-entity-resolution-validation.ts`, 215 rows,
+  fingerprint `bd8abea5871dcede17272c3cc0bd1dcebcf93ea658d2d4b2ab930e5ba4f26cae`)
+  result: `V1 46.5%, wrong=0, miss=115` vs `V2 100.0%, wrong=0, miss=0`.
+- Cutover verdict is now **PASS**.
+- 15-row hotset smoke still passes (`V2 wrong+=0`), but it is **not** the
+  cutover authority.
+- Public `/v1/lookup/wine`, local CLI `lookupWine`, and agent `lookup_wine`
+  are now compatibility-backed V2 authority surfaces.
+- Bench/doc SSOT for executable lanes moved to `docs/bench/STATUS.md`.
 
 ## 커밋 (feat/entity-lookup-v2)
 

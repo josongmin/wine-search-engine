@@ -15,6 +15,9 @@ import type {
   EntityLookupV2Command,
   EntityLookupV2Result,
 } from '../entity-lookup-v2/entity-lookup-v2.dto.js';
+import type {
+  LookupWineV2CompatibilityCommand,
+} from '../lookup-wine-v2-compatibility.usecase.js';
 import type { AutocompleteResponse } from '../autocomplete-response.dto.js';
 import type { RequestExecutionContext } from '../../../domain/shared/request-execution-context.js';
 import type { HybridSearchRequest } from '../hybrid-request.dto.js';
@@ -104,6 +107,20 @@ export interface EntityLookupV2UseCasePort {
     command: EntityLookupV2Command,
     options?: EntityLookupV2ExecutionOptions,
   ): Promise<EntityLookupV2Result>;
+}
+
+export type LookupWineV2CompatibilityExecutionOptions = RequestExecutionContext;
+
+/**
+ * Compatibility-backed authority seam for `/v1/lookup/wine`, local CLI, and
+ * agent `lookup_wine`: preserves the SearchResponseV1 contract while sourcing
+ * the decision from Entity Lookup V2.
+ */
+export interface LookupWineV2CompatibilityUseCasePort {
+  execute(
+    command: LookupWineV2CompatibilityCommand,
+    options?: LookupWineV2CompatibilityExecutionOptions,
+  ): Promise<SearchResponseV1>;
 }
 
 export type AutocompleteExecutionOptions = RequestExecutionContext;

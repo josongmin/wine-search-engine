@@ -688,6 +688,43 @@ describe('WineAgentLoopRunner — reference similarity primitive (RFC-021 T-PSA-
     expect(lookupObservation).not.toContain('opus-one-2018::Opus One 2018');
   });
 
+  it('surfaces ambiguous lookup_wine results as ambiguous observations', async () => {
+    const searchPort = makeSearchPort(() => Promise.resolve({
+      queryType: 'search',
+      engineDecision: { decisionStatus: 'ambiguous' } as unknown as SearchResponseV1['engineDecision'],
+      results: [
+        {
+          entity: {
+            entityId: 'opus-one-2018',
+            canonicalLabel: 'Opus One 2018',
+          },
+        },
+        {
+          entity: {
+            entityId: 'opus-one-2019',
+            canonicalLabel: 'Opus One 2019',
+          },
+        },
+      ] as unknown as SearchResponseV1['results'],
+      meta: { generatedAt: new Date().toISOString() } as unknown as SearchResponseV1['meta'],
+    }));
+    const llm = makeStubLlm([
+      async () => asToolUseResult([toolUse('lookup_wine', { query: 'Opus One' })]),
+      async () => asTextResult('Need clarification.'),
+    ]);
+    const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
+    const out = await runner.run(makeInput({
+      query: 'Opus One 찾아줘',
+      toolPorts: makeToolPorts({ searchUseCase: searchPort }),
+      maxSteps: 4,
+    }));
+
+    const lookupObservation = out.steps[0]?.observations[0] ?? '';
+    expect(lookupObservation).toContain('search: ambiguous; candidates=');
+    expect(lookupObservation).toContain('"entity_id":"opus-one-2018"');
+    expect(lookupObservation).toContain('"entity_id":"opus-one-2019"');
+  });
+
   it('rejects a free-text anchor passed straight into similar_to_entity (no entity_id)', async () => {
     const searchPort = makeSearchPort(() => Promise.resolve(makeSearchResponse(['wine-1'])));
     const llm = makeStubLlm([

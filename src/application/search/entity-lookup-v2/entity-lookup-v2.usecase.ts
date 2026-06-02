@@ -50,7 +50,11 @@ import { CalibratedAbstainDecider } from '../../../domain/resolver/v2/calibrated
 import { ambiguityClusterMembershipScore, extractLookupFeatures } from '../../../domain/resolver/v2/lookup-feature-extractor.js';
 import { shouldDowngradeForVintageMismatch, VINTAGE_MISMATCH_REASON_CODE } from '../../../domain/resolver/v2/vintage-guard.js';
 import type { AliasRegistryVersion } from '../../../domain/alias/model/alias-registry-version.js';
-import { anchorsHaveExactIdentityEvidence, buildChannelHitsForEntity } from '../../../domain/resolver/v2/channel-provenance.js';
+import {
+  anchorsHaveExactIdentityEvidence,
+  buildChannelHitsForEntity,
+  classifyResolveEvidenceGrade,
+} from '../../../domain/resolver/v2/channel-provenance.js';
 import { buildClarification } from '../../../domain/resolver/v2/clarification-graph.js';
 import type { AmbiguityDictionary, AmbiguityInfo } from '../../../domain/query/port/ambiguity-dictionary.port.js';
 import { clamp01 } from '../../../domain/shared/utils/clamp.js';
@@ -223,16 +227,23 @@ export class EntityLookupV2UseCase {
     const result = await this.resolveCandidatePool(plan, retrieval, options);
     throwIfAborted(options?.abortSignal, 'Entity lookup V2 aborted');
 
-    // Establish EXACT-identity evidence for the top candidate from a STRICT
-    // exact lookup strategy on the anchors that recalled it (not a raw score,
-    // not a substring-classified channel). This — and only this — may certify a
-    // resolve under untrusted calibration (audit R2 close).
+    // Build the top candidate's resolve certificate. Exact-identity evidence
+    // from anchors wins immediately; otherwise fall back to the retrieval
+    // channel provenance so V2 can distinguish identity-grade, supportive-only,
+    // and recall-only heads before trusting a calibrated resolve.
     const top = result.candidates[0];
-    const topExactEvidence = top !== undefined && anchorsHaveExactIdentityEvidence(top.entityId, plan.anchors);
+    const topEvidenceGrade = top === undefined
+      ? 'none'
+      : anchorsHaveExactIdentityEvidence(top.entityId, plan.anchors)
+        ? 'identity_grade'
+        : classifyResolveEvidenceGrade(
+            retrieval?.candidates.find((candidate) => candidate.entityId === top.entityId)?.channelHits
+            ?? buildChannelHitsForEntity(top.entityId, top.rank, plan.anchors, top.blockerSeed === true),
+          );
 
     // V2 calibrated-abstain authority — precision-first, downgrade-only over the
     // resolver's advisory status.
-    const calibrated = this.decider.decide(result, plan.queryClass, topExactEvidence);
+    const calibrated = this.decider.decide(result, plan.queryClass, topEvidenceGrade);
 
     // T-ELV2-05: combine with the learned reranker (when wired) — most
     // conservative status wins, so the model can only tighten, never relax the

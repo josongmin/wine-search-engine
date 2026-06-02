@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   buildChannelHitsForEntity,
+  classifyResolveEvidenceGrade,
   mapLookupStrategyToChannel,
 } from '../../../src/domain/resolver/v2/channel-provenance.js';
 import { ConceptAdmissionGate } from '../../../src/domain/resolver/v2/concept-admission-gate.js';
@@ -74,6 +75,32 @@ describe('buildChannelHitsForEntity', () => {
   it('adds a dense channel for blocker-seeded candidates with no anchor', () => {
     const hits = buildChannelHitsForEntity(createEntityId('x'), 2, anchors, true);
     expect(hits.map((h) => h.channel)).toContain('dense');
+  });
+});
+
+describe('classifyResolveEvidenceGrade', () => {
+  it('treats exact/compact/transliteration channels as identity-grade', () => {
+    expect(classifyResolveEvidenceGrade([{ channel: 'exact_alias' }])).toBe('identity_grade');
+    expect(classifyResolveEvidenceGrade([{ channel: 'compact_exact' }])).toBe('identity_grade');
+    expect(classifyResolveEvidenceGrade([{ channel: 'transliteration_exact' }])).toBe('identity_grade');
+  });
+
+  it('treats jamo/phonetic-only evidence as supportive_only', () => {
+    expect(classifyResolveEvidenceGrade([{ channel: 'jamo_phonetic' }])).toBe('supportive_only');
+  });
+
+  it('treats fuzzy/family/dense-only evidence as recall_only', () => {
+    expect(classifyResolveEvidenceGrade([{ channel: 'fuzzy_alias' }])).toBe('recall_only');
+    expect(classifyResolveEvidenceGrade([{ channel: 'family_graph' }])).toBe('recall_only');
+    expect(classifyResolveEvidenceGrade([{ channel: 'dense' }])).toBe('recall_only');
+  });
+
+  it('prefers identity-grade when mixed with supportive or recall channels', () => {
+    expect(classifyResolveEvidenceGrade([
+      { channel: 'fuzzy_alias' },
+      { channel: 'jamo_phonetic' },
+      { channel: 'compact_exact' },
+    ])).toBe('identity_grade');
   });
 });
 

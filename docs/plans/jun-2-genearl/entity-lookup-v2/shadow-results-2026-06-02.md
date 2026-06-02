@@ -1,5 +1,11 @@
 # Entity Lookup V2 — Live Shadow-Compare Result (2026-06-02)
 
+> Historical analysis only. Current cutover authority moved to
+> `cutover-checklist.md` and `IMPROVEMENT-PLAN-2026-06-03.md` after the
+> 2026-06-03 full authority re-run (`V2 99.1%, wrong=1, miss=1`; gate FAIL).
+> Any PASS claim in this file is sample-limited or superseded and must not be
+> treated as the current cutover verdict.
+
 ## UPDATE (2026-06-03) — FULL eval_cases distribution: gate FAILS on a PRE-EXISTING fuzzy wrong-positive
 
 The 100-case (25/class) sample below PASSED, but the **full `eval_cases`
@@ -34,7 +40,7 @@ which the checklist names as the true cutover authority — **FAILS**:
   precision+recall win, but **NOT cutover-clear** until the fuzzy_alias
   identity-grade-1.0 wrong-positive is fixed.
 
-## UPDATE (2026-06-03, post-fix 526aeee8) — authority gate now PASSES (cutover-eligible)
+## UPDATE (2026-06-03, post-fix 526aeee8) — 25/class sample PASSES (non-authority)
 
 > SUPERSEDED by the full-distribution run above. The 25/class sample missed the
 > `no_match` fuzzy wrong-positive that only appears in the fuller no_match set.

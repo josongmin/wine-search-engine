@@ -16,6 +16,7 @@ import { DecomposedSearchUseCase } from '../application/search/decomposed-search
 import { DecomposedSearchAdapter } from '../application/search/decomposed-search-adapter.js';
 import { DrinkingWindowUseCase } from '../application/drinking-window/drinking-window.usecase.js';
 import { BatchSearchUseCase } from '../application/search/batch-search.usecase.js';
+import { LookupWineV2CompatibilityUseCase } from '../application/search/lookup-wine-v2-compatibility.usecase.js';
 import { getQueryEntrySecurityMetricsCollector } from '../infrastructure/observability/query-entry-security-metrics.js';
 import type {
   DrinkingWindowUseCasePort,
@@ -28,6 +29,7 @@ import type {
   EntityLookupV2UseCasePort,
   HybridUseCasePort,
   InterpretUseCasePort,
+  LookupWineV2CompatibilityUseCasePort,
   ResolveUseCasePort,
 } from '../application/search/port/search-route-usecases.port.js';
 import type { CoreContainerServices } from './container-core.js';
@@ -38,6 +40,7 @@ export interface UseCaseContainerServices {
   readonly interpretUseCase: InterpretUseCasePort;
   readonly resolveUseCase: ResolveUseCasePort;
   readonly entityLookupV2UseCase: EntityLookupV2UseCasePort;
+  readonly lookupWineV2CompatibilityUseCase: LookupWineV2CompatibilityUseCasePort;
   /** Operator curation plane (T-ELV2-07); present only when a PG pool is wired. */
   readonly curationUseCase?: CurationUseCase | undefined;
   readonly autocompleteUseCase: AutocompleteUseCasePort;
@@ -163,7 +166,7 @@ export function buildUseCaseContainerServices(
     // T-ELV2-03: dedicated alias-registry version identity read from the live
     // alias substrate (delegated through the CachedAliasMatcher chain), surfaced
     // on the V2 response meta. undefined when the matcher carries no version.
-    ...(core.aliasMatcher.getRegistryVersion?.() !== undefined
+    ...(core.aliasMatcher?.getRegistryVersion?.() !== undefined
       ? { aliasRegistryVersion: core.aliasMatcher.getRegistryVersion() }
       : {}),
     querySanitizer: core.querySanitizer,
@@ -171,6 +174,12 @@ export function buildUseCaseContainerServices(
     judgeFailureMode: config.queryEntrySecurity.judgeFailureMode,
     judgeTimeoutMs: config.queryEntrySecurity.judgeTimeoutMs,
     queryEntrySecurityObserver,
+  });
+
+  const lookupWineV2CompatibilityUseCase = new LookupWineV2CompatibilityUseCase({
+    entityLookupV2UseCase,
+    entityLookup: core.entityLookup,
+    snapshotVersions: core.snapshotVersions,
   });
 
   // T-ELV2-07: operator curation plane. DB-only — wired solely when a PG pool
@@ -183,6 +192,7 @@ export function buildUseCaseContainerServices(
   return {
     searchUseCase,
     entityLookupV2UseCase,
+    lookupWineV2CompatibilityUseCase,
     ...(curationUseCase !== undefined ? { curationUseCase } : {}),
     interpretUseCase: new InterpretUseCase({
       queryPlanner: core.queryPlanner,

@@ -13,6 +13,10 @@
  * embedding) available — run it in a stack-up environment / CI lane, not unit.
  *
  *   pnpm run eval:lookup-v2:shadow [-- --corpus <path> --output <path>]
+ *
+ * Post-cutover note: this lane compares direct `searchUseCase` legacy core vs
+ * dedicated `entityLookupV2UseCase`. It is not a public `/v1/lookup/wine`
+ * route-parity proof after compatibility-backed cutover.
  */
 
 import { execFileSync } from 'node:child_process';

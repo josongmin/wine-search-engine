@@ -25,4 +25,4 @@ jobs:
       - name: Bench smoke (unit-only lightweight)
         run: pnpm run bench:smoke
       - name: PR-level micro-bench gate (covers smoke + future regression gate)
-        run: tsx scripts/eval/bench-pr-gate.ts --skip-smoke
+        run: pnpm exec tsx scripts/eval/bench-pr-gate.ts --skip-smoke

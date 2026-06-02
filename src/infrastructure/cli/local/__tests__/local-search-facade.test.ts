@@ -53,4 +53,41 @@ describe('LocalSearchFacade', () => {
       retrieval_mode: 'entity',
     });
   });
+
+  it('lookupWine prefers the V2 compatibility seam when wired', async () => {
+    const compatibilityCalls: unknown[] = [];
+    const facade = new LocalSearchFacade({
+      withContainer: async (work) =>
+        await work({
+          lookupWineV2CompatibilityUseCase: {
+            execute: async (input: unknown) => {
+              compatibilityCalls.push(input);
+              return {
+                queryType: 'search',
+                engineDecision: { decisionStatus: 'resolved' },
+                meta: {},
+                results: [],
+              };
+            },
+          },
+          searchUseCase: {
+            execute: async () => {
+              throw new Error('searchUseCase should not be called');
+            },
+          },
+        } as never),
+    });
+
+    await facade.lookupWine(
+      { query: 'opus one 2018', limit: 3, context: { locale: 'ko', currency: 'KRW' } },
+      { requestId: 'req-3' },
+    );
+
+    expect(compatibilityCalls[0]).toEqual({
+      query: 'opus one 2018',
+      limit: 3,
+      locale: 'ko',
+      requestId: 'req-3',
+    });
+  });
 });

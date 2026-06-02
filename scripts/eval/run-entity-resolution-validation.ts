@@ -17,7 +17,7 @@
  *                        WRONG   if resolved (a wrong-positive)
  *
  * Usage:
- *   npx tsx --env-file=.env scripts/eval/run-entity-resolution-validation.ts \
+ *   pnpm run eval:lookup-v2:authority -- \
  *     [--limit-per-class N] [--output <file.json>]
  */
 import 'dotenv/config';

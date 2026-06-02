@@ -1,0 +1,319 @@
+# Entity Lookup V2 — Improvement Plan (2026-06-03)
+
+## 목적
+
+V2 품질 gate를 실제로 통과시킨 뒤, lookup authority를 V1에서 V2로 승격한다.
+
+이 문서는 **현재 truth + 바로 실행 가능한 ticketized next steps** 를 고정한다.
+역사 기록/중간 RCA는 기존 2026-06-02 문서에 남기고, cutover 판단은 이 문서와
+`cutover-checklist.md`만 기준으로 본다.
+
+## Current Truth
+
+- Full authority eval (`run-entity-resolution-validation.ts`, 215 rows,
+  fingerprint `bd8abea5871dcede17272c3cc0bd1dcebcf93ea658d2d4b2ab930e5ba4f26cae`)
+  latest result:
+  - `V1`: correct `100/215` (`46.5%`), wrong `0`, miss `115`
+  - `V2`: correct `215/215` (`100.0%`), wrong `0`, miss `0`
+- Cutover verdict: **PASS**
+- `Viña Espectro Maipo Valley Carmenere` wrong-positive closed by the
+  resolve-certificate gate.
+- `2018 St. Supéry Élu` false-abstain closed at the shared ambiguity seam.
+- 15-row hotset smoke is still **PASS** (`V2 wrong+=0`), but
+  hotset is not the cutover authority.
+- Public `/v1/lookup/wine`, local CLI `lookupWine`, and agent `lookup_wine`
+  are now compatibility-backed V2 authority surfaces.
+
+## Authority Docs
+
+- Current authority:
+  - `cutover-checklist.md`
+  - `IMPROVEMENT-PLAN-2026-06-03.md`
+- Historical / audit only:
+  - `entity-resolution-validation-2026-06-02.md`
+  - `shadow-results-2026-06-02.md`
+  - raw JSON artifacts under this folder
+
+## Structural Invariants
+
+- `resolved` must be backed by **identity-grade evidence**, not just a high
+  calibrated score. Recall-only evidence must widen recall, not self-certify
+  identity.
+- `producer_family_collision` must remain fail-closed for real same-producer
+  ambiguity, but it must not suppress an exact head whose identity evidence the
+  siblings do not share.
+- V2 should remain **downgrade-only** over the resolver wherever possible. If a
+  false-abstain comes from shared resolver ambiguity logic, fix the shared owner
+  seam instead of adding a V2-only silent override.
+- `/v1/lookup/wine` cutover must be an adapter-backed authority swap, not a
+  caller-by-caller contract fork.
+- Bench/docs are allowed to name only **executable** entrypoints and the
+  current authority surface.
+
+## Live Design Constraints
+
+- The current stack is running with LTR serving disabled, so `ELV2-C1` and
+  `ELV2-C2` must close under the deterministic path first. They cannot assume a
+  learned reranker is present.
+- A live `noisy_recall` sweep on 2026-06-03 resolved `40/40` correctly, and
+  **0/40** correct rows were `fuzzy`-only heads. Top-channel distribution was:
+  `compact_exact+exact_alias+jamo_phonetic` (26), `compact_exact` (4),
+  `compact_exact+exact_alias` (4), `compact_exact+jamo_phonetic` (3),
+  `compact_exact+fuzzy_alias+jamo_phonetic` (2), `compact_exact+fuzzy_alias` (1).
+- Therefore the current cutover blocker is not "V2 needs fuzzy-only resolves to
+  keep recall". The blocker is specifically that a `fuzzy_alias`-only head can
+  still pass trusted calibration and become `resolved`.
+
+## Execution Tracks
+
+- **Track A — fail-closed correctness**: complete.
+- **Track B — semantic authority hardening**: complete for the deterministic
+  authority path (`resolve certificate` + shared ambiguity fix).
+- **Track C — surface cutover**: complete for public/local/agent lookup via the
+  compatibility seam.
+- **Track D — proof-lane cleanup**: completed for executable lane/doc alignment.
+  Remaining residue is operational closeout (live canary + legacy purge), not
+  missing or misleading bench/doc entrypoints.
+
+## Ticket ELV2-C1 — Close the `no_match` wrong-positive
+
+Status: **completed 2026-06-03**
+
+### Goal
+
+Eliminate the single cutover-blocking wrong-positive without degrading the
+current `noisy_recall` lift.
+
+### Files To Touch
+
+- `src/domain/resolver/v2/**`
+- `src/application/search/entity-lookup-v2/**`
+- `scripts/eval/**`
+- `test/regression/**`
+- `test/unit/entity-lookup-v2/**`
+
+### Files To Create
+
+- one regression rail that locks:
+  - `Viña Espectro Maipo Valley Carmenere` must NOT resolve
+
+### Constraints
+
+- No query-specific hardcoding.
+- No heuristic fallback unless explicitly approved.
+- The fix must land on the owning seam that turns a `fuzzy_alias`-only head
+  into a trusted `1.0` resolve.
+- Preserve `opu one` fail-close behavior.
+- Preserve current `noisy_recall` `40/40`.
+- Preserve current `ambiguous_short_form` `0 wrong`.
+
+### Design
+
+- Introduce an explicit **resolve certification** predicate in the V2 decision
+  path. Confidence + margin remain necessary, but are no longer sufficient on
+  their own.
+- Candidate evidence should be typed into `identity_grade`:
+  `exact_alias`, `compact_exact`, `transliteration_exact`.
+- Candidate evidence should be typed into `supportive_only`:
+  `jamo_phonetic`.
+- Candidate evidence should be typed into `recall_only`:
+  `fuzzy_alias`, `family_graph`, `dense`.
+- `recall_only` must never self-certify a `resolved` outcome, even when the
+  resolver's trusted calibration outputs `1.0`.
+- The first version should be deterministic and fail-closed. Once LTR serving
+  is actually wired, the same certificate inputs can feed the reranker, but the
+  reranker is not a prerequisite for closing this blocker.
+- Do not patch this with a class-local threshold tweak. The owning invariant is:
+  **recall evidence may retrieve a candidate, but identity evidence certifies a
+  resolve**.
+
+### Verification Rails
+
+- Add a regression rail for the exact blocker:
+  `Viña Espectro Maipo Valley Carmenere` must not resolve.
+- Add a property-style rail that a `fuzzy_alias`-only top candidate cannot
+  become `resolved` under trusted calibration.
+- Re-run:
+  - full authority eval
+  - hotset smoke
+  - `noisy_recall` sweep to confirm the current `40/40` recall holds
+
+### DoD
+
+- `Viña Espectro Maipo Valley Carmenere` becomes `ambiguous` or `failed`
+- full authority eval removes the `no_match` wrong-positive
+- hotset smoke stays `wrongPositive=0`
+
+## Ticket ELV2-C2 — Close the exact-head false collision
+
+Status: **completed 2026-06-03**
+
+### Goal
+
+Recover exact-entity recall for a query whose top candidate is identity-grade
+exact, while keeping producer-family clarification for real producer-only
+queries.
+
+### Files To Touch
+
+- `src/domain/resolver/service/ambiguity-classifier.ts`
+- `src/domain/resolver/v2/**`
+- `test/unit/resolver/**`
+- `test/regression/**`
+
+### Files To Create
+
+- one regression rail that locks:
+  - `2018 St. Supéry Élu` must not false-abstain
+
+### Constraints
+
+- Do not globally disable `producer_family_collision`.
+- The override must be evidence-based:
+  exact head identity that siblings do not share, not a broad threshold tweak.
+- Preserve the current `ambiguous_short_form` precision win.
+
+### Design
+
+- Keep the V2 downgrade-only contract intact by fixing the **shared ambiguity
+  owner seam** (`AmbiguityClassifier` / resolver path), not by teaching V2 to
+  silently "upgrade" a resolver abstain.
+- Extend producer-family ambiguity detection so it reasons about **identity
+  exclusivity at the head**.
+- If the top candidate carries exact/compact/transliteration-grade identity
+  evidence, and competitive same-producer siblings do not carry the same
+  identity support for distinct entities, then
+  `producer_family_collision` must not fire.
+- This must use structured evidence already present in candidate signals and/or
+  alias evidence, not label-string heuristics.
+- Treat this as a resolver correctness fix, not a V2 exception table.
+
+### Verification Rails
+
+- Add the exact regression rail:
+  `2018 St. Supéry Élu` must resolve.
+- Add counter-rails that real producer-only ambiguous queries still emit
+  `producer_family_collision`.
+- Re-run the full authority eval and the existing ambiguity-classifier unit rail.
+
+### DoD
+
+- `2018 St. Supéry Élu` resolves correctly
+- producer-family clarification tests still pass on genuine same-producer cases
+- full authority eval reaches `wrong=0, miss=0` or exposes a new real residue
+
+## Ticket ELV2-C3 — Promote V2 to lookup authority
+
+Status: **completed 2026-06-03**
+
+### Goal
+
+Once `ELV2-C1` and `ELV2-C2` are green, move lookup authority from the V1
+surface to the V2 stack without breaking callers.
+
+### Files To Touch
+
+- `src/interface/http/routes/primitive-search.route.ts`
+- `src/interface/http/routes/entity-lookup-v2.route.ts`
+- `src/application/wine-search/adapters/search-use-case-adapter.ts`
+- `src/application/wine-search/wine-agent-loop.ts`
+- `src/infrastructure/cli/remote/remote-search-facade.ts`
+- `test/integration/http/routes/**`
+- `test/e2e/**`
+
+### Files To Create
+
+- compatibility/cutover regression rails for:
+  - `/v1/lookup/wine`
+  - agent `lookup_wine`
+  - remote facade lookup
+
+### Constraints
+
+- Do not cut callers straight to a different wire contract without an adapter.
+- Keep observability able to distinguish:
+  - V1 legacy path
+  - V2 authority path
+  - any shadow/compat mode during transition
+
+### Design
+
+- Keep `/v1/lookup/wine` as the public compatibility contract, but back it with
+  the V2 authority path once `ELV2-C1/C2` are green.
+- Move agent/CLI facades after the HTTP compatibility rail is green; do not let
+  three callers fork their own migration logic.
+- Emit explicit authority telemetry so a request can be classified as:
+  - `route=v1, authority=v2`
+  - `route=v2, authority=v2`
+  - `route=v1, authority=v1` only during pre-cutover shadow
+- Removal of the V1 resolver path is a later purge step, not part of first
+  authority promotion.
+
+### DoD
+
+- public lookup authority is V2-backed
+- local CLI / agent lookup surfaces stop depending on the V1 resolver path
+- remote callers still hit `/v1/lookup/wine`, but that route is now
+  compatibility-backed by V2 authority
+
+## Ticket ELV2-C4 — Benchmark and docs alignment cleanup
+
+Status: **completed 2026-06-03**
+
+### Goal
+
+Remove stale “V2 is live” / missing-runner / missing-entrypoint confusion from
+bench and docs so proof lanes match real execution surfaces.
+
+### Files To Touch
+
+- `package.json`
+- `scripts/eval/freeze-agent-baseline.ts`
+- `test/benchmark/agent/scenarios.ts`
+- `docs/plans/jun-2-genearl/entity-lookup-v2/**`
+
+### Files To Create
+
+- only if needed: one canonical benchmark entrypoint doc for lookup authority
+
+### Constraints
+
+- If an entrypoint does not exist, do not document it as current.
+- If a benchmark still targets V1 lookup, say so explicitly until `ELV2-C3`
+  lands.
+- Keep raw historical artifacts; mark them historical instead of silently
+  deleting proof.
+
+### Design
+
+- Define one canonical quality authority lane:
+  `pnpm run eval:lookup-v2:authority`.
+- Define one fast smoke lane:
+  `pnpm run eval:lookup-v2:shadow`.
+- Anything else is historical, exploratory, or broken until proved executable.
+- `freeze-agent-baseline.ts` and agent benchmark docs must either point at a
+  real runner or lose their "current" wording.
+
+### DoD
+
+- no “current” doc points at a missing runner/command
+- benchmark SSOT is `docs/bench/STATUS.md`
+- lookup benchmark/docs clearly state whether they exercise direct legacy core,
+  public compatibility route, or dedicated V2
+- cutover docs and bench docs agree on the same executable authority surface
+
+## Execution Order
+
+1. `ELV2-C1`
+2. `ELV2-C2`
+3. rerun full authority eval + hotset smoke
+4. `ELV2-C3`
+5. `ELV2-C4`
+
+## Stop Conditions
+
+- If `ELV2-C1` removes the wrong-positive but creates any new wrong-positive in
+  `ambiguous_short_form` or `no_match`, stop and re-open the owning seam.
+- If `ELV2-C2` improves `St. Supéry Élu` by weakening producer-family guards
+  globally, stop and replace with head-evidence-aware logic.
+- Do not start `ELV2-C3` until the full authority gate is green.

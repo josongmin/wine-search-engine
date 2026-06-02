@@ -25,6 +25,9 @@ import type { SearchUseCase } from '../../search/search.usecase.js';
 import type { SearchResponseV1 } from '../../../domain/response/model/search-response.js';
 import { DomainError } from '../../../domain/shared/error/domain-error.js';
 import type {
+  LookupWineV2CompatibilityUseCasePort,
+} from '../../search/port/search-route-usecases.port.js';
+import type {
   SearchUseCaseInput,
 } from '../execution-plan-schemas.js';
 import type {
@@ -60,13 +63,31 @@ export class UnexpectedSearchAdapterResponseError extends DomainError {
 }
 
 export class SearchUseCaseAdapter implements SearchUseCasePort {
-  constructor(private readonly useCase: SearchUseCase) {}
+  constructor(
+    private readonly useCase: SearchUseCase,
+    private readonly lookupWineV2CompatibilityUseCase?: LookupWineV2CompatibilityUseCasePort,
+  ) {}
 
   async execute(
     input: SearchUseCaseInput,
     requestId: string,
     options?: { readonly abortSignal?: AbortSignal | undefined },
   ): Promise<SearchResponseV1> {
+    if (input.primitiveRoute === 'lookup_wine' && this.lookupWineV2CompatibilityUseCase !== undefined) {
+      return await this.lookupWineV2CompatibilityUseCase.execute(
+        {
+          query: input.query,
+          ...(input.limit !== undefined ? { limit: input.limit } : {}),
+          requestId,
+        },
+        {
+          requestId,
+          ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
+          executionPrincipal: AGENT_INTERNAL_TRUSTED_EXECUTION_PRINCIPAL,
+        },
+      );
+    }
+
     const request = mapSearchUseCaseInputToSearchRequest(input);
     const useCaseOptions: SearchExecutionOptions = {
       requestId,

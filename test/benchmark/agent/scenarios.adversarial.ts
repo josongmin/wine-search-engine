@@ -5,7 +5,9 @@
  * answerMustMatch/answerMustNotMatch regex contracts, attackType taxonomy,
  * cost budgets, severity tag, and rubric for LLM judge.
  *
- * Loaded by runner.ts as part of the default suite.
+ * Merged into `AGENT_SCENARIOS` at module load time. The historical live
+ * runner is currently absent from the repo, so do not treat this file as proof
+ * of an executable agent-benchmark lane by itself.
  */
 
 import type { AgentBenchmarkScenario } from './scenario.js';

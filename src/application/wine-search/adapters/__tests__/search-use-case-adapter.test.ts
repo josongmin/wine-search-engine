@@ -285,6 +285,34 @@ describe('SearchUseCaseAdapter', () => {
     expect(opts?.executionPrincipal).toBe('agent_internal_trusted');
   });
 
+  it('routes lookup_wine through the V2 compatibility seam when wired', async () => {
+    const stub = makeUseCase();
+    const compatibilityResponse = makeSearchResponse();
+    const compatibilityUseCase = {
+      execute: vi.fn(async () => compatibilityResponse),
+    };
+    const adapter = new SearchUseCaseAdapter(asUseCase(stub), compatibilityUseCase);
+
+    const out = await adapter.execute(
+      { query: 'Opus One', primitiveRoute: 'lookup_wine', limit: 3 },
+      REQUEST_ID,
+    );
+
+    expect(out).toBe(compatibilityResponse);
+    expect(compatibilityUseCase.execute).toHaveBeenCalledWith(
+      {
+        query: 'Opus One',
+        limit: 3,
+        requestId: REQUEST_ID,
+      },
+      expect.objectContaining({
+        requestId: REQUEST_ID,
+        executionPrincipal: 'agent_internal_trusted',
+      }),
+    );
+    expect(stub.executeMock).not.toHaveBeenCalled();
+  });
+
   it('marks similar_to_entity primitive execution as agent_internal_trusted', async () => {
     const stub = makeUseCase();
     const adapter = new SearchUseCaseAdapter(asUseCase(stub));

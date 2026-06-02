@@ -1306,7 +1306,19 @@ export function adaptSearchInput(
 function formatSearchObservation(result: unknown): string {
   if (result === null || typeof result !== 'object') return formatGenericObservation('search', result);
   const record = result as Record<string, unknown>;
+  const engineDecision = record['engineDecision'];
+  const decisionStatus = engineDecision !== null && typeof engineDecision === 'object'
+    ? (engineDecision as Record<string, unknown>)['decisionStatus']
+    : undefined;
   const results = record['results'];
+  if (decisionStatus === 'ambiguous' && Array.isArray(results) && results.length > 0) {
+    const preview = results.slice(0, WINE_AGENT_LOOP_RESULT_PREVIEW_LIMIT)
+      .map((r) => formatSearchObservationEntityPreview(r))
+      .filter(
+        (s): s is { readonly entity_id: string; readonly canonical_label: string } => s !== null,
+      );
+    return clipObservation(`search: ambiguous; candidates=${JSON.stringify(preview)}`);
+  }
   if (!Array.isArray(results) || results.length === 0) {
     return `${WINE_AGENT_LOOP_NO_MATCH_PREFIX}search returned 0 results`;
   }

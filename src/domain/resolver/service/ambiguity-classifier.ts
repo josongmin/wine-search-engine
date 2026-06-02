@@ -127,26 +127,39 @@ export class AmbiguityClassifier {
    * vintage was its own group, so vintages.size was always 1).
    */
   private detectMultiVintage(candidates: readonly ResolverCandidate[]): boolean {
-    const wineByLabel = new Map<string, Set<string>>();
-    for (const candidate of candidates.slice(0, AMBIGUITY_TOP_CANDIDATE_SCAN_K)) {
-      if (candidate.entityType === 'wine') {
-        const vintage = candidate.attributeHints?.['vintage'];
-        if (typeof vintage === 'string' || typeof vintage === 'number') {
-          // Strip 4-digit year from label for grouping so different vintages
-          // of the same wine converge to one key. Bounded strip preserves
-          // embedded numerals in product codes that are not vintages.
-          const label = stripVintageYearsBounded(candidate.canonicalLabel)
-            .trim()
-            .replace(/\s+/g, ' ');
-          const vintages = wineByLabel.get(label) ?? new Set<string>();
-          vintages.add(String(vintage));
-          wineByLabel.set(label, vintages);
-        }
-      }
+    const top = candidates[0];
+    if (top === undefined || top.entityType !== 'wine') {
+      return false;
     }
-    for (const vintages of wineByLabel.values()) {
-      if (vintages.size > 1) {
-        return true;
+
+    // Multi-vintage ambiguity must be ABOUT the head wine. A sibling pair from
+    // the same producer (e.g. two Cabernet vintages) must not make an exact
+    // head for a different cuvee (e.g. Élu) ambiguous. Scope the scan to the
+    // top candidate's vintage-stripped identity.
+    const topLabel = stripVintageYearsBounded(top.canonicalLabel)
+      .trim()
+      .replace(/\s+/g, ' ');
+    if (topLabel.length === 0) {
+      return false;
+    }
+
+    const vintages = new Set<string>();
+    for (const candidate of candidates.slice(0, AMBIGUITY_TOP_CANDIDATE_SCAN_K)) {
+      if (candidate.entityType !== 'wine') {
+        continue;
+      }
+      const vintage = candidate.attributeHints?.['vintage'];
+      if (typeof vintage !== 'string' && typeof vintage !== 'number') {
+        continue;
+      }
+      const label = stripVintageYearsBounded(candidate.canonicalLabel)
+        .trim()
+        .replace(/\s+/g, ' ');
+      if (label === topLabel) {
+        vintages.add(String(vintage));
+        if (vintages.size > 1) {
+          return true;
+        }
       }
     }
     return false;

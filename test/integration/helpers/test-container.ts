@@ -41,6 +41,9 @@ import { InterpretUseCase } from '../../../src/application/search/interpret.usec
 import { ResolveUseCase } from '../../../src/application/search/resolve.usecase.js';
 import { AutocompleteUseCase } from '../../../src/application/search/autocomplete.usecase.js';
 import { HybridUseCase } from '../../../src/application/search/hybrid.usecase.js';
+import { EntityLookupV2UseCase } from '../../../src/application/search/entity-lookup-v2/entity-lookup-v2.usecase.js';
+import { MultiChannelRetrievalEngine } from '../../../src/application/search/entity-lookup-v2/multi-channel-retrieval-engine.js';
+import { LookupWineV2CompatibilityUseCase } from '../../../src/application/search/lookup-wine-v2-compatibility.usecase.js';
 import type { Container } from '../../../src/config/container.js';
 import type { SnapshotVersions } from '../../../src/application/search/search.usecase.js';
 import {
@@ -57,6 +60,7 @@ import {
   type InMemoryAliasProvenance,
 } from './in-memory-adapters.js';
 import { PlannerV1Adapter } from '../../../src/config/planner-v1-adapter.js';
+import { ConceptAdmissionGate } from '../../../src/domain/resolver/v2/concept-admission-gate.js';
 import {
   FallbackAmbiguityDictionary,
   StaticAmbiguityDictionary,
@@ -338,6 +342,26 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
     resolveUseCase,
     entityLookup: searchIndex,
   });
+  const entityLookupV2UseCase = new EntityLookupV2UseCase({
+    admissionGate: new ConceptAdmissionGate(),
+    queryPlanner,
+    blocker,
+    entityResolver,
+    entityLookup: searchIndex,
+    candidateRetrieval: new MultiChannelRetrievalEngine({
+      aliasMatcher,
+      entityLookup: searchIndex,
+    }),
+    ambiguityDictionary: ambiguityDict,
+    querySanitizer,
+    injectionJudge,
+    judgeTimeoutMs,
+  });
+  const lookupWineV2CompatibilityUseCase = new LookupWineV2CompatibilityUseCase({
+    entityLookupV2UseCase,
+    entityLookup: searchIndex,
+    snapshotVersions,
+  });
   const hybridUseCase = new HybridUseCase({
     queryPlanner,
     candidatePool,
@@ -366,8 +390,11 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
     responseBuilder,
     mixedSolver,
     searchUseCase,
+    entityLookup: searchIndex,
     interpretUseCase,
     resolveUseCase,
+    entityLookupV2UseCase,
+    lookupWineV2CompatibilityUseCase,
     autocompleteUseCase,
     hybridUseCase,
     decomposedSearchUseCase,

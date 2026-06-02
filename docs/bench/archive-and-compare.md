@@ -1,5 +1,10 @@
 # Bench Archive + Compare (SOTA++)
 
+> Historical/dormant note: this flow assumes a live agent benchmark runner that
+> writes benchmark report archives. The current repo checkout does not ship
+> `test/benchmark/agent/runner.ts`, so treat this document as design/reference
+> only until that runner is restored. See `docs/bench/STATUS.md`.
+
 ## Where archives live
 
 `data/bench-archive/<sha8>-<utc>.json` and a sibling

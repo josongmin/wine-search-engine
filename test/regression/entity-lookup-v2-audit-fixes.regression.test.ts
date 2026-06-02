@@ -64,14 +64,66 @@ describe('audit HIGH — untrusted calibration never resolves on a raw score', (
   }
 
   it.each([1.0, 1.5, 0.999, 5.0])('abstains for a self-normalized raw top1=%s with no exact evidence', (top1) => {
-    const d = decider.decide(untrustedResolved(top1), 'short_entity', false);
+    const d = decider.decide(untrustedResolved(top1), 'short_entity', 'recall_only');
     expect(d.status).toBe('ambiguous');
     expect(d.reasonCode).toBe('uncalibrated_low_trust');
   });
 
   it('resolves under untrusted calibration only with explicit exact evidence', () => {
-    const d = decider.decide(untrustedResolved(0.6), 'short_entity', true);
+    const d = decider.decide(untrustedResolved(0.6), 'short_entity', 'identity_grade');
     expect(d.status).toBe('resolved');
+  });
+});
+
+describe('audit HIGH — trusted calibration still requires identity-grade evidence', () => {
+  function trustedUseCase(strategy: string): EntityLookupV2UseCase {
+    const eid = createEntityId('vinas-mora');
+    const resolver: EntityResolverPort = {
+      resolve: vi.fn().mockResolvedValue({
+        status: 'resolved',
+        candidates: [{ entityId: eid, canonicalLabel: '2022 Vinas Mora kaamen III', calibratedScore: 1.0, rank: 1, evidenceRefs: [] }],
+        topEntity: { entityId: eid, canonicalLabel: '2022 Vinas Mora kaamen III', calibratedScore: 1.0 },
+        decisionTrace: {
+          queryClass: 'short_entity', top1CalibratedScore: 1.0, top2CalibratedScore: 0.25,
+          calibratedGap: 0.75, decisionConfidenceC: 1.0, calibrationTrusted: true,
+          ambiguityDetected: false, ambiguityTypes: [],
+          appliedThresholds: { resolveThreshold: 0.5, gapThreshold: 0.1 }, outcomeReasonCodes: ['CONFIDENCE_ABOVE_THRESHOLD'],
+        },
+        conformalSetSize: 1,
+      }),
+    };
+    const doc = { entityId: eid, entityType: 'wine' as const, canonicalLabel: '2022 Vinas Mora kaamen III' };
+    const queryPlanner: QueryPlannerPort = {
+      plan: vi.fn().mockResolvedValue({
+        rawQuery: 'vina espectro', normalizedQuery: 'vina espectro', intent: 'known_item', route: 'entity',
+        retrievalMode: 'entity_lookup', queryClass: 'short_entity',
+        anchors: [{ surfaceForm: 'vina espectro', normalizedForm: 'vina espectro', candidateEntityIds: [eid], lookupStrategies: [strategy], confidence: 1.0 }],
+        constraints: { hard: [], soft: [], inferred: [] }, expansions: { lexical: [], semantic: [] },
+        policy: {}, uncertainty: {}, normalizedQueryViews: makeViews('vina espectro'),
+        plannerVersion: '1', policyRuleVersion: '1', thresholdProfileId: 'default',
+      }),
+    };
+    return new EntityLookupV2UseCase({
+      admissionGate: new ConceptAdmissionGate(),
+      queryPlanner,
+      entityResolver: resolver,
+      entityLookup: {
+        getDocument: vi.fn().mockResolvedValue(doc),
+        getDocuments: vi.fn().mockResolvedValue(new Map([[eid, doc]])),
+      },
+      querySanitizer: { sanitize: vi.fn((q: string) => ({ safe: true, sanitizedQuery: q })) } as never,
+    });
+  }
+
+  it('ABSTAINS when trusted top candidate is supported only by fuzzy recall', async () => {
+    const out = await trustedUseCase('fuzzy_char_ngram').execute({ query: 'vina espectro', maxCandidates: 5, mode: 'default' });
+    expect(out.status).toBe('ambiguous');
+    expect(out.evidenceSummary.decisionReasonCode).toBe('identity_evidence_required');
+  });
+
+  it('RESOLVES when trusted top candidate carries identity-grade evidence', async () => {
+    const out = await trustedUseCase('compact_exact').execute({ query: 'vina espectro', maxCandidates: 5, mode: 'default' });
+    expect(out.status).toBe('resolved');
   });
 });
 

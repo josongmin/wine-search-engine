@@ -108,6 +108,17 @@ describe('AmbiguityClassifier', () => {
       const state = classifier.classify(candidates, 'short_entity');
       expect(state.types).not.toContain('multi_vintage');
     });
+
+    it('does not let a sibling wine vintage pair make a different exact head ambiguous', () => {
+      const candidates: ResolverCandidate[] = [
+        makeWineCandidate('wine-elu', '2018 St. Supéry Élu', 2018),
+        makeWineCandidate('wine-cab-2014', '2014 St. Supéry Cabernet Sauvignon', 2014),
+        makeWineCandidate('wine-cab-2018', '2018 St. Supéry Cabernet Sauvignon', 2018),
+        makeWineCandidate('wine-merlot-2019', '2019 St. Supéry Merlot', 2019),
+      ];
+      const state = classifier.classify(candidates, 'short_entity');
+      expect(state.types).not.toContain('multi_vintage');
+    });
   });
 
   describe('alias_collision detection', () => {

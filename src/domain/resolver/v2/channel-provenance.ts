@@ -18,6 +18,22 @@ import type { AnchorCandidate } from '../../query/model/anchor-candidate.js';
 import { clamp01 } from '../../shared/utils/clamp.js';
 import type { LookupChannelHit, LookupRetrievalChannel } from './lookup-v2-types.js';
 
+export const LOOKUP_IDENTITY_GRADE_CHANNELS: ReadonlySet<LookupRetrievalChannel> = new Set([
+  'exact_alias',
+  'compact_exact',
+  'transliteration_exact',
+]);
+
+const LOOKUP_SUPPORTIVE_ONLY_CHANNELS: ReadonlySet<LookupRetrievalChannel> = new Set([
+  'jamo_phonetic',
+]);
+
+export type LookupResolveEvidenceGrade =
+  | 'identity_grade'
+  | 'supportive_only'
+  | 'recall_only'
+  | 'none';
+
 /**
  * Map a free-form anchor lookup-strategy string to a declared V2 channel.
  * Order matters: more specific prefixes (compact/translit/fuzzy) are tested
@@ -122,6 +138,42 @@ export function anchorsHaveExactIdentityEvidence(
     }
     return strategies.some((s) => STRICT_EXACT_IDENTITY_STRATEGIES.has(s));
   });
+}
+
+/**
+ * Classify the strongest resolve-certifying evidence a candidate carries from
+ * its per-channel provenance.
+ *
+ * Resolve certificate hierarchy:
+ * - identity_grade: exact/compact/transliteration exact channels
+ * - supportive_only: phonetic/jamo-only evidence
+ * - recall_only: fuzzy/family/dense recall lanes
+ * - none: no provenance at all
+ */
+export function classifyResolveEvidenceGrade(
+  channelHits: readonly Pick<LookupChannelHit, 'channel'>[],
+): LookupResolveEvidenceGrade {
+  let hasSupportiveOnly = false;
+  let hasRecallOnly = false;
+
+  for (const hit of channelHits) {
+    if (LOOKUP_IDENTITY_GRADE_CHANNELS.has(hit.channel)) {
+      return 'identity_grade';
+    }
+    if (LOOKUP_SUPPORTIVE_ONLY_CHANNELS.has(hit.channel)) {
+      hasSupportiveOnly = true;
+      continue;
+    }
+    hasRecallOnly = true;
+  }
+
+  if (hasSupportiveOnly) {
+    return 'supportive_only';
+  }
+  if (hasRecallOnly) {
+    return 'recall_only';
+  }
+  return 'none';
 }
 
 /**

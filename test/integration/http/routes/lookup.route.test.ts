@@ -106,10 +106,11 @@ describe('POST /v1/lookup/wine', () => {
     await app.close();
   });
 
-  it('forces retrieval_mode to "entity" regardless of caller-provided legacy fields', async () => {
-    // The lookup endpoint is entity-only. The route mapper drops any caller
-    // attempt to set retrieval_mode and always injects 'entity'. This is the
-    // single most important invariant of this endpoint.
+  it('rejects caller-provided mode overrides and keeps lane authority on the path', async () => {
+    // The lookup endpoint is entity-only and the compatibility `options`
+    // envelope is intentionally narrow. Callers cannot smuggle a lane/mode
+    // override through the body; the route must fail closed instead of
+    // silently accepting incompatible knobs.
     const response = await post(app, '/v1/lookup/wine', {
       query: 'Opus One 2018',
       options: {
@@ -118,17 +119,8 @@ describe('POST /v1/lookup/wine', () => {
       },
     });
 
-    expect(response.statusCode).toBe(200);
-    expect(deps.searchUseCase.execute).toHaveBeenCalledTimes(1);
-    const args = (deps.searchUseCase.execute as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(args?.[0]).toMatchObject({
-      query: 'Opus One 2018',
-      retrieval_mode: 'entity',
-      options: expect.objectContaining({
-        clarification: false,
-        mode: 'auto',
-      }),
-    });
+    expect(response.statusCode).toBe(400);
+    expect(deps.searchUseCase.execute).not.toHaveBeenCalled();
   });
 
   it('forwards the same observability execution options shape as the discovery primitives', async () => {
@@ -158,6 +150,47 @@ describe('POST /v1/lookup/wine', () => {
     const body = response.json();
     expect(body.results).toEqual([]);
     expect(body.engine_decision.failure_reason).toBe('NO_RESULTS');
+  });
+
+  it('prefers the V2 compatibility seam when it is wired', async () => {
+    const compatibilityResponse = buildEmptyLookupResponse({ decisionStatus: 'resolved' });
+    const compatibilityExecute = vi.fn().mockResolvedValue(compatibilityResponse);
+    deps = {
+      ...deps,
+      lookupWineV2CompatibilityUseCase: {
+        execute: compatibilityExecute,
+      },
+      searchUseCase: {
+        execute: vi.fn(),
+      },
+    };
+    await app.close();
+    app = Fastify();
+    registerRequestContext(app);
+    app.setErrorHandler(errorHandler);
+    registerLookupWineRoute(app, deps);
+    await app.ready();
+
+    const response = await post(app, '/v1/lookup/wine', {
+      query: 'Opus One 2018',
+      context: { locale: 'ko', currency: 'KRW' },
+      limit: 3,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(compatibilityExecute).toHaveBeenCalledWith(
+      {
+        query: 'Opus One 2018',
+        limit: 3,
+        locale: 'ko',
+        requestId: expect.any(String),
+      },
+      expect.objectContaining({
+        abortSignal: expect.any(AbortSignal),
+        stageTimer: expect.any(Object),
+      }),
+    );
+    expect(deps.searchUseCase.execute).not.toHaveBeenCalled();
   });
 
   it('accepts Korean entity aliases (NFC composed) and forwards the query unchanged', async () => {

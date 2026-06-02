@@ -127,20 +127,38 @@ export function registerLookupWineRoute(app: FastifyInstance, deps: SearchRouteD
     contract: LookupWineRouteContract,
     handler: async (request, reply) => {
       const parsed = parseContractBody(request, LookupWineRouteContract);
-      const searchRequest = toLookupWineRequest(parsed);
       const requestId = getRequestId(request);
       const stageTimer = createStageTimer();
       const abortSignal = abortSignalFromFastifyRequest(request, reply);
 
-      const response = await raceWithRequestAbort(
-        deps.searchUseCase.execute(searchRequest, requestId, {
-          abortSignal,
-          debugRequest: request.debugRequest,
-          stageTimer,
-        }),
-        abortSignal,
-        'Lookup request aborted',
-      );
+      const response = deps.lookupWineV2CompatibilityUseCase !== undefined
+        ? await raceWithRequestAbort(
+            deps.lookupWineV2CompatibilityUseCase.execute(
+              {
+                query: parsed.query,
+                ...(parsed.limit !== undefined ? { limit: parsed.limit } : {}),
+                ...(parsed.context?.locale !== undefined ? { locale: parsed.context.locale } : {}),
+                requestId,
+              },
+              {
+                abortSignal,
+                debugRequest: request.debugRequest,
+                stageTimer,
+                requestId,
+              },
+            ),
+            abortSignal,
+            'Lookup request aborted',
+          )
+        : await raceWithRequestAbort(
+            deps.searchUseCase.execute(toLookupWineRequest(parsed), requestId, {
+              abortSignal,
+              debugRequest: request.debugRequest,
+              stageTimer,
+            }),
+            abortSignal,
+            'Lookup request aborted',
+          );
 
       // Decomposition runs upstream of route-dispatch and may bubble a
       // comparison response even with `retrieval_mode='entity'`. Lookup is an
