@@ -27,7 +27,7 @@
 | hotset corpus | `test/fixtures/lookup-v2-hotset.jsonl` | ✅ (15 labeled; DoD exemplars 포함) |
 | shadow-compare 메트릭 (pure) | `scripts/eval/lookup-v2-shadow-metrics.ts` | ✅ unit-tested |
 | live shadow runner (V1+V2 실행) | `scripts/eval/run-lookup-v2-shadow-compare.ts` | ✅ 구현·실행됨 |
-| shadow compare report | `evidence/shadow-report-2026-06-02-postfix.json` | ✅ **PASS (cutover-eligible)**: fresh 라이브 재실행(post-vintage-guard + 4-gate incl. non-degeneracy). V2 correct=9 > V1=5, **V2 wrong-positive=0**(vintage 블로커 해소), concept-redirect 1.000, `gate.pass=true`. stamped raw artifact 커밋됨(gitSha 9a236030, 감사 가능) |
+| shadow compare report | `evidence/shadow-report-2026-06-02-postfix.json` | 🟡 **SMOKE PASS (precision), NOT cutover authority**: 정밀도 게이트 PASS(`gate.pass=true`, V2 wrong-positive=0 vs V1=1, concept-redirect 1.000, vintage 블로커 해소). **그러나 RECALL 회귀**: expected-resolve 7건 중 V2=2 resolve(V1=5; Dom Pérignon/돔페리뇽/Penfolds Grange abstain), abstainRate 0.867. `correct=9`는 대부분 correct-abstention. cutover authority는 **full eval_cases 분포**(run-entity-resolution-validation.ts), 이 15행 smoke 아님. artifact는 audit용(regression anchor 아님) |
 | operator smoke | `/v2/entity-lookup/ops/inspect` + web `/ops/*` | ✅ (T-07 trusted plane) |
 | live canary replay | — | ⬜ (정상 stack 미러 트래픽 필요) |
 

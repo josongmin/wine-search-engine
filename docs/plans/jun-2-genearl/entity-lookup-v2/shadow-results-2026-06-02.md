@@ -1,29 +1,42 @@
 # Entity Lookup V2 — Live Shadow-Compare Result (2026-06-02)
 
-## ✅ CUTOVER-ELIGIBLE — fresh live run, post-vintage-fix + Gate-4 (2026-06-02, gitSha 9a236030)
+## Precision-first gate PASS — but a REAL recall regression (15-row smoke, 2026-06-02, gitSha 9a236030)
 
 `pnpm run eval:lookup-v2:shadow` against the live stack with the CURRENT 4-gate
-`buildShadowReport` (incl. Gate 4 non-degeneracy) AND the vintage-mismatch guard:
+`buildShadowReport` (incl. Gate 4 non-degeneracy) AND the vintage-mismatch guard.
+Artifact: `evidence/shadow-report-2026-06-02-postfix.json` (stamped generatedAt + gitSha).
 
 | metric | V1 (`/v1/lookup/wine`) | V2 (`/v2/entity-lookup`) |
 |---|---|---|
 | rows | 15 | 15 |
-| correct | 5 | **9** |
+| **correct** (incl. correct-abstentions) | 5 | **9** |
 | wrong-positive | **1** | **0** |
+| **hot-entity RESOLVES (of 7 expected-resolve)** | **5** | **2** |
+| abstainRate | 0.600 | **0.867** |
 
-- improvements **7**, regressions 3, concept-redirect accuracy **1.000**.
-- **Cutover gate: PASS** (`gate.pass=true, reasons=[]`) — wrong-positive ≤ V1, correct-rate
-  within tolerance, concept-redirect ≥ floor, AND non-degenerate (V2 resolves ≥1 hot entity).
-- The 2026-06-02 vintage wrong-positive (`오퍼스원 2019` → Opus One 2018) is CLOSED: V2
-  wrong-positive=0 — the vintage guard downgrades it to ambiguous.
-- **Committed raw artifact** (stamped generatedAt + gitSha, auditable):
-  `evidence/shadow-report-2026-06-02-postfix.json`.
+**Read this honestly — the PASS is precision, NOT resolution superiority:**
+- The cutover gate is PRECISION-FIRST and it PASSES: V2 wrong-positive=0 (vs V1's 1),
+  concept-redirect 1.000, non-degenerate. The vintage wrong-positive (`오퍼스원 2019`
+  → Opus One 2018) is closed.
+- BUT V2's `correct=9` is mostly **correct-ABSTENTIONS** on the 8 non-resolve rows. On the
+  7 expected-resolve rows V2 RESOLVES ONLY **2** (Opus One ×2) vs V1's **5** — V2 abstains
+  on **Dom Pérignon, 돔페리뇽, Penfolds Grange** where V1 resolved. This is a **recall
+  regression**: V2 trades recall for precision. NOT "9× superiority".
+- So the gate PASS means "safe to cut over on PRECISION grounds (no new wrong-resolves)",
+  it does **not** mean V2 finds more wines. The recall gap (curation / family-graph
+  population / alias coverage for famous wines) is an open pre-cutover consideration.
 
-This is the DoD #7 cutover proof. The earlier runs below are historical.
+**This 15-row hotset is a SMOKE check, not the cutover authority.** The full eval_cases
+distribution (`run-entity-resolution-validation.ts`) is the authority for the
+resolution-quality call. Do NOT flip authority on this run alone.
 
 ---
 
-## UPDATE — trusted-calibration re-run (2026-06-02 PM)
+## ~~UPDATE — trusted-calibration re-run (2026-06-02 PM)~~ — SUPERSEDED
+
+> SUPERSEDED by the smoke run above. This run FAILED the gate on the vintage
+> wrong-positive (now fixed) and its "V2 9 vs V1 1" / "9× superiority" framing is a
+> DIFFERENT run from the committed PASS artifact — do not cite it. Kept for history.
 
 After closing the calibration capture loop (top1_raw_score now plumbed through
 resolver + ranked-route → eval_results), running a live 500-case eval to
