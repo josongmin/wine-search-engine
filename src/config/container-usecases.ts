@@ -155,6 +155,12 @@ export function buildUseCaseContainerServices(
     // T-ELV2-06: persisted ambiguity substrate (registry-backed) enriches the
     // clarification contract with authoritative types + severity.
     ambiguityDictionary: core.ambiguityDictionary,
+    // T-ELV2-03: dedicated alias-registry version identity read from the live
+    // alias substrate (delegated through the CachedAliasMatcher chain), surfaced
+    // on the V2 response meta. undefined when the matcher carries no version.
+    ...(core.aliasMatcher.getRegistryVersion?.() !== undefined
+      ? { aliasRegistryVersion: core.aliasMatcher.getRegistryVersion() }
+      : {}),
     querySanitizer: core.querySanitizer,
     injectionJudge: core.injectionJudge,
     judgeFailureMode: config.queryEntrySecurity.judgeFailureMode,

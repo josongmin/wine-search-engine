@@ -49,6 +49,7 @@ import type {
 import { CalibratedAbstainDecider } from '../../../domain/resolver/v2/calibrated-abstain-decider.js';
 import { ambiguityClusterMembershipScore, extractLookupFeatures } from '../../../domain/resolver/v2/lookup-feature-extractor.js';
 import { shouldDowngradeForVintageMismatch, VINTAGE_MISMATCH_REASON_CODE } from '../../../domain/resolver/v2/vintage-guard.js';
+import type { AliasRegistryVersion } from '../../../domain/alias/model/alias-registry-version.js';
 import { anchorsHaveExactIdentityEvidence, buildChannelHitsForEntity } from '../../../domain/resolver/v2/channel-provenance.js';
 import { buildClarification } from '../../../domain/resolver/v2/clarification-graph.js';
 import type { AmbiguityDictionary, AmbiguityInfo } from '../../../domain/query/port/ambiguity-dictionary.port.js';
@@ -117,6 +118,8 @@ export interface EntityLookupV2UseCaseDeps {
    * overriding the in-process label-graph classification.
    */
   readonly ambiguityDictionary?: AmbiguityDictionary | undefined;
+  /** T-ELV2-03: dedicated alias-registry version identity, surfaced on meta. */
+  readonly aliasRegistryVersion?: AliasRegistryVersion | undefined;
   readonly querySanitizer: QuerySanitizer;
   readonly injectionJudge?: InjectionJudgePort | undefined;
   readonly judgeFailureMode?: 'fail_open' | 'fail_closed' | undefined;
@@ -422,6 +425,9 @@ export class EntityLookupV2UseCase {
         queryTimeMs,
         version: LOOKUP_V2_ENGINE_VERSION,
         engineSchemaVersion: 'entity_lookup_v2',
+        ...(this.deps.aliasRegistryVersion !== undefined
+          ? { aliasRegistry: this.deps.aliasRegistryVersion }
+          : {}),
       },
     };
   }
@@ -578,6 +584,9 @@ export class EntityLookupV2UseCase {
         queryTimeMs,
         version: LOOKUP_V2_ENGINE_VERSION,
         engineSchemaVersion: 'entity_lookup_v2',
+        ...(this.deps.aliasRegistryVersion !== undefined
+          ? { aliasRegistry: this.deps.aliasRegistryVersion }
+          : {}),
       },
     };
   }

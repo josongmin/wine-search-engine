@@ -32,6 +32,10 @@ import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
 import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import type { AliasType } from '../../domain/alias/model/alias.js';
 import { parseAliasType, ALIAS_TYPES } from '../../domain/alias/model/alias.js';
+import {
+  buildAliasRegistryVersion,
+  type AliasRegistryVersion,
+} from '../../domain/alias/model/alias-registry-version.js';
 import { pickHigherTrustAliasType } from '../../domain/alias/service/conflict-resolver.js';
 import { runAbortablePgQuery } from '../db/abortable-pg-query.js';
 import {
@@ -110,7 +114,17 @@ const SnapshotManifestSchema = z.object({
   artifacts: z.object({
     aliasesNdjson: z.string().min(1),
   }).passthrough().optional(),
+  // T-ELV2-03: capture the registry identity (snapshot id + alias content hash)
+  // already present on the manifest — used for the V2 alias-registry version stamp.
+  snapshotId: z.string().min(1).optional(),
+  hashes: z.object({ aliases: z.string().min(1).optional() }).passthrough().optional(),
 }).passthrough();
+
+interface ParsedAliasesManifest {
+  readonly aliasesPath: string;
+  readonly snapshotId?: string;
+  readonly aliasContentHash?: string;
+}
 
 // Phonetic skeleton (compactForLookup / phoneticCompactForLookup /
 // PHONETIC_NORMALIZATION_RULES / LATIN_VOWEL_RE) is the SSoT in
@@ -168,14 +182,18 @@ function parseNdjson(raw: string, filePath: string): readonly SnapshotAliasRecor
   return rows;
 }
 
-function parseAliasesManifestPath(raw: string, manifestPath: string): string {
+function parseAliasesManifestPath(raw: string, manifestPath: string): ParsedAliasesManifest {
   const parsed: unknown = JSON.parse(raw);
   const manifest = SnapshotManifestSchema.parse(parsed);
   const aliasesNdjson = manifest.artifacts?.aliasesNdjson;
   if (typeof aliasesNdjson !== 'string' || aliasesNdjson.length === 0) {
     throw new Error(`Malformed search snapshot manifest at ${manifestPath}: artifacts.aliasesNdjson is required`);
   }
-  return aliasesNdjson;
+  return {
+    aliasesPath: aliasesNdjson,
+    ...(manifest.snapshotId !== undefined ? { snapshotId: manifest.snapshotId } : {}),
+    ...(manifest.hashes?.aliases !== undefined ? { aliasContentHash: manifest.hashes.aliases } : {}),
+  };
 }
 
 function trimDedupedQueries(queries: readonly string[]): readonly string[] {
@@ -215,16 +233,27 @@ interface GroupedAliasMatch {
 }
 
 export class SearchSnapshotAliasMatcher implements AliasMatcher {
+  /** T-ELV2-03: the dedicated alias-registry version identity for this substrate. */
+  getRegistryVersion(): AliasRegistryVersion | undefined {
+    return this.registryVersion;
+  }
+
   static async loadFromManifest(
     manifestPath: string,
   ): Promise<SearchSnapshotAliasMatcher | undefined> {
     try {
       const manifestRaw = await fs.readFile(manifestPath, 'utf8');
-      const aliasesPath = parseAliasesManifestPath(manifestRaw, manifestPath);
-      const aliasesRaw = await fs.readFile(aliasesPath, 'utf8');
-      const aliases = parseNdjson(aliasesRaw, aliasesPath);
+      const parsedManifest = parseAliasesManifestPath(manifestRaw, manifestPath);
+      const aliasesRaw = await fs.readFile(parsedManifest.aliasesPath, 'utf8');
+      const aliases = parseNdjson(aliasesRaw, parsedManifest.aliasesPath);
       const buildStartedAt = Date.now();
-      const matcher = new SearchSnapshotAliasMatcher(aliases);
+      const registryVersion = buildAliasRegistryVersion({
+        source: 'snapshot_manifest',
+        aliasCount: aliases.length,
+        ...(parsedManifest.snapshotId !== undefined ? { snapshotId: parsedManifest.snapshotId } : {}),
+        ...(parsedManifest.aliasContentHash !== undefined ? { aliasContentHash: parsedManifest.aliasContentHash } : {}),
+      });
+      const matcher = new SearchSnapshotAliasMatcher(aliases, registryVersion);
       matcher.warmBroadRecallIndexes();
       bootstrapLogger.info(
         {
@@ -318,7 +347,14 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
       }
 
       const buildStartedAt = Date.now();
-      const matcher = new SearchSnapshotAliasMatcher(aliases);
+      // pg overlay carries no alias content hash from the table read — OMIT it
+      // (exactOptionalPropertyTypes); snapshot id + count are the registry identity.
+      const registryVersion = buildAliasRegistryVersion({
+        source: 'pg_overlay',
+        aliasCount: aliases.length,
+        snapshotId: activeSnapshotId,
+      });
+      const matcher = new SearchSnapshotAliasMatcher(aliases, registryVersion);
       matcher.warmBroadRecallIndexes();
       bootstrapLogger.info(
         {
@@ -385,6 +421,7 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
 
   constructor(
     aliases: readonly SnapshotAliasRecord[],
+    private readonly registryVersion?: AliasRegistryVersion,
   ) {
     const normalizedAliases: IndexedAliasRecord[] = [];
     const surfaceForms: string[] = [];

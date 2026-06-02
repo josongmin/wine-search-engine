@@ -1,5 +1,6 @@
 import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { AliasType } from '../../alias/model/alias.js';
+import type { AliasRegistryVersion } from '../../alias/model/alias-registry-version.js';
 import type { AnchorCandidate } from '../model/anchor-candidate.js';
 import type { AnchorConditionedQuery } from '../model/relative-query.js';
 import type { NormalizedQueryViews } from '../model/query-views.js';
@@ -91,6 +92,13 @@ export interface AliasMatcher {
     normalizedQueries: readonly string[],
     options?: AliasLookupOptions,
   ): Promise<ReadonlyMap<string, readonly AliasMatchResult[]>>;
+  /**
+   * Optional dedicated alias-registry version identity over the substrate this
+   * matcher serves (T-ELV2-03). Optional so existing implementers (PG, fuzzy,
+   * stubs) need no change; decorators MUST delegate it through to their inner
+   * matcher or the V2 response stamp silently vanishes (dead-foundation guard).
+   */
+  getRegistryVersion?(): AliasRegistryVersion | undefined;
 }
 
 /**

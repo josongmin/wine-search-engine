@@ -12,6 +12,10 @@ import {
 } from '../../domain/query/service/alias-prefix-terms.js';
 import { buildAliasSurfaceLookupPlan } from '../../domain/query/service/alias-lookup-plan.js';
 import {
+  buildAliasRegistryVersion,
+  type AliasRegistryVersion,
+} from '../../domain/alias/model/alias-registry-version.js';
+import {
   resolveAliasMatchConfidence,
   type AliasMatchConfidenceStrategy,
 } from '../../domain/query/service/alias-match-confidence.js';
@@ -330,6 +334,15 @@ export class SearchIndexAliasMatcher implements AliasMatcher {
     private readonly options: SearchIndexAliasMatcherOptions = {},
   ) {}
 
+  /**
+   * T-ELV2-03: the search-index path is the degraded/kill-switch alias substrate
+   * (no snapshot manifest, no PG overlay) — honestly versioned as 'search_index'
+   * with no snapshot id / content hash / known alias count.
+   */
+  getRegistryVersion(): AliasRegistryVersion {
+    return buildAliasRegistryVersion({ source: 'search_index', aliasCount: 0 });
+  }
+
   private resolveMatchesForQuery(
     normalizedQuery: string,
     hits: readonly SparseHit[],
@@ -485,6 +498,16 @@ export class CascadingAliasMatcher implements AliasMatcher {
     private readonly secondary: AliasMatcher,
   ) {}
 
+  /**
+   * T-ELV2-03: the cascade's registry identity is its PRIMARY (the snapshot
+   * overlay), the substrate that authoritatively serves recall. MANDATORY for
+   * the overlay deployment chain CachedAliasMatcher(Cascading(snapshot, index)) —
+   * without it the V2 registry stamp silently vanishes on overlay deployments.
+   */
+  getRegistryVersion(): AliasRegistryVersion | undefined {
+    return this.primary.getRegistryVersion?.();
+  }
+
   async findMatches(
     normalizedQuery: string,
     options?: AliasLookupOptions,
@@ -574,6 +597,10 @@ export class CascadingAliasMatcher implements AliasMatcher {
  */
 export class ExactOnlySecondaryAliasMatcher implements AliasMatcher {
   constructor(private readonly inner: AliasMatcher) {}
+
+  getRegistryVersion(): AliasRegistryVersion | undefined {
+    return this.inner.getRegistryVersion?.();
+  }
 
   findMatches(
     normalizedQuery: string,
