@@ -45,11 +45,6 @@ describe('isSimilarToEntityPrimitiveSearchRequest', () => {
     expect(isSimilarToEntityPrimitiveSearchRequest(req)).toBe(false);
   });
 
-  it('is false for the lookup_wine primitive route', () => {
-    const req: SearchRequest = { query: 'opus one', primitiveRoute: 'lookup_wine' };
-    expect(isSimilarToEntityPrimitiveSearchRequest(req)).toBe(false);
-  });
-
   it('is false for a plain (planner) request', () => {
     expect(isSimilarToEntityPrimitiveSearchRequest({ query: 'wines like opus one' })).toBe(false);
   });
@@ -136,7 +131,8 @@ describe('buildSimilarToEntityPrimitivePlan — structured residual constraints'
 
 describe('buildSimilarToEntityPrimitivePlan — guards & determinism', () => {
   it('throws when primitiveRoute is not similar_to_entity', () => {
-    const req: SearchRequest = { query: 'opus one', primitiveRoute: 'lookup_wine' };
+    // No primitiveRoute → not a similar_to_entity request → the builder rejects it.
+    const req: SearchRequest = { query: 'opus one' };
     expect(() => buildSimilarToEntityPrimitivePlan(req, 'opus one')).toThrow(/similar_to_entity/);
   });
 
