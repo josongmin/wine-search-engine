@@ -58,4 +58,12 @@ describe('V2-only lookup cutover — removed surfaces stay removed', () => {
     expect(loop).toContain('ports.lookupWine.execute');
     expect(loop).not.toContain("primitiveRoute: 'lookup_wine'");
   });
+
+  it('the lookup coverage runner uses the same PG-backed V2 authority substrate as the authority rail', () => {
+    const coverage = read('scripts/eval/run-lookup-v2-coverage-report.ts');
+    expect(coverage).toContain("import { getPgPool } from '../../src/infrastructure/db/pg-pool.js';");
+    expect(coverage).toContain('const pool = getPgPool();');
+    expect(coverage).toContain('const container = await createContainer(config, pool);');
+    expect(coverage).toContain('await pool.end();');
+  });
 });

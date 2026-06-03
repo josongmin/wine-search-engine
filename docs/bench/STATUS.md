@@ -14,6 +14,9 @@
 - `pnpm run eval:lookup-v2:shadow -- --output /tmp/lookup-v2-shadow-report.json`
   - lookup hotset smoke gate
   - explicit `lookupAuthorityMode='legacy_core'` baseline vs dedicated V2 비교이며, cutover 이후 public `/v1/lookup/wine` route parity proof와는 다르다
+- `pnpm run eval:lookup-v2:coverage -- --output /tmp/lookup-v2-coverage-report.json`
+  - lookup hot-entity coverage / curation signal
+  - authority/shadow와 동일하게 live PG pool을 주입한 authoritative substrate에서 실행해야 한다
 
 ## Non-current / fail-closed
 

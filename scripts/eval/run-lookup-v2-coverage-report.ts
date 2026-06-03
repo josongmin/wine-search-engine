@@ -10,7 +10,10 @@
  * This wires the coverage classification + curation-task cores into a runnable
  * production entrypoint (they were otherwise reachable only from unit tests —
  * CLAUDE.md rule 33). It is infra-gated: it builds the real container, so it
- * needs the runtime stack (PG / Vespa / embedding). Run it in a stack-up
+ * needs the runtime stack (PG / Vespa / embedding). Like the authority/shadow
+ * rails, it injects the live PG pool so alias overlay / calibration-backed
+ * lookup authority is active; otherwise the run silently degrades to the
+ * search-index-only substrate and understates coverage. Run it in a stack-up
  * environment / CI lane, not unit.
  *
  *   pnpm run eval:lookup-v2:coverage [-- --corpus <path> --output <path>]
@@ -21,6 +24,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { loadConfig } from '../../src/config/env.js';
 import { createContainer } from '../../src/config/container.js';
+import { getPgPool } from '../../src/infrastructure/db/pg-pool.js';
 import { LOOKUP_V2_DEFAULT_MAX_CANDIDATES } from '../../src/interface/http/constants.js';
 import {
   buildCoverageReport,
@@ -86,7 +90,8 @@ async function main(): Promise<void> {
   }
 
   const config = loadConfig();
-  const container = await createContainer(config);
+  const pool = getPgPool();
+  const container = await createContainer(config, pool);
 
   const inputRows: CoverageInputRow[] = [];
   for (const row of hotset) {
@@ -140,6 +145,7 @@ async function main(): Promise<void> {
 
   // Coverage is a curation signal, not a hard gate — always exit 0 (the operator
   // acts on the queued tasks). A degenerate (0-covered) run is visible in the report.
+  await pool.end();
   process.exit(0);
 }
 
