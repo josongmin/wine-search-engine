@@ -67,19 +67,12 @@ describe('HTTP route contract registry', () => {
         successStatusCodes: [200],
         errorStatusCodes: [400, 403, 408, 429, 500, 503],
       },
-      {
-        method: 'POST',
-        url: '/v1/lookup/wine',
-        operationId: 'lookup.wine',
-        hasBody: true,
-        hasParams: false,
-        responseStatusCodes: [200, 400, 403, 408, 429, 500, 503],
-        successStatusCodes: [200],
-        errorStatusCodes: [400, 403, 408, 429, 500, 503],
-      },
     ]));
 
+    // V2-only cutover: /v1/lookup/wine is removed; the sole public lookup
+    // surface is /v2/entity-lookup.
     expect(contracts).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ url: '/v1/lookup/wine' }),
       expect.objectContaining({ url: '/metrics/agent' }),
       expect.objectContaining({ url: '/metrics/retrieval-degradation' }),
       expect.objectContaining({ url: '/v1/claude-tools' }),

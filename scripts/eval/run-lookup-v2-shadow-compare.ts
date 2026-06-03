@@ -25,8 +25,6 @@ import { parseArgs } from 'node:util';
 import { loadConfig } from '../../src/config/env.js';
 import { createContainer } from '../../src/config/container.js';
 import { getPgPool } from '../../src/infrastructure/db/pg-pool.js';
-import type { SearchRequest } from '../../src/application/search/search-request.dto.js';
-import type { SearchResponseV1 } from '../../src/domain/response/model/search-response.js';
 import { LOOKUP_V2_DEFAULT_MAX_CANDIDATES } from '../../src/interface/http/constants.js';
 import {
   buildShadowReport,
@@ -76,16 +74,6 @@ function parseHotset(corpusPath: string): readonly HotsetRow[] {
 }
 
 /** Map a V1 lookup response onto the shared 4-state shadow outcome. */
-function v1Outcome(response: SearchResponseV1): ShadowSideOutcome {
-  const status = response.engineDecision.decisionStatus;
-  const top = response.results[0]?.entity;
-  if (status === 'resolved' && top !== undefined) {
-    return { status: 'resolved', topEntityId: String(top.entityId), topLabel: top.canonicalLabel };
-  }
-  // V1 has no redirect_discovery; ambiguous/failed pass through.
-  return { status: status === 'ambiguous' ? 'ambiguous' : 'failed' };
-}
-
 async function main(): Promise<void> {
   // `pnpm run X -- --output Y` forwards a literal `--` terminator; drop it so
   // the forwarded options still parse (parseArgs treats `--` as end-of-options).
@@ -116,19 +104,10 @@ async function main(): Promise<void> {
   for (const row of hotset) {
     const requestId = `elv2-shadow-${row.qid}`;
 
-    // V1 — legacy lookup path.
-    let v1: ShadowSideOutcome = { status: 'failed' };
-    try {
-      const v1Request: SearchRequest = { query: row.query, primitiveRoute: 'lookup_wine' };
-      const v1Response = await container.searchUseCase.execute(v1Request, requestId, {
-        lookupAuthorityMode: 'legacy_core',
-      });
-      if (v1Response.queryType === 'search') {
-        v1 = v1Outcome(v1Response);
-      }
-    } catch (err) {
-      console.error(`[elv2-shadow] V1 failed for ${row.qid}:`, (err as Error).message);
-    }
+    // V2-only cutover: the legacy `/v1` lookup seam was REMOVED. The V1 column is
+    // retained as a removed-marker for report-shape stability only; it is no
+    // longer executed (EntityLookupV2 is the sole lookup authority).
+    const v1: ShadowSideOutcome = { status: 'failed' };
 
     // V2 — dedicated entity-lookup path.
     let v2: ShadowSideOutcome = { status: 'failed' };

@@ -43,7 +43,6 @@ import { AutocompleteUseCase } from '../../../src/application/search/autocomplet
 import { HybridUseCase } from '../../../src/application/search/hybrid.usecase.js';
 import { EntityLookupV2UseCase } from '../../../src/application/search/entity-lookup-v2/entity-lookup-v2.usecase.js';
 import { MultiChannelRetrievalEngine } from '../../../src/application/search/entity-lookup-v2/multi-channel-retrieval-engine.js';
-import { LookupWineV2CompatibilityUseCase } from '../../../src/application/search/lookup-wine-v2-compatibility.usecase.js';
 import type { Container } from '../../../src/config/container.js';
 import type { SnapshotVersions } from '../../../src/application/search/search.usecase.js';
 import {
@@ -357,11 +356,6 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
     injectionJudge,
     judgeTimeoutMs,
   });
-  const lookupWineV2CompatibilityUseCase = new LookupWineV2CompatibilityUseCase({
-    entityLookupV2UseCase,
-    entityLookup: searchIndex,
-    snapshotVersions,
-  });
   const hybridUseCase = new HybridUseCase({
     queryPlanner,
     candidatePool,
@@ -394,7 +388,6 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
     interpretUseCase,
     resolveUseCase,
     entityLookupV2UseCase,
-    lookupWineV2CompatibilityUseCase,
     autocompleteUseCase,
     hybridUseCase,
     decomposedSearchUseCase,

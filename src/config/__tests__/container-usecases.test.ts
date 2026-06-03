@@ -19,6 +19,10 @@ describe('buildUseCaseContainerServices', () => {
     const core = {
       queryPlanner: { plan: vi.fn() },
       entityResolver: { resolve: vi.fn() },
+      // T-ELV2-03: buildUseCaseContainerServices reads the alias-registry version
+      // from the matcher; provide a minimal stub so the EntityLookupV2 wiring
+      // (now the sole lookup authority) constructs.
+      aliasMatcher: { getRegistryVersion: vi.fn().mockReturnValue(undefined) },
       entityLookup: { getDocument: vi.fn() },
       candidatePool: { generate: vi.fn() },
       browseRetriever: { retrieve: vi.fn() },

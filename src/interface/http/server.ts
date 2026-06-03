@@ -18,7 +18,6 @@ import { deepKeysToSnake } from './middleware/snake-case-hook.js';
 import {
   registerHybridSearchRoute,
   registerLexicalSearchRoute,
-  registerLookupWineRoute,
   registerSemanticSearchRoute,
 } from './routes/primitive-search.route.js';
 import { registerEntityLookupV2OpsRoute, registerEntityLookupV2Route } from './routes/entity-lookup-v2.route.js';
@@ -377,7 +376,8 @@ export async function createServer(
   registerHybridSearchRoute(app, deps);
   registerSemanticSearchRoute(app, deps);
   registerLexicalSearchRoute(app, deps);
-  registerLookupWineRoute(app, deps);
+  // BREAKING (V2-only cutover): POST /v1/lookup/wine is removed. The sole public
+  // lookup surface is POST /v2/entity-lookup (4-state V2-native contract).
   // T-ELV2-01: dedicated entity-lookup V2 surface. Always present in production
   // (the container always constructs the use case); guarded so lightweight
   // server-construction tests can omit it.

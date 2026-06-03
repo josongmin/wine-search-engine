@@ -21,7 +21,6 @@ import type {
   EntityLookupV2UseCasePort,
   HybridUseCasePort,
   InterpretUseCasePort,
-  LookupWineV2CompatibilityUseCasePort,
   ResolveUseCasePort,
 } from '../application/search/port/search-route-usecases.port.js';
 import type {
@@ -82,7 +81,6 @@ export interface Container {
   readonly interpretUseCase: InterpretUseCasePort;
   readonly resolveUseCase: ResolveUseCasePort;
   readonly entityLookupV2UseCase: EntityLookupV2UseCasePort;
-  readonly lookupWineV2CompatibilityUseCase: LookupWineV2CompatibilityUseCasePort;
   /** Operator curation plane (T-ELV2-07); present only when a PG pool is wired. */
   readonly curationUseCase?: CurationUseCase | undefined;
   readonly autocompleteUseCase: AutocompleteUseCasePort;
@@ -183,10 +181,7 @@ function buildWineSearchContainerServices(
   //      (see container-usecases.ts), so the structural cast at the seam is
   //      safe and audit-traceable.
   const searchUseCaseConcrete = features.searchUseCase as unknown as SearchUseCase;
-  const searchAdapter = new SearchUseCaseAdapter(
-    searchUseCaseConcrete,
-    features.lookupWineV2CompatibilityUseCase,
-  );
+  const searchAdapter = new SearchUseCaseAdapter(searchUseCaseConcrete);
 
   // ── 3) Component construction. Logger derives one child per component so
   //      structured logs are filterable by component name.

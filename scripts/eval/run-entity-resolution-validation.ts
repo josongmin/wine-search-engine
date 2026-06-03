@@ -35,7 +35,6 @@ import { loadConfig } from '../../src/config/env.js';
 import { createContainer } from '../../src/config/container.js';
 import { getPgPool } from '../../src/infrastructure/db/pg-pool.js';
 import { LOOKUP_V2_DEFAULT_MAX_CANDIDATES } from '../../src/interface/http/constants.js';
-import type { SearchRequest } from '../../src/application/search/search-request.dto.js';
 import {
   evaluatePerClassGate,
   type ClassTally,
@@ -163,22 +162,12 @@ async function main(): Promise<void> {
     const requestId = `er-val-${String(i)}`;
     const shouldResolve = (SHOULD_RESOLVE_CLASSES as readonly string[]).includes(c.queryClass);
 
-    let v1: SideOutcome = { status: 'failed' };
-    try {
-      const req: SearchRequest = { query: c.query, primitiveRoute: 'lookup_wine' };
-      const resp = await container.searchUseCase.execute(req, requestId, {
-        lookupAuthorityMode: 'legacy_core',
-      });
-      if (resp.queryType === 'search') {
-        const status = resp.engineDecision.decisionStatus;
-        const top = resp.results[0]?.entity;
-        v1 = status === 'resolved' && top !== undefined
-          ? { status: 'resolved', entityId: String(top.entityId) }
-          : { status: status === 'ambiguous' ? 'ambiguous' : 'failed' };
-      }
-    } catch {
-      v1 = { status: 'error' };
-    }
+    // V2-only cutover: the legacy `/v1` lookup seam (SearchUseCase
+    // primitiveRoute='lookup_wine' + lookupAuthorityMode='legacy_core') was
+    // REMOVED. EntityLookupV2 is the sole lookup authority, so this validation
+    // is now V2-absolute. The V1 column is retained as a removed-marker only so
+    // the report/gate shape stays stable; it is not executed.
+    const v1: SideOutcome = { status: 'failed' };
 
     let v2: SideOutcome = { status: 'failed' };
     try {

@@ -13,7 +13,6 @@ import type {
   EntityLookupV2UseCasePort,
   HybridUseCasePort,
   InterpretUseCasePort,
-  LookupWineV2CompatibilityUseCasePort,
   ResolveUseCasePort,
 } from '../application/search/port/search-route-usecases.port.js';
 import type { CurationUseCase } from '../application/curation/curation.usecase.js';
@@ -28,7 +27,6 @@ interface FeatureContainerServices {
   readonly interpretUseCase: InterpretUseCasePort;
   readonly resolveUseCase: ResolveUseCasePort;
   readonly entityLookupV2UseCase: EntityLookupV2UseCasePort;
-  readonly lookupWineV2CompatibilityUseCase: LookupWineV2CompatibilityUseCasePort;
   readonly curationUseCase?: CurationUseCase | undefined;
   readonly autocompleteUseCase: AutocompleteUseCasePort;
   readonly hybridUseCase: HybridUseCasePort;

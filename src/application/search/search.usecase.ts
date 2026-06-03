@@ -33,7 +33,6 @@ import type {
 } from './port/search-executor.port.js';
 import type {
   DecomposedSearchUseCasePort,
-  LookupWineV2CompatibilityUseCasePort,
 } from './port/search-route-usecases.port.js';
 import type { SearchRequest } from './search-request.dto.js';
 import type { CacheLookupRuntimeState } from './search-usecase-cache-lookup.js';
@@ -153,11 +152,6 @@ export interface SearchUseCaseDeps {
   readonly cacheService?: SearchResponseCachePort | undefined;
   readonly cacheLookupRuntimeState?: CacheLookupRuntimeState | undefined;
   readonly cacheLookupRuntimeStateProvider?: (() => CacheLookupRuntimeState) | undefined;
-  /**
-   * Compatibility-backed authority seam for direct `lookup_wine` primitive
-   * callers that still enter through SearchUseCase instead of the public route.
-   */
-  readonly lookupWineV2CompatibilityUseCase?: LookupWineV2CompatibilityUseCasePort | undefined;
   /** Epic 4: Per-query-class LambdaMART models for LTR reranking. Optional. */
   readonly ltrModels?: ReadonlyMap<string, QueryClassWeights> | undefined;
   /** Epic 14: Decomposed search for "A vs B" comparison queries. Optional. */
@@ -281,28 +275,6 @@ export class SearchUseCase {
     const stageTimer = options?.stageTimer;
     stageTimer?.start('search.total');
     throwIfAborted(options?.abortSignal, 'Search execution aborted');
-
-    // Post-cutover default: direct SearchUseCase `lookup_wine` callers inherit
-    // the same compatibility-backed authority as `/v1/lookup/wine`.
-    // Legacy-core resolver comparisons must opt in explicitly so benchmark/debug
-    // lanes cannot silently masquerade as the current public authority path.
-    if (
-      request.primitiveRoute === 'lookup_wine'
-      && this.deps.lookupWineV2CompatibilityUseCase !== undefined
-      && options?.lookupAuthorityMode !== 'legacy_core'
-    ) {
-      const response = await this.deps.lookupWineV2CompatibilityUseCase.execute(
-        {
-          query: request.query,
-          ...(request.limit !== undefined ? { limit: request.limit } : {}),
-          requestId,
-        },
-        options,
-      );
-      stageTimer?.end('search.total');
-      emitSearchStageTimingSnapshot(stageTimer);
-      return { response };
-    }
 
     pipelineDebug(
       {

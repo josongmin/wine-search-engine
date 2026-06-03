@@ -29,7 +29,9 @@ function toResolveRequest(
 
 /**
  * Retained internal resolve surface for resolver-only tooling/regression
- * coverage. The public exact-entity path is `POST /v1/lookup/wine`.
+ * coverage. The public exact-entity path is `POST /v2/entity-lookup`
+ * (EntityLookupV2; the legacy `/v1/lookup/wine` route was removed in the
+ * V2-only cutover).
  */
 export function registerResolveRoute(
   app: FastifyInstance,
@@ -40,7 +42,7 @@ export function registerResolveRoute(
     url: '/v1/entity/resolve',
     contract: ResolveRouteContract,
     handler: async (request, reply) => {
-      const parsed = parseContractBody(request, ResolveRouteContract) as ResolveRouteBody;
+      const parsed = parseContractBody(request, ResolveRouteContract);
       const resolveRequest = toResolveRequest(parsed, getRequestId(request));
       const abortSignal = abortSignalFromFastifyRequest(request, reply);
 

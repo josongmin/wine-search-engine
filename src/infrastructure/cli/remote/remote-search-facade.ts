@@ -10,8 +10,7 @@ import { RemoteHttpClient } from './remote-http-client.js';
 type PrimitivePath =
   | '/v1/search/hybrid'
   | '/v1/search/semantic'
-  | '/v1/search/lexical'
-  | '/v1/lookup/wine';
+  | '/v1/search/lexical';
 
 function toSearchBody(input: PrimitiveSearchInput): Record<string, unknown> {
   return {
@@ -56,9 +55,5 @@ export class RemoteSearchFacade implements SearchFacadePort {
 
   async lexical(input: PrimitiveSearchInput, options: CliFacadeRequestOptions): Promise<PrimitiveSearchResult> {
     return await this.execute('/v1/search/lexical', input, options);
-  }
-
-  async lookupWine(input: PrimitiveSearchInput, options: CliFacadeRequestOptions): Promise<PrimitiveSearchResult> {
-    return await this.execute('/v1/lookup/wine', input, options);
   }
 }

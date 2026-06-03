@@ -1,50 +1,61 @@
 /**
- * Post-cutover authority rail for `lookup_wine`.
+ * V2-only lookup cutover guard (replaces the former compatibility-seam rail).
  *
- * Why: once `/v1/lookup/wine`, local CLI `lookupWine`, and eval lanes diverged,
- * direct `SearchUseCase.execute({ primitiveRoute: 'lookup_wine' })` callers
- * silently masqueraded as the public authority surface. This rail pins the
- * intended split:
+ * The breaking V2-only cutover removed `POST /v1/lookup/wine`, the
+ * `LookupWineV2CompatibilityUseCase`, `lookupAuthorityMode`, and the
+ * `primitiveRoute: 'lookup_wine'` SearchUseCase arm. EntityLookupV2
+ * (`POST /v2/entity-lookup`) is now the sole lookup authority across HTTP, CLI,
+ * and the agent.
  *
- * - product edges (`/v1/lookup/wine`, local CLI `lookupWine`) must call the
- *   compatibility-backed V2 authority seam directly
- * - legacy-core comparisons stay confined to explicit benchmark/debug lanes and
- *   must opt in with `lookupAuthorityMode='legacy_core'`
+ * This rail fails closed if any of the removed surfaces reappear — a structural
+ * tripwire against silent re-introduction of the dual-authority split.
  *
- * Append-only: never delete.
+ * Append-only intent preserved: the guard still exists, now asserting the
+ * post-cutover invariant (absence) instead of the pre-cutover seam.
  */
 
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 function read(relativePath: string): string {
   return readFileSync(join(process.cwd(), relativePath), 'utf8');
 }
 
-describe('lookup_wine authority surface regression', () => {
-  it('public lookup route is fail-closed on the compatibility-backed authority seam', () => {
-    const src = read('src/interface/http/routes/primitive-search.route.ts');
-    expect(src).toContain('lookup route requires lookupWineV2CompatibilityUseCase wiring');
-    expect(src).toContain('deps.lookupWineV2CompatibilityUseCase.execute(');
-    expect(src).not.toContain('deps.searchUseCase.execute(toLookupWineRequest(parsed)');
+describe('V2-only lookup cutover — removed surfaces stay removed', () => {
+  it('the LookupWineV2Compatibility use case file is deleted', () => {
+    expect(existsSync(join(process.cwd(), 'src/application/search/lookup-wine-v2-compatibility.usecase.ts'))).toBe(false);
   });
 
-  it('local CLI lookupWine bypasses generic SearchUseCase execution', () => {
-    const src = read('src/infrastructure/cli/local/local-search-facade.ts');
-    expect(src).toContain("if (kind === 'lookupWine')");
-    expect(src).toContain('container.lookupWineV2CompatibilityUseCase.execute(');
-    expect(src).not.toContain("kind === 'lookupWine' && container.lookupWineV2CompatibilityUseCase !== undefined");
+  it('SearchUseCase no longer carries a lookup_wine arm or lookupAuthorityMode', () => {
+    const usecase = read('src/application/search/search.usecase.ts');
+    expect(usecase).not.toContain('lookupWineV2CompatibilityUseCase');
+    expect(usecase).not.toContain('lookupAuthorityMode');
+    const executorPort = read('src/application/search/port/search-executor.port.ts');
+    expect(executorPort).not.toContain('lookupAuthorityMode');
   });
 
-  it('legacy-core compare lanes opt in explicitly', () => {
-    const authorityEval = read('scripts/eval/run-entity-resolution-validation.ts');
-    const shadowEval = read('scripts/eval/run-lookup-v2-shadow-compare.ts');
-    const debugOne = read('scripts/eval/debug-one-lookup.ts');
+  it('SearchRequest.primitiveRoute no longer admits lookup_wine (similar_to_entity only)', () => {
+    const dto = read('src/application/search/search-request.dto.ts');
+    expect(dto).not.toContain("'lookup_wine'");
+    expect(dto).toContain("'similar_to_entity'");
+  });
 
-    for (const src of [authorityEval, shadowEval, debugOne]) {
-      expect(src).toContain("primitiveRoute: 'lookup_wine'");
-      expect(src).toContain("lookupAuthorityMode: 'legacy_core'");
-    }
+  it('the public HTTP lookup surface is /v2/entity-lookup only (no /v1/lookup/wine route)', () => {
+    const catalog = read('src/interface/http/routes/http-route-contract-catalog.ts');
+    expect(catalog).not.toContain("'/v1/lookup/wine'");
+    expect(catalog).toContain("'/v2/entity-lookup'");
+  });
+
+  it('the CLI lookup command dispatches the dedicated V2 lookup facade', () => {
+    const cmd = read('src/application/cli/command/lookup/wine.command.ts');
+    expect(cmd).toContain('facades.lookup.lookupWine');
+    expect(cmd).not.toContain('facades.search.lookupWine');
+  });
+
+  it('the agent dispatches lookup_wine to the dedicated V2 lookup port', () => {
+    const loop = read('src/application/wine-search/wine-agent-loop.ts');
+    expect(loop).toContain('ports.lookupWine.execute');
+    expect(loop).not.toContain("primitiveRoute: 'lookup_wine'");
   });
 });

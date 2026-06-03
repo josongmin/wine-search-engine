@@ -25,9 +25,6 @@ import type { SearchUseCase } from '../../search/search.usecase.js';
 import type { SearchResponseV1 } from '../../../domain/response/model/search-response.js';
 import { DomainError } from '../../../domain/shared/error/domain-error.js';
 import type {
-  LookupWineV2CompatibilityUseCasePort,
-} from '../../search/port/search-route-usecases.port.js';
-import type {
   SearchUseCaseInput,
 } from '../execution-plan-schemas.js';
 import type {
@@ -47,7 +44,7 @@ function shouldBypassPlanner(
 function shouldBypassPublicQueryEntrySecurityForInternalPrimitive(
   input: SearchUseCaseInput,
 ): boolean {
-  return input.primitiveRoute === 'lookup_wine' || input.anchorEntityId !== undefined;
+  return input.anchorEntityId !== undefined;
 }
 
 /** Thrown when the underlying `SearchUseCase` returns a comparison response
@@ -65,7 +62,6 @@ export class UnexpectedSearchAdapterResponseError extends DomainError {
 export class SearchUseCaseAdapter implements SearchUseCasePort {
   constructor(
     private readonly useCase: SearchUseCase,
-    private readonly lookupWineV2CompatibilityUseCase?: LookupWineV2CompatibilityUseCasePort,
   ) {}
 
   async execute(
@@ -73,21 +69,6 @@ export class SearchUseCaseAdapter implements SearchUseCasePort {
     requestId: string,
     options?: { readonly abortSignal?: AbortSignal | undefined },
   ): Promise<SearchResponseV1> {
-    if (input.primitiveRoute === 'lookup_wine' && this.lookupWineV2CompatibilityUseCase !== undefined) {
-      return await this.lookupWineV2CompatibilityUseCase.execute(
-        {
-          query: input.query,
-          ...(input.limit !== undefined ? { limit: input.limit } : {}),
-          requestId,
-        },
-        {
-          requestId,
-          ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
-          executionPrincipal: AGENT_INTERNAL_TRUSTED_EXECUTION_PRINCIPAL,
-        },
-      );
-    }
-
     const request = mapSearchUseCaseInputToSearchRequest(input);
     const useCaseOptions: SearchExecutionOptions = {
       requestId,
@@ -116,14 +97,6 @@ export class SearchUseCaseAdapter implements SearchUseCasePort {
 export function mapSearchUseCaseInputToSearchRequest(
   input: SearchUseCaseInput,
 ): SearchRequest {
-  if (input.primitiveRoute === 'lookup_wine') {
-    return {
-      query: input.query,
-      primitiveRoute: 'lookup_wine',
-      ...(input.limit !== undefined ? { limit: input.limit } : {}),
-    };
-  }
-
   // RFC-021 T-PSA-02: reference-similarity is path-authoritative. When the
   // dispatcher supplied a resolved anchor entity, emit the internal
   // `similar_to_entity` primitive route + anchor — NOT a callerInterpretation.

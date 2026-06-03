@@ -16,7 +16,6 @@ import { DecomposedSearchUseCase } from '../application/search/decomposed-search
 import { DecomposedSearchAdapter } from '../application/search/decomposed-search-adapter.js';
 import { DrinkingWindowUseCase } from '../application/drinking-window/drinking-window.usecase.js';
 import { BatchSearchUseCase } from '../application/search/batch-search.usecase.js';
-import { LookupWineV2CompatibilityUseCase } from '../application/search/lookup-wine-v2-compatibility.usecase.js';
 import { getQueryEntrySecurityMetricsCollector } from '../infrastructure/observability/query-entry-security-metrics.js';
 import type {
   DrinkingWindowUseCasePort,
@@ -29,7 +28,6 @@ import type {
   EntityLookupV2UseCasePort,
   HybridUseCasePort,
   InterpretUseCasePort,
-  LookupWineV2CompatibilityUseCasePort,
   ResolveUseCasePort,
 } from '../application/search/port/search-route-usecases.port.js';
 import type { CoreContainerServices } from './container-core.js';
@@ -40,7 +38,6 @@ export interface UseCaseContainerServices {
   readonly interpretUseCase: InterpretUseCasePort;
   readonly resolveUseCase: ResolveUseCasePort;
   readonly entityLookupV2UseCase: EntityLookupV2UseCasePort;
-  readonly lookupWineV2CompatibilityUseCase: LookupWineV2CompatibilityUseCasePort;
   /** Operator curation plane (T-ELV2-07); present only when a PG pool is wired. */
   readonly curationUseCase?: CurationUseCase | undefined;
   readonly autocompleteUseCase: AutocompleteUseCasePort;
@@ -117,12 +114,6 @@ export function buildUseCaseContainerServices(
     queryEntrySecurityObserver,
   });
 
-  const lookupWineV2CompatibilityUseCase = new LookupWineV2CompatibilityUseCase({
-    entityLookupV2UseCase,
-    entityLookup: core.entityLookup,
-    snapshotVersions: core.snapshotVersions,
-  });
-
   // T1.3b: Use DecomposedSearchAdapter to break the circular dependency.
   // SearchUseCase needs decomposedSearch; DecomposedSearchUseCase needs SearchUseCase.
   const decomposedRef: { impl?: DecomposedSearchUseCase } = {};
@@ -158,7 +149,6 @@ export function buildUseCaseContainerServices(
     cacheService: core.cacheService,
     cacheLookupRuntimeState: core.cacheLookupRuntimeState,
     cacheLookupRuntimeStateProvider: core.cacheLookupRuntimeStateProvider,
-    lookupWineV2CompatibilityUseCase,
     ltrModels: core.ltrModels,
     decomposedSearch: decomposedAdapter,
     ...(extensions.multiQueryGenerator !== undefined
@@ -194,7 +184,6 @@ export function buildUseCaseContainerServices(
   return {
     searchUseCase,
     entityLookupV2UseCase,
-    lookupWineV2CompatibilityUseCase,
     ...(curationUseCase !== undefined ? { curationUseCase } : {}),
     interpretUseCase: new InterpretUseCase({
       queryPlanner: core.queryPlanner,

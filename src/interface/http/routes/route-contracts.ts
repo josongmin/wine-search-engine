@@ -311,24 +311,3 @@ export const LexicalSearchRouteContract = defineRouteContract({
   capabilities: PRIMITIVE_SEARCH_CAPABILITIES,
   responses: PRIMITIVE_SEARCH_RESPONSES,
 });
-
-export const LookupWineRouteContract = defineRouteContract({
-  operationId: 'lookup.wine',
-  body: LookupWineRequestSchema,
-  capabilities: [
-    'security',
-    'planner',
-    'SAT',
-    'cache',
-    'resolver_only',
-  ],
-  responses: {
-    [HTTP_STATUS_OK]: SearchResponseSchema,
-    [HTTP_STATUS_BAD_REQUEST]: ErrorResponseSchema,
-    [HTTP_STATUS_FORBIDDEN]: ErrorResponseSchema,
-    [HTTP_STATUS_REQUEST_TIMEOUT]: ErrorResponseSchema,
-    [HTTP_STATUS_TOO_MANY_REQUESTS]: ErrorResponseSchema,
-    [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
-    [HTTP_STATUS_SERVICE_UNAVAILABLE]: ErrorResponseSchema,
-  },
-});
