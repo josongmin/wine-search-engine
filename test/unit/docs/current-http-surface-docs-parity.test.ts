@@ -74,10 +74,13 @@ describe('current HTTP surface docs parity', () => {
   });
 
   it('current runbooks point entity lookup and deploy examples at canonical paths', () => {
-    expect(abbreviationRunbook).toContain('/v1/lookup/wine');
+    // V2-only cutover: entity lookup is now POST /v2/entity-lookup.
+    expect(abbreviationRunbook).toContain('/v2/entity-lookup');
+    expect(abbreviationRunbook).not.toContain('/v1/lookup/wine');
     expect(abbreviationRunbook).not.toContain('/v1/search/lookup');
 
-    expect(calibrationRunbook).toContain('/v1/lookup/wine');
+    expect(calibrationRunbook).toContain('/v2/entity-lookup');
+    expect(calibrationRunbook).not.toContain('/v1/lookup/wine');
     expect(calibrationRunbook).not.toContain('/v1/search/lookup');
 
     expect(deployRunbook).toContain('https://asommguide.shop:9011/v1/search/hybrid');
@@ -88,7 +91,8 @@ describe('current HTTP surface docs parity', () => {
     expect(agenticOverview).toContain('`POST /v1/search/hybrid`');
     expect(agenticOverview).toContain('`POST /v1/search/semantic`');
     expect(agenticOverview).toContain('`POST /v1/search/lexical`');
-    expect(agenticOverview).toContain('`POST /v1/lookup/wine`');
+    expect(agenticOverview).toContain('`POST /v2/entity-lookup`');
+    expect(agenticOverview).not.toContain('`POST /v1/lookup/wine`');
     expect(agenticOverview).toContain('`POST /v1/agent`');
     expect(agenticOverview).not.toContain('| `POST /v1/search` |');
     expect(agenticOverview).not.toContain('| `POST /v1/search/interpret` |');

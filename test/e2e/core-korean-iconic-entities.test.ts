@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { closeTestServer, createTestServer, type TestServer } from './helpers/test-server.js';
-import { parseSearchResponse, postJson } from './helpers/http-transport.js';
+import { postJson } from './helpers/http-transport.js';
 import {
   CORE_KOREAN_ICON_QUERY_CASES,
   loadCoreKoreanIconFixtureBundle,
@@ -25,15 +25,15 @@ afterAll(async () => {
 
 describe('Core Korean Iconic Entities', () => {
   it.each(CORE_KOREAN_ICON_QUERY_CASES)(
-    'resolves $query to $expectedEntityId through POST /v1/lookup/wine',
+    'resolves $query to $expectedEntityId through POST /v2/entity-lookup',
     async ({ query, expectedEntityId }) => {
-      const response = await postJson(server.app, '/v1/lookup/wine', { query });
+      const response = await postJson(server.app, '/v2/entity-lookup', { query });
 
       expect(response.statusCode).toBe(200);
 
-      const body = parseSearchResponse(response);
-      expect(body.engine_decision.decision_status).toBe('resolved');
-      expect(body.results[0]?.entity.entity_id).toBe(expectedEntityId);
+      const body = response.json() as { status: string; top_candidate?: { entity_id?: string } | null };
+      expect(body.status).toBe('resolved');
+      expect(body.top_candidate?.entity_id).toBe(expectedEntityId);
     },
   );
 });

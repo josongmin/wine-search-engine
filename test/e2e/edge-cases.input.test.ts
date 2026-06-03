@@ -90,82 +90,64 @@ describe('Unicode and special character queries', () => {
     expect(res.statusCode).toBe(200);
   });
 
+  // V2-only cutover: lookup resolves via POST /v2/entity-lookup (4-state
+  // contract). The wire body is the snake_case EntityLookupV2 result
+  // { status, top_candidate, candidates, clarification_options, ... }.
   it.each(['오푸스ㅇ', '오퍼스ㅇ'])(
-    'incomplete Hangul IME entity prefix resolves through POST /v1/lookup/wine (%s)',
+    'incomplete Hangul IME entity prefix resolves through POST /v2/entity-lookup (%s)',
     async (query) => {
-      const res = await post('/v1/lookup/wine', { query });
+      const res = await post('/v2/entity-lookup', { query });
       expect(res.statusCode).toBe(200);
-
-      const body = parseSearchResponse(res);
-      expect(body.engine_decision.decision_status).toBe('resolved');
-      expect(body.results[0]?.entity.entity_id).toBe('opus-one-2018');
+      const body = res.json() as { status: string; top_candidate?: { entity_id?: string } | null };
+      expect(body.status).toBe('resolved');
+      expect(body.top_candidate?.entity_id).toBe('opus-one-2018');
     },
   );
 
   it.each(['오푸스', '오퍼스'])(
-    'completed entity prefix resolves through POST /v1/lookup/wine (%s)',
+    'completed entity prefix resolves through POST /v2/entity-lookup (%s)',
     async (query) => {
-      const res = await post('/v1/lookup/wine', { query });
+      const res = await post('/v2/entity-lookup', { query });
       expect(res.statusCode).toBe(200);
-
-      const body = parseSearchResponse(res);
-      expect(body.engine_decision.decision_status).toBe('resolved');
-      expect(body.results[0]?.entity.entity_id).toBe('opus-one-2018');
+      const body = res.json() as { status: string; top_candidate?: { entity_id?: string } | null };
+      expect(body.status).toBe('resolved');
+      expect(body.top_candidate?.entity_id).toBe('opus-one-2018');
     },
   );
 
-  it('latin partial prefix opu resolves through POST /v1/lookup/wine', async () => {
-    const res = await post('/v1/lookup/wine', { query: 'opu' });
+  it('latin partial prefix opu resolves through POST /v2/entity-lookup', async () => {
+    const res = await post('/v2/entity-lookup', { query: 'opu' });
     expect(res.statusCode).toBe(200);
-
-    const body = parseSearchResponse(res);
-    expect(['resolved', 'ambiguous']).toContain(body.engine_decision.decision_status);
-    expect(body.results[0]?.entity.entity_id).toBe('opus-one-2018');
+    const body = res.json() as {
+      status: string;
+      top_candidate?: { entity_id?: string } | null;
+      candidates?: ReadonlyArray<{ entity_id?: string }>;
+    };
+    expect(['resolved', 'ambiguous']).toContain(body.status);
+    const ids = [body.top_candidate?.entity_id, ...(body.candidates ?? []).map((c) => c.entity_id)];
+    expect(ids).toContain('opus-one-2018');
   });
 
-  it('latin short-form Opus does not leak uppercase acronym alias collisions through POST /v1/lookup/wine', async () => {
-    const res = await post('/v1/lookup/wine', {
-      query: 'opus',
-    });
+  it('latin short-form Opus does not leak uppercase acronym alias collisions through POST /v2/entity-lookup', async () => {
+    const res = await post('/v2/entity-lookup', { query: 'opus' });
     expect(res.statusCode).toBe(200);
-
-    const body = parseSearchResponse(res);
-    expect(body.results.length).toBeGreaterThan(0);
-    expect(body.results[0]?.entity.canonical_label.toLowerCase()).toContain('opus');
-    expect(
-      body.results.every((result) => {
-        const surfaces = [
-          result.entity.canonical_label,
-          result.entity.producer,
-        ].filter((value): value is string => typeof value === 'string');
-        return surfaces.some((value) => value.toLowerCase().includes('opus'));
-      }),
-    ).toBe(true);
-    expect(body.results.some((result) => result.match.matched_alias === 'PS')).toBe(false);
-    expect(
-      body.clarification?.candidates.some((candidate) => /paolo scavino|poderi sanguineto|psagot|podere sapaio/i.test(candidate.label))
-        ?? false,
-    ).toBe(false);
-    expect(
-      body.clarification?.candidates.every((candidate) => candidate.label.toLowerCase().includes('opus'))
-        ?? true,
-    ).toBe(true);
-    if (body.clarification?.structured_payload?.options !== undefined && body.clarification.candidates.length > 0) {
-      expect(body.clarification.structured_payload.options).toEqual(
-        body.clarification.candidates.map((candidate) => candidate.label),
-      );
-    }
-    if (body.clarification?.structured_payload?.option_entities !== undefined && body.clarification.candidates.length > 0) {
-      expect(body.clarification.structured_payload.option_entities).toEqual(
-        body.clarification.candidates.map((candidate) => ({
-          entity_id: candidate.entity_id,
-          label: candidate.label,
-          ...(candidate.distinguishing_features.length > 0
-            ? { distinguishing_features: candidate.distinguishing_features }
-            : {}),
-        })),
-      );
-    }
+    const body = res.json() as {
+      status: string;
+      candidates?: ReadonlyArray<{ canonical_label?: string }>;
+      clarification_options?: ReadonlyArray<{ label?: string }>;
+    };
+    const candidateLabels = (body.candidates ?? [])
+      .map((c) => c.canonical_label)
+      .filter((l): l is string => typeof l === 'string');
+    const clarificationLabels = (body.clarification_options ?? [])
+      .map((o) => o.label)
+      .filter((l): l is string => typeof l === 'string');
+    const allLabels = [...candidateLabels, ...clarificationLabels];
+    // Every surfaced candidate/clarification is genuinely an "opus" wine — no
+    // uppercase-acronym (PS / Paolo Scavino / Psagot / …) collision leaks in.
+    expect(allLabels.length).toBeGreaterThan(0);
+    expect(allLabels.every((label) => label.toLowerCase().includes('opus'))).toBe(true);
+    expect(allLabels.some((label) => /paolo scavino|poderi sanguineto|psagot|podere sapaio/i.test(label))).toBe(false);
   });
 
   it('combining diacritical characters (NFD form) — NFC normalization handles it', async () => {
@@ -234,20 +216,7 @@ describe('Input validation edge cases', () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it('lookup rejects mixed camelCase and snake_case query budget aliases together', async () => {
-    const res = await post('/v1/lookup/wine', {
-      query: 'Opus One',
-      queryBudget: {
-        maxLatencyMs: 1000,
-        maxCandidates: 10,
-        rerankLimit: 5,
-      },
-      query_budget: {
-        max_latency_ms: 1000,
-        max_candidates: 10,
-        rerank_limit: 5,
-      },
-    });
-    expect(res.statusCode).toBe(400);
-  });
+  // (Removed: the mixed camelCase/snake_case query-budget-alias rejection test
+  // targeted the V1 /v1/lookup/wine request schema, which no longer exists after
+  // the V2-only cutover. The /v2/entity-lookup body has no queryBudget aliases.)
 });

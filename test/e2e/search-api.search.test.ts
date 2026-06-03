@@ -51,7 +51,7 @@ function postLexical(body: Record<string, unknown>) {
 }
 
 function postLookup(body: Record<string, unknown>) {
-  return postJson(server.app, '/v1/lookup/wine', body);
+  return postJson(server.app, '/v2/entity-lookup', body);
 }
 
 function makeLookupBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -69,13 +69,13 @@ function makeHybridBody(overrides: Record<string, unknown> = {}): Record<string,
 }
 
 describe('primitive search/lookup — happy paths', () => {
-  it('lookup query returns 200 with SearchResponseV1 shape', async () => {
+  it('lookup query returns 200 with the V2 4-state entity-lookup shape', async () => {
     const res = await postLookup(makeLookupBody());
 
     expect(res.statusCode).toBe(200);
-    const body = parseSearchResponse(res);
-    expect(getSearchRequestId(body)).toBeTruthy();
-    expect(getSearchDecision(body).decision_status).toMatch(/^(resolved|ambiguous|failed)$/);
+    const body = res.json() as { status?: string; meta?: { request_id?: string } };
+    expect(body.meta?.request_id).toBeTruthy();
+    expect(body.status).toMatch(/^(resolved|ambiguous|failed|redirect_discovery)$/);
   });
 
   it('hybrid query returns 200', async () => {

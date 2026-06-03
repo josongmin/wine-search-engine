@@ -219,7 +219,7 @@ SELECT entity_id, surface_form, normalized_value, alias_type, source
 
 ```sh
 # Should resolve to chateau-margaux-2015 with high confidence.
-curl -sX POST http://localhost:3001/v1/lookup/wine \
+curl -sX POST http://localhost:3001/v2/entity-lookup \
   -H 'Content-Type: application/json' \
   -d '{"query":"CM 15"}' | jq .
 ```

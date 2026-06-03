@@ -2,6 +2,7 @@ import type {
   SearchRequest,
   SearchResponse,
   EntityResolveResponse,
+  EntitySummary,
   WineSearchRequest,
   WineSearchResponse,
   AgentSessionCreateRequest,
@@ -144,20 +145,41 @@ export const api = {
   },
 
   async lookupEntity(body: SearchRequest, opts: ApiCallOptions = {}) {
-    const response = await request<SearchResponse>('/v1/lookup/wine', {
+    // V2-only cutover: lookup resolves via POST /v2/entity-lookup (the legacy
+    // /v1/lookup/wine route was removed). The wire body is the snake_case
+    // EntityLookupV2 4-state result.
+    interface LookupV2Candidate {
+      entity_id: string;
+      canonical_label: string;
+      entity_type?: string;
+      calibrated_score?: number;
+    }
+    interface LookupV2Response {
+      status: 'resolved' | 'ambiguous' | 'failed' | 'redirect_discovery';
+      top_candidate: LookupV2Candidate | null;
+      candidates: readonly LookupV2Candidate[];
+    }
+    const response = await request<LookupV2Response>('/v2/entity-lookup', {
       method: 'POST',
-      body: JSON.stringify(body),
+      body: JSON.stringify({ query: body.query }),
       externalSignal: opts.signal,
     });
-    if (response.query_type === 'comparison' || response.results.length === 0) {
+    if (response.status !== 'resolved' || response.top_candidate === null) {
       throw new ApiError(404, 'ENTITY_NOT_FOUND', 'No lookup candidate matched the requested wine');
     }
 
-    const [top, ...rest] = response.results;
+    const top = response.top_candidate;
+    const toSummary = (c: LookupV2Candidate): EntitySummary => ({
+      entity_id: c.entity_id as EntitySummary['entity_id'],
+      canonical_label: c.canonical_label,
+      type: c.entity_type ?? 'wine',
+    });
     return {
-      entity: top.entity,
-      confidence: top.relevance_score,
-      alternatives: rest.map((candidate) => candidate.entity),
+      entity: toSummary(top),
+      confidence: top.calibrated_score ?? 1,
+      alternatives: response.candidates
+        .filter((c) => c.entity_id !== top.entity_id)
+        .map(toSummary),
     } satisfies EntityResolveResponse;
   },
 

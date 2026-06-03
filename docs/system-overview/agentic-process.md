@@ -38,7 +38,7 @@ HTTP 계약은 `src/interface/http/routes/http-route-contract-catalog.ts`에 등
 | `POST /v1/search/hybrid` | `search.hybrid` | canonical hybrid 검색. 캐시, 보안, 플래너, SAT 게이트 전부 활성 |
 | `POST /v1/search/semantic` | `search.semantic` | dense-only retrieval 강제 |
 | `POST /v1/search/lexical` | `search.lexical` | sparse/BM25-only retrieval 강제 |
-| `POST /v1/lookup/wine` | `lookup.wine` | 단일 와인 엔터티 해소 전용 |
+| `POST /v2/entity-lookup` | `entity.lookup.v2` | 단일 와인 엔터티 해소 전용 |
 | `POST /v1/agent` | `agent.run` | caller-managed single-shot agent 실행 |
 | `POST /v1/agent/sessions` | `agent.session.create` | 서버 보관형 agent 세션 생성 |
 | `POST /v1/agent/sessions/:sessionId/turns` | `agent.session.turn` | 서버 보관형 대화 turn 추가 |
