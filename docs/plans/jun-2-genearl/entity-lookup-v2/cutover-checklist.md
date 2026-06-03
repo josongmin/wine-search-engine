@@ -21,6 +21,15 @@
   fingerprint `bd8abea5871dcede17272c3cc0bd1dcebcf93ea658d2d4b2ab930e5ba4f26cae`):
   `V1 46.5%, wrong=0, miss=115` vs `V2 100.0%, wrong=0, miss=0`
 - **verdict: PASS (cutover-eligible)**
+- **post-cutover latency truth** (`run-lookup-v2-latency-korean-famous.ts`, 65 rows):
+  `bootstrap_ms=2298.600`, `first_query_ms=4021.383`, `warm_p95_ms=1830.716`
+  → **PASS**
+- **coverage truth** (`run-lookup-v2-coverage-report.ts`, Korean-famous 65 rows):
+  `hot_entities=11/46 (23.9%)`, `non_entity=15/19`, `curation_tasks=35`
+  → **data-plane gap remains**
+- cutover eligibility PASS는 이제 correctness + latency까지 포함한다.
+  남은 residue는 authority seam이 아니라 Korean-famous alias/data-plane
+  coverage와 live canary closeout이다.
 - blocker rows closed:
   - `Viña Espectro Maipo Valley Carmenere` →
     recall-only `fuzzy_alias` head no longer self-certifies resolve
@@ -56,6 +65,8 @@
 | shadow-compare 메트릭 (pure) | `scripts/eval/lookup-v2-shadow-metrics.ts` | ✅ unit-tested |
 | live shadow runner (V1+V2 실행) | `scripts/eval/run-lookup-v2-shadow-compare.ts` | ✅ 구현·실행됨 |
 | shadow compare report | `/tmp/lookup-v2-shadow-2026-06-03-post-cutover.json` | ✅ **SMOKE PASS (post-cutover), NOT cutover authority**: `rows=15`, `V2 correct=10`, `wrongPositive=0`, `concept_redirect_acc=1.000`, gate PASS. **주의**: 현재 shadow lane의 `V1`은 public `/v1/lookup/wine` route가 아니라 explicit `lookupAuthorityMode='legacy_core'` baseline이다. 즉 이 lane은 post-cutover에는 public route parity proof가 아니라 legacy-core smoke다. |
+| latency full-corpus report | `/tmp/lookup-v2-latency-korean-famous-sotaplus-v5.json` | ✅ **LATENCY PASS**: `bootstrap_ms=2298.600`, `first_query_ms=4021.383`, `warm_p95_ms=1830.716`. |
+| Korean-famous coverage report | `/tmp/lookup-v2-coverage-korean-famous-sotaplus-v5.json` | ⬜ **COVERAGE GAP**: `hot_entities=11/46 (23.9%)`, `non_entity=15/19`, `curation_tasks=35`. owner seam is alias/data-plane curation, not serving/runtime latency. |
 | product-edge purge rail | `test/regression/lookup-wine-authority-surface.regression.test.ts` | ✅ public `/v1/lookup/wine` + local CLI `lookupWine` are locked to the compatibility-backed V2 seam; legacy-core compare lanes must opt in explicitly |
 | operator smoke | `/v2/entity-lookup/ops/inspect` + web `/ops/*` | ✅ (T-07 trusted plane) |
 | live canary replay | — | ⬜ (정상 stack 미러 트래픽 필요) |

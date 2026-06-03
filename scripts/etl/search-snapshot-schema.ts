@@ -64,6 +64,10 @@ export interface SearchSnapshotManifest {
     readonly vespaFeedNdjson: string;
     readonly entitiesNdjson: string;
     readonly aliasesNdjson: string;
+    readonly lookupAliasRuntimeJson: string;
+    readonly lookupResolverProjectionJson: string;
+    readonly lookupEntityProjectionJson: string;
+    readonly lookupAmbiguityRuntimeJson: string;
     readonly ambiguityRegistryNdjson: string;
     readonly nlMappingsJson: string;
     readonly metadataJson: string;
@@ -73,6 +77,10 @@ export interface SearchSnapshotManifest {
     readonly vespaFeed: number;
     readonly entities: number;
     readonly aliases: number;
+    readonly lookupAliasRuntimeAliases: number;
+    readonly lookupResolverProjectionDocuments: number;
+    readonly lookupEntityProjectionDocuments: number;
+    readonly lookupAmbiguityRuntimeEntries: number;
     readonly ambiguityRegistry: number;
     readonly nlMappings: number;
   };
@@ -81,6 +89,10 @@ export interface SearchSnapshotManifest {
     readonly vespaFeed: string;
     readonly entities: string;
     readonly aliases: string;
+    readonly lookupAliasRuntime: string;
+    readonly lookupResolverProjection: string;
+    readonly lookupEntityProjection: string;
+    readonly lookupAmbiguityRuntime: string;
     readonly ambiguityRegistry: string;
     readonly nlMappings: string;
   };
@@ -93,6 +105,10 @@ export interface SearchSnapshotArtifactHashes {
   readonly vespaFeed: string;
   readonly entities: string;
   readonly aliases: string;
+  readonly lookupAliasRuntime: string;
+  readonly lookupResolverProjection: string;
+  readonly lookupEntityProjection: string;
+  readonly lookupAmbiguityRuntime: string;
   readonly ambiguityRegistry: string;
   readonly nlMappings: string;
 }
@@ -104,10 +120,18 @@ export interface SearchSnapshotRuntimeState {
   readonly publishedAt: string;
   readonly manifestPath: string;
   readonly nlMappingsRuntimePath: string;
+  readonly lookupAliasRuntimePath: string;
+  readonly lookupResolverProjectionPath: string;
+  readonly lookupEntityProjectionPath: string;
+  readonly lookupAmbiguityRuntimePath: string;
   readonly quality: SearchSnapshotQualitySummary;
   readonly counts: {
     readonly entities: number;
     readonly aliases: number;
+    readonly lookupAliasRuntimeAliases: number;
+    readonly lookupResolverProjectionDocuments: number;
+    readonly lookupEntityProjectionDocuments: number;
+    readonly lookupAmbiguityRuntimeEntries: number;
     readonly ambiguityRegistry: number;
     readonly nlMappings: number;
     readonly activeLtrModels: number;
@@ -115,6 +139,10 @@ export interface SearchSnapshotRuntimeState {
   readonly hashes: {
     readonly entities: string;
     readonly aliases: string;
+    readonly lookupAliasRuntime: string;
+    readonly lookupResolverProjection: string;
+    readonly lookupEntityProjection: string;
+    readonly lookupAmbiguityRuntime: string;
     readonly ambiguityRegistry: string;
     readonly nlMappings: string;
     readonly activeLtrModels: string;
@@ -166,6 +194,10 @@ export const SearchSnapshotManifestSchema = z.object({
     vespaFeedNdjson: z.string().min(1),
     entitiesNdjson: z.string().min(1),
     aliasesNdjson: z.string().min(1),
+    lookupAliasRuntimeJson: z.string().min(1),
+    lookupResolverProjectionJson: z.string().min(1),
+    lookupEntityProjectionJson: z.string().min(1),
+    lookupAmbiguityRuntimeJson: z.string().min(1),
     ambiguityRegistryNdjson: z.string().min(1),
     nlMappingsJson: z.string().min(1),
     metadataJson: z.string().min(1),
@@ -175,6 +207,10 @@ export const SearchSnapshotManifestSchema = z.object({
     vespaFeed: z.number().int().nonnegative(),
     entities: z.number().int().nonnegative(),
     aliases: z.number().int().nonnegative(),
+    lookupAliasRuntimeAliases: z.number().int().nonnegative(),
+    lookupResolverProjectionDocuments: z.number().int().nonnegative(),
+    lookupEntityProjectionDocuments: z.number().int().nonnegative(),
+    lookupAmbiguityRuntimeEntries: z.number().int().nonnegative(),
     ambiguityRegistry: z.number().int().nonnegative(),
     nlMappings: z.number().int().nonnegative(),
   }).strict(),
@@ -183,6 +219,10 @@ export const SearchSnapshotManifestSchema = z.object({
     vespaFeed: z.string().min(1),
     entities: z.string().min(1),
     aliases: z.string().min(1),
+    lookupAliasRuntime: z.string().min(1),
+    lookupResolverProjection: z.string().min(1),
+    lookupEntityProjection: z.string().min(1),
+    lookupAmbiguityRuntime: z.string().min(1),
     ambiguityRegistry: z.string().min(1),
     nlMappings: z.string().min(1),
   }).strict(),
@@ -203,6 +243,10 @@ export const SearchSnapshotRuntimeStateSchema = z.object({
   publishedAt: z.string().min(1),
   manifestPath: z.string().min(1),
   nlMappingsRuntimePath: z.string().min(1),
+  lookupAliasRuntimePath: z.string().min(1),
+  lookupResolverProjectionPath: z.string().min(1),
+  lookupEntityProjectionPath: z.string().min(1),
+  lookupAmbiguityRuntimePath: z.string().min(1),
   quality: z.object({
     status: z.enum(['canonical', 'degraded']),
     blockers: z.array(z.string().min(1)),
@@ -213,6 +257,10 @@ export const SearchSnapshotRuntimeStateSchema = z.object({
   counts: z.object({
     entities: z.number().int().nonnegative(),
     aliases: z.number().int().nonnegative(),
+    lookupAliasRuntimeAliases: z.number().int().nonnegative(),
+    lookupResolverProjectionDocuments: z.number().int().nonnegative(),
+    lookupEntityProjectionDocuments: z.number().int().nonnegative(),
+    lookupAmbiguityRuntimeEntries: z.number().int().nonnegative(),
     ambiguityRegistry: z.number().int().nonnegative(),
     nlMappings: z.number().int().nonnegative(),
     activeLtrModels: z.number().int().nonnegative(),
@@ -220,6 +268,10 @@ export const SearchSnapshotRuntimeStateSchema = z.object({
   hashes: z.object({
     entities: z.string().min(1),
     aliases: z.string().min(1),
+    lookupAliasRuntime: z.string().min(1),
+    lookupResolverProjection: z.string().min(1),
+    lookupEntityProjection: z.string().min(1),
+    lookupAmbiguityRuntime: z.string().min(1),
     ambiguityRegistry: z.string().min(1),
     nlMappings: z.string().min(1),
     activeLtrModels: z.string().min(1),
@@ -255,14 +307,57 @@ export function parseManifest(raw: string, _filePath: string): SearchSnapshotMan
     ? asRecord['hashes'] as Record<string, unknown>
     : undefined;
 
+  if (
+    asRecord !== undefined
+    && (asRecord['schemaVersion'] === 'search_snapshot.v1' || asRecord['schemaVersion'] === 'search_snapshot.v2')
+  ) {
+    asRecord['schemaVersion'] = SEARCH_SNAPSHOT_SCHEMA_VERSION;
+  }
+
   if (artifacts !== undefined && artifacts['vespaFeedNdjson'] === undefined) {
     artifacts['vespaFeedNdjson'] = path.join(path.dirname(_filePath), 'vespa-feed.ndjson');
+  }
+  if (artifacts !== undefined && artifacts['lookupAliasRuntimeJson'] === undefined) {
+    artifacts['lookupAliasRuntimeJson'] = path.join(path.dirname(_filePath), 'lookup-alias-runtime.json');
+  }
+  if (artifacts !== undefined && artifacts['lookupResolverProjectionJson'] === undefined) {
+    artifacts['lookupResolverProjectionJson'] = path.join(path.dirname(_filePath), 'lookup-resolver-projection.json');
+  }
+  if (artifacts !== undefined && artifacts['lookupEntityProjectionJson'] === undefined) {
+    artifacts['lookupEntityProjectionJson'] = path.join(path.dirname(_filePath), 'lookup-entity-projection.json');
+  }
+  if (artifacts !== undefined && artifacts['lookupAmbiguityRuntimeJson'] === undefined) {
+    artifacts['lookupAmbiguityRuntimeJson'] = path.join(path.dirname(_filePath), 'lookup-ambiguity-runtime.json');
   }
   if (counts !== undefined && counts['vespaFeed'] === undefined) {
     counts['vespaFeed'] = counts['documents'];
   }
+  if (counts !== undefined && counts['lookupAliasRuntimeAliases'] === undefined) {
+    counts['lookupAliasRuntimeAliases'] = counts['aliases'];
+  }
+  if (counts !== undefined && counts['lookupResolverProjectionDocuments'] === undefined) {
+    counts['lookupResolverProjectionDocuments'] = counts['entities'];
+  }
+  if (counts !== undefined && counts['lookupEntityProjectionDocuments'] === undefined) {
+    counts['lookupEntityProjectionDocuments'] = counts['entities'];
+  }
+  if (counts !== undefined && counts['lookupAmbiguityRuntimeEntries'] === undefined) {
+    counts['lookupAmbiguityRuntimeEntries'] = counts['ambiguityRegistry'];
+  }
   if (hashes !== undefined && hashes['vespaFeed'] === undefined) {
     hashes['vespaFeed'] = hashes['documents'];
+  }
+  if (hashes !== undefined && hashes['lookupAliasRuntime'] === undefined) {
+    hashes['lookupAliasRuntime'] = hashes['aliases'];
+  }
+  if (hashes !== undefined && hashes['lookupResolverProjection'] === undefined) {
+    hashes['lookupResolverProjection'] = hashes['entities'];
+  }
+  if (hashes !== undefined && hashes['lookupEntityProjection'] === undefined) {
+    hashes['lookupEntityProjection'] = hashes['entities'];
+  }
+  if (hashes !== undefined && hashes['lookupAmbiguityRuntime'] === undefined) {
+    hashes['lookupAmbiguityRuntime'] = hashes['ambiguityRegistry'];
   }
   return SearchSnapshotManifestSchema.parse(parsed);
 }
@@ -280,6 +375,10 @@ export function buildSearchSnapshotContentHash(hashes: SearchSnapshotArtifactHas
     documents: hashes.documents,
     entities: hashes.entities,
     aliases: hashes.aliases,
+    lookupAliasRuntime: hashes.lookupAliasRuntime,
+    lookupResolverProjection: hashes.lookupResolverProjection,
+    lookupEntityProjection: hashes.lookupEntityProjection,
+    lookupAmbiguityRuntime: hashes.lookupAmbiguityRuntime,
     ambiguityRegistry: hashes.ambiguityRegistry,
     nlMappings: hashes.nlMappings,
   });

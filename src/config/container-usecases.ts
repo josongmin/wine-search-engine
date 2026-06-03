@@ -73,15 +73,21 @@ export function buildUseCaseContainerServices(
   // the admission gate + 4-state calibrated decision.
   const entityLookupV2UseCase = new EntityLookupV2UseCase({
     admissionGate: new ConceptAdmissionGate(),
-    queryPlanner: core.queryPlanner,
+    queryPlanner: core.lookupQueryPlanner,
     blocker: core.blocker,
     entityResolver: core.entityResolver,
     entityLookup: core.entityLookup,
+    ...(core.resolverProjectionLookup !== undefined
+      ? { resolverProjectionLookup: core.resolverProjectionLookup }
+      : {}),
     // T-ELV2-04: real independent timed multi-channel retrieval over the live
     // alias substrate (per-channel latency/score; replaces the latencyMs:0 reproj).
     candidateRetrieval: new MultiChannelRetrievalEngine({
       aliasMatcher: core.aliasMatcher,
       entityLookup: core.entityLookup,
+      ...(core.resolverProjectionLookup !== undefined
+        ? { resolverProjectionLookup: core.resolverProjectionLookup }
+        : {}),
       // T-ELV2-06 Half B: producer family graph recall channel (PG-backed,
       // snapshot-scoped). Wired when a pool exists; degrades to dormant when the
       // entity_family table is unpublished.
@@ -100,7 +106,7 @@ export function buildUseCaseContainerServices(
       : {}),
     // T-ELV2-06: persisted ambiguity substrate (registry-backed) enriches the
     // clarification contract with authoritative types + severity.
-    ambiguityDictionary: core.ambiguityDictionary,
+    ambiguityDictionary: core.lookupAmbiguityDictionary,
     // T-ELV2-03: dedicated alias-registry version identity read from the live
     // alias substrate (delegated through the CachedAliasMatcher chain), surfaced
     // on the V2 response meta. undefined when the matcher carries no version.
@@ -108,10 +114,6 @@ export function buildUseCaseContainerServices(
       ? { aliasRegistryVersion }
       : {}),
     querySanitizer: core.querySanitizer,
-    injectionJudge: core.injectionJudge,
-    judgeFailureMode: config.queryEntrySecurity.judgeFailureMode,
-    judgeTimeoutMs: config.queryEntrySecurity.judgeTimeoutMs,
-    queryEntrySecurityObserver,
   });
 
   // T1.3b: Use DecomposedSearchAdapter to break the circular dependency.

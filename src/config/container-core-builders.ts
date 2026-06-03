@@ -46,6 +46,7 @@ import { resolveActiveSnapshot } from '../infrastructure/db/active-snapshot-reso
 import { globalSilentSkipCounter } from '../domain/observability/silent-skip-counters.js';
 import { getRetrievalDegradationCollector } from '../infrastructure/observability/retrieval-degradation-metrics.js';
 import { LazyFuzzyMatcher } from '../infrastructure/adapter/lazy-fuzzy-matcher.js';
+import type { AmbiguityDictionary } from '../domain/query/port/ambiguity-dictionary.port.js';
 import type {
   BlockingUseCasePort,
   BrowseRetrieverPort,
@@ -82,6 +83,12 @@ export async function buildQueryPlanner(
   llmQueryInterpreterTimeoutMs?: number,
   phraseCache?: PhraseCachePort,
   searchSnapshotId?: string,
+  options: {
+    readonly ambiguityDictionary?: AmbiguityDictionary;
+    readonly forceRuleOnlyNlMapper?: boolean;
+    readonly disableTopologyPlanner?: boolean;
+    readonly disableAmbiguityIntentCompiler?: boolean;
+  } = {},
 ): Promise<Planner> {
   // ADR-018 Wave F3: reject incoherent feature flag combinations BEFORE
   // constructing any planner dependencies. A mis-configured container
@@ -140,7 +147,8 @@ export async function buildQueryPlanner(
       'LLM_QUERY_INTERPRETER=true but no ChatLlm was constructed — check OPENAI_API_KEY/OPENAI_API_KEYS, Codex ChatGPT login token, and chatLlm wiring',
     );
   }
-  const nlMapper = llmQueryInterpreter && chatLlm !== undefined
+  const useRuleOnlyNlMapper = options.forceRuleOnlyNlMapper === true;
+  const nlMapper = !useRuleOnlyNlMapper && llmQueryInterpreter && chatLlm !== undefined
     ? new LlmNLMapper(adapters.mappingTable, chatLlm, llmQueryInterpreterTimeoutMs, phraseCache, fuzzyMatcher)
     : new NLMapper(adapters.mappingTable);
 
@@ -155,16 +163,20 @@ export async function buildQueryPlanner(
   //     per-request by re-reading `CONSTRAINT_GRAPH_TOPOLOGY_LLM` on
   //     every `compile()` call.
   const topologyPlanner =
-    chatLlm !== undefined
+    options.disableTopologyPlanner === true
+      ? undefined
+      : chatLlm !== undefined
       ? new ConstraintTopologyPlanner(chatLlm)
       : undefined;
   const ambiguityIntentCompiler =
-    chatLlm !== undefined
+    options.disableAmbiguityIntentCompiler === true
+      ? undefined
+      : chatLlm !== undefined
       ? new AmbiguityIntentCompiler(chatLlm)
       : undefined;
 
   return new Planner(
-    adapters.ambiguityDict,
+    options.ambiguityDictionary ?? adapters.ambiguityDict,
     new AnchorExtractor(adapters.aliasMatcher),
     new ExpansionBuilder(),
     nlMapper,

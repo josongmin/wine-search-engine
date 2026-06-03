@@ -3,7 +3,11 @@ import type { ResolverCandidate } from '../../domain/resolver/model/resolved-can
 import type { MatchSignalSet } from '../../domain/resolver/model/match-signal-set.js';
 import type { CanonicalEntityId } from '../../domain/shared/types/index.js';
 import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
-import type { EntityDocumentLookupPort } from './port/search-pipeline-deps.port.js';
+import type {
+  EntityDocumentLookupPort,
+  LookupResolverProjection,
+  LookupResolverProjectionPort,
+} from './port/search-pipeline-deps.port.js';
 import { DomainError } from '../../domain/shared/error/domain-error.js';
 import type {
   EntityCandidateGeneratorInput,
@@ -18,6 +22,32 @@ import {
   isPhoneticLookupStrategy,
 } from '../../domain/query/service/lookup-strategy-taxonomy.js';
 import { buildResolverCandidateAttributeHints } from './search-usecase-entity-attribute-projection.js';
+
+type ResolverProjectionLike =
+  Pick<LookupResolverProjection, 'entityId' | 'entityType' | 'canonicalLabel' | 'aliasesIdentitySafe'>
+  & {
+    readonly identitySafeKeys?: readonly string[] | undefined;
+    readonly producer?: string | undefined;
+    readonly attributeHints?: Readonly<Record<string, unknown>> | undefined;
+    readonly sourceRecordRefs?: RetrievalDocument['sourceRecordRefs'];
+  };
+
+function adaptRetrievalDocumentToResolverProjection(
+  doc: RetrievalDocument,
+): ResolverProjectionLike {
+  const attributeHints = buildResolverCandidateAttributeHints(doc);
+  return {
+    entityId: doc.entityId,
+    entityType: doc.entityType,
+    canonicalLabel: doc.canonicalLabel,
+    aliasesIdentitySafe: doc.aliasesIdentitySafe,
+    ...(doc.producer !== undefined ? { producer: doc.producer } : {}),
+    ...(attributeHints !== undefined ? { attributeHints } : {}),
+    ...(doc.sourceRecordRefs !== undefined && doc.sourceRecordRefs.length > 0
+      ? { sourceRecordRefs: doc.sourceRecordRefs }
+      : {}),
+  };
+}
 
 const ZERO_SIGNALS: MatchSignalSet = {
   canonicalExactMatch: 0,
@@ -103,7 +133,7 @@ function removeAllOccurrences(value: string, needle: string): string {
 }
 
 function isProducerOnlyAliasForDistinctWine(
-  doc: RetrievalDocument,
+  doc: ResolverProjectionLike,
   identitySurface: string,
 ): boolean {
   if (doc.entityType !== 'wine' || typeof doc.producer !== 'string' || doc.producer.trim().length === 0) {
@@ -120,7 +150,14 @@ function isProducerOnlyAliasForDistinctWine(
   return removeAllOccurrences(canonicalKey, producerKey).length > 0;
 }
 
-function collectIdentitySafeKeys(doc: RetrievalDocument): ReadonlySet<string> {
+function collectIdentitySafeKeys(doc: ResolverProjectionLike): ReadonlySet<string> {
+  if (Array.isArray(doc.identitySafeKeys)) {
+    const precomputedKeys = doc.identitySafeKeys ?? [];
+    return new Set(
+      precomputedKeys.filter((key): key is string => typeof key === 'string' && key.length > 0),
+    );
+  }
+
   const keys = new Set<string>();
   const rawAliases = doc.aliasesIdentitySafe;
   // Only build identity surfaces when the document actually carries the alias
@@ -217,7 +254,7 @@ function anchorMatchesIdentitySafeProjection(
   rawQuery: string,
   normalizedQuery: string,
   anchor: AnchorCandidate,
-  doc: RetrievalDocument,
+  doc: ResolverProjectionLike,
 ): boolean | undefined {
   const identityKeys = collectIdentitySafeKeys(doc);
   if (identityKeys.size === 0) {
@@ -298,7 +335,7 @@ function buildSignals(
   rawQuery: string,
   normalizedQuery: string,
   anchor: AnchorCandidate,
-  doc: RetrievalDocument,
+  doc: ResolverProjectionLike,
 ): MatchSignalSet {
   const strategies = new Set(anchor.lookupStrategies ?? []);
   const phoneticOnly = isPhoneticOnlyStrategySet(strategies);
@@ -424,14 +461,15 @@ function describeEntityIds(ids: readonly CanonicalEntityId[]): string {
 export async function buildResolverCandidatesFromGenerator(
   input: EntityCandidateGeneratorInput,
   entityLookup: EntityDocumentLookupPort | undefined,
+  resolverProjectionLookup?: LookupResolverProjectionPort | undefined,
 ): Promise<readonly ResolverCandidate[]> {
   if (input.anchors.length === 0 && (input.blockerOnlyIds == null || input.blockerOnlyIds.length === 0)) {
     return [];
   }
-  if (entityLookup === undefined) {
+  if (entityLookup === undefined && resolverProjectionLookup === undefined) {
     throw new DomainError(
       'INTERNAL_INCONSISTENCY',
-      'Entity candidate generation requires entityLookup when anchors or blocker seeds are present.',
+      'Entity candidate generation requires entityLookup or resolverProjectionLookup when anchors or blocker seeds are present.',
     );
   }
 
@@ -447,8 +485,8 @@ export async function buildResolverCandidatesFromGenerator(
     allEntityIds.add(id);
   }
 
-  // Resolve documents: use preloaded cache first, then fetch missing IDs.
-  const docMap = new Map<CanonicalEntityId, RetrievalDocument>();
+  // Resolve projection documents: use preloaded cache first, then fetch missing IDs.
+  const docMap = new Map<CanonicalEntityId, ResolverProjectionLike>();
 
   // Populate from upstream prefetch cache
   if (input.preloadedDocs != null) {
@@ -456,7 +494,7 @@ export async function buildResolverCandidatesFromGenerator(
       // preloadedDocs keys are string-coerced EntityIds; match by stringified form
       for (const id of allEntityIds) {
         if (String(id) === key) {
-          docMap.set(id, doc);
+          docMap.set(id, adaptRetrievalDocumentToResolverProjection(doc));
         }
       }
     }
@@ -470,16 +508,23 @@ export async function buildResolverCandidatesFromGenerator(
   const missingIds = [...allEntityIds].filter((id) => !docMap.has(id));
   if (missingIds.length > 0) {
     try {
-      const docs = await entityLookup.getDocuments(missingIds);
-      for (const [id, doc] of docs) {
-        docMap.set(id, doc);
+      if (resolverProjectionLookup !== undefined) {
+        const docs = await resolverProjectionLookup.getResolverProjections(missingIds);
+        for (const [id, doc] of docs) {
+          docMap.set(id, doc);
+        }
+      } else if (entityLookup !== undefined) {
+        const docs = await entityLookup.getDocuments(missingIds);
+        for (const [id, doc] of docs) {
+          docMap.set(id, adaptRetrievalDocumentToResolverProjection(doc));
+        }
       }
     } catch (error: unknown) {
       // Failure taxonomy: batch_lookup_failed -- the entire batch fetch errored.
       const message = error instanceof Error ? error.message : String(error);
       throw new DomainError(
         'INTERNAL_INCONSISTENCY',
-        `batch_lookup_failed: getDocuments() threw for ${missingIds.length} ids | ${message}`,
+        `batch_lookup_failed: resolver projection lookup threw for ${missingIds.length} ids | ${message}`,
       );
     }
 
@@ -509,7 +554,7 @@ export async function buildResolverCandidatesFromGenerator(
       if (doc == null) {
         continue;
       }
-      const attributeHints = buildResolverCandidateAttributeHints(doc);
+      const attributeHints = doc.attributeHints;
       const key = String(entityId);
       const incomingAliasMatch = {
         aliasValue: anchor.surfaceForm,
@@ -568,7 +613,7 @@ export async function buildResolverCandidatesFromGenerator(
     if (doc == null) {
       continue;
     }
-    const attributeHints = buildResolverCandidateAttributeHints(doc);
+    const attributeHints = doc.attributeHints;
     candidatesById.set(key, {
       entityId,
       entityType: doc.entityType,

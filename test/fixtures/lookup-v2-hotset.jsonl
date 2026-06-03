@@ -1,6 +1,6 @@
 {"qid": "elv2-001", "query": "Opus One 2018", "expected_status": "resolved", "expected_entity_hint": "opus one 2018", "class": "exact_entity", "note": "exact canonical — must resolve"}
 {"qid": "elv2-002", "query": "오푸스원", "expected_status": "resolved", "expected_entity_hint": "opus one", "class": "transliteration", "note": "Korean transliteration of a hot entity"}
-{"qid": "elv2-003", "query": "opu one", "expected_status": "failed", "class": "noisy_typo", "note": "DoD #1 — must NOT wrong-resolve to Opus One"}
+{"qid": "elv2-003", "query": "opu one", "expected_status": "failed", "accepted_statuses": ["failed", "ambiguous"], "class": "noisy_typo", "note": "DoD #1 — must NOT wrong-resolve to Opus One"}
 {"qid": "elv2-004", "query": "까쇼", "expected_status": "redirect_discovery", "class": "concept_grape", "note": "DoD #3 — grape concept, must redirect not resolve"}
 {"qid": "elv2-005", "query": "Cabernet Sauvignon", "expected_status": "redirect_discovery", "class": "concept_grape", "note": "bare grape concept"}
 {"qid": "elv2-006", "query": "full bodied red", "expected_status": "redirect_discovery", "class": "concept_style", "note": "style facet concept"}
@@ -12,4 +12,15 @@
 {"qid": "elv2-012", "query": "a", "expected_status": "failed", "class": "under_specified", "note": "too short to be an entity reference"}
 {"qid": "elv2-013", "query": "wine", "expected_status": "redirect_discovery", "class": "generic", "note": "generic non-entity → discovery"}
 {"qid": "elv2-014", "query": "Caymus Cabernet Sauvignon", "expected_status": "resolved", "expected_entity_hint": "caymus", "class": "producer_grape", "note": "producer token must NOT be swept up as concept (false-positive guard)"}
-{"qid": "elv2-015", "query": "오퍼스원 2019", "expected_status": "ambiguous", "class": "multi_vintage_noisy", "note": "noisy + possible multi-vintage — ambiguous or failed acceptable, never wrong-resolve"}
+{"qid": "elv2-015", "query": "오퍼스원 2019", "expected_status": "ambiguous", "accepted_statuses": ["ambiguous", "failed"], "class": "multi_vintage_noisy", "note": "noisy + possible multi-vintage — ambiguous or failed acceptable, never wrong-resolve"}
+{"qid": "elv2-016", "query": "사시카이아", "expected_status": "resolved", "expected_entity_hint": "sassicaia", "class": "transliteration_hard", "note": "core Korean transliteration must resolve to Sassicaia"}
+{"qid": "elv2-017", "query": "사씨카이아", "expected_status": "resolved", "expected_entity_hint": "sassicaia", "class": "transliteration_hard", "note": "phonetic variant of Sassicaia must still resolve"}
+{"qid": "elv2-018", "query": "돔 페리뇽", "expected_status": "resolved", "expected_entity_hint": "dom perignon", "class": "transliteration_spacing", "note": "space-separated Korean transliteration of Dom Perignon"}
+{"qid": "elv2-019", "query": "돔페리농", "expected_status": "resolved", "expected_entity_hint": "dom perignon", "class": "transliteration_hard", "note": "phonetic misspelling must still land on Dom Perignon"}
+{"qid": "elv2-020", "query": "까베르네 소비뇽", "expected_status": "redirect_discovery", "class": "concept_grape_korean", "note": "Korean grape concept must redirect to discovery, not resolve"}
+{"qid": "elv2-021", "query": "바롤로", "expected_status": "ambiguous", "class": "appellation_entity_collision", "note": "appellation vs entity collision must stay ambiguous"}
+{"qid": "elv2-022", "query": "펜폴즈", "expected_status": "ambiguous", "class": "producer_entity_collision", "note": "broad producer surface must not auto-resolve to a single wine"}
+{"qid": "elv2-023", "query": "크리스탈", "expected_status": "ambiguous", "class": "common_noun_entity_collision", "note": "common noun vs iconic entity must stay ambiguous"}
+{"qid": "elv2-024", "query": "Cloudy Dreams Marlborough Sauvignon Blanc", "expected_status": "failed", "class": "adversarial_no_match", "note": "realistic invented wine must fail closed"}
+{"qid": "elv2-025", "query": "Chateau Latour 2099", "expected_status": "ambiguous", "accepted_statuses": ["ambiguous", "failed"], "class": "vintage_conflict_impossible", "note": "real label + impossible vintage must not wrong-resolve"}
+{"qid": "elv2-026", "query": "와인 추천", "expected_status": "redirect_discovery", "class": "generic_korean", "note": "generic Korean discovery intent must redirect, not resolve"}

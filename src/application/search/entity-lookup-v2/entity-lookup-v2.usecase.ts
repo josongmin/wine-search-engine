@@ -22,12 +22,11 @@
 
 import { ConstraintSAT } from '../../../domain/query/service/constraint-sat.js';
 import type { QuerySanitizer } from '../../../domain/security/service/query-sanitizer.js';
-import type { InjectionJudgePort } from '../../../domain/security/port/injection-judge.port.js';
-import type { QueryEntrySecurityObserver } from '../../../domain/security/port/security-observer.port.js';
 import type {
   BlockingUseCasePort,
   EntityDocumentLookupPort,
   EntityResolverPort,
+  LookupResolverProjectionPort,
   QueryPlannerPort,
 } from '../port/search-pipeline-deps.port.js';
 import type { CanonicalEntityId } from '../../../domain/shared/types/index.js';
@@ -62,13 +61,17 @@ import { LOOKUP_RETRIEVAL_CHANNELS } from '../../../domain/resolver/v2/lookup-v2
 import type { LookupRetrievalChannel } from '../../../domain/resolver/v2/lookup-v2-types.js';
 import { buildNormalizedQueryViews } from '../../../domain/query/service/query-normalizer.js';
 import { buildResolverCandidatesFromGenerator } from '../search-usecase-resolver-candidates.js';
-import { shouldSuppressBlockerSeedExpansion } from '../search-usecase-blocker-seed-policy.js';
+import {
+  hasDeterministicSingletonAliasWitness,
+  shouldSuppressBlockerSeedExpansion,
+  shouldSuppressBlockerSeedExpansionForKnownShortAmbiguity,
+} from '../search-usecase-blocker-seed-policy.js';
 import { buildPlannerContextFromSearchRequest } from '../search-usecase-planner-context.js';
-import { createSearchQuerySecurityGate } from '../search-usecase-security-gate.js';
 import { pipelineDebug, sanitizeQueryForDebug } from '../../../domain/observability/request-pipeline-debug.js';
 import { PipelineDebugStep } from '../../../domain/observability/pipeline-debug-steps.js';
 import { throwIfAborted } from '../../../domain/shared/cooperative-abort.js';
 import type { RequestExecutionContext } from '../../../domain/shared/request-execution-context.js';
+import { PolicyBlockedError } from '../../../domain/shared/error/policy-blocked.js';
 import type {
   EntityLookupV2Command,
   EntityLookupV2Result,
@@ -100,6 +103,7 @@ export interface EntityLookupV2UseCaseDeps {
   readonly queryPlanner: QueryPlannerPort;
   readonly entityResolver: EntityResolverPort;
   readonly entityLookup?: EntityDocumentLookupPort | undefined;
+  readonly resolverProjectionLookup?: LookupResolverProjectionPort | undefined;
   readonly blocker?: BlockingUseCasePort | undefined;
   /**
    * T-ELV2-04: independent timed multi-channel retrieval. When present, the
@@ -125,10 +129,6 @@ export interface EntityLookupV2UseCaseDeps {
   /** T-ELV2-03: dedicated alias-registry version identity, surfaced on meta. */
   readonly aliasRegistryVersion?: AliasRegistryVersion | undefined;
   readonly querySanitizer: QuerySanitizer;
-  readonly injectionJudge?: InjectionJudgePort | undefined;
-  readonly judgeFailureMode?: 'fail_open' | 'fail_closed' | undefined;
-  readonly judgeTimeoutMs?: number | undefined;
-  readonly queryEntrySecurityObserver?: QueryEntrySecurityObserver | undefined;
 }
 
 export class EntityLookupV2UseCase {
@@ -143,25 +143,31 @@ export class EntityLookupV2UseCase {
   ): Promise<EntityLookupV2Result> {
     throwIfAborted(options?.abortSignal, 'Entity lookup V2 aborted');
     const startedAt = performance.now();
+    options?.stageTimer?.start('lookup.total');
+    try {
 
-    pipelineDebug(
-      {
-        step: PipelineDebugStep.RESOLVE_USE_CASE_START,
-        query_preview: sanitizeQueryForDebug(command.query),
-        ...(command.requestId !== undefined ? { request_id: command.requestId } : {}),
-      },
-      'pipeline entity-lookup-v2',
-    );
+      pipelineDebug(
+        {
+          step: PipelineDebugStep.RESOLVE_USE_CASE_START,
+          query_preview: sanitizeQueryForDebug(command.query),
+          ...(command.requestId !== undefined ? { request_id: command.requestId } : {}),
+        },
+        'pipeline entity-lookup-v2',
+      );
 
-    // ── Stage 0: security gate (shared public entry guard) ──────────────────
-    const securityGate = createSearchQuerySecurityGate({
-      querySanitizer: this.deps.querySanitizer,
-      injectionJudge: this.deps.injectionJudge,
-      judgeFailureMode: this.deps.judgeFailureMode,
-      judgeTimeoutMs: this.deps.judgeTimeoutMs,
-      queryEntrySecurityObserver: this.deps.queryEntrySecurityObserver,
-    });
-    const effectiveQuery = await securityGate.getSafeQueryOrThrow(command.query);
+    // ── Stage 0: deterministic query sanitizer only. Lookup is a bounded
+    // public entity-resolution surface, not an LLM prompt surface, so it keeps
+    // Layer 1 static blocking but does NOT pay the Layer 2 LLM judge tax.
+    options?.stageTimer?.start('security_gate');
+    const sanitization = this.deps.querySanitizer.sanitize(command.query);
+    options?.stageTimer?.end('security_gate');
+    if (!sanitization.safe) {
+      throw new PolicyBlockedError(undefined, {
+        layer: 'LAYER_1_BLOCKED',
+        reason: sanitization.reason,
+      });
+    }
+    const effectiveQuery = sanitization.sanitizedQuery;
     throwIfAborted(options?.abortSignal, 'Entity lookup V2 aborted');
 
     // ── Stage 1: FRONT-DOOR admission — runs on a STANDALONE normalizer BEFORE
@@ -176,125 +182,154 @@ export class EntityLookupV2UseCase {
       ...(command.locale !== undefined ? { locale: command.locale } : {}),
     });
 
-    if (admission.decision !== 'admit') {
-      pipelineDebug(
-        {
-          step: PipelineDebugStep.RESOLVE_USE_CASE_START,
-          admission_reason: admission.reasonCode,
-        },
-        'pipeline entity-lookup-v2 admission stop (front-door, pre-planner)',
-      );
-      return this.buildNonAdmittedResult(command, frontDoorViews, admission, startedAt);
-    }
+      if (admission.decision !== 'admit') {
+        pipelineDebug(
+          {
+            step: PipelineDebugStep.RESOLVE_USE_CASE_START,
+            admission_reason: admission.reasonCode,
+          },
+          'pipeline entity-lookup-v2 admission stop (front-door, pre-planner)',
+        );
+        return this.buildNonAdmittedResult(command, frontDoorViews, admission, startedAt);
+      }
 
     // ── Stage 2: plan + normalized views (admitted queries only) ────────────
-    const plan = await this.deps.queryPlanner.plan(
-      effectiveQuery,
-      buildPlannerContextFromSearchRequest(
-        { query: effectiveQuery },
-        {
-          ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
-          ...(options?.debugRequest === true ? { debugRequest: true } : {}),
-        },
-      ),
-    );
+      options?.stageTimer?.start('planner.total');
+      const plan = await this.deps.queryPlanner.plan(
+        effectiveQuery,
+        buildPlannerContextFromSearchRequest(
+          { query: effectiveQuery },
+          {
+            ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
+            ...(options?.debugRequest === true ? { debugRequest: true } : {}),
+            ...(options?.stageTimer !== undefined ? { stageTimer: options.stageTimer } : {}),
+          },
+        ),
+      ).finally(() => {
+        options?.stageTimer?.end('planner.total');
+      });
     throwIfAborted(options?.abortSignal, 'Entity lookup V2 aborted');
 
-    const viewsView = buildNormalizedQueryViewsView(plan);
+      const viewsView = buildNormalizedQueryViewsView(plan);
+      const prefetchedPersistedAmbiguity = await this.prefetchKnownShortAmbiguity(plan, options);
+      const suppressBlockerSeedExpansion =
+        shouldSuppressBlockerSeedExpansion(plan.anchors)
+        || shouldSuppressBlockerSeedExpansionForKnownShortAmbiguity({
+          queryClass: plan.queryClass,
+          anchors: plan.anchors,
+          persistedAmbiguity: prefetchedPersistedAmbiguity,
+        });
 
     // ── Stage 3: candidate union (resolver-backed baseline; T-04 deepens) ───
-    const sat = this.constraintSAT.check(plan.constraints);
-    if (sat.contradicted) {
-      return this.finishResult({
-        command,
-        plan,
-        viewsView,
-        admission,
-        result: undefined,
-        forcedStatus: 'failed',
-        decisionReasonCode: 'hard_constraint_violation',
-        startedAt,
-      });
-    }
+      const sat = this.constraintSAT.check(plan.constraints);
+      if (sat.contradicted) {
+        return this.finishResult({
+          command,
+          plan,
+          viewsView,
+          admission,
+          result: undefined,
+          forcedStatus: 'failed',
+          decisionReasonCode: 'hard_constraint_violation',
+          startedAt,
+        });
+      }
 
     // T-ELV2-04: run the independent timed multi-channel retrieval engine (when
     // wired) for REAL per-channel coverage + provenance, alongside the resolver
     // which scores/calibrates. Channel failures are isolated inside the engine.
-    const retrieval = this.deps.candidateRetrieval !== undefined
-      ? await this.runRetrieval(this.deps.candidateRetrieval, plan, command, options)
-      : undefined;
+      const retrieval = this.deps.candidateRetrieval !== undefined
+        ? await this.runRetrieval(this.deps.candidateRetrieval, plan, command, options)
+        : undefined;
 
-    const result = await this.resolveCandidatePool(plan, retrieval, options);
-    throwIfAborted(options?.abortSignal, 'Entity lookup V2 aborted');
+      const result = await this.resolveCandidatePool(
+        plan,
+        retrieval,
+        suppressBlockerSeedExpansion,
+        options,
+      );
+      throwIfAborted(options?.abortSignal, 'Entity lookup V2 aborted');
 
     // Build the top candidate's resolve certificate. Exact-identity evidence
     // from anchors wins immediately; otherwise fall back to the retrieval
     // channel provenance so V2 can distinguish identity-grade, supportive-only,
     // and recall-only heads before trusting a calibrated resolve.
-    const top = result.candidates[0];
-    const topEvidenceGrade = top === undefined
-      ? 'none'
-      : anchorsHaveExactIdentityEvidence(top.entityId, plan.anchors)
-        ? 'identity_grade'
-        : classifyResolveEvidenceGrade(
-            retrieval?.candidates.find((candidate) => candidate.entityId === top.entityId)?.channelHits
-            ?? buildChannelHitsForEntity(top.entityId, top.rank, plan.anchors, top.blockerSeed === true),
-          );
+      const top = result.candidates[0];
+      const topEvidenceGrade = top === undefined
+        ? 'none'
+        : anchorsHaveExactIdentityEvidence(top.entityId, plan.anchors)
+          ? 'identity_grade'
+          : classifyResolveEvidenceGrade(
+              retrieval?.candidates.find((candidate) => candidate.entityId === top.entityId)?.channelHits
+              ?? buildChannelHitsForEntity(top.entityId, top.rank, plan.anchors, top.blockerSeed === true),
+            );
 
     // V2 calibrated-abstain authority — precision-first, downgrade-only over the
     // resolver's advisory status.
-    const calibrated = this.decider.decide(result, plan.queryClass, topEvidenceGrade);
+      const calibrated = this.decider.decide(result, plan.queryClass, topEvidenceGrade);
 
     // T-ELV2-05: combine with the learned reranker (when wired) — most
     // conservative status wins, so the model can only tighten, never relax the
     // audit-hardened calibrated gates.
-    let decision = calibrated;
-    if (this.deps.reranker !== undefined && result.candidates.length > 0) {
+      let decision = calibrated;
+      if (this.deps.reranker !== undefined && result.candidates.length > 0) {
       // Reranker-gated: populate the persisted ambiguity-cluster membership feature
       // ONLY when the learned reranker actually consumes it — zero PG/feature cost
       // in the default LTR-OFF build (the reranker is omitted there).
-      const clusterMembership = await this.buildClusterMembership(plan.normalizedQuery, options?.abortSignal);
-      const learned = await this.deps.reranker.decide({
-        queryClass: plan.queryClass,
-        scored: buildScoredCandidates(result, retrieval, clusterMembership),
-      });
-      decision = combineDecisions(calibrated, learned);
-    }
+        const clusterMembership = await this.buildClusterMembership(plan.normalizedQuery, options?.abortSignal);
+        const learned = await this.deps.reranker.decide({
+          queryClass: plan.queryClass,
+          scored: buildScoredCandidates(result, retrieval, clusterMembership),
+        });
+        decision = combineDecisions(calibrated, learned);
+      }
 
-    pipelineDebug(
-      {
-        step: PipelineDebugStep.RESOLVE_USE_CASE_DONE,
-        resolve_status: result.status,
-        decision_status: decision.status,
-        decision_reason: decision.reasonCode,
-        candidate_count: result.candidates.length,
-        has_top_entity: result.topEntity !== undefined,
-      },
-      'pipeline entity-lookup-v2',
-    );
+      pipelineDebug(
+        {
+          step: PipelineDebugStep.RESOLVE_USE_CASE_DONE,
+          resolve_status: result.status,
+          decision_status: decision.status,
+          decision_reason: decision.reasonCode,
+          candidate_count: result.candidates.length,
+          has_top_entity: result.topEntity !== undefined,
+        },
+        'pipeline entity-lookup-v2',
+      );
 
     // T-ELV2-06: enrich an ambiguous outcome with the PERSISTED ambiguity graph
     // (registry-backed) — authoritative types + severity override the in-process
     // label-graph classification. Degradation-safe (null on miss/unavailable).
-    let persistedAmbiguity: AmbiguityInfo | null = null;
-    if (decision.status === 'ambiguous' && this.deps.ambiguityDictionary !== undefined) {
-      persistedAmbiguity = await this.deps.ambiguityDictionary
-        .getAmbiguityInfo(plan.normalizedQuery, options?.abortSignal)
-        .catch(() => null);
-    }
+      let persistedAmbiguity = prefetchedPersistedAmbiguity;
+      if (
+        decision.status === 'ambiguous'
+        && persistedAmbiguity === null
+        && this.deps.ambiguityDictionary !== undefined
+      ) {
+        options?.stageTimer?.start('ambiguity_lookup');
+        persistedAmbiguity = await this.deps.ambiguityDictionary
+          .getAmbiguityInfo(plan.normalizedQuery, options?.abortSignal)
+          .catch(() => null)
+          .finally(() => {
+            options?.stageTimer?.end('ambiguity_lookup');
+          });
+      }
 
-    return this.finishResult({
-      command,
-      plan,
-      viewsView,
-      admission,
-      result,
-      decision,
-      ...(retrieval !== undefined ? { retrieval } : {}),
-      ...(persistedAmbiguity !== null ? { persistedAmbiguity } : {}),
-      decisionReasonCode: decision.reasonCode,
-      startedAt,
-    });
+      return this.finishResult({
+        command,
+        plan,
+        viewsView,
+        admission,
+        result,
+        decision,
+        ...(retrieval !== undefined ? { retrieval } : {}),
+        ...(persistedAmbiguity !== null ? { persistedAmbiguity } : {}),
+        decisionReasonCode: decision.reasonCode,
+        startedAt,
+        ...(options?.stageTimer !== undefined ? { stageTimer: options.stageTimer } : {}),
+      });
+    } finally {
+      options?.stageTimer?.end('lookup.total');
+    }
   }
 
   /**
@@ -326,16 +361,21 @@ export class EntityLookupV2UseCase {
     options?: RequestExecutionContext,
   ): Promise<LookupRetrievalResult | undefined> {
     try {
+      options?.stageTimer?.start('retrieval.total');
       return await engine.retrieve(
         {
           rawQuery: plan.rawQuery,
           views: plan.normalizedQueryViews ?? buildNormalizedQueryViews(plan.rawQuery),
           queryClass: plan.queryClass,
           maxCandidates: command.maxCandidates,
+          suppressFamilyGraphExpansion: hasDeterministicSingletonAliasWitness(plan.anchors),
           ...(command.locale !== undefined ? { locale: command.locale } : {}),
+          ...(options?.stageTimer !== undefined ? { stageTimer: options.stageTimer } : {}),
         },
         options?.abortSignal,
-      );
+      ).finally(() => {
+        options?.stageTimer?.end('retrieval.total');
+      });
     } catch {
       // Provenance is best-effort: fall back to the anchor re-projection.
       return undefined;
@@ -350,6 +390,7 @@ export class EntityLookupV2UseCase {
   private async resolveCandidatePool(
     plan: QueryPlanV1,
     retrieval: LookupRetrievalResult | undefined,
+    suppressBlockerSeedExpansion: boolean,
     options?: RequestExecutionContext,
   ): Promise<EntityResolveResult> {
     // Seed the resolver pool from EVERY recall source not already covered by an
@@ -360,8 +401,12 @@ export class EntityLookupV2UseCase {
     const anchorCovered = new Set(plan.anchors.flatMap((a) => a.candidateEntityIds.map(String)));
     const seeds = new Map<string, CanonicalEntityId>();
 
-    if (this.deps.blocker !== undefined && !shouldSuppressBlockerSeedExpansion(plan.anchors)) {
-      const allBlockerIds = await this.deps.blocker.block(plan.rawQuery, plan.normalizedQuery);
+    if (this.deps.blocker !== undefined && !suppressBlockerSeedExpansion) {
+      options?.stageTimer?.start('blocker');
+      const allBlockerIds = await this.deps.blocker.block(plan.rawQuery, plan.normalizedQuery)
+        .finally(() => {
+          options?.stageTimer?.end('blocker');
+        });
       for (const id of allBlockerIds) {
         if (!anchorCovered.has(String(id))) seeds.set(String(id), id);
       }
@@ -374,6 +419,7 @@ export class EntityLookupV2UseCase {
     }
     const blockerOnlyIds: readonly CanonicalEntityId[] = [...seeds.values()];
 
+    options?.stageTimer?.start('candidate_generation');
     const candidateEntities = await buildResolverCandidatesFromGenerator(
       {
         rawQuery: plan.rawQuery,
@@ -382,7 +428,10 @@ export class EntityLookupV2UseCase {
         ...(blockerOnlyIds.length > 0 ? { blockerOnlyIds } : {}),
       },
       this.deps.entityLookup,
-    );
+      this.deps.resolverProjectionLookup,
+    ).finally(() => {
+      options?.stageTimer?.end('candidate_generation');
+    });
 
     const resolverInput: ResolverInput = {
       rawQuery: plan.rawQuery,
@@ -399,7 +448,33 @@ export class EntityLookupV2UseCase {
     };
 
     throwIfAborted(options?.abortSignal, 'Entity lookup V2 aborted');
-    return this.deps.entityResolver.resolve(resolverInput);
+    options?.stageTimer?.start('resolver');
+    return this.deps.entityResolver.resolve(resolverInput)
+      .finally(() => {
+        options?.stageTimer?.end('resolver');
+      });
+  }
+
+  private async prefetchKnownShortAmbiguity(
+    plan: QueryPlanV1,
+    options?: RequestExecutionContext,
+  ): Promise<AmbiguityInfo | null> {
+    if (this.deps.ambiguityDictionary === undefined) {
+      return null;
+    }
+    if (hasDeterministicSingletonAliasWitness(plan.anchors)) {
+      return null;
+    }
+    if (plan.queryClass !== 'short_entity' && plan.queryClass !== 'ambiguous_short_form') {
+      return null;
+    }
+    options?.stageTimer?.start('ambiguity_lookup');
+    return this.deps.ambiguityDictionary
+      .getAmbiguityInfo(plan.normalizedQuery, options?.abortSignal)
+      .catch(() => null)
+      .finally(() => {
+        options?.stageTimer?.end('ambiguity_lookup');
+      });
   }
 
   /**
@@ -455,8 +530,9 @@ export class EntityLookupV2UseCase {
     forcedStatus?: 'failed' | 'redirect_discovery';
     decisionReasonCode: string;
     startedAt: number;
+    stageTimer?: RequestExecutionContext['stageTimer'];
   }): EntityLookupV2Result {
-    const { command, plan, viewsView, admission, result, decision, retrieval, persistedAmbiguity, forcedStatus, decisionReasonCode } = args;
+    const { command, plan, viewsView, admission, result, decision, retrieval, persistedAmbiguity, forcedStatus, decisionReasonCode, stageTimer } = args;
 
     // T-ELV2-04: when the independent timed retrieval engine ran, index its REAL
     // per-channel hits by entity so resolved candidates carry real provenance
@@ -531,13 +607,16 @@ export class EntityLookupV2UseCase {
     const topCandidate = status === 'resolved' ? (candidates[0] ?? null) : null;
     // T-ELV2-06: graph-backed clarification (kind + distinguishing features) for
     // ambiguous outcomes; ambiguity types/severity prefer the persisted graph.
-    const clarification = status === 'ambiguous'
-      ? buildClarification(
-          allCandidates
-            .slice(0, LOOKUP_V2_MAX_CLARIFICATION_OPTIONS)
-            .map((c) => ({ entityId: c.entityId, canonicalLabel: c.canonicalLabel })),
-        )
-      : undefined;
+    let clarification;
+    if (status === 'ambiguous') {
+      stageTimer?.start('clarification');
+      clarification = buildClarification(
+        allCandidates
+          .slice(0, LOOKUP_V2_MAX_CLARIFICATION_OPTIONS)
+          .map((c) => ({ entityId: c.entityId, canonicalLabel: c.canonicalLabel })),
+      );
+      stageTimer?.end('clarification');
+    }
     const clarificationOptions: readonly LookupV2ClarificationOptionView[] =
       clarification?.options.map((o) => ({
         entityId: o.entityId,

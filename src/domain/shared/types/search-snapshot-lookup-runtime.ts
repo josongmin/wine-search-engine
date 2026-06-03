@@ -1,0 +1,329 @@
+import { z } from 'zod';
+import { hashStableJson } from '../utils/stable-json.js';
+
+const LOOKUP_RUNTIME_ALIAS_TYPES = [
+  'canonical',
+  'translation',
+  'phonetic',
+  'misspelling',
+  'observed_query_alias',
+  'catalog_noise_alias',
+  'derived_initialism',
+  'abbreviation',
+] as const;
+
+type AliasType = (typeof LOOKUP_RUNTIME_ALIAS_TYPES)[number];
+
+interface LookupRuntimeSourceRecordRef {
+  readonly sourceSystem: string;
+  readonly sourceRecordId: string;
+}
+
+export const LOOKUP_ALIAS_RUNTIME_SCHEMA_VERSION = 'lookup_alias_runtime.v1' as const;
+export const LOOKUP_RESOLVER_PROJECTION_SCHEMA_VERSION = 'lookup_resolver_projection.v1' as const;
+export const LOOKUP_ENTITY_PROJECTION_SCHEMA_VERSION = 'lookup_entity_projection.v1' as const;
+export const LOOKUP_AMBIGUITY_RUNTIME_SCHEMA_VERSION = 'lookup_ambiguity_runtime.v1' as const;
+
+export interface LookupAliasRuntimeRow {
+  readonly aliasId: string;
+  readonly entityId: string;
+  readonly value: string;
+  readonly normalizedValue: string;
+  readonly sourceTrust: number;
+  readonly confidencePrior: number;
+  readonly aliasType?: AliasType | undefined;
+}
+
+export interface LookupAliasRuntimePrefixEntry {
+  readonly candidateTerm: string;
+  readonly aliasIndexes: readonly number[];
+}
+
+export interface LookupAliasRuntimeHangulCompletionEntry {
+  readonly aliasIndex: number;
+  readonly jamoKey: string;
+  readonly syllableBoundaryOffsets: readonly number[];
+}
+
+export interface LookupAliasRuntimeArtifact {
+  readonly schemaVersion: typeof LOOKUP_ALIAS_RUNTIME_SCHEMA_VERSION;
+  readonly snapshotId: string;
+  readonly generatedAt: string;
+  readonly aliasRegistryHash: string;
+  readonly aliases: readonly LookupAliasRuntimeRow[];
+  readonly surfaceForms: readonly string[];
+  readonly exactIndex: Readonly<Record<string, readonly number[]>>;
+  readonly compactIndex: Readonly<Record<string, readonly number[]>>;
+  readonly wholeTokenIndex: Readonly<Record<string, readonly number[]>>;
+  readonly phoneticIndex: Readonly<Record<string, readonly number[]>>;
+  readonly doubleMetaphoneIndex: Readonly<Record<string, readonly number[]>>;
+  readonly doubleMetaphoneKeysByAliasId: Readonly<Record<string, readonly string[]>>;
+  readonly prefixCatalog: readonly LookupAliasRuntimePrefixEntry[];
+  readonly hangulCompletionRecords: readonly LookupAliasRuntimeHangulCompletionEntry[];
+}
+
+export interface LookupEntityProjectionDocument {
+  readonly entityId: string;
+  readonly entityType: string;
+  readonly canonicalLabel: string;
+  readonly aliasesIdentitySafe: readonly string[];
+  readonly aliasesNoisyRecall: readonly string[];
+  readonly producer: string;
+  readonly region: string;
+  readonly grapes: readonly string[];
+  readonly searchTextKo: string;
+  readonly searchTextEn: string;
+  readonly semanticSummary: string;
+  readonly pairing: readonly string[];
+  readonly availability: boolean;
+  readonly popularityScore: number;
+  readonly [key: string]: unknown;
+}
+
+export interface LookupResolverProjectionDocument {
+  readonly entityId: string;
+  readonly entityType: string;
+  readonly canonicalLabel: string;
+  readonly aliasesIdentitySafe: readonly string[];
+  readonly identitySafeKeys: readonly string[];
+  readonly producer?: string | undefined;
+  readonly attributeHints?: Readonly<Record<string, string | number | readonly string[]>> | undefined;
+  readonly sourceRecordRefs?: readonly LookupRuntimeSourceRecordRef[] | undefined;
+}
+
+export interface LookupResolverProjectionArtifact {
+  readonly schemaVersion: typeof LOOKUP_RESOLVER_PROJECTION_SCHEMA_VERSION;
+  readonly snapshotId: string;
+  readonly generatedAt: string;
+  readonly documents: readonly LookupResolverProjectionDocument[];
+}
+
+export interface LookupEntityProjectionArtifact {
+  readonly schemaVersion: typeof LOOKUP_ENTITY_PROJECTION_SCHEMA_VERSION;
+  readonly snapshotId: string;
+  readonly generatedAt: string;
+  readonly documents: readonly LookupEntityProjectionDocument[];
+}
+
+export interface LookupAmbiguityRuntimeEntry {
+  readonly normalizedForm: string;
+  readonly types: readonly string[];
+  readonly severity: 'low' | 'medium' | 'high';
+  readonly entityIds?: readonly string[] | undefined;
+}
+
+export interface LookupAmbiguityRuntimeArtifact {
+  readonly schemaVersion: typeof LOOKUP_AMBIGUITY_RUNTIME_SCHEMA_VERSION;
+  readonly snapshotId: string;
+  readonly generatedAt: string;
+  readonly entries: Readonly<Record<string, LookupAmbiguityRuntimeEntry>>;
+}
+
+const NonNegativeIntArraySchema = z.array(z.number().int().nonnegative());
+const AliasIndexSchema = z.record(z.string().min(1), NonNegativeIntArraySchema);
+
+const LookupAliasRuntimeRowSchema = z.object({
+  aliasId: z.string().min(1),
+  entityId: z.string().min(1),
+  value: z.string().min(1),
+  normalizedValue: z.string().min(1),
+  sourceTrust: z.number().finite(),
+  confidencePrior: z.number().finite(),
+  aliasType: z.enum(LOOKUP_RUNTIME_ALIAS_TYPES).optional(),
+}).strict();
+
+const LookupAliasRuntimePrefixEntrySchema = z.object({
+  candidateTerm: z.string().min(1),
+  aliasIndexes: NonNegativeIntArraySchema,
+}).strict();
+
+const LookupAliasRuntimeHangulCompletionEntrySchema = z.object({
+  aliasIndex: z.number().int().nonnegative(),
+  jamoKey: z.string().min(1),
+  syllableBoundaryOffsets: NonNegativeIntArraySchema,
+}).strict();
+
+const LookupResolverProjectionHintValueSchema = z.union([
+  z.string(),
+  z.number().finite(),
+  z.array(z.string()),
+]);
+const LookupResolverProjectionHintsSchema = z.record(
+  z.string().min(1),
+  LookupResolverProjectionHintValueSchema,
+);
+const LookupRuntimeSourceRecordRefSchema = z.object({
+  sourceSystem: z.string().min(1),
+  sourceRecordId: z.string().min(1),
+}).strict();
+
+export const LookupAliasRuntimeArtifactSchema = z.object({
+  schemaVersion: z.literal(LOOKUP_ALIAS_RUNTIME_SCHEMA_VERSION),
+  snapshotId: z.string().min(1),
+  generatedAt: z.string().min(1),
+  aliasRegistryHash: z.string().min(1),
+  aliases: z.array(LookupAliasRuntimeRowSchema),
+  surfaceForms: z.array(z.string().min(1)),
+  exactIndex: AliasIndexSchema,
+  compactIndex: AliasIndexSchema,
+  wholeTokenIndex: AliasIndexSchema,
+  phoneticIndex: AliasIndexSchema,
+  doubleMetaphoneIndex: AliasIndexSchema,
+  doubleMetaphoneKeysByAliasId: z.record(z.string().min(1), z.array(z.string().min(1))),
+  prefixCatalog: z.array(LookupAliasRuntimePrefixEntrySchema),
+  hangulCompletionRecords: z.array(LookupAliasRuntimeHangulCompletionEntrySchema),
+}).strict();
+
+const LookupResolverProjectionDocumentSchema = z.object({
+  entityId: z.string().min(1),
+  entityType: z.string().min(1),
+  canonicalLabel: z.string().min(1),
+  aliasesIdentitySafe: z.array(z.string()),
+  identitySafeKeys: z.array(z.string().min(1)),
+  producer: z.string().optional(),
+  attributeHints: LookupResolverProjectionHintsSchema.optional(),
+  sourceRecordRefs: z.array(LookupRuntimeSourceRecordRefSchema).optional(),
+}).strict();
+
+const LookupEntityProjectionDocumentSchema = z.object({
+  entityId: z.string().min(1),
+  entityType: z.string().min(1),
+  canonicalLabel: z.string().min(1),
+  aliasesIdentitySafe: z.array(z.string()),
+  aliasesNoisyRecall: z.array(z.string()),
+  producer: z.string(),
+  region: z.string(),
+  grapes: z.array(z.string()),
+  searchTextKo: z.string(),
+  searchTextEn: z.string(),
+  semanticSummary: z.string(),
+  pairing: z.array(z.string()),
+  availability: z.boolean(),
+  popularityScore: z.number().finite(),
+}).passthrough();
+
+export const LookupResolverProjectionArtifactSchema = z.object({
+  schemaVersion: z.literal(LOOKUP_RESOLVER_PROJECTION_SCHEMA_VERSION),
+  snapshotId: z.string().min(1),
+  generatedAt: z.string().min(1),
+  documents: z.array(LookupResolverProjectionDocumentSchema),
+}).strict();
+
+export const LookupEntityProjectionArtifactSchema = z.object({
+  schemaVersion: z.literal(LOOKUP_ENTITY_PROJECTION_SCHEMA_VERSION),
+  snapshotId: z.string().min(1),
+  generatedAt: z.string().min(1),
+  documents: z.array(LookupEntityProjectionDocumentSchema),
+}).strict();
+
+const LookupAmbiguityRuntimeEntrySchema = z.object({
+  normalizedForm: z.string().min(1),
+  types: z.array(z.string().min(1)),
+  severity: z.enum(['low', 'medium', 'high']),
+  entityIds: z.array(z.string().min(1)).optional(),
+}).strict();
+
+export const LookupAmbiguityRuntimeArtifactSchema = z.object({
+  schemaVersion: z.literal(LOOKUP_AMBIGUITY_RUNTIME_SCHEMA_VERSION),
+  snapshotId: z.string().min(1),
+  generatedAt: z.string().min(1),
+  entries: z.record(z.string().min(1), LookupAmbiguityRuntimeEntrySchema),
+}).strict();
+
+export function parseLookupAliasRuntimeArtifact(
+  raw: string,
+  filePath: string,
+): LookupAliasRuntimeArtifact {
+  try {
+    return LookupAliasRuntimeArtifactSchema.parse(JSON.parse(raw));
+  } catch (error) {
+    throw new Error(
+      `Malformed lookup alias runtime artifact at ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+export function parseLookupEntityProjectionArtifact(
+  raw: string,
+  filePath: string,
+): LookupEntityProjectionArtifact {
+  try {
+    return LookupEntityProjectionArtifactSchema.parse(JSON.parse(raw));
+  } catch (error) {
+    throw new Error(
+      `Malformed lookup entity projection artifact at ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+export function parseLookupResolverProjectionArtifact(
+  raw: string,
+  filePath: string,
+): LookupResolverProjectionArtifact {
+  try {
+    return LookupResolverProjectionArtifactSchema.parse(JSON.parse(raw));
+  } catch (error) {
+    throw new Error(
+      `Malformed lookup resolver projection artifact at ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+export function parseLookupAmbiguityRuntimeArtifact(
+  raw: string,
+  filePath: string,
+): LookupAmbiguityRuntimeArtifact {
+  try {
+    return LookupAmbiguityRuntimeArtifactSchema.parse(JSON.parse(raw));
+  } catch (error) {
+    throw new Error(
+      `Malformed lookup ambiguity runtime artifact at ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+export function buildLookupAliasRuntimeArtifactHash(
+  artifact: LookupAliasRuntimeArtifact,
+): string {
+  return hashStableJson({
+    schemaVersion: artifact.schemaVersion,
+    aliasRegistryHash: artifact.aliasRegistryHash,
+    aliases: artifact.aliases,
+    surfaceForms: artifact.surfaceForms,
+    exactIndex: artifact.exactIndex,
+    compactIndex: artifact.compactIndex,
+    wholeTokenIndex: artifact.wholeTokenIndex,
+    phoneticIndex: artifact.phoneticIndex,
+    doubleMetaphoneIndex: artifact.doubleMetaphoneIndex,
+    doubleMetaphoneKeysByAliasId: artifact.doubleMetaphoneKeysByAliasId,
+    prefixCatalog: artifact.prefixCatalog,
+    hangulCompletionRecords: artifact.hangulCompletionRecords,
+  });
+}
+
+export function buildLookupEntityProjectionArtifactHash(
+  artifact: LookupEntityProjectionArtifact,
+): string {
+  return hashStableJson({
+    schemaVersion: artifact.schemaVersion,
+    documents: artifact.documents,
+  });
+}
+
+export function buildLookupResolverProjectionArtifactHash(
+  artifact: LookupResolverProjectionArtifact,
+): string {
+  return hashStableJson({
+    schemaVersion: artifact.schemaVersion,
+    documents: artifact.documents,
+  });
+}
+
+export function buildLookupAmbiguityRuntimeArtifactHash(
+  artifact: LookupAmbiguityRuntimeArtifact,
+): string {
+  return hashStableJson({
+    schemaVersion: artifact.schemaVersion,
+    entries: artifact.entries,
+  });
+}

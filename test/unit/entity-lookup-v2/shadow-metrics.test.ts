@@ -122,4 +122,22 @@ describe('buildShadowReport (T-ELV2-08 cutover gate)', () => {
     expect(report.v2.wrongPositive).toBe(1);
     expect(report.improvements).toBe(1);
   });
+
+  it('treats multiple accepted abstention statuses as correct for precision-first typo rows', () => {
+    const r: ShadowRow[] = [
+      {
+        qid: 'm1',
+        query: 'opu one',
+        expectedStatus: 'failed',
+        acceptedStatuses: ['failed', 'ambiguous'],
+        v1: { status: 'failed' },
+        v2: { status: 'ambiguous' },
+      },
+    ];
+    const report = buildShadowReport(r);
+    expect(report.v1.correct).toBe(1);
+    expect(report.v2.correct).toBe(1);
+    expect(report.v2.wrongPositive).toBe(0);
+    expect(report.gate.pass).toBe(true);
+  });
 });

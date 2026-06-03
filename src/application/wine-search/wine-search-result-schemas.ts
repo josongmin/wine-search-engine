@@ -259,7 +259,7 @@ const AgentTerminationReasonSchema = z.enum([
 
 const AnswerLayerSchema = z.enum(['primary', 'layer2', 'layer3', 'layer4']);
 
-const DegradedReasonSchema = z.enum([
+export const DegradedReasonSchema = z.enum([
   'malformed_llm_output',
   'timeout',
   'circuit_open',
@@ -273,6 +273,14 @@ const DegradedReasonSchema = z.enum([
   // the grounding union; one re-synth was attempted and still ungrounded, so
   // the runner degraded to the deterministic layer ladder.
   'ungrounded_claim',
+  // Wave 1 (Cluster F): DecisionEngine emitted NO_CORPUS_MATCH (high-confidence
+  // anchor but resolver returned 0 candidates) → deterministic corpusGapAdmission.
+  'no_corpus_match',
+  // LLM PROVIDER unavailable (auth / credit-exhausted / circuit-open / timeout):
+  // the synthesizer never ran, so the runner emitted the honest llmUnavailable
+  // message instead of fabricating a grounded one-line answer. MUST mirror
+  // `DegradedReason` in synthesis-schemas.ts (SSoT — rule 30).
+  'llm_unavailable',
 ]);
 
 const PlanKindSchema = z.enum([

@@ -184,6 +184,17 @@ describe('MultiChannelRetrievalEngine — family_graph channel', () => {
     expect(result.coverage.some((c) => c.channel === 'family_graph')).toBe(false);
   });
 
+  it('suppresses family_graph expansion for deterministic singleton alias witnesses', async () => {
+    const matcher = matcherReturning({
+      'opus one': [{ surfaceForm: 'Opus One', normalizedForm: 'opus one', entityIds: [opus], matchConfidence: 1, lookupStrategy: 'exact' }],
+    });
+    const familyGraph = familyGraphReturning({ 'opus-one-2018': [{ entityId: 'opus-one-2019', edgeWeight: 0.5 }] });
+    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, entityLookup, familyGraph });
+    const result = await engine.retrieve(input({ suppressFamilyGraphExpansion: true }));
+    expect(result.candidates.map((candidate) => String(candidate.entityId))).not.toContain('opus-one-2019');
+    expect(result.coverage.some((c) => c.channel === 'family_graph')).toBe(false);
+  });
+
   it('survives a family graph that throws (request not sunk; alias union stands)', async () => {
     const matcher = matcherReturning({
       'opus one': [{ surfaceForm: 'Opus One', normalizedForm: 'opus one', entityIds: [opus], matchConfidence: 0.97 }],

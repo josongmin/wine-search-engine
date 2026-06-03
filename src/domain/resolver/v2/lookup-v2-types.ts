@@ -22,6 +22,7 @@
 
 import type { CanonicalEntityId, QueryClass } from '../../shared/types/index.js';
 import type { NormalizedQueryViews } from '../../query/model/query-views.js';
+import type { StageTimer } from '../../shared/stage-timer.js';
 
 // ───────────────────────────────────────────────────────────────────────────
 // Public outcome contract
@@ -152,6 +153,8 @@ export interface LookupRetrievalInput {
   readonly queryClass: QueryClass;
   readonly maxCandidates: number;
   readonly locale?: string | undefined;
+  readonly suppressFamilyGraphExpansion?: boolean | undefined;
+  readonly stageTimer?: StageTimer | undefined;
 }
 
 /** Per-channel coverage rail (latency + hit counts) for observability. */

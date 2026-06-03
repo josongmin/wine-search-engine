@@ -326,6 +326,12 @@ export const WineSearchDegradedReasonSchema = z.enum([
   // (no-grounding path) and from `policy_blocked` (security / unsupported
   // intent) so dashboards can monitor catalogue coverage gaps.
   'no_corpus_match',
+  // LLM PROVIDER unavailable (auth / credit-exhausted / circuit-open /
+  // timeout) — the synthesizer never ran, so the runner emitted the honest
+  // `llmUnavailable` message instead of fabricating a grounded one-line
+  // answer. Distinct from `malformed_llm_output` (a working LLM that emitted
+  // bad output) and `unexpected_error` (unmodeled local failure).
+  'llm_unavailable',
 ]);
 
 /** Query intent classifier output. Matches `QueryIntentSchema` in

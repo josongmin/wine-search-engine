@@ -4,7 +4,7 @@ import { parseEnv } from '../env.js';
 import { getQueryEntrySecurityMetricsCollector } from '../../infrastructure/observability/query-entry-security-metrics.js';
 
 describe('buildUseCaseContainerServices', () => {
-  it('wires the shared query-entry security policy into all public query entry use cases', () => {
+  it('wires the shared query-entry security policy into LLM-bearing public entry use cases, but keeps lookup V2 sanitizer-only', () => {
     const config = parseEnv({
       NODE_ENV: 'test',
       INJECTION_JUDGE_FAIL_OPEN: 'true',
@@ -74,5 +74,12 @@ describe('buildUseCaseContainerServices', () => {
       judgeTimeoutMs: config.queryEntrySecurity.judgeTimeoutMs,
       queryEntrySecurityObserver,
     }));
+    expect((useCases.entityLookupV2UseCase as any).deps).toEqual(expect.objectContaining({
+      querySanitizer,
+    }));
+    expect((useCases.entityLookupV2UseCase as any).deps).not.toHaveProperty('injectionJudge');
+    expect((useCases.entityLookupV2UseCase as any).deps).not.toHaveProperty('judgeFailureMode');
+    expect((useCases.entityLookupV2UseCase as any).deps).not.toHaveProperty('judgeTimeoutMs');
+    expect((useCases.entityLookupV2UseCase as any).deps).not.toHaveProperty('queryEntrySecurityObserver');
   });
 });

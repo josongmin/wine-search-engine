@@ -37,6 +37,7 @@ interface HotsetRow {
   readonly qid: string;
   readonly query: string;
   readonly expected_status: ShadowStatus;
+  readonly accepted_statuses?: readonly ShadowStatus[] | undefined;
   readonly expected_entity_hint?: string;
   readonly class?: string;
 }
@@ -62,10 +63,16 @@ function parseHotset(corpusPath: string): readonly HotsetRow[] {
     const expected = obj['expected_status'];
     if (typeof qid !== 'string' || typeof query !== 'string' || typeof expected !== 'string') continue;
     if (!HOTSET_STATUSES.has(expected)) continue;
+    const acceptedStatuses = Array.isArray(obj['accepted_statuses'])
+      ? obj['accepted_statuses']
+          .filter((status): status is string => typeof status === 'string')
+          .filter((status): status is ShadowStatus => HOTSET_STATUSES.has(status))
+      : undefined;
     rows.push({
       qid,
       query,
       expected_status: expected as ShadowStatus,
+      ...(acceptedStatuses !== undefined && acceptedStatuses.length > 0 ? { accepted_statuses: acceptedStatuses } : {}),
       ...(typeof obj['expected_entity_hint'] === 'string' ? { expected_entity_hint: obj['expected_entity_hint'] } : {}),
       ...(typeof obj['class'] === 'string' ? { class: obj['class'] } : {}),
     });
@@ -98,7 +105,8 @@ async function main(): Promise<void> {
   // store, and alias substrate are active. createContainer(config) without a
   // pool silently degrades (blocker=0 / calibration untrusted) — that is what
   // understated the 2026-06-02 shadow run.
-  const container = await createContainer(config, getPgPool());
+  const pool = getPgPool();
+  const container = await createContainer(config, pool);
 
   const rows: ShadowRow[] = [];
   for (const row of hotset) {
@@ -126,7 +134,9 @@ async function main(): Promise<void> {
     rows.push({
       qid: row.qid,
       query: row.query,
+      ...(row.class !== undefined ? { queryClass: row.class } : {}),
       expectedStatus: row.expected_status,
+      ...(row.accepted_statuses !== undefined ? { acceptedStatuses: row.accepted_statuses } : {}),
       ...(row.expected_entity_hint !== undefined ? { expectedLabelHint: row.expected_entity_hint } : {}),
       v1,
       v2,
@@ -157,6 +167,7 @@ async function main(): Promise<void> {
   }
   console.log(`[elv2-shadow] report → ${outputPath}`);
 
+  await pool.end();
   process.exit(report.gate.pass ? 0 : 1);
 }
 

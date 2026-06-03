@@ -33,6 +33,21 @@ describe('buildCoverageReport (T-ELV2-03 hot-entity coverage)', () => {
     expect(report.nonEntityCorrect).toBe(2);
   });
 
+  it('treats any accepted abstention status as correct for precision-first typo rows', () => {
+    const report = buildCoverageReport([
+      {
+        qid: 'm1',
+        query: 'opu one',
+        expectedStatus: 'failed',
+        acceptedStatuses: ['failed', 'ambiguous'],
+        class: 'noisy_typo',
+        observedStatus: 'ambiguous',
+      },
+    ]);
+    expect(report.nonEntityTotal).toBe(1);
+    expect(report.nonEntityCorrect).toBe(1);
+  });
+
   it('reports zero holes when every hot entity resolves', () => {
     const report = buildCoverageReport([
       { qid: 'a', query: 'X', expectedStatus: 'resolved', class: 'e', observedStatus: 'resolved' },

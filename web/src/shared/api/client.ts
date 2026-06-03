@@ -35,6 +35,71 @@ const DEFAULT_TIMEOUT_MS = 30_000;
  * upper bound (120_000 ms) plus headroom for network + serialization. */
 const WINE_SEARCH_EXECUTE_TIMEOUT_MS = 180_000;
 
+/**
+ * Result of {@link rawApiCall}: the verbatim status + parsed body of a single
+ * request, captured WITHOUT throwing on non-2xx so the operator API playground
+ * can show 4xx/5xx envelopes as-is. Not for product code — product callers use
+ * `api.*`, which throws typed {@link ApiError}.
+ */
+export interface RawApiResult {
+  ok: boolean;
+  status: number;
+  durationMs: number;
+  body: unknown;
+}
+
+export interface RawApiOptions {
+  body?: string;
+  debugKey?: string;
+  writeKey?: string;
+}
+
+export async function rawApiCall(
+  method: string,
+  path: string,
+  opts: RawApiOptions = {},
+): Promise<RawApiResult> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (opts.debugKey) headers[DEBUG_KEY_HEADER] = opts.debugKey;
+  if (opts.writeKey) headers[WRITE_KEY_HEADER] = opts.writeKey;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+  const start = performance.now();
+  try {
+    const init: RequestInit = { method, headers, signal: controller.signal };
+    if (opts.body !== undefined && method !== 'GET' && method !== 'HEAD') {
+      init.body = opts.body;
+    }
+    const res = await fetch(`${API_BASE}${path}`, init);
+    const text = await res.text();
+    let parsed: unknown = '';
+    if (text.length > 0) {
+      try {
+        parsed = JSON.parse(text) as unknown;
+      } catch {
+        parsed = text;
+      }
+    }
+    return {
+      ok: res.ok,
+      status: res.status,
+      durationMs: Math.round(performance.now() - start),
+      body: parsed,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network error';
+    return {
+      ok: false,
+      status: 0,
+      durationMs: Math.round(performance.now() - start),
+      body: { error: message },
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,

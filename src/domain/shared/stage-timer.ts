@@ -12,6 +12,23 @@
  * Timer instances are request-scoped — never share across requests.
  */
 
+/**
+ * Hard cap on entries returned by {@link StageTimer.snapshot}.
+ *
+ * The HTTP `stage_timings` response field is schema-bounded (a `.refine` in
+ * `search-response.schema.ts`). If a pipeline emitted MORE distinct stages than
+ * this, the strict outbound validation would 500 the ENTIRE search over a
+ * best-effort telemetry field (observed on the LLM-provider-degradation path,
+ * which fans out extra retry/fallback stages). The timer therefore enforces the
+ * bound AT THE SOURCE: it keeps the largest-duration stages — the ones that
+ * actually matter for latency diagnosis — and drops the rest.
+ *
+ * This is the SSoT for the bound (rule 30): the interface constant
+ * `MAX_STAGE_TIMINGS_KEYS` re-exports this value so the schema cap and the
+ * producer cap can never drift.
+ */
+export const MAX_STAGE_TIMER_SNAPSHOT_KEYS = 64;
+
 export interface StageTimer {
   /** Begin timing a named stage. */
   start(stage: string): void;
@@ -57,9 +74,24 @@ class StageTimerImpl implements StageTimer {
   }
 
   snapshot(): Readonly<Record<string, number>> {
+    if (this.elapsed.size <= MAX_STAGE_TIMER_SNAPSHOT_KEYS) {
+      const out: Record<string, number> = {};
+      for (const [stage, ms] of this.elapsed) {
+        out[stage] = ms;
+      }
+      return out;
+    }
+    // Overflow: keep the largest-duration stages (most useful for latency
+    // diagnosis); deterministic tie-break by stage name so equal-duration
+    // overflow is stable across calls. See MAX_STAGE_TIMER_SNAPSHOT_KEYS.
+    const ranked = [...this.elapsed.entries()].sort(
+      (a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0),
+    );
     const out: Record<string, number> = {};
-    for (const [stage, ms] of this.elapsed) {
-      out[stage] = ms;
+    for (let i = 0; i < MAX_STAGE_TIMER_SNAPSHOT_KEYS; i++) {
+      const entry = ranked[i];
+      if (entry === undefined) break;
+      out[entry[0]] = entry[1];
     }
     return out;
   }

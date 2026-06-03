@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { SearchUseCase } from '../../../../src/application/search/search.usecase.js';
-import { shouldSuppressBlockerSeedExpansion } from '../../../../src/application/search/search-usecase-blocker-seed-policy.js';
+import {
+  hasDeterministicSingletonAliasWitness,
+  shouldSuppressBlockerSeedExpansion,
+  shouldSuppressBlockerSeedExpansionForKnownShortAmbiguity,
+} from '../../../../src/application/search/search-usecase-blocker-seed-policy.js';
 import type { QueryPlanV1 } from '../../../../src/domain/query/model/query-plan.js';
 import type { CompiledWineQuery } from '../../../../src/domain/query/model/compiled-wine-query.js';
 import { createCanonicalEntityId } from '../../../../src/domain/shared/types/index.js';
@@ -102,14 +106,55 @@ describe('shouldSuppressBlockerSeedExpansion', () => {
     expect(shouldSuppressBlockerSeedExpansion(makeExactCanonicalAnchorPlan().anchors)).toBe(true);
   });
 
-  it('returns false for non-canonical singleton anchors', () => {
+  it('returns true for authoritative singleton observed_query_alias anchors', () => {
+    const plan = makeExactCanonicalAnchorPlan();
+    plan.anchors = [{
+      ...plan.anchors[0]!,
+      aliasType: 'observed_query_alias',
+    }];
+    expect(hasDeterministicSingletonAliasWitness(plan.anchors)).toBe(true);
+    expect(shouldSuppressBlockerSeedExpansion(plan.anchors)).toBe(true);
+  });
+
+  it('returns true for deterministic singleton translation anchors', () => {
+    const plan = makeExactCanonicalAnchorPlan();
+    plan.anchors = [{
+      ...plan.anchors[0]!,
+      aliasType: 'translation',
+    }];
+    expect(hasDeterministicSingletonAliasWitness(plan.anchors)).toBe(true);
+    expect(shouldSuppressBlockerSeedExpansion(plan.anchors)).toBe(true);
+  });
+
+  it('returns false when the singleton alias witness is not full-confidence', () => {
     const plan = makeExactCanonicalAnchorPlan();
     plan.anchors = [{
       ...plan.anchors[0]!,
       aliasType: 'translation',
       confidence: 0.92,
     }];
+    expect(hasDeterministicSingletonAliasWitness(plan.anchors)).toBe(false);
     expect(shouldSuppressBlockerSeedExpansion(plan.anchors)).toBe(false);
+  });
+
+  it('returns true for known ambiguous short_entity queries without a singleton alias witness', () => {
+    const plan = makeExactCanonicalAnchorPlan();
+    plan.queryClass = 'short_entity';
+    plan.anchors = [];
+    expect(shouldSuppressBlockerSeedExpansionForKnownShortAmbiguity({
+      queryClass: plan.queryClass,
+      anchors: plan.anchors,
+      persistedAmbiguity: { types: ['fixture_curated_ambiguity'], severity: 'high' },
+    })).toBe(true);
+  });
+
+  it('returns false for known ambiguity when a singleton alias witness already exists', () => {
+    const plan = makeExactCanonicalAnchorPlan();
+    expect(shouldSuppressBlockerSeedExpansionForKnownShortAmbiguity({
+      queryClass: 'short_entity',
+      anchors: plan.anchors,
+      persistedAmbiguity: { types: ['fixture_curated_ambiguity'], severity: 'high' },
+    })).toBe(false);
   });
 });
 

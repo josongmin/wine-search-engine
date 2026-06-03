@@ -4,7 +4,6 @@ import { PgCalibrationStore } from '../infrastructure/adapter/pg-calibration-sto
 import { PgAmbiguityDictionary } from '../infrastructure/adapter/pg-ambiguity-dictionary.js';
 import { PgThresholdStore } from '../infrastructure/adapter/pg-threshold-store.js';
 import { PgRefusalThresholdStore } from '../infrastructure/adapter/pg-refusal-threshold-store.js';
-import { isAliasTableAvailable } from '../infrastructure/adapter/pg-alias-matcher.js';
 import {
   CascadingAliasMatcher,
   ExactOnlySecondaryAliasMatcher,
@@ -61,8 +60,6 @@ import {
   StubEmbeddingService,
   StubThresholdStore,
 } from './container-stubs.js';
-
-const ALIAS_OVERLAY_STARTUP_QUERY_TIMEOUT_MS = 1_500;
 
 export interface CoreAdapterServices {
   readonly searchIndex: SearchIndexPort;
@@ -187,30 +184,21 @@ export async function buildCoreAdapterServices(
     allowCodexFallback: true,
   });
 
-  const isPgAliasOverlayAvailable = pool !== undefined && !config.killSwitch.aliasOverlay
-    ? await isAliasTableAvailable(pool, {
-      queryTimeoutMs: ALIAS_OVERLAY_STARTUP_QUERY_TIMEOUT_MS,
-    })
-    : false;
-
   let inMemoryAliasMatcher: SearchSnapshotAliasMatcher | undefined;
   if (!config.killSwitch.aliasOverlay) {
-    const loadSnapshotBoundAliasMatcher = async (): Promise<SearchSnapshotAliasMatcher | undefined> => (
-      runtimeHandles.searchSnapshotManifestPath !== undefined
-        ? SearchSnapshotAliasMatcher.loadFromManifest(runtimeHandles.searchSnapshotManifestPath)
-        : undefined
-    );
-    if (pool !== undefined && isPgAliasOverlayAvailable) {
-      inMemoryAliasMatcher = await SearchSnapshotAliasMatcher.loadFromPostgres(
-        pool,
-        runtimeHandles.searchSnapshotId,
-        {
-          queryTimeoutMs: ALIAS_OVERLAY_STARTUP_QUERY_TIMEOUT_MS,
-        },
+    if (runtimeHandles.searchSnapshotManifestPath !== undefined) {
+      inMemoryAliasMatcher = await SearchSnapshotAliasMatcher.loadFromManifest(
+        runtimeHandles.searchSnapshotManifestPath,
       );
-      inMemoryAliasMatcher ??= await loadSnapshotBoundAliasMatcher();
-    } else {
-      inMemoryAliasMatcher = await loadSnapshotBoundAliasMatcher();
+      if (inMemoryAliasMatcher === undefined) {
+        throw new Error(
+          `Snapshot-bound lookup runtime artifacts are required but failed to load from ${runtimeHandles.searchSnapshotManifestPath}`,
+        );
+      }
+    } else if (pool !== undefined) {
+      throw new Error(
+        'Pool-backed core adapter wiring requires searchSnapshotManifestPath for artifact-only lookup authority.',
+      );
     }
   }
 

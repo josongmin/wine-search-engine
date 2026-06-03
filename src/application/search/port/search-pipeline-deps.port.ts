@@ -9,6 +9,7 @@ import type {
   RetrievalDocument,
   RetrievalDrinkingWindowProjection,
 } from '../../../domain/retrieval/model/retrieval-document.js';
+import type { SourceRecordRef } from '../../../domain/entity/model/source-record-ref.js';
 import type { RrfFusionTrace, CandidateDropRecord } from '../../../domain/retrieval/model/candidate-envelope.js';
 import type { RetrievalDegradationSignal } from '../../../domain/retrieval/port/retrieval-degradation-observer.port.js';
 import type { RetrievalDegradationCode } from '../../../domain/retrieval/port/retrieval-degradation-observer.port.js';
@@ -104,6 +105,23 @@ export interface EntityDocumentLookupPort {
   getDrinkingWindowDocuments?(
     entityIds: readonly CanonicalEntityId[],
   ): Promise<ReadonlyMap<CanonicalEntityId, RetrievalDrinkingWindowProjection>>;
+}
+
+export interface LookupResolverProjection {
+  readonly entityId: CanonicalEntityId;
+  readonly entityType: string;
+  readonly canonicalLabel: string;
+  readonly aliasesIdentitySafe: readonly string[];
+  readonly identitySafeKeys: readonly string[];
+  readonly producer?: string | undefined;
+  readonly attributeHints?: Readonly<Record<string, unknown>> | undefined;
+  readonly sourceRecordRefs?: readonly SourceRecordRef[] | undefined;
+}
+
+export interface LookupResolverProjectionPort {
+  getResolverProjections(
+    entityIds: readonly CanonicalEntityId[],
+  ): Promise<ReadonlyMap<CanonicalEntityId, LookupResolverProjection>>;
 }
 
 export interface BrowseRetrieverPort {

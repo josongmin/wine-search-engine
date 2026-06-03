@@ -17,6 +17,7 @@ import { pickHigherTrustAliasType } from '../../alias/service/conflict-resolver.
 import { extractRuleBasedConstraints } from './rule-based-constraint-extractor.js';
 import { bootstrapLogger } from '../../shared/bootstrap-logger.js';
 import { globalSilentSkipCounter } from '../../observability/silent-skip-counters.js';
+import type { StageTimer } from '../../shared/stage-timer.js';
 
 /**
  * Result returned by an {@link AliasMatcher} lookup.
@@ -57,6 +58,7 @@ const DETERMINISTIC_CONSTRAINT_ENTITY_TYPES: ReadonlySet<DeterministicConstraint
 export interface AliasLookupOptions {
   readonly scope?: AliasLookupScope;
   readonly recallMode?: AliasRecallMode | undefined;
+  readonly stageTimer?: StageTimer | undefined;
 }
 
 function isDeterministicConstraintEntityType(
@@ -274,9 +276,10 @@ export class AnchorExtractor {
   async extract(
     normalizedQuery: string,
     queryViews?: NormalizedQueryViews,
+    stageTimer?: StageTimer,
   ): Promise<readonly AnchorCandidate[]> {
     const lookupQueries = this.buildLookupQueries(normalizedQuery, queryViews);
-    return this.extractFromLookupQueries(lookupQueries);
+    return this.extractFromLookupQueries(lookupQueries, stageTimer);
   }
 
   /**
@@ -294,6 +297,7 @@ export class AnchorExtractor {
   async extractWithRelative(
     normalizedQuery: string,
     queryViews?: NormalizedQueryViews,
+    stageTimer?: StageTimer,
   ): Promise<AnchorExtractionWithRelative> {
     const relativeQuery = this.relativeQueryExtractor.extract(normalizedQuery);
     const extraBaseQueries = new Set<string>();
@@ -307,6 +311,7 @@ export class AnchorExtractor {
 
     const anchors = await this.extractFromLookupQueries(
       this.buildLookupQueries(normalizedQuery, queryViews, extraBaseQueries),
+      stageTimer,
     );
 
     return { anchors, relativeQuery };
@@ -517,8 +522,9 @@ export class AnchorExtractor {
 
   private async extractFromLookupQueries(
     lookupQueries: LookupQuerySet,
+    stageTimer?: StageTimer,
   ): Promise<readonly AnchorCandidate[]> {
-    const aliasMatches = await this.lookupAliasMatchesWithSpanFallback(lookupQueries);
+    const aliasMatches = await this.lookupAliasMatchesWithSpanFallback(lookupQueries, stageTimer);
 
     const candidates: AnchorCandidate[] = aliasMatches.map((match) => ({
       surfaceForm: match.surfaceForm,
@@ -548,6 +554,7 @@ export class AnchorExtractor {
 
   private async lookupAliasMatchesWithSpanFallback(
     lookupQueries: LookupQuerySet,
+    stageTimer?: StageTimer,
   ): Promise<readonly (AliasMatchResult & { readonly lookupVariants: readonly string[] })[]> {
     const baseQueries = lookupQueries.baseQueries.map((query) => ({
       query,
@@ -555,6 +562,7 @@ export class AnchorExtractor {
     }));
     const baseMatches = await this.lookupAliasMatches(
       baseQueries,
+      stageTimer,
     );
     if (
       lookupQueries.spanQueries.length === 0 ||
@@ -569,6 +577,7 @@ export class AnchorExtractor {
         scope: 'span' as const,
         ...(queryPlan.recallMode !== undefined ? { recallMode: queryPlan.recallMode } : {}),
       })),
+      stageTimer,
     );
     return this.mergeLookupMatches(baseMatches, spanMatches);
   }
@@ -600,6 +609,7 @@ export class AnchorExtractor {
 
   private async lookupAliasMatches(
     lookupQueries: readonly ScopedLookupQuery[],
+    stageTimer?: StageTimer,
   ): Promise<readonly (AliasMatchResult & { readonly lookupVariants: readonly string[] })[]> {
     const normalizedLookupQueries = lookupQueries
       .map(({ query, scope, recallMode }) => ({
@@ -608,7 +618,7 @@ export class AnchorExtractor {
         ...(recallMode !== undefined ? { recallMode } : {}),
       }))
       .filter(({ query }) => query.length > 0);
-    const effectiveBatchMatches = await this.lookupAliasMatchesBatch(normalizedLookupQueries);
+    const effectiveBatchMatches = await this.lookupAliasMatchesBatch(normalizedLookupQueries, stageTimer);
     const merged = new Map<
       string,
       {
@@ -632,6 +642,7 @@ export class AnchorExtractor {
         ?? await this.aliasMatcher.findMatches(trimmedLookupQuery, {
           scope: lookupQuery.scope,
           ...(lookupQuery.recallMode !== undefined ? { recallMode: lookupQuery.recallMode } : {}),
+          ...(stageTimer !== undefined ? { stageTimer } : {}),
         });
       for (const match of aliasMatches) {
         const key = `${match.surfaceForm}\u0000${match.normalizedForm}\u0000${match.entityIds.map(String).join(',')}`;
@@ -675,6 +686,7 @@ export class AnchorExtractor {
 
   private async lookupAliasMatchesBatch(
     lookupQueries: readonly ScopedLookupQuery[],
+    stageTimer?: StageTimer,
   ): Promise<ReadonlyMap<string, readonly AliasMatchResult[]>> {
     const groupedQueries = new Map<string, {
       scope: AliasLookupScope;
@@ -709,6 +721,7 @@ export class AnchorExtractor {
         ? await this.aliasMatcher.findMatchesBatch(queries, {
           scope: group.scope,
           ...(group.recallMode !== undefined ? { recallMode: group.recallMode } : {}),
+          ...(stageTimer !== undefined ? { stageTimer } : {}),
         })
         : undefined;
       if (batch === undefined) {

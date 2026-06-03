@@ -75,6 +75,51 @@ const FIELD_AVAILABILITY = {
   },
 } as const;
 
+function makeRuntimeStatePayload(args: {
+  readonly dir: string;
+  readonly nlMappingsPath: string;
+  readonly nlMappingsPayloadHash: string;
+  readonly activeLtrModels: number;
+  readonly fieldAvailability?: unknown;
+}) {
+  return {
+    schemaVersion: 'search_snapshot_runtime_state.v5',
+    snapshotId: 'search-snapshot:v1:test',
+    contentHash: 'abc123',
+    publishedAt: '2026-04-12T00:00:00.000Z',
+    manifestPath: '/tmp/manifest.json',
+    nlMappingsRuntimePath: args.nlMappingsPath,
+    lookupAliasRuntimePath: path.join(args.dir, 'lookup-alias-runtime.json'),
+    lookupResolverProjectionPath: path.join(args.dir, 'lookup-resolver-projection.json'),
+    lookupEntityProjectionPath: path.join(args.dir, 'lookup-entity-projection.json'),
+    lookupAmbiguityRuntimePath: path.join(args.dir, 'lookup-ambiguity-runtime.json'),
+    counts: {
+      entities: 10,
+      aliases: 10,
+      lookupAliasRuntimeAliases: 10,
+      lookupResolverProjectionDocuments: 10,
+      lookupEntityProjectionDocuments: 10,
+      lookupAmbiguityRuntimeEntries: 0,
+      ambiguityRegistry: 0,
+      nlMappings: 1,
+      activeLtrModels: args.activeLtrModels,
+    },
+    hashes: {
+      entities: 'entities-hash',
+      aliases: 'aliases-hash',
+      lookupAliasRuntime: 'lookup-alias-runtime-hash',
+      lookupResolverProjection: 'lookup-resolver-projection-hash',
+      lookupEntityProjection: 'lookup-entity-projection-hash',
+      lookupAmbiguityRuntime: 'lookup-ambiguity-runtime-hash',
+      ambiguityRegistry: 'ambiguity-hash',
+      nlMappings: args.nlMappingsPayloadHash,
+      activeLtrModels: 'ltr-hash',
+    },
+    fieldAvailability: args.fieldAvailability ?? FIELD_AVAILABILITY,
+    quality: CANONICAL_QUALITY,
+  };
+}
+
 describe('search snapshot runtime readiness', () => {
   beforeEach(() => {
     mockVerifySearchSnapshotRuntimeStateLive.mockReset();
@@ -89,30 +134,12 @@ describe('search snapshot runtime readiness', () => {
     const nlMappingsPayload = { mappings: [{ key: 'full-bodied', canonical: 'full' }] };
 
     await fs.writeFile(nlMappingsPath, JSON.stringify(nlMappingsPayload));
-    await fs.writeFile(runtimeStatePath, JSON.stringify({
-      schemaVersion: 'search_snapshot_runtime_state.v3',
-      snapshotId: 'search-snapshot:v1:test',
-      contentHash: 'abc123',
-      publishedAt: '2026-04-12T00:00:00.000Z',
-      manifestPath: '/tmp/manifest.json',
-      nlMappingsRuntimePath: nlMappingsPath,
-      counts: {
-        entities: 10,
-        aliases: 10,
-        ambiguityRegistry: 0,
-        nlMappings: 1,
-        activeLtrModels: 1,
-      },
-      hashes: {
-        entities: 'entities-hash',
-        aliases: 'aliases-hash',
-        ambiguityRegistry: 'ambiguity-hash',
-        nlMappings: hashRuntimeNlMappings(nlMappingsPayload),
-        activeLtrModels: 'ltr-hash',
-      },
-      fieldAvailability: FIELD_AVAILABILITY,
-      quality: CANONICAL_QUALITY,
-    }));
+    await fs.writeFile(runtimeStatePath, JSON.stringify(makeRuntimeStatePayload({
+      dir,
+      nlMappingsPath,
+      nlMappingsPayloadHash: hashRuntimeNlMappings(nlMappingsPayload),
+      activeLtrModels: 1,
+    })));
 
     await expect(probeSearchSnapshotRuntimeState(runtimeStatePath)).resolves.toBe('up');
   });
@@ -124,30 +151,12 @@ describe('search snapshot runtime readiness', () => {
     const nlMappingsPayload = { mappings: [{ key: 'full-bodied', canonical: 'full' }] };
 
     await fs.writeFile(nlMappingsPath, JSON.stringify(nlMappingsPayload));
-    await fs.writeFile(runtimeStatePath, JSON.stringify({
-      schemaVersion: 'search_snapshot_runtime_state.v3',
-      snapshotId: 'search-snapshot:v1:test',
-      contentHash: 'abc123',
-      publishedAt: '2026-04-12T00:00:00.000Z',
-      manifestPath: '/tmp/manifest.json',
-      nlMappingsRuntimePath: nlMappingsPath,
-      counts: {
-        entities: 10,
-        aliases: 10,
-        ambiguityRegistry: 0,
-        nlMappings: 1,
-        activeLtrModels: 0,
-      },
-      hashes: {
-        entities: 'entities-hash',
-        aliases: 'aliases-hash',
-        ambiguityRegistry: 'ambiguity-hash',
-        nlMappings: hashRuntimeNlMappings(nlMappingsPayload),
-        activeLtrModels: 'ltr-hash',
-      },
-      fieldAvailability: FIELD_AVAILABILITY,
-      quality: CANONICAL_QUALITY,
-    }));
+    await fs.writeFile(runtimeStatePath, JSON.stringify(makeRuntimeStatePayload({
+      dir,
+      nlMappingsPath,
+      nlMappingsPayloadHash: hashRuntimeNlMappings(nlMappingsPayload),
+      activeLtrModels: 0,
+    })));
 
     await expect(probeSearchSnapshotRuntimeState(runtimeStatePath)).resolves.toBe('up');
   });
@@ -159,30 +168,12 @@ describe('search snapshot runtime readiness', () => {
     const nlMappingsPayload = { mappings: [{ key: 'full-bodied', canonical: 'full' }] };
 
     await fs.writeFile(nlMappingsPath, JSON.stringify(nlMappingsPayload));
-    await fs.writeFile(runtimeStatePath, JSON.stringify({
-      schemaVersion: 'search_snapshot_runtime_state.v3',
-      snapshotId: 'search-snapshot:v1:test',
-      contentHash: 'abc123',
-      publishedAt: '2026-04-12T00:00:00.000Z',
-      manifestPath: '/tmp/manifest.json',
-      nlMappingsRuntimePath: nlMappingsPath,
-      counts: {
-        entities: 10,
-        aliases: 10,
-        ambiguityRegistry: 0,
-        nlMappings: 1,
-        activeLtrModels: 0,
-      },
-      hashes: {
-        entities: 'entities-hash',
-        aliases: 'aliases-hash',
-        ambiguityRegistry: 'ambiguity-hash',
-        nlMappings: hashRuntimeNlMappings(nlMappingsPayload),
-        activeLtrModels: 'ltr-hash',
-      },
-      fieldAvailability: FIELD_AVAILABILITY,
-      quality: CANONICAL_QUALITY,
-    }));
+    await fs.writeFile(runtimeStatePath, JSON.stringify(makeRuntimeStatePayload({
+      dir,
+      nlMappingsPath,
+      nlMappingsPayloadHash: hashRuntimeNlMappings(nlMappingsPayload),
+      activeLtrModels: 0,
+    })));
 
     await expect(
       probeSearchSnapshotRuntimeState(runtimeStatePath, { requireActiveLtr: true }),
@@ -197,30 +188,12 @@ describe('search snapshot runtime readiness', () => {
     await fs.writeFile(nlMappingsPath, JSON.stringify({
       mappings: [{ key: 'full-bodied', canonical: 'full' }],
     }));
-    await fs.writeFile(runtimeStatePath, JSON.stringify({
-      schemaVersion: 'search_snapshot_runtime_state.v3',
-      snapshotId: 'search-snapshot:v1:test',
-      contentHash: 'abc123',
-      publishedAt: '2026-04-12T00:00:00.000Z',
-      manifestPath: '/tmp/manifest.json',
-      nlMappingsRuntimePath: nlMappingsPath,
-      counts: {
-        entities: 10,
-        aliases: 10,
-        ambiguityRegistry: 0,
-        nlMappings: 1,
-        activeLtrModels: 1,
-      },
-      hashes: {
-        entities: 'entities-hash',
-        aliases: 'aliases-hash',
-        ambiguityRegistry: 'ambiguity-hash',
-        nlMappings: 'mismatched-hash',
-        activeLtrModels: 'ltr-hash',
-      },
-      fieldAvailability: FIELD_AVAILABILITY,
-      quality: CANONICAL_QUALITY,
-    }));
+    await fs.writeFile(runtimeStatePath, JSON.stringify(makeRuntimeStatePayload({
+      dir,
+      nlMappingsPath,
+      nlMappingsPayloadHash: 'mismatched-hash',
+      activeLtrModels: 1,
+    })));
 
     await expect(probeSearchSnapshotRuntimeState(runtimeStatePath)).resolves.toBe('down');
   });
@@ -232,32 +205,15 @@ describe('search snapshot runtime readiness', () => {
     const nlMappingsPayload = { mappings: [{ key: 'full-bodied', canonical: 'full' }] };
 
     await fs.writeFile(nlMappingsPath, JSON.stringify(nlMappingsPayload));
-    await fs.writeFile(runtimeStatePath, JSON.stringify({
-      schemaVersion: 'search_snapshot_runtime_state.v3',
-      snapshotId: 'search-snapshot:v1:test',
-      contentHash: 'abc123',
-      publishedAt: '2026-04-12T00:00:00.000Z',
-      manifestPath: '/tmp/manifest.json',
-      nlMappingsRuntimePath: nlMappingsPath,
-      counts: {
-        entities: 10,
-        aliases: 10,
-        ambiguityRegistry: 0,
-        nlMappings: 1,
-        activeLtrModels: 1,
-      },
-      hashes: {
-        entities: 'entities-hash',
-        aliases: 'aliases-hash',
-        ambiguityRegistry: 'ambiguity-hash',
-        nlMappings: hashRuntimeNlMappings(nlMappingsPayload),
-        activeLtrModels: 'ltr-hash',
-      },
+    await fs.writeFile(runtimeStatePath, JSON.stringify(makeRuntimeStatePayload({
+      dir,
+      nlMappingsPath,
+      nlMappingsPayloadHash: hashRuntimeNlMappings(nlMappingsPayload),
+      activeLtrModels: 1,
       fieldAvailability: {
         appellation: FIELD_AVAILABILITY.appellation,
       },
-      quality: CANONICAL_QUALITY,
-    }));
+    })));
 
     await expect(probeSearchSnapshotRuntimeState(runtimeStatePath)).resolves.toBe('down');
   });

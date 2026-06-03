@@ -4,51 +4,58 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEntityId } from '../../../domain/shared/types/index.js';
 import { SearchSnapshotEntityLookup } from '../search-snapshot-entity-lookup.js';
-
-function makeDocumentFields(entityId: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    entity_id: entityId,
-    entity_type: 'wine',
-    canonical_label: `Label for ${entityId}`,
-    aliases_identity_safe: [`Label for ${entityId}`],
-    aliases_noisy_recall: [`Alias for ${entityId}`],
-    producer: 'Producer',
-    region: 'Region',
-    grapes: ['Cabernet Sauvignon'],
-    search_text_ko: '와인 검색어',
-    search_text_en: 'Wine search text',
-    semantic_summary: 'Wine semantic summary',
-    style: 'red',
-    price_band: 'premium',
-    pairing: ['steak'],
-    availability: true,
-    popularity_score: 0.8,
-    country: 'United States',
-    drinking_window_start: 2024,
-    drinking_window_end: 2038,
-    ...overrides,
-  };
-}
+import { LOOKUP_ENTITY_PROJECTION_SCHEMA_VERSION } from '../../../domain/shared/types/search-snapshot-lookup-runtime.js';
 
 async function writeSnapshotArtifacts(): Promise<{
   readonly dir: string;
   readonly manifestPath: string;
 }> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'snapshot-entity-lookup-'));
-  const vespaFeedPath = path.join(dir, 'vespa-feed.ndjson');
+  const projectionPath = path.join(dir, 'lookup-entity-projection.json');
   const manifestPath = path.join(dir, 'manifest.json');
   const docA = {
-    id: 'wine-a',
-    fields: makeDocumentFields('wine-a', { wine_type: 'red' }),
+    entityId: 'wine-a',
+    entityType: 'wine',
+    canonicalLabel: 'Label for wine-a',
+    aliasesIdentitySafe: ['Label for wine-a'],
+    aliasesNoisyRecall: ['Alias for wine-a'],
+    producer: 'Producer',
+    region: 'Region',
+    grapes: ['Cabernet Sauvignon'],
+    searchTextKo: '와인 검색어',
+    searchTextEn: 'Wine search text',
+    semanticSummary: 'Wine semantic summary',
+    pairing: ['steak'],
+    availability: true,
+    popularityScore: 0.8,
+    wineType: 'red',
+    drinkingWindowStart: 2024,
+    drinkingWindowEnd: 2038,
   };
   const docB = {
-    id: 'wine-b',
-    fields: makeDocumentFields('wine-b', { wine_type: 'white' }),
+    ...docA,
+    entityId: 'wine-b',
+    canonicalLabel: 'Label for wine-b',
+    aliasesIdentitySafe: ['Label for wine-b'],
+    aliasesNoisyRecall: ['Alias for wine-b'],
+    wineType: 'white',
   };
-  await fs.writeFile(vespaFeedPath, `${JSON.stringify(docA)}\n${JSON.stringify(docB)}\n`, 'utf8');
+  await fs.writeFile(
+    projectionPath,
+    `${JSON.stringify({
+      schemaVersion: LOOKUP_ENTITY_PROJECTION_SCHEMA_VERSION,
+      snapshotId: 'search-snapshot:v1:test',
+      generatedAt: '2026-06-03T00:00:00.000Z',
+      documents: [docA, docB],
+    }, null, 2)}\n`,
+    'utf8',
+  );
   await fs.writeFile(
     manifestPath,
-    `${JSON.stringify({ artifacts: { vespaFeedNdjson: vespaFeedPath } }, null, 2)}\n`,
+    `${JSON.stringify({
+      schemaVersion: 'search_snapshot.v3',
+      artifacts: { lookupEntityProjectionJson: projectionPath },
+    }, null, 2)}\n`,
     'utf8',
   );
   return { dir, manifestPath };
@@ -102,38 +109,50 @@ describe('SearchSnapshotEntityLookup', () => {
   it('skips malformed feed rows and preserves valid documents', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'snapshot-entity-lookup-'));
     cleanupDirs.push(dir);
-    const vespaFeedPath = path.join(dir, 'vespa-feed.ndjson');
+    const projectionPath = path.join(dir, 'lookup-entity-projection.json');
     const manifestPath = path.join(dir, 'manifest.json');
     const validDoc = {
-      id: 'wine-a',
-      fields: makeDocumentFields('wine-a'),
+      entityId: 'wine-a',
+      entityType: 'wine',
+      canonicalLabel: 'Label for wine-a',
+      aliasesIdentitySafe: ['Label for wine-a'],
+      aliasesNoisyRecall: ['Alias for wine-a'],
+      producer: 'Producer',
+      region: 'Region',
+      grapes: ['Cabernet Sauvignon'],
+      searchTextKo: '와인 검색어',
+      searchTextEn: 'Wine search text',
+      semanticSummary: 'Wine semantic summary',
+      pairing: ['steak'],
+      availability: true,
+      popularityScore: 0.8,
     };
     const malformedDoc = {
-      id: 'wine-b',
-      fields: {
-        entity_id: 'wine-b',
-        entity_type: 'wine',
-        producer: 'Producer',
-      },
+      entityId: 'wine-b',
+      entityType: 'wine',
+      producer: 'Producer',
     };
     await fs.writeFile(
-      vespaFeedPath,
-      `${JSON.stringify(validDoc)}\n${JSON.stringify(malformedDoc)}\n`,
+      projectionPath,
+      `${JSON.stringify({
+        schemaVersion: LOOKUP_ENTITY_PROJECTION_SCHEMA_VERSION,
+        snapshotId: 'search-snapshot:v1:test',
+        generatedAt: '2026-06-03T00:00:00.000Z',
+        documents: [validDoc, malformedDoc],
+      }, null, 2)}\n`,
       'utf8',
     );
     await fs.writeFile(
       manifestPath,
-      `${JSON.stringify({ artifacts: { vespaFeedNdjson: vespaFeedPath } }, null, 2)}\n`,
+      `${JSON.stringify({
+        schemaVersion: 'search_snapshot.v3',
+        artifacts: { lookupEntityProjectionJson: projectionPath },
+      }, null, 2)}\n`,
       'utf8',
     );
 
-    const lookup = await SearchSnapshotEntityLookup.loadFromManifest(manifestPath);
-    const docs = await lookup.getDocuments([
-      createEntityId('wine-a'),
-      createEntityId('wine-b'),
-    ]);
-
-    expect(docs.has(createEntityId('wine-a'))).toBe(true);
-    expect(docs.has(createEntityId('wine-b'))).toBe(false);
+    await expect(SearchSnapshotEntityLookup.loadFromManifest(manifestPath)).rejects.toThrow(
+      /Malformed lookup entity projection artifact/,
+    );
   });
 });

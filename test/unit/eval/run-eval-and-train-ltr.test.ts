@@ -654,8 +654,8 @@ describe('run-eval-and-train-ltr release gating', () => {
       searchUseCase as never,
       {} as never,
       {
-        snapshotId: 'snapshot-test',
         ...parsed,
+        snapshotId: 'snapshot-test',
         evalCaseFilter: { queryClass: 'exact_entity', sliceTag: 'mixed_constraint_guided_hybrid_fallback' },
         runtimeStatePath: '/tmp/nonexistent-runtime-search-snapshot.json',
         noisyEntityGateThresholds: {

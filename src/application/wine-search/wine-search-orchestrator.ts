@@ -74,6 +74,7 @@ import {
   type AnswerResult,
 } from './synthesis-schemas.js';
 import type { SynthesisRunner } from './synthesis-runner.js';
+import { layer4MessageFor } from './synthesis-fallback-templates.js';
 import {
   getCanonicalNormalizedConstraints,
   latestUserMessageIndex,
@@ -1161,9 +1162,9 @@ export class WineSearchOrchestrator {
     terminationKind?: TerminationKind,
   ): WineSearchResult {
     const totalDurationMs = Math.max(0, this.clock.now() - startMs);
-    const answerText = queryHasHangul
-      ? '요청하신 와인 정보를 현재 처리하지 못했습니다. 검색어를 바꿔서 다시 시도해주세요.'
-      : 'We could not process your wine query. Please try rephrasing or simplifying your search.';
+    // Honest, cause-specific copy instead of reflexively blaming the user's
+    // query — mirrors the synthesizer's Layer 4 selector (SSoT).
+    const answerText = layer4MessageFor(degradedReason, queryHasHangul);
     // S1: `policyBlocked` is true ONLY for a real security block. When the
     // caller passes a `terminationKind` we honor it; otherwise we fall back
     // to the legacy "policy_blocked degradedReason → true" heuristic ONLY

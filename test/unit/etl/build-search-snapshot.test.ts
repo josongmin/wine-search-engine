@@ -12,6 +12,7 @@ import {
 import type { EnrichedSilverRecord } from '../../../scripts/etl/types.js';
 import { SNAPSHOT_CANONICAL_ENTITY_FALLBACK_PREFIX } from '../../../scripts/etl/snapshot-entity-identity.js';
 import { canonicalizeAliasSnapshotRecords } from '../../../src/domain/shared/utils/search-snapshot-canonicalization.js';
+import { normalizeForMatch } from '../../../src/domain/alias/service/normalize.js';
 
 async function makeTempDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'build-search-snapshot-'));
@@ -232,6 +233,36 @@ describe('buildSearchSnapshot', () => {
     })).rejects.toThrow(/beginnerSuitabilityClassification coverage/);
   });
 
+  it('materializes deterministic fixture-backed ambiguity overlay into the lookup runtime artifact', async () => {
+    const dir = await makeTempDir();
+    const inputPath = path.join(dir, 'silver-trackc.ndjson');
+    const outputDir = path.join(dir, 'search-snapshots');
+    const nlMappingsPath = path.join(dir, 'nl-mappings.json');
+
+    await fs.writeFile(inputPath, `${JSON.stringify(makeRecord())}\n`);
+    await fs.writeFile(nlMappingsPath, JSON.stringify({ mappings: [] }));
+
+    const result = await buildSearchSnapshot({
+      input: inputPath,
+      outputDir,
+      nlMappings: nlMappingsPath,
+    });
+
+    const ambiguityRuntimeRaw = await fs.readFile(
+      result.manifest.artifacts.lookupAmbiguityRuntimeJson,
+      'utf8',
+    );
+    const ambiguityRuntime = JSON.parse(ambiguityRuntimeRaw) as {
+      entries: Record<string, { types: string[]; severity: string }>;
+    };
+    const key = normalizeForMatch('샤또');
+
+    expect(ambiguityRuntime.entries[key]).toMatchObject({
+      types: ['fixture_curated_ambiguity'],
+      severity: 'high',
+    });
+  });
+
   it('carries forward required benchmark anchors from the active snapshot when current input dropped them', async () => {
     const dir = await makeTempDir();
     const inputPath = path.join(dir, 'silver-trackc.ndjson');
@@ -350,15 +381,19 @@ describe('buildSearchSnapshot', () => {
     await fs.writeFile(
       runtimeStatePath,
       `${JSON.stringify({
-        schemaVersion: 'search_snapshot_runtime_state.v3',
+        schemaVersion: 'search_snapshot_runtime_state.v4',
         snapshotId: 'search-snapshot:v1:previous',
         contentHash: 'previous-content-hash',
         publishedAt: '2026-04-17T00:00:00.000Z',
         manifestPath: previousManifestPath,
         nlMappingsRuntimePath: path.join(dir, 'nl-mappings.json'),
+        lookupAliasRuntimePath: path.join(previousSnapshotRoot, 'lookup-alias-runtime.json'),
+        lookupEntityProjectionPath: path.join(previousSnapshotRoot, 'lookup-entity-projection.json'),
         counts: {
           entities: 1,
           aliases: 0,
+          lookupAliasRuntimeAliases: 0,
+          lookupEntityProjectionDocuments: 1,
           ambiguityRegistry: 0,
           nlMappings: 0,
           activeLtrModels: 0,
@@ -366,6 +401,8 @@ describe('buildSearchSnapshot', () => {
         hashes: {
           entities: 'entities-hash',
           aliases: 'aliases-hash',
+          lookupAliasRuntime: 'lookup-alias-runtime-hash',
+          lookupEntityProjection: 'lookup-entity-projection-hash',
           ambiguityRegistry: 'ambiguity-hash',
           nlMappings: 'nl-hash',
           activeLtrModels: 'ltr-hash',

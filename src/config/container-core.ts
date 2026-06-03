@@ -25,6 +25,7 @@ import type {
   BrowseRetrieverPort,
   CompareRetrieverPort,
   EntityDocumentLookupPort,
+  LookupResolverProjectionPort,
 } from '../application/search/port/search-pipeline-deps.port.js';
 import type { Config } from './env.js';
 import type { Pool } from 'pg';
@@ -55,12 +56,15 @@ import {
 } from './kill-switch-policy.js';
 import { warnStartupMisconfigurations } from './startup-preflight.js';
 import { SearchSnapshotEntityLookup } from '../infrastructure/adapter/search-snapshot-entity-lookup.js';
+import { SearchSnapshotResolverProjectionLookup } from '../infrastructure/adapter/search-snapshot-resolver-projection-lookup.js';
+import { SearchSnapshotAmbiguityDictionary } from '../infrastructure/adapter/search-snapshot-ambiguity-dictionary.js';
 import type { AnchorRefreshCallback } from '../domain/query/service/anchor-refresh.js';
 
 export interface CoreContainerServices {
   // T1.2: typed as QueryPlannerPort for backward compat while Planner returns QueryPlanV2.
   // T1.5 will update the port to QueryPlanV2.
   readonly queryPlanner: QueryPlannerPort;
+  readonly lookupQueryPlanner: QueryPlannerPort;
   readonly entityLookupAnchorRefresh: AnchorRefreshCallback;
   readonly blocker: BlockingUseCasePort;
   readonly chatLlm?: ChatLlmPort;
@@ -73,10 +77,12 @@ export interface CoreContainerServices {
   readonly browseRetriever: BrowseRetrieverPort;
   readonly compareRetriever: CompareRetrieverPort;
   readonly entityLookup: EntityDocumentLookupPort;
+  readonly resolverProjectionLookup?: LookupResolverProjectionPort | undefined;
   /** Live alias substrate matcher — exposed for the T-ELV2-04 V2 retrieval engine. */
   readonly aliasMatcher: AliasMatcher;
   /** Persisted ambiguity substrate (registry-backed) — for the T-ELV2-06 clarification graph. */
   readonly ambiguityDictionary: AmbiguityDictionary;
+  readonly lookupAmbiguityDictionary: AmbiguityDictionary;
   readonly snapshotVersions: SnapshotVersions;
   readonly querySanitizer: RuntimeSupportServices['querySanitizer'];
   readonly injectionJudge?: RuntimeSupportServices['injectionJudge'];
@@ -114,6 +120,12 @@ export async function buildCoreContainerServices(
 
   const support = await buildRuntimeSupportServices(config, runtime);
   const adapters = await Promise.resolve(buildCoreAdapterServices(config, runtime));
+  const lookupAmbiguityDictionary: AmbiguityDictionary = runtime.searchSnapshotManifestPath !== undefined
+    ? await SearchSnapshotAmbiguityDictionary.loadFromManifest(runtime.searchSnapshotManifestPath)
+    : adapters.ambiguityDict;
+  const resolverProjectionLookup = runtime.searchSnapshotManifestPath !== undefined
+    ? await SearchSnapshotResolverProjectionLookup.loadFromManifest(runtime.searchSnapshotManifestPath)
+    : undefined;
 
   // T1.2: Wrap the concrete Planner (returns QueryPlanV2) in the V1 adapter so
   // existing consumers continue to receive QueryPlanV1-shaped objects.
@@ -142,6 +154,26 @@ export async function buildCoreContainerServices(
       anchorRefresh: entityLookupAnchorRefresh,
     },
   );
+  const lookupQueryPlanner: QueryPlannerPort = new PlannerV1Adapter(
+    await buildQueryPlanner(
+      adapters,
+      runtime.pool,
+      adapters.chatLlm,
+      config.openai.llmQueryInterpreter,
+      config.openai.llmQueryInterpreterTimeoutMs,
+      support.phraseCache,
+      runtime.searchSnapshotId,
+      {
+        ambiguityDictionary: lookupAmbiguityDictionary,
+        forceRuleOnlyNlMapper: true,
+        disableTopologyPlanner: true,
+        disableAmbiguityIntentCompiler: true,
+      },
+    ),
+    {
+      anchorRefresh: entityLookupAnchorRefresh,
+    },
+  );
   const entityResolver = buildEntityResolver(adapters, config);
   const candidatePool = buildCandidatePool(adapters, support, config);
   const browseRetriever = buildBrowseRetriever(adapters);
@@ -155,6 +187,7 @@ export async function buildCoreContainerServices(
   return {
     ...(runtime.pool !== undefined ? { pool: runtime.pool } : {}),
     queryPlanner,
+    lookupQueryPlanner,
     entityLookupAnchorRefresh,
     blocker: buildBlockingUseCaseAdapter(adapters),
     entityResolver,
@@ -162,8 +195,10 @@ export async function buildCoreContainerServices(
     browseRetriever,
     compareRetriever,
     entityLookup,
+    ...(resolverProjectionLookup !== undefined ? { resolverProjectionLookup } : {}),
     aliasMatcher: adapters.aliasMatcher,
     ambiguityDictionary: adapters.ambiguityDict,
+    lookupAmbiguityDictionary,
     ...(adapters.chatLlm !== undefined ? { chatLlm: adapters.chatLlm } : {}),
     ranker,
     decisionEngine: buildDecisionEngine(adapters, config),

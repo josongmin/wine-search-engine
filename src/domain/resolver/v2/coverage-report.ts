@@ -25,6 +25,12 @@ export interface CoverageInputRow {
   readonly query: string;
   /** Gold expectation for this query. */
   readonly expectedStatus: CoverageStatus;
+  /**
+   * Optional exact set of statuses that count as correct for this row. This is
+   * for precision-first "must not resolve" rows where multiple abstentions are
+   * acceptable (`failed` OR `ambiguous`, but never `resolved`).
+   */
+  readonly acceptedStatuses?: readonly CoverageStatus[] | undefined;
   /** Hotset class tag (e.g. hot_entity_coverage, concept_grape). */
   readonly class: string;
   /** What the engine actually returned. */
@@ -59,9 +65,13 @@ function ratio(num: number, den: number): number {
   return den === 0 ? 0 : num / den;
 }
 
+function acceptedStatuses(row: CoverageInputRow): readonly CoverageStatus[] {
+  return row.acceptedStatuses ?? [row.expectedStatus];
+}
+
 export function buildCoverageReport(rows: readonly CoverageInputRow[]): CoverageReport {
-  const hotRows = rows.filter((r) => r.expectedStatus === 'resolved');
-  const nonEntityRows = rows.filter((r) => r.expectedStatus !== 'resolved');
+  const hotRows = rows.filter((r) => acceptedStatuses(r).includes('resolved'));
+  const nonEntityRows = rows.filter((r) => !acceptedStatuses(r).includes('resolved'));
 
   const holes: CoverageHole[] = [];
   let coveredCount = 0;
@@ -75,7 +85,7 @@ export function buildCoverageReport(rows: readonly CoverageInputRow[]): Coverage
 
   let nonEntityCorrect = 0;
   for (const row of nonEntityRows) {
-    if (row.observedStatus === row.expectedStatus) {
+    if (acceptedStatuses(row).includes(row.observedStatus)) {
       nonEntityCorrect += 1;
     }
   }

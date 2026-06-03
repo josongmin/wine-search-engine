@@ -1,9 +1,9 @@
 #!/usr/bin/env tsx
 
-import { existsSync } from 'node:fs';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { existsSync } from 'node:fs';
 import { z } from 'zod';
 import { parseNdjson } from './ndjson.js';
 import type { EnrichedSilverRecord, PriceBand, WineType } from './types.js';
@@ -56,11 +56,34 @@ import {
   canonicalizeAmbiguitySnapshotRows,
   canonicalizeEntitySnapshotRecords,
 } from '../../src/domain/shared/utils/search-snapshot-canonicalization.js';
+import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
+import { compactForLookup } from '../../src/domain/query/service/phonetic-skeleton.js';
+import {
+  buildLookupAliasRuntimeArtifact,
+  buildLookupAmbiguityRuntimeArtifact,
+  buildLookupResolverProjectionArtifact,
+  buildLookupEntityProjectionArtifact,
+} from './build-lookup-runtime-pack.js';
+import {
+  buildLookupAliasRuntimeArtifactHash,
+  buildLookupAmbiguityRuntimeArtifactHash,
+  buildLookupResolverProjectionArtifactHash,
+  buildLookupEntityProjectionArtifactHash,
+  type LookupAmbiguityRuntimeEntry,
+} from '../../src/domain/shared/types/search-snapshot-lookup-runtime.js';
 
 export const DEFAULT_INPUT = ETL_ARTIFACT_FILES.trackc;
 export const DEFAULT_OUTPUT_DIR = ETL_ARTIFACT_FILES.searchSnapshotsDir;
 export const DEFAULT_NL_MAPPINGS = ETL_ARTIFACT_FILES.nlMappings;
 export const DEFAULT_RUNTIME_STATE_PATH = resolveDataPath('data/runtime-search-snapshot.json');
+const KOREAN_FAMOUS_EXACT_SAFE_CORPUS_PATH = path.resolve(
+  path.dirname(new URL(import.meta.url).pathname),
+  '..',
+  '..',
+  'test',
+  'fixtures',
+  'lookup-v2-korean-famous-expanded.jsonl',
+);
 
 export interface Args {
   readonly input: string;
@@ -653,6 +676,7 @@ async function buildArtifactsForRecords(args: {
   readonly entityArtifact: readonly EntitySnapshotRecord[];
   readonly resolvedAliases: ReturnType<typeof resolveAliasClaimsAndBuildAmbiguityRegistry>['resolvedAliases'];
   readonly ambiguityRows: ReturnType<typeof resolveAliasClaimsAndBuildAmbiguityRegistry>['ambiguityRows'];
+  readonly entityIdBySourceId: ReadonlyMap<SourceRecordId, CanonicalEntityId>;
 }> {
   const entityArtifact: EntitySnapshotRecord[] = [];
   const entityIdBySourceId = new Map<SourceRecordId, CanonicalEntityId>();
@@ -708,13 +732,28 @@ async function buildArtifactsForRecords(args: {
   const approvedAbbreviationOverlay = await loadApprovedAbbreviationAliasOverlay(
     [...entityIdBySourceId.values()],
   );
-  const aliasArtifact = buildAliasArtifact(
+  const baseAliasArtifact = buildAliasArtifact(
     args.records,
     entityIdBySourceId,
     approvedAbbreviationOverlay,
   );
+  const koreanExactSafeOverlay = await loadKoreanExactSafeAliasOverlay(
+    [...entityIdBySourceId.values()],
+  );
+  assertNoCuratedExactAliasCollisions({
+    baseAliases: baseAliasArtifact,
+    curatedOverlay: koreanExactSafeOverlay,
+  });
+  const aliasArtifact = buildAliasArtifact(
+    args.records,
+    entityIdBySourceId,
+    mergeAliasOverlayMaps(
+      approvedAbbreviationOverlay,
+      koreanExactSafeOverlay,
+    ),
+  );
   const { resolvedAliases, ambiguityRows } = resolveAliasClaimsAndBuildAmbiguityRegistry(aliasArtifact);
-  return { entityArtifact, resolvedAliases, ambiguityRows };
+  return { entityArtifact, resolvedAliases, ambiguityRows, entityIdBySourceId };
 }
 
 interface ApprovedAbbreviationAliasProposalRow {
@@ -818,6 +857,168 @@ async function loadApprovedAbbreviationAliasOverlay(
   }
 }
 
+interface KoreanExactSafeAliasFixtureRow {
+  readonly query?: unknown;
+  readonly expected_status?: unknown;
+  readonly expected_entity_id?: unknown;
+  readonly promote_exact_alias?: unknown;
+  readonly accepted_statuses?: unknown;
+  readonly class?: unknown;
+}
+
+interface KoreanCuratedAmbiguityFixtureRow {
+  readonly query?: unknown;
+  readonly expected_status?: unknown;
+  readonly accepted_statuses?: unknown;
+}
+
+function mergeAliasOverlayMaps(
+  ...overlays: readonly ReadonlyMap<CanonicalEntityId, readonly SnapshotAliasOverlayProposal[]>[]
+): ReadonlyMap<CanonicalEntityId, readonly SnapshotAliasOverlayProposal[]> {
+  const merged = new Map<CanonicalEntityId, SnapshotAliasOverlayProposal[]>();
+  for (const overlay of overlays) {
+    for (const [entityId, proposals] of overlay) {
+      const next = merged.get(entityId) ?? [];
+      next.push(...proposals);
+      merged.set(entityId, next);
+    }
+  }
+  return merged;
+}
+
+async function loadKoreanExactSafeAliasOverlay(
+  entityIds: readonly CanonicalEntityId[],
+): Promise<ReadonlyMap<CanonicalEntityId, readonly SnapshotAliasOverlayProposal[]>> {
+  if (!existsSync(KOREAN_FAMOUS_EXACT_SAFE_CORPUS_PATH)) {
+    return new Map();
+  }
+
+  const raw = await fs.readFile(KOREAN_FAMOUS_EXACT_SAFE_CORPUS_PATH, 'utf8');
+  const entityIdSet = new Set(entityIds);
+  const overlay = new Map<CanonicalEntityId, SnapshotAliasOverlayProposal[]>();
+
+  for (const [index, line] of raw.split('\n').entries()) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+    const parsed = JSON.parse(trimmed) as KoreanExactSafeAliasFixtureRow;
+    if (
+      parsed.expected_status !== 'resolved'
+      || parsed.promote_exact_alias !== true
+    ) {
+      continue;
+    }
+    if (Array.isArray(parsed.accepted_statuses) && parsed.accepted_statuses.length > 0) {
+      throw new Error(
+        `Korean exact-safe alias row ${index + 1} is not deterministic: accepted_statuses must be omitted when promote_exact_alias=true`,
+      );
+    }
+    if (typeof parsed.query !== 'string' || parsed.query.trim().length === 0) {
+      throw new Error(`Korean exact-safe alias row ${index + 1} is missing query`);
+    }
+    if (typeof parsed.expected_entity_id !== 'string' || parsed.expected_entity_id.trim().length === 0) {
+      throw new Error(`Korean exact-safe alias row ${index + 1} is missing expected_entity_id`);
+    }
+    const targetEntityId = parsed.expected_entity_id as CanonicalEntityId;
+    if (!entityIdSet.has(targetEntityId)) {
+      // The curated corpus is global, but buildSearchSnapshot also serves
+      // partial/tiny fixtures in unit tests and ad hoc snapshot builds.
+      // Exact-safe promotion only applies when the target entity is present
+      // in the current snapshot payload.
+      continue;
+    }
+    const existing = overlay.get(targetEntityId) ?? [];
+    existing.push({
+      value: parsed.query.trim(),
+      type: 'observed_query_alias',
+      source: 'fixture:korean_famous_exact_safe_v1',
+      confidencePrior: 0.98,
+      scope: hasHangul(parsed.query) ? 'locale_ko' : 'global',
+      sourceTrust: 1,
+    });
+    overlay.set(targetEntityId, existing);
+  }
+
+  return overlay;
+}
+
+async function loadKoreanCuratedAmbiguityOverlay(): Promise<readonly LookupAmbiguityRuntimeEntry[]> {
+  if (!existsSync(KOREAN_FAMOUS_EXACT_SAFE_CORPUS_PATH)) {
+    return [];
+  }
+
+  const raw = await fs.readFile(KOREAN_FAMOUS_EXACT_SAFE_CORPUS_PATH, 'utf8');
+  const entries = new Map<string, LookupAmbiguityRuntimeEntry>();
+
+  for (const [index, line] of raw.split('\n').entries()) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+    const parsed = JSON.parse(trimmed) as KoreanCuratedAmbiguityFixtureRow;
+    if (parsed.expected_status !== 'ambiguous') {
+      continue;
+    }
+    if (Array.isArray(parsed.accepted_statuses) && parsed.accepted_statuses.length > 0) {
+      continue;
+    }
+    if (typeof parsed.query !== 'string' || parsed.query.trim().length === 0) {
+      throw new Error(`Korean curated ambiguity row ${index + 1} is missing query`);
+    }
+    const normalizedForm = normalizeForMatch(parsed.query);
+    if (normalizedForm.length === 0) {
+      throw new Error(`Korean curated ambiguity row ${index + 1} normalizes to empty`);
+    }
+    entries.set(normalizedForm, {
+      normalizedForm,
+      types: ['fixture_curated_ambiguity'],
+      severity: 'high',
+    });
+  }
+
+  return [...entries.values()].sort((left, right) => left.normalizedForm.localeCompare(right.normalizedForm));
+}
+
+function assertNoCuratedExactAliasCollisions(args: {
+  readonly baseAliases: readonly AliasSnapshotRecord[];
+  readonly curatedOverlay: ReadonlyMap<CanonicalEntityId, readonly SnapshotAliasOverlayProposal[]>;
+}): void {
+  const normalizedOwner = new Map<string, CanonicalEntityId>();
+  const compactOwner = new Map<string, CanonicalEntityId>();
+
+  for (const alias of args.baseAliases) {
+    normalizedOwner.set(alias.normalizedValue, alias.entityId as CanonicalEntityId);
+    const compact = compactForLookup(alias.normalizedValue);
+    if (compact.length > 0) {
+      compactOwner.set(compact, alias.entityId as CanonicalEntityId);
+    }
+  }
+
+  for (const [entityId, proposals] of args.curatedOverlay) {
+    for (const proposal of proposals) {
+      const normalizedValue = normalizeForMatch(proposal.value);
+      const compactValue = compactForLookup(normalizedValue);
+      const normalizedCollision = normalizedOwner.get(normalizedValue);
+      if (normalizedCollision !== undefined && normalizedCollision !== entityId) {
+        throw new Error(
+          `Curated Korean exact alias "${proposal.value}" collides on normalized exact lane with ${normalizedCollision}`,
+        );
+      }
+      const compactCollision = compactValue.length > 0 ? compactOwner.get(compactValue) : undefined;
+      if (compactCollision !== undefined && compactCollision !== entityId) {
+        throw new Error(
+          `Curated Korean exact alias "${proposal.value}" collides on compact exact lane with ${compactCollision}`,
+        );
+      }
+      normalizedOwner.set(normalizedValue, entityId);
+      if (compactValue.length > 0) {
+        compactOwner.set(compactValue, entityId);
+      }
+    }
+  }
+}
+
 export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapshotResult> {
   assertCanonicalTrackCArtifactInput(args.input, 'build-search-snapshot');
   const [recordContent, nlMappingsRaw] = await Promise.all([
@@ -846,6 +1047,7 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     entityArtifact,
     resolvedAliases,
     ambiguityRows,
+    entityIdBySourceId,
   } = await buildArtifactsForRecords({
     records: finalRecords,
     goldLookup,
@@ -863,6 +1065,7 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
       entityArtifact,
       resolvedAliases,
       ambiguityRows,
+      entityIdBySourceId,
     } = await buildArtifactsForRecords({
       records: finalRecords,
       goldLookup,
@@ -875,24 +1078,82 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
   });
   const nlMappings = parseNlMappings(nlMappingsRaw);
 
+  const generatedAt = new Date().toISOString();
   const documentsNdjson = serializeNdjson(finalRecords);
   const entitiesNdjson = serializeNdjson(entityArtifact);
   const aliasesNdjson = serializeNdjson(resolvedAliases);
   const ambiguityNdjson = serializeNdjson(ambiguityRows);
   const nlMappingsCanonical = `${stableJsonStringify(nlMappings.payload)}\n`;
+  const entityArtifactHash = hashStableJson(canonicalizeEntitySnapshotRecords(entityArtifact));
+  const aliasArtifactHash = hashStableJson(canonicalizeAliasSnapshotRecords(resolvedAliases));
+  const ambiguityArtifactHash = hashStableJson(canonicalizeAmbiguitySnapshotRows(ambiguityRows));
+  const lookupAliasRuntimeArtifact = buildLookupAliasRuntimeArtifact({
+    snapshotId: '',
+    generatedAt,
+    aliasRegistryHash: aliasArtifactHash,
+    aliases: resolvedAliases,
+  });
+  const lookupResolverProjectionArtifact = buildLookupResolverProjectionArtifact({
+    snapshotId: '',
+    generatedAt,
+    records: finalRecords,
+    entityIdBySourceId,
+    goldCanonicalLookup: goldLookup,
+    sourceContinuityLookup,
+  });
+  const lookupEntityProjectionArtifact = buildLookupEntityProjectionArtifact({
+    snapshotId: '',
+    generatedAt,
+    records: finalRecords,
+    entityIdBySourceId,
+    goldCanonicalLookup: goldLookup,
+    sourceContinuityLookup,
+  });
+  const koreanCuratedAmbiguityOverlay = await loadKoreanCuratedAmbiguityOverlay();
+  const lookupAmbiguityRuntimeArtifact = buildLookupAmbiguityRuntimeArtifact({
+    snapshotId: '',
+    generatedAt,
+    ambiguityRows,
+    curatedEntries: koreanCuratedAmbiguityOverlay,
+  });
 
   const hashes = {
     documents: hashText(documentsNdjson),
     vespaFeed: hashText(''),
-    entities: hashStableJson(canonicalizeEntitySnapshotRecords(entityArtifact)),
-    aliases: hashStableJson(canonicalizeAliasSnapshotRecords(resolvedAliases)),
-    ambiguityRegistry: hashStableJson(canonicalizeAmbiguitySnapshotRows(ambiguityRows)),
+    entities: entityArtifactHash,
+    aliases: aliasArtifactHash,
+    lookupAliasRuntime: buildLookupAliasRuntimeArtifactHash(lookupAliasRuntimeArtifact),
+    lookupResolverProjection: buildLookupResolverProjectionArtifactHash(lookupResolverProjectionArtifact),
+    lookupEntityProjection: buildLookupEntityProjectionArtifactHash(lookupEntityProjectionArtifact),
+    lookupAmbiguityRuntime: buildLookupAmbiguityRuntimeArtifactHash(lookupAmbiguityRuntimeArtifact),
+    ambiguityRegistry: ambiguityArtifactHash,
     nlMappings: hashText(nlMappingsCanonical),
   } as const;
 
   const contentHash = buildSearchSnapshotContentHash(hashes);
   const snapshotId = buildSearchSnapshotId(contentHash);
   const snapshotRoot = path.join(args.outputDir, snapshotId);
+  const finalizedLookupAliasRuntimeArtifact = {
+    ...lookupAliasRuntimeArtifact,
+    snapshotId,
+    aliasRegistryHash: hashes.aliases,
+  };
+  const finalizedLookupResolverProjectionArtifact = {
+    ...lookupResolverProjectionArtifact,
+    snapshotId,
+  };
+  const finalizedLookupEntityProjectionArtifact = {
+    ...lookupEntityProjectionArtifact,
+    snapshotId,
+  };
+  const finalizedLookupAmbiguityRuntimeArtifact = {
+    ...lookupAmbiguityRuntimeArtifact,
+    snapshotId,
+  };
+  const lookupAliasRuntimeJson = `${stableJsonStringify(finalizedLookupAliasRuntimeArtifact)}\n`;
+  const lookupResolverProjectionJson = `${stableJsonStringify(finalizedLookupResolverProjectionArtifact)}\n`;
+  const lookupEntityProjectionJson = `${stableJsonStringify(finalizedLookupEntityProjectionArtifact)}\n`;
+  const lookupAmbiguityRuntimeJson = `${stableJsonStringify(finalizedLookupAmbiguityRuntimeArtifact)}\n`;
   const fieldAvailability = buildFieldAvailability(finalRecords);
   const quality = {
     status: 'canonical' as const,
@@ -905,7 +1166,7 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
   const manifest: SearchSnapshotManifest = {
     schemaVersion: SEARCH_SNAPSHOT_SCHEMA_VERSION,
     snapshotId,
-    generatedAt: new Date().toISOString(),
+    generatedAt,
     contentHash,
     sourceInputPath: args.input,
     artifacts: {
@@ -913,6 +1174,10 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
       vespaFeedNdjson: path.join(snapshotRoot, 'vespa-feed.ndjson'),
       entitiesNdjson: path.join(snapshotRoot, 'entities.ndjson'),
       aliasesNdjson: path.join(snapshotRoot, 'aliases.ndjson'),
+      lookupAliasRuntimeJson: path.join(snapshotRoot, 'lookup-alias-runtime.json'),
+      lookupResolverProjectionJson: path.join(snapshotRoot, 'lookup-resolver-projection.json'),
+      lookupEntityProjectionJson: path.join(snapshotRoot, 'lookup-entity-projection.json'),
+      lookupAmbiguityRuntimeJson: path.join(snapshotRoot, 'lookup-ambiguity-runtime.json'),
       ambiguityRegistryNdjson: path.join(snapshotRoot, 'ambiguity-registry.ndjson'),
       nlMappingsJson: path.join(snapshotRoot, 'nl-mappings.json'),
       metadataJson: path.join(snapshotRoot, 'metadata.json'),
@@ -922,6 +1187,10 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
       vespaFeed: 0,
       entities: entityArtifact.length,
       aliases: resolvedAliases.length,
+      lookupAliasRuntimeAliases: finalizedLookupAliasRuntimeArtifact.aliases.length,
+      lookupResolverProjectionDocuments: finalizedLookupResolverProjectionArtifact.documents.length,
+      lookupEntityProjectionDocuments: finalizedLookupEntityProjectionArtifact.documents.length,
+      lookupAmbiguityRuntimeEntries: Object.keys(finalizedLookupAmbiguityRuntimeArtifact.entries).length,
       ambiguityRegistry: ambiguityRows.length,
       nlMappings: nlMappings.mappingCount,
     },
@@ -946,6 +1215,10 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     fs.rm(manifest.artifacts.vespaFeedNdjson, { force: true }),
     atomicWriteFile(manifest.artifacts.entitiesNdjson, entitiesNdjson),
     atomicWriteFile(manifest.artifacts.aliasesNdjson, aliasesNdjson),
+    atomicWriteFile(manifest.artifacts.lookupAliasRuntimeJson, lookupAliasRuntimeJson),
+    atomicWriteFile(manifest.artifacts.lookupResolverProjectionJson, lookupResolverProjectionJson),
+    atomicWriteFile(manifest.artifacts.lookupEntityProjectionJson, lookupEntityProjectionJson),
+    atomicWriteFile(manifest.artifacts.lookupAmbiguityRuntimeJson, lookupAmbiguityRuntimeJson),
     atomicWriteFile(manifest.artifacts.ambiguityRegistryNdjson, ambiguityNdjson),
     atomicWriteFile(manifest.artifacts.nlMappingsJson, nlMappingsCanonical),
     atomicWriteFile(manifest.artifacts.metadataJson, `${JSON.stringify(metadata, null, 2)}\n`),

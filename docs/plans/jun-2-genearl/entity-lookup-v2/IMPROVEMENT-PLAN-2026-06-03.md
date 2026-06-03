@@ -319,3 +319,282 @@ bench and docs so proof lanes match real execution surfaces.
 - If `ELV2-C2` improves `St. Supéry Élu` by weakening producer-family guards
   globally, stop and replace with head-evidence-aware logic.
 - Do not start `ELV2-C3` until the full authority gate is green.
+
+## Phase 2 — Post-Cutover Latency Hardening (2026-06-03)
+
+현재 상태는 **correctness green / latency green / Korean-famous coverage weak** 다.
+authority truth는 `215/215 PASS`이고, Korean-famous full latency lane도
+이제 `warm_p95_ms=1830.716`으로 pass다. 남은 owner seam은 serving latency가 아니라
+alias/data-plane coverage다.
+
+### Current Latency Truth
+
+- executable lane:
+  - `pnpm run eval:lookup-v2:latency:korean-famous -- --output /tmp/lookup-v2-latency-korean-famous-sotaplus-v5.json`
+- latest result:
+  - `bootstrap_ms=2298.600`
+  - `first_query_ms=4021.383`
+  - `warm_p50_ms=538.761`
+  - `warm_p95_ms=1830.716`
+  - verdict: **PASS**
+- latest coverage truth:
+  - `pnpm run eval:lookup-v2:coverage:korean-famous -- --output /tmp/lookup-v2-coverage-korean-famous-sotaplus-v5.json`
+  - `hot_entities=11/46 (23.9%)`
+  - `non_entity=15/19`
+  - `curation_tasks=35`
+- conclusion:
+  - serving/runtime latency seam is no longer the active blocker
+  - current blocker is Korean-famous alias/data-plane coverage
+  - the latency fixes must be preserved while coverage curation proceeds
+
+### Phase-2 Invariants
+
+- `eval:lookup-v2:authority` must remain `215/215`.
+- `eval:lookup-v2:shadow` must remain `wrong+=0`.
+- no heuristic shortcut / query allowlist / hardcoded exceptional path.
+- latency optimization must preserve the precision-first ambiguity behavior:
+  ambiguous short-form rows must stay ambiguous rather than wrong-resolving.
+- artifact-only lookup authority must remain intact; no PG serving dependency is
+  reintroduced to chase latency.
+
+## Ticket ELV2-L1 — Candidate Generation Decoupling
+
+Status: **planned**
+
+### Goal
+
+Remove the dominant `candidate_generation` wall time by splitting lookup
+resolver hydration from full retrieval-document hydration.
+
+### Evidence
+
+- Worst rows spend `1.3s~2.4s` in `candidate_generation`.
+- This stage currently calls `buildResolverCandidatesFromGenerator(...)`, which
+  batch-hydrates every anchor/blocker/retrieval seed through `entityLookup`
+  before the resolver runs.
+
+### Files To Touch
+
+- `src/application/search/search-usecase-resolver-candidates.ts`
+- `src/application/search/entity-lookup-v2/entity-lookup-v2.usecase.ts`
+- `src/infrastructure/adapter/search-snapshot-entity-lookup.ts`
+- `src/domain/shared/types/search-snapshot-lookup-runtime.ts`
+- `scripts/etl/build-lookup-runtime-pack.ts`
+- `scripts/etl/search-snapshot-schema.ts`
+- `scripts/etl/build-search-snapshot.ts`
+- `test/unit/entity-lookup-v2/**`
+- `test/unit/etl/**`
+
+### Design
+
+- Introduce a **lookup-resolver candidate projection** that contains only the
+  fields the resolver/scorer actually needs pre-decision.
+- Stop hydrating full `RetrievalDocument` payloads for every seed during
+  `candidate_generation`.
+- Fold that projection into the runtime pack so lookup can read it from the
+  published artifact rather than synthesizing it on the request path.
+- Keep expensive metadata hydration behind the point where the candidate set is
+  already narrowed and known to be needed for response projection.
+
+### Constraints
+
+- no partial-resolution / fail-open behavior
+- no route-local heuristic cap on “number of candidates to hydrate”
+- the new projection must remain an explicit artifact contract, not an ad hoc
+  in-memory shape
+
+### Verification Rails
+
+- `pnpm run eval:lookup-v2:authority`
+- `pnpm run eval:lookup-v2:shadow`
+- `pnpm run eval:lookup-v2:latency:korean-famous`
+- add a regression/assertion that `candidate_generation` no longer dominates the
+  current top-offender queries
+
+### DoD
+
+- top-offender `candidate_generation` time reduced by at least 50%
+- `warm_p95_ms < 2300` without correctness regression
+
+## Ticket ELV2-L2 — Planner Lane Separation For Lookup Authority
+
+Status: **planned**
+
+### Goal
+
+Strip lookup authority off planner branches that are useful for discovery /
+interpretation but too expensive for canonical known-item resolution.
+
+### Evidence
+
+- `planner_total` still reaches `700ms~1000ms` on `오푸스원`, `라피트 로쉴드`,
+  `샤또 오 브리옹`, `무똥 로쉴드`.
+- current planner can still be wired with `LlmNLMapper`,
+  `ConstraintTopologyPlanner`, and `AmbiguityIntentCompiler`, all built from
+  the generic search container.
+
+### Files To Touch
+
+- `src/config/container-core-builders.ts`
+- `src/domain/query/service/planner.ts`
+- `src/application/search/entity-lookup-v2/entity-lookup-v2.usecase.ts`
+- `src/domain/query/model/**`
+- `test/unit/entity-lookup-v2/**`
+- `test/unit/application/search/**`
+
+### Design
+
+- Define a **lookup-authority planner profile**:
+  - keeps anchor extraction, normalization, and deterministic uncertainty
+  - disables LLM-bearing or discovery-oriented planner branches on the
+    lookup authority lane
+- Wire that profile only for `EntityLookupV2UseCase`; generic search keeps its
+  current richer planner surface.
+- Treat lookup as an entity-resolution lane, not a generic semantic parse lane.
+
+### Constraints
+
+- no change to public `/v2/entity-lookup` contract
+- no regression on concept redirect / under-specified gate behavior
+- no silent change to generic search planner behavior
+
+### Verification Rails
+
+- exact regression rows:
+  - `오푸스원`
+  - `라피트 로쉴드`
+  - `샤또 오 브리옹`
+- full authority + shadow + latency reruns
+
+### DoD
+
+- worst-row `planner_total` reduced below `400ms`
+- `오푸스원` no longer spends ~`1s` in planner
+
+## Ticket ELV2-L3 — Short Ambiguity / Blocker Pressure Relief
+
+Status: **planned**
+
+### Goal
+
+Reduce blocker and broad recall blow-up on short ambiguous iconic surfaces
+without weakening fail-closed ambiguity behavior.
+
+### Evidence
+
+- `샤또`: `blocker=442ms`, `retrieval_total=408ms`
+- `샤토`: `blocker=362ms`, `retrieval_total=350ms`
+- `크룩`, `이켐` also show blocker-heavy profiles
+
+### Files To Touch
+
+- `src/domain/resolver/service/blocker.ts`
+- `src/application/search/entity-lookup-v2/multi-channel-retrieval-engine.ts`
+- `src/domain/query/service/planner.ts`
+- `src/domain/query/model/**`
+- `test/unit/entity-lookup-v2/**`
+- `test/regression/**`
+
+### Design
+
+- Add a deterministic **short-ambiguity lane** for iconic short forms:
+  - preserve ambiguity as the terminal behavior
+  - avoid needlessly broad blocker expansion when retrieval/family-graph already
+    establishes an ambiguity cluster
+- Audit `family_graph` recall on short ambiguous terms and keep only the
+  structural work needed to surface clarification options.
+- The target is not “resolve more”; the target is “be ambiguous faster”.
+
+### Constraints
+
+- no degradation of `ambiguous_short_form` precision
+- no producer-family false resolve
+- no per-query heuristic exception list
+
+### DoD
+
+- `샤또` / `샤토` blocker + retrieval combined cost materially reduced
+- ambiguous output preserved on the same rows
+
+## Ticket ELV2-L4 — Ambiguity Graph Read Path Compression
+
+Status: **planned**
+
+### Goal
+
+Lower the `ambiguity_lookup` read cost on ambiguous rows once larger owners are
+handled.
+
+### Evidence
+
+- current `ambiguity_lookup` is usually `28ms~43ms`
+- not the main bottleneck, but it is always on the ambiguous path
+
+### Files To Touch
+
+- `src/domain/query/port/ambiguity-dictionary.port.ts`
+- `src/infrastructure/adapter/pg-ambiguity-dictionary.ts`
+- `src/application/search/entity-lookup-v2/entity-lookup-v2.usecase.ts`
+- `test/unit/**`
+
+### Design
+
+- keep the persisted ambiguity substrate, but compress the read path:
+  cache/materialize by normalized query key inside the snapshot/runtime plane
+  instead of paying the full lookup on every ambiguous request
+
+### DoD
+
+- ambiguous rows keep the same types/severity
+- `ambiguity_lookup` drops into single-digit ms on warm path
+
+## Ticket ELV2-L5 — Bench / SLO Governance
+
+Status: **planned**
+
+### Goal
+
+Make latency a first-class release gate the same way correctness already is.
+
+### Files To Touch
+
+- `docs/bench/STATUS.md`
+- `docs/plans/jun-2-genearl/entity-lookup-v2/cutover-checklist.md`
+- `scripts/eval/run-lookup-v2-latency-korean-famous.ts`
+- `test/regression/**`
+
+### Design
+
+- keep the instrumented latency lane as SSOT for post-cutover performance
+- track stage owners explicitly:
+  - `planner_total`
+  - `retrieval_total`
+  - `candidate_generation`
+  - `blocker`
+  - `resolver`
+  - `ambiguity_lookup`
+- fail when a new latency regression lands even if correctness stays green
+
+### DoD
+
+- latency lane documented as current executable lane
+- stage-owner artifact is stable enough for PR regression use
+
+## Phase-2 Execution Order
+
+1. `ELV2-L1`
+2. `ELV2-L2`
+3. rerun full latency lane
+4. `ELV2-L3`
+5. rerun full latency lane + authority + shadow
+6. `ELV2-L4`
+7. `ELV2-L5`
+
+## Phase-2 Stop Conditions
+
+- If `ELV2-L1` improves latency by caching or omitting fields in a way that
+  changes resolver semantics, stop and move the projection boundary later.
+- If `ELV2-L2` improves latency by weakening concept admission or ambiguity
+  behavior, stop and restore the shared planner invariants.
+- If `ELV2-L3` improves short-form latency by converting ambiguity into resolve,
+  stop immediately.

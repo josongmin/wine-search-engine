@@ -17,6 +17,13 @@
 - `pnpm run eval:lookup-v2:coverage -- --output /tmp/lookup-v2-coverage-report.json`
   - lookup hot-entity coverage / curation signal
   - authority/shadow와 동일하게 live PG pool을 주입한 authoritative substrate에서 실행해야 한다
+- `pnpm run eval:lookup-v2:latency:korean-famous -- --output /tmp/lookup-v2-latency-korean-famous.json`
+  - post-cutover lookup latency / SLO gate
+  - current owner-stage artifact는 `planner_total`, `retrieval_total`,
+    `candidate_generation`, `blocker`, `resolver`, `ambiguity_lookup`를 함께 출력한다
+  - current full-corpus truth는 `/tmp/lookup-v2-latency-korean-famous-sotaplus-v5.json`
+    기준 `bootstrap_ms=2298.600`, `first_query_ms=4021.383`,
+    `warm_p95_ms=1830.716`로 **PASS**다
 
 ## Non-current / fail-closed
 

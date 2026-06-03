@@ -52,12 +52,16 @@ import type {
   LookupRetrievalInput,
   LookupRetrievalResult,
 } from '../../../domain/resolver/v2/lookup-v2-types.js';
-import type { EntityDocumentLookupPort } from '../port/search-pipeline-deps.port.js';
+import type {
+  EntityDocumentLookupPort,
+  LookupResolverProjectionPort,
+} from '../port/search-pipeline-deps.port.js';
 import type { FamilyGraphPort, FamilySibling } from '../../../domain/resolver/v2/family-graph.port.js';
 
 export interface MultiChannelRetrievalDeps {
   readonly aliasMatcher: AliasMatcher;
   readonly entityLookup: EntityDocumentLookupPort;
+  readonly resolverProjectionLookup?: LookupResolverProjectionPort | undefined;
   /**
    * T-ELV2-06 Half B: producer family graph. When wired, the engine walks each
    * alias-recalled anchor to its persisted family and emits co-producer siblings
@@ -94,6 +98,7 @@ export class MultiChannelRetrievalEngine implements LookupCandidateRetrievalPort
 
   async retrieve(input: LookupRetrievalInput, _signal?: AbortSignal): Promise<LookupRetrievalResult> {
     const views = input.views;
+    const stageTimer = input.stageTimer;
     const bindings: readonly ChannelViewBinding[] = [
       { channel: 'exact_alias', view: views.strict },
       { channel: 'compact_exact', view: views.compact },
@@ -113,7 +118,7 @@ export class MultiChannelRetrievalEngine implements LookupCandidateRetrievalPort
     });
 
     const runs = await Promise.all(
-      runnable.map((b) => this.runChannel(b.channel, b.view as string)),
+      runnable.map((b) => this.runChannel(b.channel, b.view as string, stageTimer)),
     );
 
     // UNION + dedupe by entity. Per-candidate channel provenance is derived from
@@ -128,6 +133,7 @@ export class MultiChannelRetrievalEngine implements LookupCandidateRetrievalPort
     const byEntity = new Map<string, { id: CanonicalEntityId; key: string; byChannel: Map<LookupRetrievalChannel, ChannelAccum>; best: number }>();
     const coverage: LookupChannelCoverage[] = [];
 
+    stageTimer?.start('retrieval.union');
     for (const run of runs) {
       let hitCount = 0;
       for (const match of run.matches) {
@@ -170,6 +176,7 @@ export class MultiChannelRetrievalEngine implements LookupCandidateRetrievalPort
         latencyMs: run.latencyMs,
       });
     }
+    stageTimer?.end('retrieval.union');
 
     // T-ELV2-06 Half B: walk each alias-recalled anchor to its persisted producer
     // family and emit co-producer SIBLINGS on the family_graph channel. Siblings
@@ -177,9 +184,14 @@ export class MultiChannelRetrievalEngine implements LookupCandidateRetrievalPort
     // degradation-safe (empty when the substrate is unavailable).
     const aliasRecalledKeys = [...byEntity.keys()];
     const familyOnlyKeys = new Set<string>();
-    if (this.deps.familyGraph !== undefined && aliasRecalledKeys.length > 0) {
+    if (
+      this.deps.familyGraph !== undefined
+      && aliasRecalledKeys.length > 0
+      && input.suppressFamilyGraphExpansion !== true
+    ) {
       const startedAt = performance.now();
       let familyHitCount = 0;
+      stageTimer?.start('retrieval.family_graph');
       try {
         const siblingsByAnchor = this.deps.familyGraph.getFamilySiblingsBatch !== undefined
           ? await this.deps.familyGraph.getFamilySiblingsBatch(aliasRecalledKeys, _signal)
@@ -204,6 +216,8 @@ export class MultiChannelRetrievalEngine implements LookupCandidateRetrievalPort
       } catch (err) {
         // Family graph must never sink the request — record a dormant timed run.
         void err; /* intentional: degrade to dormant family channel */
+      } finally {
+        stageTimer?.end('retrieval.family_graph');
       }
       // A sibling that was ALSO alias-recalled is not family-only.
       for (const key of aliasRecalledKeys) familyOnlyKeys.delete(key);
@@ -234,7 +248,11 @@ export class MultiChannelRetrievalEngine implements LookupCandidateRetrievalPort
       ranked = [...primary, ...reserved.filter((e) => !seen.has(e.key))].sort(byScore).slice(0, max);
     }
 
-    const docs = await this.deps.entityLookup.getDocuments(ranked.map((e) => e.id));
+    stageTimer?.start('retrieval.hydration');
+    const docs = this.deps.resolverProjectionLookup !== undefined
+      ? await this.deps.resolverProjectionLookup.getResolverProjections(ranked.map((e) => e.id))
+      : await this.deps.entityLookup.getDocuments(ranked.map((e) => e.id));
+    stageTimer?.end('retrieval.hydration');
 
     const candidates: LookupCandidate[] = ranked.map((entry) => {
       const doc = docs.get(entry.id);
@@ -277,11 +295,15 @@ export class MultiChannelRetrievalEngine implements LookupCandidateRetrievalPort
   private async runChannel(
     channel: LookupRetrievalChannel,
     view: string,
+    stageTimer?: LookupRetrievalInput['stageTimer'],
   ): Promise<ChannelRunResult> {
     const startedAt = performance.now();
     let matches: readonly AliasMatchResult[] = [];
     try {
-      matches = await this.deps.aliasMatcher.findMatches(view);
+      matches = await this.deps.aliasMatcher.findMatches(view, {
+        scope: 'span',
+        ...(stageTimer !== undefined ? { stageTimer } : {}),
+      });
     } catch {
       // A single channel failure must not sink the union — record an empty,
       // timed run (firing=false) and let the other channels stand.

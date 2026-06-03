@@ -66,6 +66,7 @@ import { createSqliteAgentSessionStore } from '../infrastructure/db/agent-sessio
 import { AgentSessionService } from '../application/wine-search/agent-session-service.js';
 import { AgentUseCase } from '../application/wine-search/agent-usecase.js';
 import type { AgentUseCasePort } from '../application/wine-search/port/agent-usecase.port.js';
+import { bindLiveSearchSnapshotRuntimeHandles } from './runtime-handles.js';
 export interface Container {
   /** Chat LLM when an OpenAI credential pool or Codex ChatGPT login token is available. */
   readonly chatLlm?: ChatLlmPort;
@@ -300,7 +301,9 @@ export async function createContainer(
   config: Config,
   runtime: Pool | RuntimeHandles = {},
 ): Promise<Container> {
-  const runtimeHandles = normalizeRuntimeHandles(runtime);
+  const runtimeHandles = await bindLiveSearchSnapshotRuntimeHandles(
+    normalizeRuntimeHandles(runtime),
+  );
   const core = await buildCoreContainerServices(config, runtimeHandles);
 
   // Construct the shared StructuredLlmPort BEFORE feature services so

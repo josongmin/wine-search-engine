@@ -243,89 +243,19 @@ describe('buildCoreAdapterServices', () => {
     }
   });
 
-  it('prefers PostgreSQL in-memory alias substrate when aliases table is present', async () => {
-    const aliasTableAvailableSpy = vi
-      .spyOn(PgAliasMatcherAdapter, 'isAliasTableAvailable')
-      .mockResolvedValue(true);
-    const loadFromPostgresSpy = vi
-      .spyOn(SearchSnapshotAliasMatcher, 'loadFromPostgres')
-      .mockResolvedValue({
-        findMatches: () => Promise.resolve([]),
-        findMatchesBatch: () => Promise.resolve(new Map()),
-        getSurfaceForms: () => ['Opus One'],
-      } as SearchSnapshotAliasMatcher);
-    const loadSpy = vi
-      .spyOn(SearchSnapshotAliasMatcher, 'loadFromRuntimeState')
-      .mockResolvedValue(undefined);
-
+  it('requires searchSnapshotManifestPath when a PostgreSQL pool is wired', async () => {
     const config = parseEnv({
       NODE_ENV: 'test',
       WEBHOOK_SECRET: 'watchlist-secret-1234',
     });
     const fakePool = { query: vi.fn() } as never;
 
-    try {
-      await buildCoreAdapterServices(config, { pool: fakePool });
-      expect(aliasTableAvailableSpy).toHaveBeenCalledWith(fakePool, {
-        queryTimeoutMs: 1500,
-      });
-      expect(loadFromPostgresSpy).toHaveBeenCalledWith(fakePool, undefined, {
-        queryTimeoutMs: 1500,
-      });
-      expect(loadSpy).not.toHaveBeenCalled();
-    } finally {
-      aliasTableAvailableSpy.mockRestore();
-      loadSpy.mockRestore();
-      loadFromPostgresSpy.mockRestore();
-    }
+    await expect(buildCoreAdapterServices(config, { pool: fakePool })).rejects.toThrow(
+      /searchSnapshotManifestPath/,
+    );
   });
 
-  it('skips snapshot manifest alias preload when PostgreSQL alias overlay is available', async () => {
-    const aliasTableAvailableSpy = vi
-      .spyOn(PgAliasMatcherAdapter, 'isAliasTableAvailable')
-      .mockResolvedValue(true);
-    const loadFromPostgresSpy = vi
-      .spyOn(SearchSnapshotAliasMatcher, 'loadFromPostgres')
-      .mockResolvedValue({
-        findMatches: () => Promise.resolve([]),
-        findMatchesBatch: () => Promise.resolve(new Map()),
-        getSurfaceForms: () => ['Opus One'],
-      } as SearchSnapshotAliasMatcher);
-    const loadFromManifestSpy = vi
-      .spyOn(SearchSnapshotAliasMatcher, 'loadFromManifest')
-      .mockResolvedValue(undefined);
-
-    const config = parseEnv({
-      NODE_ENV: 'test',
-      WEBHOOK_SECRET: 'watchlist-secret-1234',
-    });
-    const fakePool = { query: vi.fn() } as never;
-
-    try {
-      await buildCoreAdapterServices(config, {
-        pool: fakePool,
-        searchSnapshotId: 'search-snapshot:v1:target',
-        searchSnapshotManifestPath: '/tmp/search-snapshot:v1:target/manifest.json',
-      });
-      expect(aliasTableAvailableSpy).toHaveBeenCalledWith(fakePool, {
-        queryTimeoutMs: 1500,
-      });
-      expect(loadFromPostgresSpy).toHaveBeenCalledWith(
-        fakePool,
-        'search-snapshot:v1:target',
-        {
-          queryTimeoutMs: 1500,
-        },
-      );
-      expect(loadFromManifestSpy).not.toHaveBeenCalled();
-    } finally {
-      aliasTableAvailableSpy.mockRestore();
-      loadFromPostgresSpy.mockRestore();
-      loadFromManifestSpy.mockRestore();
-    }
-  });
-
-  it('falls back to snapshot manifest alias preload when PostgreSQL overlay resolves empty', async () => {
+  it('uses snapshot-manifest alias substrate even when a PostgreSQL pool is wired', async () => {
     const exactQuery = '2017 delas le clos rouge crozes-hermitage';
     const exactMatch = {
       surfaceForm: 'Delas Le Clos Rouge Crozes-Hermitage',
@@ -334,9 +264,7 @@ describe('buildCoreAdapterServices', () => {
       matchConfidence: 0.99,
       lookupStrategy: 'in_memory',
     } as const;
-    const aliasTableAvailableSpy = vi
-      .spyOn(PgAliasMatcherAdapter, 'isAliasTableAvailable')
-      .mockResolvedValue(true);
+    const aliasTableAvailableSpy = vi.spyOn(PgAliasMatcherAdapter, 'isAliasTableAvailable');
     const loadFromPostgresSpy = vi
       .spyOn(SearchSnapshotAliasMatcher, 'loadFromPostgres')
       .mockResolvedValue(undefined);
@@ -365,16 +293,9 @@ describe('buildCoreAdapterServices', () => {
         searchSnapshotId: 'search-snapshot:v1:target',
         searchSnapshotManifestPath: '/tmp/search-snapshot:v1:target/manifest.json',
       });
-      expect(aliasTableAvailableSpy).toHaveBeenCalledWith(fakePool, {
-        queryTimeoutMs: 1500,
-      });
-      expect(loadFromPostgresSpy).toHaveBeenCalledWith(
-        fakePool,
-        'search-snapshot:v1:target',
-        {
-          queryTimeoutMs: 1500,
-        },
-      );
+      expect(adapters.fuzzyMatcher).toBeDefined();
+      expect(aliasTableAvailableSpy).not.toHaveBeenCalled();
+      expect(loadFromPostgresSpy).not.toHaveBeenCalled();
       expect(loadFromManifestSpy).toHaveBeenCalledWith('/tmp/search-snapshot:v1:target/manifest.json');
       expect(await adapters.aliasMatcher.findMatches(exactQuery)).toEqual([exactMatch]);
       expect(await adapters.aliasMatcher.findMatches('missing snapshot alias')).toEqual([]);
@@ -387,29 +308,12 @@ describe('buildCoreAdapterServices', () => {
     }
   });
 
-  it('uses search-index alias authority when PostgreSQL aliases table is absent', async () => {
-    const aliasTableAvailableSpy = vi
-      .spyOn(PgAliasMatcherAdapter, 'isAliasTableAvailable')
-      .mockResolvedValue(false);
-    const loadFromPostgresSpy = vi
-      .spyOn(SearchSnapshotAliasMatcher, 'loadFromPostgres')
+  it('fails closed when manifest-backed lookup runtime artifacts cannot be loaded', async () => {
+    const aliasTableAvailableSpy = vi.spyOn(PgAliasMatcherAdapter, 'isAliasTableAvailable');
+    const loadFromPostgresSpy = vi.spyOn(SearchSnapshotAliasMatcher, 'loadFromPostgres');
+    const loadFromManifestSpy = vi
+      .spyOn(SearchSnapshotAliasMatcher, 'loadFromManifest')
       .mockResolvedValue(undefined);
-    const loadSpy = vi
-      .spyOn(SearchSnapshotAliasMatcher, 'loadFromRuntimeState')
-      .mockResolvedValue(undefined);
-    const sparseSearchSpy = vi
-      .spyOn(VespaSearchIndex.prototype, 'sparseSearch')
-      .mockResolvedValue([
-        {
-          entityId: createCanonicalEntityId('index-opus-one'),
-          score: 1,
-          rank: 1,
-          matchedFields: ['canonical_label'],
-          summary: {
-            canonicalLabel: 'Opus One',
-          },
-        },
-      ] satisfies readonly SparseHit[]);
 
     const config = parseEnv({
       NODE_ENV: 'test',
@@ -418,86 +322,17 @@ describe('buildCoreAdapterServices', () => {
     const fakePool = { query: vi.fn() } as never;
 
     try {
-      const adapters = await buildCoreAdapterServices(config, { pool: fakePool });
-      expect(aliasTableAvailableSpy).toHaveBeenCalledWith(fakePool, {
-        queryTimeoutMs: 1500,
-      });
-      expect(loadFromPostgresSpy).not.toHaveBeenCalled();
-      expect(loadSpy).not.toHaveBeenCalled();
-      expect(adapters.aliasMatcher).toBeInstanceOf(CachedAliasMatcher);
-      const matches = await adapters.aliasMatcher.findMatches('opus one');
-      expect(matches).toEqual([
-        {
-          surfaceForm: 'Opus One',
-          normalizedForm: 'opus one',
-          entityIds: ['index-opus-one'],
-          matchConfidence: 0.97,
-          lookupStrategy: 'index_exact',
-        },
-      ]);
-      expect(sparseSearchSpy).toHaveBeenCalled();
-    } finally {
-      aliasTableAvailableSpy.mockRestore();
-      loadSpy.mockRestore();
-      loadFromPostgresSpy.mockRestore();
-      sparseSearchSpy.mockRestore();
-    }
-  });
-
-  it('scopes PostgreSQL alias preload to the explicit snapshot override', async () => {
-    const exactQuery = '2017 delas le clos rouge crozes-hermitage';
-    const exactMatch = {
-      surfaceForm: 'Delas Le Clos Rouge Crozes-Hermitage',
-      normalizedForm: 'delas le clos rouge crozes-hermitage',
-      entityIds: ['snapshot-delas'],
-      matchConfidence: 0.99,
-      lookupStrategy: 'in_memory',
-    } as const;
-    const aliasTableAvailableSpy = vi
-      .spyOn(PgAliasMatcherAdapter, 'isAliasTableAvailable')
-      .mockResolvedValue(true);
-    const loadFromPostgresSpy = vi
-      .spyOn(SearchSnapshotAliasMatcher, 'loadFromPostgres')
-      .mockResolvedValue({
-        findMatches: (query: string) => Promise.resolve(query === exactQuery ? [exactMatch] : []),
-        findMatchesBatch: (queries: readonly string[]) => Promise.resolve(new Map(
-          queries.map((query) => [query, query === exactQuery ? [exactMatch] : []] as const),
-        )),
-        getSurfaceForms: () => ['Delas Le Clos Rouge Crozes-Hermitage'],
-      } as SearchSnapshotAliasMatcher);
-    const sparseSearchSpy = vi
-      .spyOn(VespaSearchIndex.prototype, 'sparseSearch')
-      .mockResolvedValue([] satisfies readonly SparseHit[]);
-
-    const config = parseEnv({
-      NODE_ENV: 'test',
-      WEBHOOK_SECRET: 'watchlist-secret-1234',
-    });
-    const fakePool = { query: vi.fn() } as never;
-
-    try {
-      const adapters = await buildCoreAdapterServices(config, {
+      await expect(buildCoreAdapterServices(config, {
         pool: fakePool,
-        searchSnapshotId: 'search-snapshot:v1:target',
-      });
-      expect(adapters.fuzzyMatcher).toBeDefined();
-      expect(aliasTableAvailableSpy).toHaveBeenCalledWith(fakePool, {
-        queryTimeoutMs: 1500,
-      });
-      expect(loadFromPostgresSpy).toHaveBeenCalledWith(
-        fakePool,
-        'search-snapshot:v1:target',
-        {
-          queryTimeoutMs: 1500,
-        },
-      );
-      expect(await adapters.aliasMatcher.findMatches(exactQuery)).toEqual([exactMatch]);
-      expect(await adapters.aliasMatcher.findMatches('missing snapshot alias')).toEqual([]);
-      expect(sparseSearchSpy).not.toHaveBeenCalled();
+        searchSnapshotManifestPath: '/tmp/search-snapshot:v1:target/manifest.json',
+      })).rejects.toThrow(/lookup runtime artifacts are required/);
+      expect(aliasTableAvailableSpy).not.toHaveBeenCalled();
+      expect(loadFromPostgresSpy).not.toHaveBeenCalled();
+      expect(loadFromManifestSpy).toHaveBeenCalledWith('/tmp/search-snapshot:v1:target/manifest.json');
     } finally {
       aliasTableAvailableSpy.mockRestore();
       loadFromPostgresSpy.mockRestore();
-      sparseSearchSpy.mockRestore();
+      loadFromManifestSpy.mockRestore();
     }
   });
 });

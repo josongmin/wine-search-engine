@@ -79,7 +79,8 @@ export type WineSearchDegradedReason =
   | 'policy_blocked'
   | 'unexpected_error'
   | 'ungrounded_claim'
-  | 'no_corpus_match';
+  | 'no_corpus_match'
+  | 'llm_unavailable';
 
 /** Query intent classifier output (wire form). */
 export type WineSearchQueryIntent =

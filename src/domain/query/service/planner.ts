@@ -402,6 +402,7 @@ export class Planner {
     const { anchors, relativeQuery } = await this.anchorExtractor.extractWithRelative(
       plannerSurfaceNormalized,
       plannerSurfaceViews,
+      stageTimer,
     ).finally(() => {
       stageTimer?.end('planner.anchor_extraction');
     });

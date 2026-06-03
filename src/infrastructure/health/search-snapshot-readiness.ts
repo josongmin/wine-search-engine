@@ -231,6 +231,10 @@ export interface LoadedSearchSnapshotRuntimeState {
   readonly publishedAt: string;
   readonly manifestPath: string;
   readonly nlMappingsRuntimePath: string;
+  readonly lookupAliasRuntimePath: string;
+  readonly lookupResolverProjectionPath: string;
+  readonly lookupEntityProjectionPath: string;
+  readonly lookupAmbiguityRuntimePath: string;
   readonly quality: {
     readonly status: 'canonical' | 'degraded';
     readonly blockers: readonly string[];
@@ -242,6 +246,10 @@ export interface LoadedSearchSnapshotRuntimeState {
   readonly counts: {
     readonly entities: number;
     readonly aliases: number;
+    readonly lookupAliasRuntimeAliases: number;
+    readonly lookupResolverProjectionDocuments: number;
+    readonly lookupEntityProjectionDocuments: number;
+    readonly lookupAmbiguityRuntimeEntries: number;
     readonly ambiguityRegistry: number;
     readonly nlMappings: number;
     readonly activeLtrModels: number;
@@ -249,6 +257,10 @@ export interface LoadedSearchSnapshotRuntimeState {
   readonly hashes: {
     readonly entities: string;
     readonly aliases: string;
+    readonly lookupAliasRuntime: string;
+    readonly lookupResolverProjection: string;
+    readonly lookupEntityProjection: string;
+    readonly lookupAmbiguityRuntime: string;
     readonly ambiguityRegistry: string;
     readonly nlMappings: string;
     readonly activeLtrModels: string;
@@ -309,6 +321,10 @@ type RuntimeStateShape = {
   readonly publishedAt?: unknown;
   readonly manifestPath?: unknown;
   readonly nlMappingsRuntimePath?: unknown;
+  readonly lookupAliasRuntimePath?: unknown;
+  readonly lookupResolverProjectionPath?: unknown;
+  readonly lookupEntityProjectionPath?: unknown;
+  readonly lookupAmbiguityRuntimePath?: unknown;
   readonly quality?: {
     readonly status?: unknown;
     readonly blockers?: unknown;
@@ -346,6 +362,10 @@ type RuntimeStateShape = {
   readonly counts?: {
     readonly entities?: unknown;
     readonly aliases?: unknown;
+    readonly lookupAliasRuntimeAliases?: unknown;
+    readonly lookupResolverProjectionDocuments?: unknown;
+    readonly lookupEntityProjectionDocuments?: unknown;
+    readonly lookupAmbiguityRuntimeEntries?: unknown;
     readonly ambiguityRegistry?: unknown;
     readonly nlMappings?: unknown;
     readonly activeLtrModels?: unknown;
@@ -353,6 +373,10 @@ type RuntimeStateShape = {
   readonly hashes?: {
     readonly entities?: unknown;
     readonly aliases?: unknown;
+    readonly lookupAliasRuntime?: unknown;
+    readonly lookupResolverProjection?: unknown;
+    readonly lookupEntityProjection?: unknown;
+    readonly lookupAmbiguityRuntime?: unknown;
     readonly ambiguityRegistry?: unknown;
     readonly nlMappings?: unknown;
     readonly activeLtrModels?: unknown;
@@ -512,75 +536,109 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
           tannin: sensoryFieldAvailabilityMetrics['tannin'] ?? ZERO_SEARCH_FIELD_AVAILABILITY_METRIC,
         };
   const hasValidFieldAvailability = normalizedFieldAvailability !== undefined;
-  if (
-    parsed.schemaVersion !== SEARCH_SNAPSHOT_STATE_VERSION
-    || typeof parsed.snapshotId !== 'string'
-    || parsed.snapshotId.length === 0
-    || typeof parsed.contentHash !== 'string'
-    || parsed.contentHash.length === 0
-    || typeof parsed.publishedAt !== 'string'
-    || parsed.publishedAt.length === 0
-    || typeof parsed.manifestPath !== 'string'
-    || parsed.manifestPath.length === 0
-    || typeof parsed.nlMappingsRuntimePath !== 'string'
-    || parsed.nlMappingsRuntimePath.length === 0
-    || quality === undefined
-    || !hasValidFieldAvailability
-    || counts === undefined
-    || !isFiniteCount(counts.entities)
-    || !isFiniteCount(counts.aliases)
-    || !isFiniteCount(counts.ambiguityRegistry)
-    || !isFiniteCount(counts.nlMappings)
-    || !isFiniteCount(counts.activeLtrModels)
-    || hashes === undefined
-    || typeof hashes.entities !== 'string'
-    || hashes.entities.length === 0
-    || typeof hashes.aliases !== 'string'
-    || hashes.aliases.length === 0
-    || typeof hashes.ambiguityRegistry !== 'string'
-    || hashes.ambiguityRegistry.length === 0
-    || typeof hashes.nlMappings !== 'string'
-    || hashes.nlMappings.length === 0
-    || typeof hashes.activeLtrModels !== 'string'
-    || hashes.activeLtrModels.length === 0
-    || (parsed.ltrReleaseProvenance !== undefined && ltrReleaseProvenance === undefined)
-  ) {
-    throw new Error('Malformed runtime search snapshot state');
+  const malformedReasons: string[] = [];
+  if (parsed.schemaVersion !== SEARCH_SNAPSHOT_STATE_VERSION) malformedReasons.push('schemaVersion');
+  if (typeof parsed.snapshotId !== 'string' || parsed.snapshotId.length === 0) malformedReasons.push('snapshotId');
+  if (typeof parsed.contentHash !== 'string' || parsed.contentHash.length === 0) malformedReasons.push('contentHash');
+  if (typeof parsed.publishedAt !== 'string' || parsed.publishedAt.length === 0) malformedReasons.push('publishedAt');
+  if (typeof parsed.manifestPath !== 'string' || parsed.manifestPath.length === 0) malformedReasons.push('manifestPath');
+  if (typeof parsed.nlMappingsRuntimePath !== 'string' || parsed.nlMappingsRuntimePath.length === 0) malformedReasons.push('nlMappingsRuntimePath');
+  if (typeof parsed.lookupAliasRuntimePath !== 'string' || parsed.lookupAliasRuntimePath.length === 0) malformedReasons.push('lookupAliasRuntimePath');
+  if (typeof parsed.lookupResolverProjectionPath !== 'string' || parsed.lookupResolverProjectionPath.length === 0) malformedReasons.push('lookupResolverProjectionPath');
+  if (typeof parsed.lookupEntityProjectionPath !== 'string' || parsed.lookupEntityProjectionPath.length === 0) malformedReasons.push('lookupEntityProjectionPath');
+  if (typeof parsed.lookupAmbiguityRuntimePath !== 'string' || parsed.lookupAmbiguityRuntimePath.length === 0) malformedReasons.push('lookupAmbiguityRuntimePath');
+  if (quality === undefined) malformedReasons.push('quality');
+  if (!hasValidFieldAvailability) malformedReasons.push('fieldAvailability');
+  if (counts === undefined) malformedReasons.push('counts');
+  if (counts !== undefined) {
+    if (!isFiniteCount(counts.entities)) malformedReasons.push('counts.entities');
+    if (!isFiniteCount(counts.aliases)) malformedReasons.push('counts.aliases');
+    if (!isFiniteCount(counts.lookupAliasRuntimeAliases)) malformedReasons.push('counts.lookupAliasRuntimeAliases');
+    if (!isFiniteCount(counts.lookupResolverProjectionDocuments)) malformedReasons.push('counts.lookupResolverProjectionDocuments');
+    if (!isFiniteCount(counts.lookupEntityProjectionDocuments)) malformedReasons.push('counts.lookupEntityProjectionDocuments');
+    if (!isFiniteCount(counts.lookupAmbiguityRuntimeEntries)) malformedReasons.push('counts.lookupAmbiguityRuntimeEntries');
+    if (!isFiniteCount(counts.ambiguityRegistry)) malformedReasons.push('counts.ambiguityRegistry');
+    if (!isFiniteCount(counts.nlMappings)) malformedReasons.push('counts.nlMappings');
+    if (!isFiniteCount(counts.activeLtrModels)) malformedReasons.push('counts.activeLtrModels');
   }
+  if (hashes === undefined) malformedReasons.push('hashes');
+  if (hashes !== undefined) {
+    if (typeof hashes.entities !== 'string' || hashes.entities.length === 0) malformedReasons.push('hashes.entities');
+    if (typeof hashes.aliases !== 'string' || hashes.aliases.length === 0) malformedReasons.push('hashes.aliases');
+    if (typeof hashes.lookupAliasRuntime !== 'string' || hashes.lookupAliasRuntime.length === 0) malformedReasons.push('hashes.lookupAliasRuntime');
+    if (typeof hashes.lookupResolverProjection !== 'string' || hashes.lookupResolverProjection.length === 0) malformedReasons.push('hashes.lookupResolverProjection');
+    if (typeof hashes.lookupEntityProjection !== 'string' || hashes.lookupEntityProjection.length === 0) malformedReasons.push('hashes.lookupEntityProjection');
+    if (typeof hashes.lookupAmbiguityRuntime !== 'string' || hashes.lookupAmbiguityRuntime.length === 0) malformedReasons.push('hashes.lookupAmbiguityRuntime');
+    if (typeof hashes.ambiguityRegistry !== 'string' || hashes.ambiguityRegistry.length === 0) malformedReasons.push('hashes.ambiguityRegistry');
+    if (typeof hashes.nlMappings !== 'string' || hashes.nlMappings.length === 0) malformedReasons.push('hashes.nlMappings');
+    if (typeof hashes.activeLtrModels !== 'string' || hashes.activeLtrModels.length === 0) malformedReasons.push('hashes.activeLtrModels');
+  }
+  if (parsed.ltrReleaseProvenance !== undefined && ltrReleaseProvenance === undefined) {
+    malformedReasons.push('ltrReleaseProvenance');
+  }
+  if (malformedReasons.length > 0) {
+    throw new Error(`Malformed runtime search snapshot state: ${malformedReasons.join(', ')}`);
+  }
+  const validatedSchemaVersion = parsed.schemaVersion as typeof SEARCH_SNAPSHOT_STATE_VERSION;
+  const validatedSnapshotId = parsed.snapshotId as string;
+  const validatedContentHash = parsed.contentHash as string;
+  const validatedPublishedAt = parsed.publishedAt as string;
+  const validatedManifestPath = parsed.manifestPath as string;
+  const validatedNlMappingsRuntimePath = parsed.nlMappingsRuntimePath as string;
+  const validatedLookupAliasRuntimePath = parsed.lookupAliasRuntimePath as string;
+  const validatedLookupResolverProjectionPath = parsed.lookupResolverProjectionPath as string;
+  const validatedLookupEntityProjectionPath = parsed.lookupEntityProjectionPath as string;
+  const validatedLookupAmbiguityRuntimePath = parsed.lookupAmbiguityRuntimePath as string;
+  const validatedQuality = quality as RuntimeStateQuality;
+  const validatedFieldAvailability = normalizedFieldAvailability as SearchSnapshotFieldAvailability;
+  const validatedCounts = counts as LoadedSearchSnapshotRuntimeState['counts'];
+  const validatedHashes = hashes as LoadedSearchSnapshotRuntimeState['hashes'];
   const normalizedQuality: RuntimeStateQuality =
     missingSensoryFieldAvailabilityAttributes.length === 0
-      ? quality
+      ? validatedQuality
       : {
-          ...quality,
+          ...validatedQuality,
           status: 'degraded',
           blockers: [
-            ...quality.blockers,
+            ...validatedQuality.blockers,
             `missing_runtime_sensory_field_availability:${missingSensoryFieldAvailabilityAttributes.join(',')}`,
           ],
         };
 
   return {
-    schemaVersion: parsed.schemaVersion,
-    snapshotId: parsed.snapshotId,
-    contentHash: parsed.contentHash,
-    publishedAt: parsed.publishedAt,
-    manifestPath: parsed.manifestPath,
-    nlMappingsRuntimePath: parsed.nlMappingsRuntimePath,
+    schemaVersion: validatedSchemaVersion,
+    snapshotId: validatedSnapshotId,
+    contentHash: validatedContentHash,
+    publishedAt: validatedPublishedAt,
+    manifestPath: validatedManifestPath,
+    nlMappingsRuntimePath: validatedNlMappingsRuntimePath,
+    lookupAliasRuntimePath: validatedLookupAliasRuntimePath,
+    lookupResolverProjectionPath: validatedLookupResolverProjectionPath,
+    lookupEntityProjectionPath: validatedLookupEntityProjectionPath,
+    lookupAmbiguityRuntimePath: validatedLookupAmbiguityRuntimePath,
     quality: normalizedQuality,
-    fieldAvailability: normalizedFieldAvailability,
+    fieldAvailability: validatedFieldAvailability,
     counts: {
-      entities: counts.entities,
-      aliases: counts.aliases,
-      ambiguityRegistry: counts.ambiguityRegistry,
-      nlMappings: counts.nlMappings,
-      activeLtrModels: counts.activeLtrModels,
+      entities: validatedCounts.entities,
+      aliases: validatedCounts.aliases,
+      lookupAliasRuntimeAliases: validatedCounts.lookupAliasRuntimeAliases,
+      lookupResolverProjectionDocuments: validatedCounts.lookupResolverProjectionDocuments,
+      lookupEntityProjectionDocuments: validatedCounts.lookupEntityProjectionDocuments,
+      lookupAmbiguityRuntimeEntries: validatedCounts.lookupAmbiguityRuntimeEntries,
+      ambiguityRegistry: validatedCounts.ambiguityRegistry,
+      nlMappings: validatedCounts.nlMappings,
+      activeLtrModels: validatedCounts.activeLtrModels,
     },
     hashes: {
-      entities: hashes.entities,
-      aliases: hashes.aliases,
-      ambiguityRegistry: hashes.ambiguityRegistry,
-      nlMappings: hashes.nlMappings,
-      activeLtrModels: hashes.activeLtrModels,
+      entities: validatedHashes.entities,
+      aliases: validatedHashes.aliases,
+      lookupAliasRuntime: validatedHashes.lookupAliasRuntime,
+      lookupResolverProjection: validatedHashes.lookupResolverProjection,
+      lookupEntityProjection: validatedHashes.lookupEntityProjection,
+      lookupAmbiguityRuntime: validatedHashes.lookupAmbiguityRuntime,
+      ambiguityRegistry: validatedHashes.ambiguityRegistry,
+      nlMappings: validatedHashes.nlMappings,
+      activeLtrModels: validatedHashes.activeLtrModels,
     },
     ...(ltrReleaseProvenance === undefined
       ? {}

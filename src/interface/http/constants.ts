@@ -8,6 +8,7 @@
 import { HOURS_PER_DAY, MINUTES_PER_HOUR, SECONDS_PER_MINUTE } from '../../domain/shared/utils/time-units.js';
 import { MAX_QUERY_LENGTH } from '../../domain/shared/constants.js';
 import { AGENT_MAX_STEPS_HARD_CAP } from '../../domain/agent/model/agent-config.js';
+import { MAX_STAGE_TIMER_SNAPSHOT_KEYS } from '../../domain/shared/stage-timer.js';
 
 /** Subject string from X-Authenticated-Subject; matches header/log safety. */
 export const MAX_AUTHENTICATED_SUBJECT_CHARS = 128;
@@ -245,8 +246,12 @@ export const MAX_AGENT_STEPS_CAP = AGENT_MAX_STEPS_HARD_CAP;
  * Max keys in a response `stage_timings` map — one entry per instrumented
  * pipeline stage (~30 distinct stage labels today; headroom for future stages).
  * Guards against unbounded response growth (schema bar: every record needs a cap).
+ *
+ * SSoT (rule 30): re-exported from the producer ({@link MAX_STAGE_TIMER_SNAPSHOT_KEYS}),
+ * which caps `StageTimer.snapshot()` at the SAME value — so the strict response
+ * schema can never reject a snapshot the timer itself produced.
  */
-export const MAX_STAGE_TIMINGS_KEYS = 64;
+export const MAX_STAGE_TIMINGS_KEYS = MAX_STAGE_TIMER_SNAPSHOT_KEYS;
 
 /**
  * Max keys in a tool-call `arguments` object. Tool inputs are a bounded field

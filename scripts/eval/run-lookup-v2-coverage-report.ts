@@ -45,6 +45,7 @@ interface HotsetRow {
   readonly qid: string;
   readonly query: string;
   readonly expectedStatus: CoverageStatus;
+  readonly acceptedStatuses?: readonly CoverageStatus[] | undefined;
   readonly class: string;
 }
 
@@ -62,10 +63,16 @@ function parseHotset(corpusPath: string): readonly HotsetRow[] {
     const expected = obj['expected_status'];
     if (typeof qid !== 'string' || typeof query !== 'string' || typeof expected !== 'string') continue;
     if (!COVERAGE_STATUSES.has(expected)) continue;
+    const acceptedStatuses = Array.isArray(obj['accepted_statuses'])
+      ? obj['accepted_statuses']
+          .filter((status): status is string => typeof status === 'string')
+          .filter((status): status is CoverageStatus => COVERAGE_STATUSES.has(status))
+      : undefined;
     rows.push({
       qid,
       query,
       expectedStatus: expected as CoverageStatus,
+      ...(acceptedStatuses !== undefined && acceptedStatuses.length > 0 ? { acceptedStatuses } : {}),
       class: typeof obj['class'] === 'string' ? obj['class'] : 'unclassified',
     });
   }
@@ -109,6 +116,7 @@ async function main(): Promise<void> {
       qid: row.qid,
       query: row.query,
       expectedStatus: row.expectedStatus,
+      ...(row.acceptedStatuses !== undefined ? { acceptedStatuses: row.acceptedStatuses } : {}),
       class: row.class,
       observedStatus,
     });

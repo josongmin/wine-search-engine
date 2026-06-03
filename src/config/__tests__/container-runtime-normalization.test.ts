@@ -4,6 +4,7 @@ import { parseEnv } from '../env.js';
 const builderCalls = vi.hoisted(() => ({
   core: vi.fn(),
   features: vi.fn(),
+  bind: vi.fn(),
 }));
 
 const mockCore = {
@@ -46,6 +47,17 @@ vi.mock('../container-features.js', () => ({
   }),
 }));
 
+vi.mock('../runtime-handles.js', () => ({
+  bindLiveSearchSnapshotRuntimeHandles: vi.fn(async (runtime) => {
+    builderCalls.bind(runtime);
+    return {
+      ...runtime,
+      searchSnapshotId: 'search-snapshot:v1:active',
+      searchSnapshotManifestPath: '/tmp/search-snapshot:v1:active/manifest.json',
+    };
+  }),
+}));
+
 describe('createContainer runtime normalization', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -58,7 +70,16 @@ describe('createContainer runtime normalization', () => {
 
     await createContainer(config, pool);
 
-    expect(builderCalls.core).toHaveBeenCalledWith({ pool });
-    expect(builderCalls.features).toHaveBeenCalledWith({ pool });
+    expect(builderCalls.bind).toHaveBeenCalledWith({ pool });
+    expect(builderCalls.core).toHaveBeenCalledWith({
+      pool,
+      searchSnapshotId: 'search-snapshot:v1:active',
+      searchSnapshotManifestPath: '/tmp/search-snapshot:v1:active/manifest.json',
+    });
+    expect(builderCalls.features).toHaveBeenCalledWith({
+      pool,
+      searchSnapshotId: 'search-snapshot:v1:active',
+      searchSnapshotManifestPath: '/tmp/search-snapshot:v1:active/manifest.json',
+    });
   }, 10_000);
 });

@@ -70,6 +70,16 @@ export type DegradedReason =
   | 'no_results'
   | 'policy_blocked'
   /**
+   * The structured-LLM PROVIDER was unavailable — the model never produced
+   * output: an HTTP transport rejection (auth / credit-exhausted / 4xx-5xx),
+   * not a schema-validation failure of model output. Distinguished from
+   * `malformed_llm_output` (a working LLM that emitted bad JSON) because the
+   * remedy differs: provider-unavailable means the synthesizer cannot run AT
+   * ALL, so the runner must fail honestly (no fabricated grounded fallback)
+   * rather than naming an arbitrary grounded wine as if it answered.
+   */
+  | 'llm_unavailable'
+  /**
    * The primary structured-LLM call threw an exception that is NOT one of
    * the typed {@link StructuredLlm*Error} classes — i.e. an unmodeled
    * runtime failure (network hiccup, downstream adapter bug, generic

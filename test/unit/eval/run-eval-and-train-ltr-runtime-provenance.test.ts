@@ -12,15 +12,23 @@ async function makeTempDir(): Promise<string> {
 
 function runtimeStatePayload(runtimeStatePathDir: string, snapshotId: string) {
   return {
-    schemaVersion: 'search_snapshot_runtime_state.v3',
+    schemaVersion: 'search_snapshot_runtime_state.v5',
     snapshotId,
     contentHash: 'content-hash',
     publishedAt: '2026-04-17T00:00:00.000Z',
     manifestPath: path.join(runtimeStatePathDir, 'manifest.json'),
     nlMappingsRuntimePath: path.join(runtimeStatePathDir, 'nl-mappings.json'),
+    lookupAliasRuntimePath: path.join(runtimeStatePathDir, 'lookup-alias-runtime.json'),
+    lookupResolverProjectionPath: path.join(runtimeStatePathDir, 'lookup-resolver-projection.json'),
+    lookupEntityProjectionPath: path.join(runtimeStatePathDir, 'lookup-entity-projection.json'),
+    lookupAmbiguityRuntimePath: path.join(runtimeStatePathDir, 'lookup-ambiguity-runtime.json'),
     counts: {
       entities: 10,
       aliases: 12,
+      lookupAliasRuntimeAliases: 12,
+      lookupResolverProjectionDocuments: 10,
+      lookupEntityProjectionDocuments: 10,
+      lookupAmbiguityRuntimeEntries: 2,
       ambiguityRegistry: 2,
       nlMappings: 1,
       activeLtrModels: 1,
@@ -28,6 +36,10 @@ function runtimeStatePayload(runtimeStatePathDir: string, snapshotId: string) {
     hashes: {
       entities: 'entities-hash',
       aliases: 'aliases-hash',
+      lookupAliasRuntime: 'lookup-alias-runtime-hash',
+      lookupResolverProjection: 'lookup-resolver-projection-hash',
+      lookupEntityProjection: 'lookup-entity-projection-hash',
+      lookupAmbiguityRuntime: 'lookup-ambiguity-runtime-hash',
       ambiguityRegistry: 'ambiguity-hash',
       nlMappings: 'nl-hash',
       activeLtrModels: 'ltr-hash',

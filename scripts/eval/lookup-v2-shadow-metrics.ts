@@ -47,6 +47,13 @@ export interface ShadowRow {
    */
   readonly queryClass?: string | undefined;
   readonly expectedStatus: ShadowStatus;
+  /**
+   * Optional exact set of statuses that count as correct for this row. Use this
+   * for precision-first "must not resolve" rows where multiple abstentions are
+   * acceptable (`opu one` may fail OR clarify, but must never resolve).
+   * When omitted, only `expectedStatus` is accepted.
+   */
+  readonly acceptedStatuses?: readonly ShadowStatus[] | undefined;
   /** Preferred correctness key when expectedStatus === 'resolved'. */
   readonly expectedEntityId?: string | undefined;
   /**
@@ -134,6 +141,10 @@ function normalizeForHint(value: string): string {
     .trim();
 }
 
+function acceptedStatuses(row: ShadowRow): readonly ShadowStatus[] {
+  return row.acceptedStatuses ?? [row.expectedStatus];
+}
+
 /** Whether a resolved side matches the gold entity (by id, else by label hint). */
 function resolvedMatchesGold(row: ShadowRow, side: ShadowSideOutcome): boolean {
   if (row.expectedEntityId !== undefined) {
@@ -147,10 +158,10 @@ function resolvedMatchesGold(row: ShadowRow, side: ShadowSideOutcome): boolean {
 }
 
 function isResolveCorrect(row: ShadowRow, side: ShadowSideOutcome): boolean {
-  if (row.expectedStatus !== side.status) {
+  if (!acceptedStatuses(row).includes(side.status)) {
     return false;
   }
-  if (row.expectedStatus === 'resolved') {
+  if (side.status === 'resolved') {
     return side.status === 'resolved' && resolvedMatchesGold(row, side);
   }
   return true;
@@ -162,7 +173,7 @@ function isWrongPositive(row: ShadowRow, side: ShadowSideOutcome): boolean {
   }
   // Resolved when the gold says it should NOT resolve, or resolved to the
   // wrong entity. Both are precision failures.
-  if (row.expectedStatus !== 'resolved') {
+  if (!acceptedStatuses(row).includes('resolved')) {
     return true;
   }
   return !resolvedMatchesGold(row, side);

@@ -10,7 +10,20 @@ summary: |
 
 maturity: 4
 maturity_rationale: |
-  **2026-06-02 갱신 (T-ELV2-07 operator plane 완료, DoD #6 충족).** 운영자가
+  **2026-06-03 갱신 (curation console UX 하드닝 + API playground).** curation 탭을
+  raw 폼에서 키워드 관리 워크벤치로 재설계: 운영자가 slug를 외워 입력하는 대신
+  `EntityPicker`(ops/inspect 기반 와인 검색 + "현재 어디로 라우팅되나" 미리보기)로
+  엔티티를 고르고, 그 엔티티의 LIVE alias + in-flight proposal을 인라인으로 본 뒤,
+  type(드롭다운)·confidence(0~1 가드)로 키워드를 추가한다. proposal queue에
+  status/kind 필터, ambiguity/suppression 제출 폼 노출. 추가로 **API Playground 탭**
+  (`/ops/playground`): V2 surface 11개 엔드포인트(health/public-lookup/inspect/
+  alias-audit/coverage-health/proposals[list/submit×3/review/publish])를 카탈로그에서
+  골라 JSON body 편집 후 직접 발사, 원본 status+응답(4xx/5xx 봉투 포함)을 표시하고
+  auth 헤더를 게이트별 자동 첨부 + copy-paste curl 렌더. `rawApiCall`(client.ts)은
+  비-2xx에서 throw 않고 status+body를 그대로 반환. web vitest 25 케이스(entity-picker
+  5 + curation-view 6 + playground 8 + raw-api-call 6)로 고정.
+
+  **2026-06-02 (T-ELV2-07 operator plane 완료, DoD #6 충족).** 운영자가
   query 하나로 admission/candidates/scores/decision을 trusted plane(브라우저)에서
   보고, alias/ambiguity/suppression을 staging(proposal→review→publish) 기반으로
   운영할 수 있다:
@@ -66,7 +79,7 @@ maturity_rationale: |
 
 status: active
 since: 2026-06
-last_reviewed: 2026-06-02
+last_reviewed: 2026-06-03
 owner: core
 
 surfaces:
@@ -97,6 +110,8 @@ key_files:
   - web/src/features/ops/ui/inspect-view.tsx
   - web/src/features/ops/ui/curation-view.tsx
   - web/src/features/ops/ui/coverage-view.tsx
+  - web/src/features/ops/ui/entity-picker.tsx
+  - web/src/features/ops/ui/playground-view.tsx
   - scripts/eval/lookup-v2-shadow-metrics.ts
 
 tests:

@@ -353,8 +353,6 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
     }),
     ambiguityDictionary: ambiguityDict,
     querySanitizer,
-    injectionJudge,
-    judgeTimeoutMs,
   });
   const hybridUseCase = new HybridUseCase({
     queryPlanner,
