@@ -3,6 +3,7 @@ import type { QueryIntent } from '../../../domain/query/model/query-intent.js';
 import type { QueryUncertainty } from '../../../domain/query/model/query-uncertainty.js';
 import type { AnchorCandidate } from '../../../domain/query/model/anchor-candidate.js';
 import { AnchorExtractor, type AliasMatcher } from '../../../domain/query/service/anchor-extractor.js';
+import { buildAliasSurfaceLookupPlan } from '../../../domain/query/service/alias-lookup-plan.js';
 import { buildNormalizedQueryViews } from '../../../domain/query/service/query-normalizer.js';
 import { PolicyCompiler } from '../../../domain/query/service/policy-compiler.js';
 import type { AmbiguityDictionary } from '../../../domain/query/port/ambiguity-dictionary.port.js';
@@ -88,21 +89,26 @@ export class RuntimeLookupPlanner implements LookupPlannerPort {
       normalizedQueryViews,
       context?.stageTimer,
     );
+    const authorityAnchors = pruneLookupAuthorityAnchors(
+      normalizedQuery,
+      normalizedQueryViews,
+      anchors,
+    );
 
     const queryClass = classifyLookupQueryClass({
       rawQuery: query,
       normalizedQuery,
-      anchors,
+      anchors: authorityAnchors,
     });
     const intent: QueryIntent = queryClass === 'exact_entity' ? 'entity_exact' : 'entity_fuzzy';
-    const uncertainty = buildLookupUncertainty(queryClass, anchors);
+    const uncertainty = buildLookupUncertainty(queryClass, authorityAnchors);
     return this.buildPlan({
       rawQuery: query,
       normalizedQuery,
       normalizedQueryViews,
       queryClass,
       intent,
-      anchors,
+      anchors: authorityAnchors,
       uncertainty,
     });
   }
@@ -162,6 +168,52 @@ export class RuntimeLookupPlanner implements LookupPlannerPort {
       context?.stageTimer?.end('ambiguity_lookup');
     }
   }
+}
+
+function tokenizeLookupSurface(value: string): readonly string[] {
+  return buildNormalizedQueryViews(value)
+    .punctuationStripped
+    .split(/\s+/u)
+    .filter((token) => token.length > 0);
+}
+
+function anchorHasAuthorityLookupVariant(
+  anchor: AnchorCandidate,
+  wholeSurfaceQueries: ReadonlySet<string>,
+): boolean {
+  const lookupVariants = anchor.lookupVariants ?? [];
+  if (lookupVariants.length === 0) {
+    return true;
+  }
+
+  return lookupVariants.some((variant) => {
+    const trimmed = variant.trim();
+    return trimmed.length > 0
+      && (
+        wholeSurfaceQueries.has(trimmed)
+        || tokenizeLookupSurface(trimmed).length > 1
+      );
+  });
+}
+
+function pruneLookupAuthorityAnchors(
+  normalizedQuery: string,
+  normalizedQueryViews: ReturnType<typeof buildNormalizedQueryViews>,
+  anchors: readonly AnchorCandidate[],
+): readonly AnchorCandidate[] {
+  const queryTokenCount = tokenizeLookupSurface(normalizedQueryViews.punctuationStripped).length;
+  if (queryTokenCount <= 1 || anchors.length === 0) {
+    return anchors;
+  }
+
+  const wholeSurfaceQueries = new Set(
+    buildAliasSurfaceLookupPlan(normalizedQuery, normalizedQueryViews).tokenList,
+  );
+  const authorityAnchors = anchors.filter((anchor) =>
+    anchorHasAuthorityLookupVariant(anchor, wholeSurfaceQueries),
+  );
+
+  return authorityAnchors.length > 0 ? authorityAnchors : [];
 }
 
 function buildExactSafeAnchor(
@@ -276,8 +328,7 @@ function hasHighConfidenceStrictExactSingletonAnchor(
     && (anchor.lookupStrategies?.every((strategy) =>
       strategy === 'exact'
       || strategy === 'compact_exact'
-      || strategy === 'transliterated_exact'
-      || strategy === 'phonetic_exact',
+      || strategy === 'transliterated_exact',
     ) ?? false),
   );
 }

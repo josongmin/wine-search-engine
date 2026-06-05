@@ -19,15 +19,20 @@ V2 품질 gate를 실제로 통과시킨 뒤, lookup authority를 V1에서 V2로
 - `Viña Espectro Maipo Valley Carmenere` wrong-positive closed by the
   resolve-certificate gate.
 - `2018 St. Supéry Élu` false-abstain closed at the shared ambiguity seam.
-- 26-row hotset smoke is still **PASS** (`V2 wrong+=0`), but
+- 45-row hotset smoke is still **PASS** (`V2 wrong+=0`), but
   hotset is not the cutover authority.
 - Public `/v1/lookup/wine`, local CLI `lookupWine`, and agent `lookup_wine`
   are now compatibility-backed V2 authority surfaces.
 - Earlier `V1 93.5%` numbers are historical only; the current explicit
   `legacy_core` rerun is `V1 46.5%`.
-- Korean-famous coverage is now **53/53**, non-entity handling is **22/22**,
+- Korean-famous coverage is now **70/70**, non-entity handling is **37/37**,
   and canonical active runtime is now
   `search-snapshot:v1:7bcd44a5484b2be5`.
+- Expanded Korean benchmark surface now includes:
+  - iconic short-form ambiguity (`마고`, `라투르`, `샹베르탱`)
+  - Korean typo / misspelling pressure (`사시카야`, `사씨카이야`, `페트루스`, `돔페리농`)
+  - Korean recommendation / pairing phrasing (`까쇼 추천해줘`, `피노누아 추천`, `기념일 와인 추천`, `샴페인 뭐 마실까`)
+  - Koreanized adversarial no-match (`샤또 미라쥬 2022`, `도멘 판타지 부르고뉴`, `실버문 나파 리저브 2021`)
 - Current canonical active runtime readiness is green:
   - bootstrap verify PASS
   - pointer parity verify PASS
@@ -370,21 +375,24 @@ current canonical note (2026-06-05):
 ### Current Latency Truth
 
 - executable lane:
-  - `pnpm run eval:lookup-v2:latency:korean-famous -- --use-active-runtime --output /tmp/lookup-v2-latency-korean-famous-active-2026-06-05-post-bootstrap-fix.json`
+  - `pnpm run eval:lookup-v2:latency:korean-famous -- --use-active-runtime --output /tmp/lookup-v2-latency-structural-final.json`
 - latest result:
-  - `bootstrap_ms=963.213`
-  - `first_query_ms=182.245`
-  - `warm_p50_ms=10.889`
-  - `warm_p95_ms=116.823`
+  - `bootstrap_ms=670.765`
+  - `first_query_ms=400.941`
+  - `warm_p50_ms=29.966`
+  - `warm_p95_ms=63.767`
   - verdict: **PASS**
 - latest coverage truth:
-  - `pnpm run eval:lookup-v2:coverage -- --use-active-runtime --corpus test/fixtures/lookup-v2-korean-famous-expanded.jsonl --output /tmp/lookup-v2-coverage-korean-famous-active-2026-06-05-post-bootstrap-fix.json`
+  - `pnpm run eval:lookup-v2:coverage -- --use-active-runtime --corpus test/fixtures/lookup-v2-korean-famous-expanded.jsonl --output /tmp/lookup-v2-coverage-korean-famous-structural-final.json`
   - `hot_entities=53/53`
   - `non_entity=22/22`
   - `curation_tasks=0`
 - latest publish truth:
   - `pnpm run etl:migrate-runtime-state -- --runtime-state /Users/songmin/.wine-search-engine/data/runtime-search-snapshot.json --active-nl-mappings /Users/songmin/.wine-search-engine/data/nl-mappings.json --manifest /Users/songmin/.wine-search-engine/data/search-snapshots/search-snapshot:v1:7bcd44a5484b2be5/manifest.json`
   - active runtime snapshot `search-snapshot:v1:7bcd44a5484b2be5`
+- latest self-canary truth:
+  - `pnpm run eval:lookup-v2:canary:replay -- --input /tmp/lookup-v2-canary-built-sample.jsonl --baselineUseActiveRuntime --candidateUseActiveRuntime --output /tmp/lookup-v2-canary-replay-structural-final.json`
+  - `hard_drift=0`, `soft_abstain_drift=0`, sample labeled `3/3`
 - latest operator-plane publish note:
   - `pnpm run etl:publish-runtime-substrates -- --manifest /Users/songmin/.wine-search-engine/data/search-snapshots/search-snapshot:v1:7bcd44a5484b2be5/manifest.json --runtime-state /Users/songmin/.wine-search-engine/data/runtime-search-snapshot.json --runtime-nl-mappings /Users/songmin/.wine-search-engine/data/nl-mappings.json --refresh-active-runtime-substrates`
   - failed on this host with `getaddrinfo ENOTFOUND wine-engine-pg...`

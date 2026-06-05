@@ -25,9 +25,9 @@
   - current owner-stage artifact는 `planner_total`, `retrieval_total`,
     `candidate_generation`, `blocker`, `resolver`, `ambiguity_lookup`를 함께 출력한다
   - current canonical active truth는
-    `/tmp/lookup-v2-latency-runtime-bundle-manifest-once.json`
-    기준 `cold_boot measured_ms=1629.921`,
-    `request first_query_ms=329.336`, `warm_p95_ms=195.639`로 **PASS**다
+    `/tmp/lookup-v2-latency-structural-final.json`
+    기준 `cold_boot measured_ms=670.765`,
+    `request first_query_ms=400.941`, `warm_p95_ms=63.767`로 **PASS**다
 - `pnpm run eval:lookup-v2:canary:build -- --input <traffic.ndjson> --output <corpus.jsonl> --query-field <dotted.path> [route/method filters]`
   - explicit real-traffic canary corpus extractor
   - heuristic field guessing 없이 dotted-path 계약으로만 replay corpus를 만든다
@@ -50,22 +50,26 @@
   - bootstrap verify PASS
   - pointer parity verify PASS
 - authority:
-  - `/tmp/entity-resolution-validation-active-2026-06-05-post-bootstrap-fix.json`
+  - `/tmp/entity-resolution-validation-structural-final.json`
   - `V2 215/215`, `wrong=0`, `miss=0`
 - shadow:
-  - `/tmp/lookup-v2-shadow-active-2026-06-05-post-bootstrap-fix.json`
-  - `rows=31`, `V2 correct=27`, `wrong+=0`, `regressions=0`
+  - `/tmp/lookup-v2-shadow-korean-expanded-final.json`
+  - `rows=45`, `V2 correct=41`, `wrong+=0`, `regressions=0`
 - Korean-famous coverage:
-  - `/tmp/lookup-v2-coverage-korean-famous-active-2026-06-05-post-bootstrap-fix.json`
-  - `hot_entities=53/53`, `non_entity=22/22`, `curation_tasks=0`
+  - `/tmp/lookup-v2-coverage-korean-famous-expanded-final.json`
+  - `hot_entities=70/70`, `non_entity=37/37`, `curation_tasks=0`
 - latency:
-  - `/tmp/lookup-v2-latency-runtime-bundle-manifest-once.json`
-  - `cold_boot measured_ms=1629.921` -> **PASS**
-  - `request first_query_ms=329.336`, `warm_p50_ms=14.433`, `warm_p95_ms=195.639` -> **PASS**
+  - `/tmp/lookup-v2-latency-structural-final.json`
+  - `cold_boot measured_ms=670.765` -> **PASS**
+  - `request first_query_ms=400.941`, `warm_p50_ms=29.966`, `warm_p95_ms=63.767` -> **PASS**
   - `runtime_hydration fully_hydrated_runtime_artifact=true`, `lazy_build_detected_during_probe=false`
 - canary self-replay:
-  - `/tmp/lookup-v2-canary-replay-active-2026-06-05-post-bootstrap-fix.json`
-  - `hard_drift=0`, `soft_abstain_drift=0`, labeled `75/75`
+  - `/tmp/lookup-v2-canary-replay-structural-final.json`
+  - `hard_drift=0`, `soft_abstain_drift=0`, sample labeled `3/3`
+- benchmark scope:
+  - hotset fixture `test/fixtures/lookup-v2-hotset.jsonl` now covers 45 labeled rows
+  - Korean-famous corpus `test/fixtures/lookup-v2-korean-famous-expanded.jsonl` now covers 107 labeled rows
+  - added pressure includes Korean iconic short-form ambiguity (`마고`, `라투르`, `샹베르탱`), Korean typos (`사시카야`, `페트루스`), Korean recommendation phrases (`까쇼 추천해줘`, `기념일 와인 추천`), and Koreanized adversarial no-match (`샤또 미라쥬 2022`, `도멘 판타지 부르고뉴`)
 - artifact-only runtime promote:
   - `pnpm run etl:publish-runtime-substrates:artifact-only -- --manifest /Users/songmin/.wine-search-engine/data/search-snapshots/search-snapshot:v1:7bcd44a5484b2be5/manifest.json --runtime-state /Users/songmin/.wine-search-engine/data/runtime-search-snapshot.json --runtime-nl-mappings /Users/songmin/.wine-search-engine/data/nl-mappings.json`
   - result: PASS

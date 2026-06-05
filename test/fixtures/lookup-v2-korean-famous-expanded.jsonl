@@ -73,3 +73,35 @@
 {"qid":"elv2-kr-063","query":"Chateau Fantaisie 2025","expected_status":"failed","class":"adversarial_no_match","note":"fake chateau + future vintage must fail closed"}
 {"qid":"elv2-kr-064","query":"Bodega Fantasma Rioja Especial","expected_status":"failed","class":"adversarial_no_match","note":"fake but plausible Rioja label must fail closed"}
 {"qid":"elv2-kr-065","query":"환상의 와이너리 그랑크뤼","expected_status":"failed","class":"adversarial_no_match","note":"Korean fake winery surface must fail closed"}
+{"qid":"elv2-kr-076","query":"샤토 라피트","expected_status":"resolved","expected_entity_hint":"lafite","class":"korean_icon_bordeaux","note":"alternate Korean spacing/orthography for Lafite"}
+{"qid":"elv2-kr-077","query":"샤또 라피트 로칠드","expected_status":"resolved","expected_entity_hint":"lafite","class":"korean_icon_bordeaux","note":"common Korean Rothschild misspelling"}
+{"qid":"elv2-kr-078","query":"샤토 무통","expected_status":"resolved","expected_entity_hint":"mouton","class":"korean_icon_bordeaux","note":"short Korean Mouton variant"}
+{"qid":"elv2-kr-079","query":"샤또 무통 로칠드","expected_status":"resolved","expected_entity_hint":"mouton","class":"korean_icon_bordeaux","note":"Korean Rothschild misspelling variant for Mouton"}
+{"qid":"elv2-kr-080","query":"샤토 디껨","expected_status":"resolved","expected_entity_hint":"yquem","class":"korean_icon_germany_sauternes","note":"common Korean d'Yquem misspelling"}
+{"qid":"elv2-kr-081","query":"샤또디껨","expected_status":"resolved","expected_entity_hint":"yquem","class":"korean_icon_germany_sauternes","note":"collapsed Korean d'Yquem misspelling"}
+{"qid":"elv2-kr-082","query":"로마네콩티","expected_status":"resolved","expected_entity_hint":"romanee conti","class":"korean_icon_burgundy","note":"compact Korean DRC shorthand"}
+{"qid":"elv2-kr-083","query":"돔페리농","expected_status":"resolved","expected_entity_hint":"dom perignon","class":"korean_icon_champagne","note":"common compact Korean typo for Dom Perignon"}
+{"qid":"elv2-kr-084","query":"티그나넬로","expected_status":"resolved","expected_entity_hint":"tignanello","class":"korean_icon_super_tuscan","note":"popular Korean misspelling of Tignanello"}
+{"qid":"elv2-kr-085","query":"오르넬라야","expected_status":"resolved","expected_entity_hint":"ornellaia","class":"korean_icon_super_tuscan","note":"popular Korean misspelling of Ornellaia"}
+{"qid":"elv2-kr-086","query":"크뤼그 그랑 퀴베","expected_status":"resolved","expected_entity_hint":"krug","class":"korean_icon_champagne","note":"alternate Korean spelling for Krug Grande Cuvée"}
+{"qid":"elv2-kr-087","query":"크룩 그랑 퀴베","expected_status":"resolved","expected_entity_hint":"krug","class":"korean_icon_champagne","note":"hard Korean typo for Krug Grande Cuvée"}
+{"qid":"elv2-kr-088","query":"에곤뮬러","expected_status":"resolved","expected_entity_hint":"egon muller","class":"korean_icon_germany_sauternes","note":"compact Korean Egon Muller misspelling"}
+{"qid":"elv2-kr-089","query":"에곤뮬러 샤르초프베르거","expected_status":"resolved","expected_entity_hint":"egon muller","class":"korean_icon_germany_sauternes","note":"full Korean misspelling with vineyard suffix"}
+{"qid":"elv2-kr-090","query":"스크리밍 이글","expected_status":"resolved","expected_entity_hint":"screaming eagle","class":"korean_icon_napa_cult","note":"spaced Korean Screaming Eagle variant"}
+{"qid":"elv2-kr-091","query":"할란 이스테이트","expected_status":"resolved","expected_entity_hint":"harlan estate","class":"korean_icon_napa_cult","note":"Korean Harlan Estate spelling variant"}
+{"qid":"elv2-kr-092","query":"도미니오 데 핑구스","expected_status":"resolved","expected_entity_hint":"pingus","class":"korean_icon_iberia_latam","note":"full Korean producer phrase for Pingus"}
+{"qid":"elv2-kr-093","query":"사시카야","expected_status":"ambiguous","class":"ambiguity_korean_typo","note":"short Korean Sassicaia typo must not wrong-resolve"}
+{"qid":"elv2-kr-094","query":"사씨카이야","expected_status":"ambiguous","class":"ambiguity_korean_typo","note":"hard Korean Sassicaia typo must stay fail-closed"}
+{"qid":"elv2-kr-095","query":"페트루스","expected_status":"ambiguous","class":"ambiguity_korean_typo","note":"popular Petrus spelling variant still collides and must not wrong-resolve"}
+{"qid":"elv2-kr-106","query":"마고","expected_status":"ambiguous","class":"ambiguity_bordeaux_short_form","note":"ultra-short Korean Margaux shorthand should stay ambiguous"}
+{"qid":"elv2-kr-107","query":"라투르","expected_status":"ambiguous","class":"ambiguity_bordeaux_short_form","note":"ultra-short Korean Latour shorthand should stay ambiguous"}
+{"qid":"elv2-kr-096","query":"까쇼 추천해줘","expected_status":"redirect_discovery","class":"concept_grape_recommendation_korean","note":"grape shorthand plus recommendation phrase should redirect"}
+{"qid":"elv2-kr-097","query":"피노누아 추천","expected_status":"redirect_discovery","class":"concept_grape_recommendation_korean","note":"grape + recommendation phrase should redirect"}
+{"qid":"elv2-kr-098","query":"기념일 와인 추천","expected_status":"redirect_discovery","class":"concept_recommendation_korean","note":"occasion-driven recommendation phrase should redirect"}
+{"qid":"elv2-kr-099","query":"보르도 와인 추천","expected_status":"failed","class":"safe_abstain_recommendation_phrase","note":"Korean region recommendation phrase currently safe-abstains and must never wrong-resolve"}
+{"qid":"elv2-kr-100","query":"샴페인 뭐 마실까","expected_status":"failed","class":"safe_abstain_recommendation_phrase","note":"colloquial category recommendation phrase currently safe-abstains"}
+{"qid":"elv2-kr-101","query":"회랑 먹을 와인 추천","expected_status":"failed","class":"safe_abstain_recommendation_phrase","note":"pairing-style Korean phrase currently safe-abstains rather than resolving"}
+{"qid":"elv2-kr-102","query":"샤또 미라쥬 2022","expected_status":"failed","class":"adversarial_no_match","note":"Koreanized fake chateau label must fail closed"}
+{"qid":"elv2-kr-103","query":"도멘 판타지 부르고뉴","expected_status":"failed","class":"adversarial_no_match","note":"fake French-style Koreanized label must fail closed"}
+{"qid":"elv2-kr-104","query":"실버문 나파 리저브 2021","expected_status":"failed","class":"adversarial_no_match","note":"plausible Napa reserve invention must fail closed"}
+{"qid":"elv2-kr-105","query":"골든피크 소노마 피노누아","expected_status":"failed","class":"adversarial_no_match","note":"plausible Sonoma Pinot invention must fail closed"}

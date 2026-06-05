@@ -33,13 +33,13 @@ describe('lookup-v2 hotset fixture stays diverse enough to catch real regression
       { resolved: 0, ambiguous: 0, failed: 0, redirect_discovery: 0 },
     );
 
-    expect(rows.length).toBeGreaterThanOrEqual(31);
+    expect(rows.length).toBeGreaterThanOrEqual(45);
     expect(qids.size).toBe(rows.length);
 
-    expect(statusCounts.resolved).toBeGreaterThanOrEqual(14);
-    expect(statusCounts.redirect_discovery).toBeGreaterThanOrEqual(6);
-    expect(statusCounts.ambiguous).toBeGreaterThanOrEqual(5);
-    expect(statusCounts.failed).toBeGreaterThanOrEqual(4);
+    expect(statusCounts.resolved).toBeGreaterThanOrEqual(20);
+    expect(statusCounts.redirect_discovery).toBeGreaterThanOrEqual(7);
+    expect(statusCounts.ambiguous).toBeGreaterThanOrEqual(9);
+    expect(statusCounts.failed).toBeGreaterThanOrEqual(5);
 
     for (const requiredClass of [
       'exact_entity',
@@ -58,6 +58,9 @@ describe('lookup-v2 hotset fixture stays diverse enough to catch real regression
       'appellation_entity_collision',
       'producer_entity_collision',
       'common_noun_entity_collision',
+      'ambiguity_korean_typo',
+      'concept_grape_recommendation',
+      'safe_abstain_recommendation_phrase',
       'adversarial_no_match',
       'vintage_conflict_impossible',
       'hot_entity_coverage',
@@ -74,10 +77,10 @@ describe('lookup-v2 hotset fixture stays diverse enough to catch real regression
     const koreanResolved = hangulRows.filter((row) => row.expected_status === 'resolved');
     const ambiguousCollisionRows = rows.filter((row) => row.expected_status === 'ambiguous' && /collision|vintage/u.test(row.class));
 
-    expect(hangulRows.length).toBeGreaterThanOrEqual(14);
-    expect(koreanRedirects.length).toBeGreaterThanOrEqual(2);
-    expect(koreanResolved.length).toBeGreaterThanOrEqual(9);
-    expect(ambiguousCollisionRows.length).toBeGreaterThanOrEqual(4);
+    expect(hangulRows.length).toBeGreaterThanOrEqual(25);
+    expect(koreanRedirects.length).toBeGreaterThanOrEqual(3);
+    expect(koreanResolved.length).toBeGreaterThanOrEqual(14);
+    expect(ambiguousCollisionRows.length).toBeGreaterThanOrEqual(7);
   });
 
   it('keeps hotset class labels wired into the live shadow scorer for per-class gating', () => {

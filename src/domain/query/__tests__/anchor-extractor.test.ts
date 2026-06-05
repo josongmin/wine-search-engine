@@ -183,6 +183,33 @@ describe('AnchorExtractor', () => {
     });
   });
 
+  it('omits atomic deterministic grape and region tokens from lookup queries inside a longer mixed surface', () => {
+    const extractor = new AnchorExtractor(new EmptyAliasMatcher());
+    const lookupQueries = (
+      extractor as unknown as {
+        buildLookupQueries(query: string): {
+          readonly baseQueries: readonly string[];
+          readonly spanQueries: readonly { readonly query: string }[];
+        };
+      }
+    ).buildLookupQueries('cloudy dreams marlborough sauvignon blanc');
+
+    expect(lookupQueries.baseQueries).toEqual([
+      'cloudy dreams marlborough sauvignon blanc',
+      'cloudydreamsmarlboroughsauvignonblanc',
+    ]);
+    expect(lookupQueries.spanQueries.map((entry) => entry.query)).not.toEqual(
+      expect.arrayContaining([
+        'marlborough',
+        'sauvignon',
+        'blanc',
+        'sauvignon blanc',
+        'marlborough sauvignon',
+        'marlborough sauvignon blanc',
+      ]),
+    );
+  });
+
   describe('English anchor extraction', () => {
     it('"Opus One 같은" → English anchor extracted', async () => {
       const aliasMatcher = new StubAliasMatcher(

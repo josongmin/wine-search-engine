@@ -29,3 +29,17 @@
 {"qid": "elv2-029", "query": "로마네 콩티", "expected_status": "resolved", "expected_entity_hint": "romanee conti", "class": "hot_entity_coverage", "note": "spaced Korean Romanée-Conti should resolve"}
 {"qid": "elv2-030", "query": "돈 멜초", "expected_status": "resolved", "expected_entity_hint": "don melchor", "class": "hot_entity_coverage", "note": "spaced Korean Don Melchor should resolve"}
 {"qid": "elv2-031", "query": "샴페인 추천", "expected_status": "redirect_discovery", "class": "generic_korean_failed", "note": "category recommendation phrase should redirect through concept registry"}
+{"qid": "elv2-032", "query": "샤토 라피트", "expected_status": "resolved", "expected_entity_hint": "lafite", "class": "hot_entity_coverage", "note": "common Korean Lafite orthography variant"}
+{"qid": "elv2-033", "query": "샤또 무통 로칠드", "expected_status": "resolved", "expected_entity_hint": "mouton", "class": "hot_entity_coverage", "note": "common Korean Rothschild misspelling variant"}
+{"qid": "elv2-034", "query": "돔페리농", "expected_status": "resolved", "expected_entity_hint": "dom perignon", "class": "transliteration_hard", "note": "compact Korean typo of Dom Perignon should still resolve"}
+{"qid": "elv2-035", "query": "크룩 그랑 퀴베", "expected_status": "resolved", "expected_entity_hint": "krug", "class": "hot_entity_coverage", "note": "hard Korean typo for Krug Grande Cuvée"}
+{"qid": "elv2-036", "query": "사시카야", "expected_status": "ambiguous", "class": "ambiguity_korean_typo", "note": "Korean Sassicaia typo must not wrong-resolve"}
+{"qid": "elv2-037", "query": "페트루스", "expected_status": "ambiguous", "class": "ambiguity_korean_typo", "note": "popular Petrus spelling variant stays fail-closed"}
+{"qid": "elv2-038", "query": "까쇼 추천해줘", "expected_status": "redirect_discovery", "class": "concept_grape_recommendation", "note": "grape shorthand plus recommendation phrase should redirect"}
+{"qid": "elv2-039", "query": "보르도 와인 추천", "expected_status": "failed", "class": "safe_abstain_recommendation_phrase", "note": "region recommendation phrase currently safe-abstains and must never resolve"}
+{"qid": "elv2-040", "query": "샤또 미라쥬 2022", "expected_status": "failed", "class": "adversarial_no_match", "note": "fake Koreanized chateau label must fail closed"}
+{"qid": "elv2-041", "query": "에곤뮬러", "expected_status": "resolved", "expected_entity_hint": "egon muller", "class": "hot_entity_coverage", "note": "compact Korean Egon Muller misspelling"}
+{"qid": "elv2-042", "query": "도미니오 데 핑구스", "expected_status": "resolved", "expected_entity_hint": "pingus", "class": "hot_entity_coverage", "note": "full Korean producer phrase for Pingus"}
+{"qid": "elv2-043", "query": "마고", "expected_status": "ambiguous", "class": "producer_entity_collision", "note": "ultra-short Korean Margaux shorthand must stay ambiguous"}
+{"qid": "elv2-044", "query": "라투르", "expected_status": "ambiguous", "class": "producer_entity_collision", "note": "ultra-short Korean Latour shorthand must stay ambiguous"}
+{"qid": "elv2-045", "query": "샹베르탱", "expected_status": "ambiguous", "class": "appellation_entity_collision", "note": "appellation-like Korean shorthand must stay ambiguous instead of resolving"}

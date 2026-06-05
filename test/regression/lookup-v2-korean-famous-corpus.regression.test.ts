@@ -33,13 +33,13 @@ describe('lookup-v2 Korean-famous expanded corpus stays large and diverse', () =
       { resolved: 0, ambiguous: 0, failed: 0, redirect_discovery: 0 },
     );
 
-    expect(rows.length).toBeGreaterThanOrEqual(75);
+    expect(rows.length).toBeGreaterThanOrEqual(107);
     expect(qids.size).toBe(rows.length);
 
-    expect(statusCounts.resolved).toBeGreaterThanOrEqual(48);
-    expect(statusCounts.ambiguous).toBeGreaterThanOrEqual(10);
-    expect(statusCounts.redirect_discovery).toBeGreaterThanOrEqual(6);
-    expect(statusCounts.failed).toBeGreaterThanOrEqual(4);
+    expect(statusCounts.resolved).toBeGreaterThanOrEqual(65);
+    expect(statusCounts.ambiguous).toBeGreaterThanOrEqual(15);
+    expect(statusCounts.redirect_discovery).toBeGreaterThanOrEqual(9);
+    expect(statusCounts.failed).toBeGreaterThanOrEqual(10);
 
     for (const requiredClass of [
       'korean_icon_bordeaux',
@@ -55,12 +55,16 @@ describe('lookup-v2 Korean-famous expanded corpus stays large and diverse', () =
       'ambiguity_common_noun_collision',
       'ambiguity_short_form',
       'ambiguity_near_miss',
+      'ambiguity_korean_typo',
+      'ambiguity_bordeaux_short_form',
       'concept_grape',
+      'concept_grape_recommendation_korean',
       'concept_region',
       'concept_style_korean',
       'concept_recommendation',
       'concept_recommendation_korean',
       'concept_pairing_korean',
+      'safe_abstain_recommendation_phrase',
       'adversarial_no_match',
     ]) {
       expect(classes.has(requiredClass)).toBe(true);
@@ -74,9 +78,9 @@ describe('lookup-v2 Korean-famous expanded corpus stays large and diverse', () =
     const ambiguityRows = rows.filter((row) => row.class.startsWith('ambiguity_'));
     const conceptRows = rows.filter((row) => row.class.startsWith('concept_'));
 
-    expect(hangulRows.length).toBeGreaterThanOrEqual(58);
-    expect(iconicResolved.length).toBeGreaterThanOrEqual(48);
-    expect(ambiguityRows.length).toBeGreaterThanOrEqual(10);
-    expect(conceptRows.length).toBeGreaterThanOrEqual(8);
+    expect(hangulRows.length).toBeGreaterThanOrEqual(82);
+    expect(iconicResolved.length).toBeGreaterThanOrEqual(60);
+    expect(ambiguityRows.length).toBeGreaterThanOrEqual(15);
+    expect(conceptRows.length).toBeGreaterThanOrEqual(10);
   });
 });

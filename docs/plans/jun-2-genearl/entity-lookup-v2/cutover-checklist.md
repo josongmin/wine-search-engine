@@ -23,10 +23,10 @@
 - **verdict: code/data/runtime/bench PASS, self-canary PASS, artifact-only publish PASS, real traffic mirror input external**
 - **post-cutover latency truth** (`run-lookup-v2-latency-korean-famous.ts`, 75 rows):
   canonical active runtime rerun (`lookup_direct_container`):
-  `bootstrap_ms=963.213`, `first_query_ms=182.245`, `warm_p95_ms=116.823`
+  `bootstrap_ms=670.765`, `first_query_ms=400.941`, `warm_p95_ms=63.767`
   → **PASS**
-- **coverage truth** (`run-lookup-v2-coverage-report.ts`, Korean-famous 75 rows):
-  `hot_entities=53/53`, `non_entity=22/22`, `curation_tasks=0`
+- **coverage truth** (`run-lookup-v2-coverage-report.ts`, Korean-famous 107 rows):
+  `hot_entities=70/70`, `non_entity=37/37`, `curation_tasks=0`
   → **PASS**
 - **active runtime truth** (`pnpm run etl:migrate-runtime-state ... --manifest ...7bcd44a5484b2be5...`):
   active runtime snapshot = `search-snapshot:v1:7bcd44a5484b2be5`
@@ -44,8 +44,8 @@
     recall-only `fuzzy_alias` head no longer self-certifies resolve
   - `2018 St. Supéry Élu` →
     exact-head false ambiguity closed at the shared ambiguity seam
-- **31-row hotset smoke** is still PASS and still non-authoritative:
-  `V2 wrong+=0` after blocker closure
+- **45-row hotset smoke** is still PASS and still non-authoritative:
+  `V2 wrong+=0` after expanded Korean typo / short-form / recommendation coverage
 - note: the older `V1 93.5%` comparison is now historical. The current codebase's
   explicit `legacy_core` rerun is `V1 46.5%`, so cutover docs must not quote the
   older baseline as current truth.
@@ -68,15 +68,18 @@
 
 | 산출물 | 위치 | 상태 |
 |---|---|---|
-| hotset corpus | `test/fixtures/lookup-v2-hotset.jsonl` | ✅ (26 labeled; DoD exemplars 포함) |
+| hotset corpus | `test/fixtures/lookup-v2-hotset.jsonl` | ✅ (45 labeled; Korean typo / short-form ambiguity / recommendation phrase / adversarial no-match 압력 포함) |
 | full authority report | `/tmp/entity-resolution-validation-active-2026-06-05-post-bootstrap-fix.json` | ✅ **AUTHORITY PASS**: explicit `legacy_core` baseline `V1 100/215 (46.5%), wrong=0, miss=115` vs `V2 215/215 (100%), wrong=0, miss=0`, fingerprint `bd8abea5871dcede17272c3cc0bd1dcebcf93ea658d2d4b2ab930e5ba4f26cae` |
+| full authority report (current structural rerun) | `/tmp/entity-resolution-validation-structural-final.json` | ✅ **AUTHORITY PASS**: `V2 215/215 (100%), wrong=0, miss=0`, fingerprint `bd8abea5871dcede17272c3cc0bd1dcebcf93ea658d2d4b2ab930e5ba4f26cae` |
 | shadow-compare 메트릭 (pure) | `scripts/eval/lookup-v2-shadow-metrics.ts` | ✅ unit-tested |
 | live shadow runner (V1+V2 실행) | `scripts/eval/run-lookup-v2-shadow-compare.ts` | ✅ 구현·실행됨 |
 | shadow compare report | `/tmp/lookup-v2-shadow-active-2026-06-05-post-bootstrap-fix.json` | ✅ **SMOKE PASS (post-cutover), NOT cutover authority**: `rows=31`, `V2 correct=27`, `wrongPositive=0`, `concept_redirect_acc=1.000`, gate PASS. **주의**: 현재 shadow lane의 `V1`은 public `/v1/lookup/wine` route가 아니라 explicit `legacy_core` baseline이다. 즉 이 lane은 post-cutover에는 public route parity proof가 아니라 legacy-core smoke다. |
-| latency full-corpus report | `/tmp/lookup-v2-latency-korean-famous-active-2026-06-05-post-bootstrap-fix.json` | ✅ **LATENCY PASS**: `bootstrap_ms=963.213`, `first_query_ms=182.245`, `warm_p95_ms=116.823`. lookup direct bootstrap / warm path 모두 threshold 이내다. |
-| Korean-famous coverage report | `/tmp/lookup-v2-coverage-korean-famous-active-2026-06-05-post-bootstrap-fix.json` | ✅ **COVERAGE PASS**: `hot_entities=53/53`, `non_entity=22/22`, `curation_tasks=0`. |
+| shadow compare report (expanded Korean rerun) | `/tmp/lookup-v2-shadow-korean-expanded-final.json` | ✅ **SMOKE PASS (post-cutover), NOT cutover authority**: `rows=45`, `V2 correct=41`, `wrongPositive=0`, `concept_redirect_acc=1.000`, gate PASS. |
+| latency full-corpus report | `/tmp/lookup-v2-latency-structural-final.json` | ✅ **LATENCY PASS**: `bootstrap_ms=670.765`, `first_query_ms=400.941`, `warm_p95_ms=63.767`. lookup direct bootstrap / warm path 모두 threshold 이내다. |
+| Korean-famous coverage report | `/tmp/lookup-v2-coverage-korean-famous-expanded-final.json` | ✅ **COVERAGE PASS**: `hot_entities=70/70`, `non_entity=37/37`, `curation_tasks=0`. |
 | canary corpus build | `/tmp/lookup-v2-canary-built-sample.jsonl` | ✅ explicit dotted-path extractor lane PASS (`scanned=4`, `matched=3`, `rows=3`) |
 | canary self-replay | `/tmp/lookup-v2-canary-replay-active-2026-06-05-post-bootstrap-fix.json` | ✅ **SELF-CANARY PASS**: `hard_drift=0`, `soft_abstain_drift=0`, labeled `75/75`. real traffic mirror raw input 자체는 여전히 외부 필요. |
+| canary self-replay (current structural rerun) | `/tmp/lookup-v2-canary-replay-structural-final.json` | ✅ **SELF-CANARY PASS**: `hard_drift=0`, `soft_abstain_drift=0`, sample labeled `3/3`. real traffic mirror raw input 자체는 여전히 외부 필요. |
 | active runtime proof | `/Users/songmin/.wine-search-engine/data/runtime-search-snapshot.json` | ✅ active runtime points at `search-snapshot:v1:7bcd44a5484b2be5`; current-contract artifact-only promote PASS. |
 | artifact-only publish proof | — | ✅ `pnpm run etl:publish-runtime-substrates:artifact-only -- --manifest /Users/songmin/.wine-search-engine/data/search-snapshots/search-snapshot:v1:7bcd44a5484b2be5/manifest.json --runtime-state /Users/songmin/.wine-search-engine/data/runtime-search-snapshot.json --runtime-nl-mappings /Users/songmin/.wine-search-engine/data/nl-mappings.json` PASS |
 | operator-plane PG publish | — | ℹ️ host DNS / operator-plane availability issue는 여전히 별도 운영 문제일 수 있다. lookup-only cutover gate와는 분리한다. |

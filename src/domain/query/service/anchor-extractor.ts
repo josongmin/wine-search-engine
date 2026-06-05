@@ -4,6 +4,7 @@ import type { AliasRegistryVersion } from '../../alias/model/alias-registry-vers
 import type { AnchorCandidate } from '../model/anchor-candidate.js';
 import type { AnchorConditionedQuery } from '../model/relative-query.js';
 import type { NormalizedQueryViews } from '../model/query-views.js';
+import { buildNormalizedQueryViews } from './query-normalizer.js';
 import { parseSpans } from '../../attribute/service/span-parser.js';
 import {
   isDirectEntityResolution,
@@ -11,7 +12,7 @@ import {
 } from '../../attribute/service/entity-resolver.js';
 import { RelativeQueryExtractor } from './relative-query-extractor.js';
 import { compareScoreWithTiebreaker } from '../../shared/utils/stable-comparator.js';
-import { buildAliasSurfaceLookupPlan } from './alias-lookup-plan.js';
+import { buildAliasLookupPlan, buildAliasSurfaceLookupPlan } from './alias-lookup-plan.js';
 import { isExactLikeLookupStrategy } from './lookup-strategy-taxonomy.js';
 import { pickHigherTrustAliasType } from '../../alias/service/conflict-resolver.js';
 import { extractRuleBasedConstraints } from './rule-based-constraint-extractor.js';
@@ -47,12 +48,19 @@ export interface AliasMatchResult {
 
 export type AliasLookupScope = 'surface' | 'span';
 export type AliasRecallMode = 'surface_only';
-type DeterministicConstraintEntityType = 'country' | 'region' | 'wine_type';
+type DeterministicConstraintEntityType =
+  | 'country'
+  | 'region'
+  | 'wine_type'
+  | 'grape_primary'
+  | 'grape_family';
 
 const DETERMINISTIC_CONSTRAINT_ENTITY_TYPES: ReadonlySet<DeterministicConstraintEntityType> = new Set([
   'country',
   'region',
   'wine_type',
+  'grape_primary',
+  'grape_family',
 ]);
 
 export interface AliasLookupOptions {
@@ -385,6 +393,9 @@ export class AnchorExtractor {
       }
       add(baseQueries, seenBase, query);
     }
+    for (const query of this.collectShortMixedCanonicalBaseQueries(normalizedQuery, queryViews)) {
+      add(baseQueries, seenBase, query);
+    }
     for (const query of extraBaseQueries) {
       add(baseQueries, seenBase, query);
     }
@@ -435,10 +446,51 @@ export class AnchorExtractor {
     return { baseQueries, spanQueries };
   }
 
-  private isAtomicSpanDeterministicConstraintSurface(spanText: string): boolean {
-    const resolved = resolveEntity(spanText, { preferEntityOverStyle: true });
-    return isDirectEntityResolution(resolved)
-      && isDeterministicConstraintEntityType(resolved.entityType);
+  private collectShortMixedCanonicalBaseQueries(
+    normalizedQuery: string,
+    queryViews?: NormalizedQueryViews,
+  ): readonly string[] {
+    const sourceSurface = queryViews?.raw ?? normalizedQuery;
+    const queryTokens = sourceSurface
+      .trim()
+      .split(/\s+/u)
+      .filter((token) => token.length > 0);
+    if (queryTokens.length !== 2) {
+      return [];
+    }
+
+    const trailingToken = queryTokens[1]!;
+    const lookupPlan = buildAliasLookupPlan(normalizedQuery, queryViews);
+    const candidates = new Set<string>(
+      lookupPlan.tokenList.filter((candidate) => {
+        const candidateTokens = candidate
+          .trim()
+          .split(/\s+/u)
+          .filter((token) => token.length > 0);
+        return (
+          candidateTokens.length > 1
+          && !candidateTokens.includes(trailingToken)
+        );
+      }),
+    );
+    const views = queryViews ?? buildNormalizedQueryViews(normalizedQuery);
+    for (const surface of [views.strict, views.transliterated]) {
+      if (typeof surface !== 'string' || surface.length === 0) {
+        continue;
+      }
+      const suffix = ` ${trailingToken}`;
+      if (!surface.endsWith(suffix)) {
+        continue;
+      }
+      const stripped = surface.slice(0, -suffix.length).trim();
+      if (
+        stripped.length > 0
+        && stripped.split(/\s+/u).filter((token) => token.length > 0).length > 1
+      ) {
+        candidates.add(stripped);
+      }
+    }
+    return trimDeduped(candidates);
   }
 
   private shouldSkipAtomicDeterministicConstraintQuery(
@@ -453,8 +505,7 @@ export class AnchorExtractor {
     if (tokens.length !== 1) {
       return false;
     }
-    return deterministicConstraintTokens.has(tokens[0]!)
-      || this.isAtomicSpanDeterministicConstraintSurface(query);
+    return deterministicConstraintTokens.has(tokens[0]!);
   }
 
   private collectDeterministicConstraintTokens(normalizedQuery: string): ReadonlySet<string> {
@@ -470,6 +521,9 @@ export class AnchorExtractor {
       }
     }
     for (const span of parseSpans(normalizedQuery)) {
+      if (span.tokenCount <= 1) {
+        continue;
+      }
       const resolved = resolveEntity(span.text, { preferEntityOverStyle: true });
       if (
         !isDirectEntityResolution(resolved)
