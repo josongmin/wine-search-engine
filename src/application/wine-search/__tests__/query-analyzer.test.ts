@@ -299,6 +299,37 @@ describe('QueryAnalyzerService — LLM fallback', () => {
     expect(result.analysis.llmFallbackOutcome).toEqual({ kind: 'success' });
   });
 
+  it('passes a MINIMAL schema to the LLM and merges {intent} into the deterministic shell (OpenAI-robust)', async () => {
+    // Structural fix: the fallback must NOT ask the LLM to emit the entire
+    // (huge, strict, nested) WineSearchAnalysis — OpenAI structured output
+    // cannot reliably satisfy it, so the analyzer kept failing → intent=unknown
+    // → false "unsupported_intent". Instead the LLM emits only the intent (+ may
+    // sprinkle extra reasoning fields, rule 10), which we merge into the
+    // deterministic shell that already carries contract/budget/etc.
+    const stub = makeStubLlm(() =>
+      Promise.resolve({
+        // minimal output + an extra reasoning field the LLM may add
+        data: { intent: 'search', reasoning: 'mentions a wine region' } as never,
+        usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheCreationTokens: 0 },
+        durationMs: 1,
+      }),
+    );
+    const result = await analyze('asdf', { structuredLlm: stub });
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    // intent came from the LLM; the shell supplied the rest
+    expect(result.analysis.intent).toBe('search');
+    expect(result.analysis.contract).toBeDefined();
+    expect(result.analysis.recommendedBudget).toBeDefined();
+    expect(result.analysis.expectedMultiStep).toBe(false);
+    expect(result.analysis.preservedSurface).toBe('asdf');
+    expect(result.analysis.llmFallbackOutcome).toEqual({ kind: 'success' });
+    // The schema handed to the LLM is MINIMAL — it accepts `{ intent }` alone
+    // (the full WineSearchAnalysisSchema would reject that for missing fields).
+    const passedSchema = stub.analyzeMock.mock.calls[0]?.[0]?.schema;
+    expect(passedSchema?.safeParse({ intent: 'search' }).success).toBe(true);
+  });
+
   it('does NOT invoke structuredLlm when deterministic pipeline yields constraints', async () => {
     const stub = makeStubLlm(() => {
       throw new Error('LLM must not be called when deterministic constraints exist');

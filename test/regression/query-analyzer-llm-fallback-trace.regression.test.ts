@@ -256,12 +256,17 @@ describe('regression: query-analyzer LLM-fallback observability trace', () => {
     expect(preservedSurface).toBe('asdf');
   });
 
-  it('routing consequence: preserved-unknown fallback failure reaches the router unsupported_intent reject', async () => {
+  it('routing consequence: preserved-unknown fallback failure → router reject with honest analysis_unavailable reason', async () => {
     // The whole point of preserving intent='unknown' instead of softening to
-    // 'search': a fully-ambiguous query whose LLM disambiguation failed must
-    // be honestly rejected by the deterministic-router (no anchors, no
-    // constraints, no wine-domain keyword), NOT force-routed into a search
-    // that masquerades the LLM outage as a confident hit.
+    // 'search': a fully-ambiguous query whose LLM disambiguation FAILED must be
+    // rejected by the deterministic-router (no anchors, no constraints, no
+    // wine-domain keyword), NOT force-routed into a search that masquerades the
+    // LLM outage as a confident hit.
+    //
+    // Move 2: because the LLM fallback was ATTEMPTED and FAILED (vs a genuinely
+    // out-of-scope query), the router carries that cause forward as the honest
+    // `analysis_unavailable` reason (→ "AI analysis unavailable" message),
+    // rather than the query-blaming `unsupported_intent`.
     const stub = makeStubLlm(() => Promise.reject(new Error('boom')));
     const { out } = await runAnalyze('asdf', { structuredLlm: stub });
     expect(out.kind).toBe('ok');
@@ -272,6 +277,6 @@ describe('regression: query-analyzer LLM-fallback observability trace', () => {
     const plan = router.route(out.analysis);
     expect(plan.kind).toBe('reject');
     if (plan.kind !== 'reject') return;
-    expect(plan.reason).toBe('unsupported_intent');
+    expect(plan.reason).toBe('analysis_unavailable');
   });
 });

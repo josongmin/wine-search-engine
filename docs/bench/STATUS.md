@@ -25,9 +25,9 @@
   - current owner-stage artifact는 `planner_total`, `retrieval_total`,
     `candidate_generation`, `blocker`, `resolver`, `ambiguity_lookup`를 함께 출력한다
   - current canonical active truth는
-    `/tmp/lookup-v2-latency-runtime-bundle-preload-governance.json`
-    기준 `cold_boot measured_ms=4811.520`로 **FAIL**,
-    `request first_query_ms=549.002`, `warm_p95_ms=315.122`로 **PASS**다
+    `/tmp/lookup-v2-latency-runtime-bundle-manifest-once.json`
+    기준 `cold_boot measured_ms=1629.921`,
+    `request first_query_ms=329.336`, `warm_p95_ms=195.639`로 **PASS**다
 - `pnpm run eval:lookup-v2:canary:build -- --input <traffic.ndjson> --output <corpus.jsonl> --query-field <dotted.path> [route/method filters]`
   - explicit real-traffic canary corpus extractor
   - heuristic field guessing 없이 dotted-path 계약으로만 replay corpus를 만든다
@@ -59,9 +59,9 @@
   - `/tmp/lookup-v2-coverage-korean-famous-active-2026-06-05-post-bootstrap-fix.json`
   - `hot_entities=53/53`, `non_entity=22/22`, `curation_tasks=0`
 - latency:
-  - `/tmp/lookup-v2-latency-runtime-bundle-preload-governance.json`
-  - `cold_boot measured_ms=4811.520` -> **FAIL**
-  - `request first_query_ms=549.002`, `warm_p50_ms=14.962`, `warm_p95_ms=315.122` -> **PASS**
+  - `/tmp/lookup-v2-latency-runtime-bundle-manifest-once.json`
+  - `cold_boot measured_ms=1629.921` -> **PASS**
+  - `request first_query_ms=329.336`, `warm_p50_ms=14.433`, `warm_p95_ms=195.639` -> **PASS**
   - `runtime_hydration fully_hydrated_runtime_artifact=true`, `lazy_build_detected_during_probe=false`
 - canary self-replay:
   - `/tmp/lookup-v2-canary-replay-active-2026-06-05-post-bootstrap-fix.json`
