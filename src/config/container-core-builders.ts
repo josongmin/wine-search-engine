@@ -52,6 +52,9 @@ import type {
   BrowseRetrieverPort,
   CompareRetrieverPort,
 } from '../application/search/port/search-pipeline-deps.port.js';
+import type { BlockingPort } from '../domain/resolver/port/blocking.port.js';
+import type { CalibrationStore } from '../domain/resolver/port/calibration-store.port.js';
+import type { LearnedMatcherPort } from '../domain/resolver/port/learned-matcher.port.js';
 
 /** Default blocking limit for standard queries. */
 const BLOCKER_DEFAULT_LIMIT = 100;
@@ -88,6 +91,9 @@ export async function buildQueryPlanner(
     readonly forceRuleOnlyNlMapper?: boolean;
     readonly disableTopologyPlanner?: boolean;
     readonly disableAmbiguityIntentCompiler?: boolean;
+    readonly skipConstraintParsingOnExactSafeWitness?: boolean;
+    readonly disableConstraintCompilerFuzzyMatcher?: boolean;
+    readonly skipFuzzyFallbackOnKnownAmbiguousSurface?: boolean;
   } = {},
 ): Promise<Planner> {
   // ADR-018 Wave F3: reject incoherent feature flag combinations BEFORE
@@ -118,9 +124,7 @@ export async function buildQueryPlanner(
       );
       const terms = rows.map((r) => r.surface_form);
       if (terms.length > 0) {
-        const matcher = new LazyFuzzyMatcher(terms);
-        matcher.warm();
-        fuzzyMatcher = matcher;
+        fuzzyMatcher = new LazyFuzzyMatcher(terms);
       }
     } catch (err: unknown) {
       const code = (err as { code?: string } | undefined)?.code;
@@ -183,6 +187,14 @@ export async function buildQueryPlanner(
     fuzzyMatcher,
     topologyPlanner,
     ambiguityIntentCompiler,
+    {
+      skipConstraintParsingOnExactSafeWitness:
+        options.skipConstraintParsingOnExactSafeWitness === true,
+      disableConstraintCompilerFuzzyMatcher:
+        options.disableConstraintCompilerFuzzyMatcher === true,
+      skipFuzzyFallbackOnKnownAmbiguousSurface:
+        options.skipFuzzyFallbackOnKnownAmbiguousSurface === true,
+    },
   );
 }
 
@@ -208,12 +220,21 @@ export function buildBlockingUseCaseAdapter(adapters: CoreAdapterServices): Bloc
   };
 }
 
-export function buildEntityResolver(adapters: CoreAdapterServices, config: Config): Resolver {
+export interface EntityResolverBuilderDeps {
+  readonly blockingPort: BlockingPort;
+  readonly calibrationStore: CalibrationStore;
+  readonly learnedMatcher?: LearnedMatcherPort | undefined;
+}
+
+export function buildEntityResolver(
+  deps: EntityResolverBuilderDeps,
+  config: Config,
+): Resolver {
   return new Resolver(
-    new Blocker(adapters.blockingPort),
+    new Blocker(deps.blockingPort),
     new CandidateScorer(),
     new AmbiguityClassifier(),
-    new Calibrator(adapters.calibrationStore, {
+    new Calibrator(deps.calibrationStore, {
       // The resolver / decision stack already carries an explicit
       // `calibrationTrusted=false` degradation path for missing or stale
       // params. Hard-failing production requests here turns an untrusted score
@@ -231,7 +252,7 @@ export function buildEntityResolver(adapters: CoreAdapterServices, config: Confi
     // suppress the learned-matcher blend in the Resolver as well. Without this guard,
     // KILL_SWITCH_LEARNING=true disables SPLADE retrieval but the learned-matcher service
     // is still called on every entity resolution — defeating the kill switch's intent.
-    config.killSwitch.learning ? undefined : adapters.learnedMatcher,
+    config.killSwitch.learning ? undefined : deps.learnedMatcher,
   );
 }
 

@@ -33,13 +33,13 @@ describe('lookup-v2 hotset fixture stays diverse enough to catch real regression
       { resolved: 0, ambiguous: 0, failed: 0, redirect_discovery: 0 },
     );
 
-    expect(rows.length).toBeGreaterThanOrEqual(26);
+    expect(rows.length).toBeGreaterThanOrEqual(31);
     expect(qids.size).toBe(rows.length);
 
-    expect(statusCounts.resolved).toBeGreaterThanOrEqual(10);
+    expect(statusCounts.resolved).toBeGreaterThanOrEqual(14);
     expect(statusCounts.redirect_discovery).toBeGreaterThanOrEqual(6);
     expect(statusCounts.ambiguous).toBeGreaterThanOrEqual(5);
-    expect(statusCounts.failed).toBeGreaterThanOrEqual(3);
+    expect(statusCounts.failed).toBeGreaterThanOrEqual(4);
 
     for (const requiredClass of [
       'exact_entity',
@@ -60,6 +60,8 @@ describe('lookup-v2 hotset fixture stays diverse enough to catch real regression
       'common_noun_entity_collision',
       'adversarial_no_match',
       'vintage_conflict_impossible',
+      'hot_entity_coverage',
+      'generic_korean_failed',
     ]) {
       expect(classes.has(requiredClass)).toBe(true);
     }
@@ -72,9 +74,9 @@ describe('lookup-v2 hotset fixture stays diverse enough to catch real regression
     const koreanResolved = hangulRows.filter((row) => row.expected_status === 'resolved');
     const ambiguousCollisionRows = rows.filter((row) => row.expected_status === 'ambiguous' && /collision|vintage/u.test(row.class));
 
-    expect(hangulRows.length).toBeGreaterThanOrEqual(10);
+    expect(hangulRows.length).toBeGreaterThanOrEqual(14);
     expect(koreanRedirects.length).toBeGreaterThanOrEqual(2);
-    expect(koreanResolved.length).toBeGreaterThanOrEqual(5);
+    expect(koreanResolved.length).toBeGreaterThanOrEqual(9);
     expect(ambiguousCollisionRows.length).toBeGreaterThanOrEqual(4);
   });
 

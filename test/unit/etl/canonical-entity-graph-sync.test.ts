@@ -235,8 +235,8 @@ describe('canonical-entity-graph-sync', () => {
     expect(sql).toMatch(/DELETE FROM canonical_aliases/);
     expect(sql).toMatch(/DELETE FROM canonical_ambiguity_registry/);
     expect(sql).toMatch(/search_snapshot_id = \$1/);
-    expect(sql).toMatch(/ON CONFLICT \(search_snapshot_id, alias_id\)/);
-    expect(sql).toMatch(/ON CONFLICT \(search_snapshot_id, registry_id\)/);
+    expect(sql).not.toMatch(/ON CONFLICT \(search_snapshot_id, alias_id\)/);
+    expect(sql).not.toMatch(/ON CONFLICT \(search_snapshot_id, registry_id\)/);
   });
 
   it('rejects existing canonical graph rows that would remap an identity signature', async () => {

@@ -78,6 +78,40 @@ describe('DeterministicRouter — Rule 1: analysis-rejected guard', () => {
     expect(ExecutionPlanSchema.parse(plan)).toEqual(plan);
   });
 
+  it('intent=unknown reject WITH a failed LLM fallback → analysis_unavailable (honest cause, not query-blaming)', () => {
+    // Move 2: the analyzer already captures that its LLM fallback FAILED
+    // (llmFallbackOutcome). The router must carry that cause forward as a
+    // distinct reject reason so the response says "AI analysis unavailable"
+    // instead of "unsupported intent — give a wine name" (which blames the
+    // user when the real cause was an LLM outage).
+    const router = makeRouter();
+    const plan = router.route(
+      baseAnalysis({
+        intent: 'unknown',
+        preservedSurface: '보르고뉴',
+        llmFallbackOutcome: { kind: 'failed_preserved_unknown', failureReason: 'validation' },
+      }),
+    );
+    expect(plan.kind).toBe('reject');
+    if (plan.kind !== 'reject') return;
+    expect(plan.reason).toBe('analysis_unavailable');
+    expect(ExecutionPlanSchema.parse(plan)).toEqual(plan);
+  });
+
+  it('intent=unknown reject WITHOUT an LLM failure (not_attempted) → stays unsupported_intent', () => {
+    const router = makeRouter();
+    const plan = router.route(
+      baseAnalysis({
+        intent: 'unknown',
+        preservedSurface: 'asdfqwer',
+        llmFallbackOutcome: { kind: 'not_attempted' },
+      }),
+    );
+    expect(plan.kind).toBe('reject');
+    if (plan.kind !== 'reject') return;
+    expect(plan.reason).toBe('unsupported_intent');
+  });
+
   it('intent=unknown + no anchors + no constraints + wine-domain surface → falls through to single-search', () => {
     // Regression guard for the CLAUDE.md rule 23 fix: "와인 좀 알려줘" /
     // "와인 추천해 주시겠어요?" produce zero anchors AND zero constraints

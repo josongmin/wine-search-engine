@@ -8,6 +8,7 @@
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, join, normalize, resolve } from 'node:path';
+import type { PoolClient } from 'pg';
 import { z } from 'zod';
 
 import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
@@ -24,7 +25,6 @@ import {
 } from '../../src/domain/shared/types/entity-id.js';
 import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 import {
-  parseManifest,
   type EntitySnapshotRecord,
 } from './search-snapshot-schema.js';
 
@@ -120,6 +120,19 @@ export interface SourceEntityContinuityRecord {
   readonly benchmarkEntityId?: CanonicalEntityId;
 }
 
+interface CanonicalGraphContinuityRow {
+  readonly source_record_id: string;
+  readonly canonical_entity_ids: readonly string[];
+  readonly identity_signatures: readonly string[];
+  readonly benchmark_entity_ids: readonly string[];
+}
+
+interface LoadActiveSourceEntityContinuityOptions {
+  readonly canonicalGraphClient?: Pick<PoolClient, 'query'>;
+  readonly disableCanonicalGraphFallback?: boolean;
+  readonly sourceIds?: readonly SourceRecordId[];
+}
+
 /**
  * Wave 4 (fail-loud): explicit "fixture required" mode for build/eval/publish
  * paths where missing gold linkage would silently degrade benchmark coverage
@@ -180,20 +193,54 @@ export function resolveDefaultFixtureRepoRoot(): string | undefined {
 
 export async function loadActiveSourceEntityContinuity(
   runtimeStatePath: string = resolveDataPath('data/runtime-search-snapshot.json'),
+  options: LoadActiveSourceEntityContinuityOptions = {},
 ): Promise<ReadonlyMap<SourceRecordId, SourceEntityContinuityRecord>> {
-  if (!existsSync(runtimeStatePath)) {
+  if (existsSync(runtimeStatePath)) {
+    try {
+      const runtimeRaw = await readFile(runtimeStatePath, 'utf8');
+      const runtimeParsed = JSON.parse(runtimeRaw) as {
+        manifestPath?: unknown;
+      };
+      if (typeof runtimeParsed.manifestPath === 'string' && runtimeParsed.manifestPath.length > 0) {
+        const continuity = await loadSourceEntityContinuityFromManifestPath(runtimeParsed.manifestPath);
+        if (continuity.size > 0) {
+          return continuity;
+        }
+      }
+    } catch {
+      // Serving/readiness reject malformed runtime state. Build/index continuity
+      // is different: canonical graph authority still defines immutable public
+      // ids even when the active runtime pointer is missing or malformed.
+    }
+  }
+
+  if (options.disableCanonicalGraphFallback === true) {
     return new Map();
   }
 
-  const runtimeRaw = await readFile(runtimeStatePath, 'utf8');
-  const runtimeParsed = JSON.parse(runtimeRaw) as {
-    manifestPath?: unknown;
-  };
-  if (typeof runtimeParsed.manifestPath !== 'string' || runtimeParsed.manifestPath.length === 0) {
+  if (options.canonicalGraphClient !== undefined) {
+    return loadSourceEntityContinuityFromCanonicalGraph(options.canonicalGraphClient, options.sourceIds);
+  }
+
+  const [{ loadConfig }, { createPgPool, shouldUsePgPool }] = await Promise.all([
+    import('../../src/config/env.js'),
+    import('../../src/infrastructure/db/pg-pool.js'),
+  ]);
+  const config = loadConfig();
+  if (!shouldUsePgPool(config.pg)) {
     return new Map();
   }
 
-  return loadSourceEntityContinuityFromManifestPath(runtimeParsed.manifestPath);
+  const pool = createPgPool(config.pg, {
+    statementTimeoutMs: 10_000,
+    idleInTransactionSessionTimeoutMs: 10_000,
+    queryTimeoutMs: 15_000,
+  });
+  try {
+    return await loadSourceEntityContinuityFromCanonicalGraph(pool, options.sourceIds);
+  } finally {
+    await pool.end();
+  }
 }
 
 export async function loadSourceEntityContinuityFromManifestPath(
@@ -204,8 +251,16 @@ export async function loadSourceEntityContinuityFromManifestPath(
   }
 
   const manifestRaw = await readFile(manifestPath, 'utf8');
-  const manifest = parseManifest(manifestRaw, manifestPath);
-  return loadSourceEntityContinuityFromEntitiesNdjson(manifest.artifacts.entitiesNdjson);
+  const parsed = JSON.parse(manifestRaw) as {
+    artifacts?: {
+      entitiesNdjson?: unknown;
+    };
+  };
+  const entitiesNdjson = parsed.artifacts?.entitiesNdjson;
+  if (typeof entitiesNdjson !== 'string' || entitiesNdjson.length === 0) {
+    return new Map();
+  }
+  return loadSourceEntityContinuityFromEntitiesNdjson(entitiesNdjson);
 }
 
 export async function loadSourceEntityContinuityFromEntitiesNdjson(
@@ -236,6 +291,101 @@ export async function loadSourceEntityContinuityFromEntitiesNdjson(
           : {}),
       });
     }
+  }
+  return continuity;
+}
+
+export async function loadSourceEntityContinuityFromCanonicalGraph(
+  client: Pick<PoolClient, 'query'>,
+  sourceIds?: readonly SourceRecordId[],
+): Promise<ReadonlyMap<SourceRecordId, SourceEntityContinuityRecord>> {
+  const scopedSourceIds = sourceIds === undefined
+    ? undefined
+    : [...new Set(sourceIds)].sort((left, right) => left.localeCompare(right));
+  if (scopedSourceIds !== undefined && scopedSourceIds.length === 0) {
+    return new Map();
+  }
+  const result = scopedSourceIds === undefined
+    ? await client.query<CanonicalGraphContinuityRow>(
+      `SELECT
+         esl.source_record_id,
+         ARRAY_AGG(DISTINCT esl.canonical_entity_id ORDER BY esl.canonical_entity_id) AS canonical_entity_ids,
+         ARRAY_AGG(DISTINCT ce.identity_signature ORDER BY ce.identity_signature) AS identity_signatures,
+         ARRAY_REMOVE(
+           ARRAY_AGG(
+             DISTINCT NULLIF(ce.source_provenance->>'benchmark_entity_id', '')
+             ORDER BY NULLIF(ce.source_provenance->>'benchmark_entity_id', '')
+           ),
+           NULL
+         ) AS benchmark_entity_ids
+       FROM entity_source_links esl
+       INNER JOIN canonical_entities ce
+         ON ce.search_snapshot_id = esl.search_snapshot_id
+        AND ce.canonical_entity_id = esl.canonical_entity_id
+       WHERE esl.source_system = 'vivino-silver'
+       GROUP BY esl.source_record_id`,
+    )
+    : await client.query<CanonicalGraphContinuityRow>(
+      `WITH input AS (
+         SELECT DISTINCT source_record_id
+         FROM UNNEST($1::text[]) AS rows(source_record_id)
+       )
+       SELECT
+         esl.source_record_id,
+         ARRAY_AGG(DISTINCT esl.canonical_entity_id ORDER BY esl.canonical_entity_id) AS canonical_entity_ids,
+         ARRAY_AGG(DISTINCT ce.identity_signature ORDER BY ce.identity_signature) AS identity_signatures,
+         ARRAY_REMOVE(
+           ARRAY_AGG(
+             DISTINCT NULLIF(ce.source_provenance->>'benchmark_entity_id', '')
+             ORDER BY NULLIF(ce.source_provenance->>'benchmark_entity_id', '')
+           ),
+           NULL
+         ) AS benchmark_entity_ids
+       FROM input
+       INNER JOIN entity_source_links esl
+         ON esl.source_system = 'vivino-silver'
+        AND esl.source_record_id = input.source_record_id
+       INNER JOIN canonical_entities ce
+         ON ce.search_snapshot_id = esl.search_snapshot_id
+        AND ce.canonical_entity_id = esl.canonical_entity_id
+       GROUP BY esl.source_record_id`,
+      [scopedSourceIds],
+    );
+
+  const continuity = new Map<SourceRecordId, SourceEntityContinuityRecord>();
+  for (const row of result.rows) {
+    const canonicalEntityId = row.canonical_entity_ids[0];
+    if (canonicalEntityId === undefined) {
+      continue;
+    }
+    if (row.canonical_entity_ids.length > 1) {
+      throw new Error(
+        `canonical graph continuity drift: source_record_id ${row.source_record_id} maps to multiple canonical_entity_id values (${row.canonical_entity_ids.join(', ')})`,
+      );
+    }
+    const identitySignature = row.identity_signatures[0];
+    if (identitySignature === undefined) {
+      throw new Error(
+        `canonical graph continuity drift: source_record_id ${row.source_record_id} is missing identity_signature for canonical_entity_id ${canonicalEntityId}`,
+      );
+    }
+    if (row.identity_signatures.length > 1) {
+      throw new Error(
+        `canonical graph continuity drift: source_record_id ${row.source_record_id} maps to multiple identity_signature values (${row.identity_signatures.join(', ')})`,
+      );
+    }
+    if (row.benchmark_entity_ids.length > 1) {
+      throw new Error(
+        `canonical graph continuity drift: source_record_id ${row.source_record_id} maps to multiple benchmark_entity_id values (${row.benchmark_entity_ids.join(', ')})`,
+      );
+    }
+    continuity.set(row.source_record_id as SourceRecordId, {
+      entityId: createCanonicalEntityId(canonicalEntityId),
+      identitySignature,
+      ...(row.benchmark_entity_ids[0] !== undefined
+        ? { benchmarkEntityId: createCanonicalEntityId(row.benchmark_entity_ids[0]) }
+        : {}),
+    });
   }
   return continuity;
 }

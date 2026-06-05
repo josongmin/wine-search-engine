@@ -32,9 +32,14 @@ import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
 import { loadConfig } from '../../src/config/env.js';
-import { createContainer } from '../../src/config/container.js';
+import { createLookupDirectContainer } from '../../src/config/container-lookup.js';
 import { getPgPool } from '../../src/infrastructure/db/pg-pool.js';
+import { SEARCH_SNAPSHOT_SCHEMA_VERSION } from '../../src/domain/shared/constants/search-snapshot.js';
 import { LOOKUP_V2_DEFAULT_MAX_CANDIDATES } from '../../src/interface/http/constants.js';
+import {
+  DEFAULT_RUNTIME_STATE_PATH,
+  loadSearchSnapshotRuntimeState,
+} from '../../src/infrastructure/health/search-snapshot-readiness.js';
 import {
   evaluatePerClassGate,
   type ClassTally,
@@ -110,9 +115,16 @@ export function toPerClassEntries(
     });
 }
 
-function parseLimit(argv: readonly string[]): { limitPerClass: number; output: string } {
+function parseArgs(argv: readonly string[]): {
+  limitPerClass: number;
+  output: string;
+  runtimeStatePath?: string | undefined;
+  useActiveRuntime: boolean;
+} {
   let limitPerClass = 1000;
   let output = '/tmp/entity-resolution-validation.json';
+  let runtimeStatePath: string | undefined;
+  let useActiveRuntime = false;
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--limit-per-class') {
       const n = Number.parseInt(argv[i + 1] ?? '', 10);
@@ -121,16 +133,31 @@ function parseLimit(argv: readonly string[]): { limitPerClass: number; output: s
     } else if (argv[i] === '--output') {
       output = argv[i + 1] ?? output;
       i += 1;
+    } else if (argv[i] === '--runtime-state') {
+      runtimeStatePath = argv[i + 1] ?? runtimeStatePath;
+      i += 1;
+    } else if (argv[i] === '--use-active-runtime') {
+      useActiveRuntime = true;
     }
   }
-  return { limitPerClass, output };
+  return { limitPerClass, output, runtimeStatePath, useActiveRuntime };
 }
 
 async function main(): Promise<void> {
-  const { limitPerClass, output } = parseLimit(process.argv.slice(2));
+  const { limitPerClass, output, runtimeStatePath, useActiveRuntime } = parseArgs(process.argv.slice(2));
+  if (runtimeStatePath === undefined && !useActiveRuntime) {
+    throw new Error('Explicit runtime binding required: pass --runtime-state <path> or --use-active-runtime');
+  }
+  const effectiveRuntimeStatePath = runtimeStatePath ?? DEFAULT_RUNTIME_STATE_PATH;
   const config = loadConfig();
   const pool = getPgPool();
-  const container = await createContainer(config, pool);
+  const runtimeState = await loadSearchSnapshotRuntimeState(effectiveRuntimeStatePath);
+  const container = await createLookupDirectContainer(config, {
+    pool,
+    searchSnapshotId: runtimeState.snapshotId,
+    searchSnapshotManifestPath: runtimeState.manifestPath,
+    searchSnapshotFieldAvailability: runtimeState.fieldAvailability,
+  });
 
   const { rows: caseRows } = await pool.query<CaseRow>(
     `SELECT query, query_class AS "queryClass", expected_status AS "expectedStatus",
@@ -242,7 +269,21 @@ async function main(): Promise<void> {
 
   writeFileSync(
     output,
-    `${JSON.stringify({ byClass, overall, perClass, gate, evalCasesFingerprint, detail }, null, 2)}\n`,
+    `${JSON.stringify({
+      runtime: {
+        runtime_state_path: effectiveRuntimeStatePath,
+        runtime_state_schema: runtimeState.schemaVersion,
+        manifest_schema: SEARCH_SNAPSHOT_SCHEMA_VERSION,
+        snapshot_id: runtimeState.snapshotId,
+        artifact_hashes: runtimeState.hashes,
+      },
+      byClass,
+      overall,
+      perClass,
+      gate,
+      evalCasesFingerprint,
+      detail,
+    }, null, 2)}\n`,
     'utf8',
   );
   process.stderr.write(`[er-validation] report → ${output}\n`);

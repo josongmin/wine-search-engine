@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { linkEvalTrainingReleaseToRuntimeState } from '../../../scripts/eval/run-eval-and-train-ltr.ts';
+import { SEARCH_SNAPSHOT_STATE_VERSION } from '../../../src/domain/shared/constants/search-snapshot.js';
 import { loadSearchSnapshotRuntimeState } from '../../../src/infrastructure/health/search-snapshot-readiness.js';
 import { hashText } from '../../../src/domain/shared/utils/stable-json.js';
 
@@ -12,7 +13,7 @@ async function makeTempDir(): Promise<string> {
 
 function runtimeStatePayload(runtimeStatePathDir: string, snapshotId: string) {
   return {
-    schemaVersion: 'search_snapshot_runtime_state.v5',
+    schemaVersion: SEARCH_SNAPSHOT_STATE_VERSION,
     snapshotId,
     contentHash: 'content-hash',
     publishedAt: '2026-04-17T00:00:00.000Z',
@@ -22,6 +23,7 @@ function runtimeStatePayload(runtimeStatePathDir: string, snapshotId: string) {
     lookupResolverProjectionPath: path.join(runtimeStatePathDir, 'lookup-resolver-projection.json'),
     lookupEntityProjectionPath: path.join(runtimeStatePathDir, 'lookup-entity-projection.json'),
     lookupAmbiguityRuntimePath: path.join(runtimeStatePathDir, 'lookup-ambiguity-runtime.json'),
+    lookupConceptRedirectRuntimePath: path.join(runtimeStatePathDir, 'lookup-concept-redirect-runtime.json'),
     counts: {
       entities: 10,
       aliases: 12,
@@ -29,6 +31,7 @@ function runtimeStatePayload(runtimeStatePathDir: string, snapshotId: string) {
       lookupResolverProjectionDocuments: 10,
       lookupEntityProjectionDocuments: 10,
       lookupAmbiguityRuntimeEntries: 2,
+      lookupConceptRedirectRuntimeEntries: 0,
       ambiguityRegistry: 2,
       nlMappings: 1,
       activeLtrModels: 1,
@@ -40,6 +43,7 @@ function runtimeStatePayload(runtimeStatePathDir: string, snapshotId: string) {
       lookupResolverProjection: 'lookup-resolver-projection-hash',
       lookupEntityProjection: 'lookup-entity-projection-hash',
       lookupAmbiguityRuntime: 'lookup-ambiguity-runtime-hash',
+      lookupConceptRedirectRuntime: 'lookup-concept-redirect-runtime-hash',
       ambiguityRegistry: 'ambiguity-hash',
       nlMappings: 'nl-hash',
       activeLtrModels: 'ltr-hash',

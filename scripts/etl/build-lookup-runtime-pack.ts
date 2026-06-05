@@ -1,5 +1,6 @@
 import { Transliterator } from '../../src/domain/alias/service/transliterator.js';
 import { doubleMetaphoneKeys } from '../../src/domain/alias/service/double-metaphone.js';
+import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
 import type { SourceRecordId } from '../../src/domain/shared/types/entity-id.js';
 import { buildHangulJamoKey } from '../../src/domain/shared/utils/hangul.js';
 import type {
@@ -7,6 +8,11 @@ import type {
   LookupAmbiguityRuntimeEntry,
   LookupAliasRuntimeArtifact,
   LookupAliasRuntimeRow,
+  LookupConceptRedirectRuntimeArtifact,
+  LookupConceptRedirectRuntimeEntry,
+  LookupExactSafeRuntimeArtifact,
+  LookupExactSafeRuntimeEntry,
+  LookupIdentityCertificate,
   LookupResolverProjectionArtifact,
   LookupResolverProjectionDocument,
   LookupEntityProjectionArtifact,
@@ -15,6 +21,8 @@ import type {
 import {
   LOOKUP_AMBIGUITY_RUNTIME_SCHEMA_VERSION,
   LOOKUP_ALIAS_RUNTIME_SCHEMA_VERSION,
+  LOOKUP_CONCEPT_REDIRECT_RUNTIME_SCHEMA_VERSION,
+  LOOKUP_EXACT_SAFE_RUNTIME_SCHEMA_VERSION,
   LOOKUP_RESOLVER_PROJECTION_SCHEMA_VERSION,
   LOOKUP_ENTITY_PROJECTION_SCHEMA_VERSION,
 } from '../../src/domain/shared/types/search-snapshot-lookup-runtime.js';
@@ -30,6 +38,10 @@ import type { AliasSnapshotRecord, AmbiguityRegistrySnapshotRow } from './search
 import type { EnrichedSilverRecord } from './types.js';
 import type { SourceEntityContinuityRecord } from './snapshot-entity-identity.js';
 import { silverToIndexable } from './index-to-vespa.js';
+import type {
+  LookupExactSafeRegistryRow,
+  LookupRuntimeOverlayAlias,
+} from './lookup-exact-safe-registry.js';
 
 function tokenizeForLookup(value: string): readonly string[] {
   return buildNormalizedQueryViews(value).punctuationStripped
@@ -194,6 +206,7 @@ export function buildLookupAliasRuntimeArtifact(args: {
   readonly generatedAt: string;
   readonly aliasRegistryHash: string;
   readonly aliases: readonly AliasSnapshotRecord[];
+  readonly runtimeOverlayAliases?: readonly LookupRuntimeOverlayAlias[] | undefined;
 }): LookupAliasRuntimeArtifact {
   const exactIndex = new Map<string, number[]>();
   const compactIndex = new Map<string, number[]>();
@@ -205,6 +218,9 @@ export function buildLookupAliasRuntimeArtifact(args: {
   const hangulCompletionRecords: LookupAliasRuntimeArtifact['hangulCompletionRecords'] = [];
   const seenSurfaceForms = new Set<string>();
   const surfaceForms: string[] = [];
+  const overlayPromotionClassByAliasId = new Map<string, LookupRuntimeOverlayAlias['promotionClass']>();
+  const exactOverrideOwnerByNormalizedValue = new Map<string, string>();
+  const compactOverrideOwnerByCompactValue = new Map<string, string>();
 
   const aliasRows: LookupAliasRuntimeRow[] = args.aliases.map((alias) => ({
     aliasId: alias.aliasId,
@@ -215,12 +231,66 @@ export function buildLookupAliasRuntimeArtifact(args: {
     confidencePrior: alias.confidencePrior,
     ...(alias.aliasType !== undefined ? { aliasType: alias.aliasType } : {}),
   }));
+  for (const overlay of args.runtimeOverlayAliases ?? []) {
+    const existingExactOwner = exactOverrideOwnerByNormalizedValue.get(overlay.normalizedValue);
+    if (existingExactOwner !== undefined && existingExactOwner !== overlay.entityId) {
+      throw new Error(
+        `lookup runtime overlay exact collision on "${overlay.normalizedValue}" between ${existingExactOwner} and ${overlay.entityId}`,
+      );
+    }
+    exactOverrideOwnerByNormalizedValue.set(overlay.normalizedValue, overlay.entityId);
+    if (overlay.promotionClass === 'compact_exact_safe') {
+      const compactValue = compactForLookup(overlay.normalizedValue);
+      if (compactValue.length > 0) {
+        const existingCompactOwner = compactOverrideOwnerByCompactValue.get(compactValue);
+        if (existingCompactOwner !== undefined && existingCompactOwner !== overlay.entityId) {
+          throw new Error(
+            `lookup runtime overlay compact collision on "${compactValue}" between ${existingCompactOwner} and ${overlay.entityId}`,
+          );
+        }
+        compactOverrideOwnerByCompactValue.set(compactValue, overlay.entityId);
+      }
+    }
+    const aliasId = `lookup-exact-safe:${overlay.entityId}:${overlay.normalizedValue}:${overlay.promotionClass}`;
+    overlayPromotionClassByAliasId.set(aliasId, overlay.promotionClass);
+    aliasRows.push({
+      aliasId,
+      entityId: overlay.entityId,
+      value: overlay.value,
+      normalizedValue: overlay.normalizedValue,
+      sourceTrust: overlay.sourceTrust,
+      confidencePrior: overlay.confidencePrior,
+      aliasType: overlay.aliasType,
+    });
+  }
 
   for (const [aliasIndex, alias] of aliasRows.entries()) {
-    pushIndex(exactIndex, alias.normalizedValue, aliasIndex);
+    const overlayPromotionClass = overlayPromotionClassByAliasId.get(alias.aliasId);
+    const exactOverrideOwner = exactOverrideOwnerByNormalizedValue.get(alias.normalizedValue);
+    if (
+      exactOverrideOwner === undefined
+      || exactOverrideOwner === alias.entityId
+      || overlayPromotionClass !== undefined
+    ) {
+      pushIndex(exactIndex, alias.normalizedValue, aliasIndex);
+    }
     const compactValue = compactForLookup(alias.normalizedValue);
-    if (compactValue.length > 0) {
+    const compactOverrideOwner = compactOverrideOwnerByCompactValue.get(compactValue);
+    if (
+      compactValue.length > 0
+      && (compactOverrideOwner === undefined
+        || compactOverrideOwner === alias.entityId
+        || overlayPromotionClass !== undefined)
+      && (overlayPromotionClass === undefined || overlayPromotionClass === 'compact_exact_safe')
+    ) {
       pushIndex(compactIndex, compactValue, aliasIndex);
+    }
+    if (overlayPromotionClass !== undefined) {
+      if (!seenSurfaceForms.has(alias.value)) {
+        seenSurfaceForms.add(alias.value);
+        surfaceForms.push(alias.value);
+      }
+      continue;
     }
     for (const token of tokenizeForLookup(alias.normalizedValue)) {
       pushIndex(wholeTokenIndex, token, aliasIndex);
@@ -371,6 +441,7 @@ export function buildLookupResolverProjectionArtifact(args: {
   readonly entityIdBySourceId: ReadonlyMap<SourceRecordId, CanonicalEntityId>;
   readonly goldCanonicalLookup: ReadonlyMap<string, string>;
   readonly sourceContinuityLookup: ReadonlyMap<SourceRecordId, SourceEntityContinuityRecord>;
+  readonly identityCertificatesByEntity?: ReadonlyMap<CanonicalEntityId, readonly LookupIdentityCertificate[]> | undefined;
 }): LookupResolverProjectionArtifact {
   const documents: LookupResolverProjectionDocument[] = args.records.map((record) => {
     const entityId = args.entityIdBySourceId.get(record.sourceId);
@@ -438,6 +509,9 @@ export function buildLookupResolverProjectionArtifact(args: {
         aliasesIdentitySafe: indexable.aliasesIdentitySafe,
         producer: record.producer,
       }),
+      ...(args.identityCertificatesByEntity?.get(entityId) !== undefined
+        ? { identityCertificates: args.identityCertificatesByEntity.get(entityId)! }
+        : {}),
       ...(record.producer.trim().length > 0 ? { producer: record.producer } : {}),
       ...(attributeHints !== undefined ? { attributeHints } : {}),
       ...(indexable.sourceRecordRefs !== undefined && indexable.sourceRecordRefs.length > 0
@@ -500,5 +574,89 @@ export function buildLookupAmbiguityRuntimeArtifact(args: {
     snapshotId: args.snapshotId,
     generatedAt: args.generatedAt,
     entries,
+  };
+}
+
+export function buildLookupConceptRedirectRuntimeArtifact(args: {
+  readonly snapshotId: string;
+  readonly generatedAt: string;
+  readonly entries: readonly LookupConceptRedirectRuntimeEntry[];
+}): LookupConceptRedirectRuntimeArtifact {
+  const entries = Object.fromEntries(
+    [...args.entries]
+      .slice()
+      .sort((left, right) => left.normalizedForm.localeCompare(right.normalizedForm))
+      .map((entry) => [entry.normalizedForm, entry] as const),
+  );
+  return {
+    schemaVersion: LOOKUP_CONCEPT_REDIRECT_RUNTIME_SCHEMA_VERSION,
+    snapshotId: args.snapshotId,
+    generatedAt: args.generatedAt,
+    entries,
+  };
+}
+
+export function buildLookupExactSafeRuntimeArtifact(args: {
+  readonly snapshotId: string;
+  readonly generatedAt: string;
+  readonly rows: readonly LookupExactSafeRegistryRow[];
+  readonly snapshotEntityIds: ReadonlySet<CanonicalEntityId>;
+}): LookupExactSafeRuntimeArtifact {
+  const exactEntries: Record<string, LookupExactSafeRuntimeEntry> = {};
+  const compactEntries: Record<string, LookupExactSafeRuntimeEntry> = {};
+  for (const row of [...args.rows].sort((left, right) =>
+    left.entityId.localeCompare(right.entityId)
+    || left.surface.localeCompare(right.surface)
+    || left.promotionClass.localeCompare(right.promotionClass),
+  )) {
+    if (!args.snapshotEntityIds.has(row.entityId)) {
+      continue;
+    }
+    const normalizedSurface = normalizeForMatch(row.surface);
+    if (normalizedSurface.length === 0) {
+      throw new Error(`lookup exact-safe runtime surface normalizes to empty: ${row.surface}`);
+    }
+    const entry: LookupExactSafeRuntimeEntry = {
+      entityId: row.entityId,
+      locale: row.locale,
+      certificate: {
+        kind: row.promotionClass,
+        normalizedSurface,
+        ...(row.promotionClass === 'compact_exact_safe'
+          ? { compactSurface: compactForLookup(normalizedSurface) }
+          : {}),
+        sourceTier: 'curated',
+        singleton: true,
+        collisionFree: true,
+      },
+    };
+    const existingExact = exactEntries[normalizedSurface];
+    if (existingExact !== undefined && existingExact.entityId !== entry.entityId) {
+      throw new Error(
+        `lookup exact-safe runtime exact collision on "${normalizedSurface}" between ${existingExact.entityId} and ${entry.entityId}`,
+      );
+    }
+    exactEntries[normalizedSurface] = entry;
+    if (row.promotionClass !== 'compact_exact_safe') {
+      continue;
+    }
+    const compactSurface = compactForLookup(normalizedSurface);
+    if (compactSurface.length === 0) {
+      throw new Error(`lookup exact-safe runtime compact surface is empty for "${row.surface}"`);
+    }
+    const existingCompact = compactEntries[compactSurface];
+    if (existingCompact !== undefined && existingCompact.entityId !== entry.entityId) {
+      throw new Error(
+        `lookup exact-safe runtime compact collision on "${compactSurface}" between ${existingCompact.entityId} and ${entry.entityId}`,
+      );
+    }
+    compactEntries[compactSurface] = entry;
+  }
+  return {
+    schemaVersion: LOOKUP_EXACT_SAFE_RUNTIME_SCHEMA_VERSION,
+    snapshotId: args.snapshotId,
+    generatedAt: args.generatedAt,
+    exactEntries,
+    compactEntries,
   };
 }

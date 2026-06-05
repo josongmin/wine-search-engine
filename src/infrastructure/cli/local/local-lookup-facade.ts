@@ -3,7 +3,7 @@ import type { CliFacadeRequestOptions } from '../../../application/cli/port/faca
 import type { PrimitiveSearchInput } from '../../../application/cli/dto/search.dto.js';
 import { deepKeysToSnake } from '../../../interface/http/middleware/snake-case-hook.js';
 import { LOOKUP_V2_DEFAULT_MAX_CANDIDATES } from '../../../interface/http/constants.js';
-import { LocalContainerRuntime } from './local-container-runtime.js';
+import { LocalLookupContainerRuntime } from './local-lookup-container-runtime.js';
 
 /**
  * Local CLI lookup facade — calls EntityLookupV2UseCase directly (V2-only
@@ -12,7 +12,7 @@ import { LocalContainerRuntime } from './local-container-runtime.js';
  */
 export class LocalLookupFacade implements LookupFacadePort {
   constructor(
-    private readonly runtime: Pick<LocalContainerRuntime, 'withContainer'> = new LocalContainerRuntime(),
+    private readonly runtime: Pick<LocalLookupContainerRuntime, 'withContainer'> = new LocalLookupContainerRuntime(),
   ) {}
 
   async lookupWine(

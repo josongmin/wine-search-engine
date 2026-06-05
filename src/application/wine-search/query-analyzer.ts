@@ -21,6 +21,7 @@ import { z } from 'zod';
 import {
   StructuredLlmCircuitOpenError,
   StructuredLlmPartialOutputError,
+  StructuredLlmProviderError,
   StructuredLlmRefusalError,
   StructuredLlmTimeoutError,
   StructuredLlmValidationError,
@@ -516,6 +517,7 @@ type LlmFallbackFailureReason =
   | 'validation'
   | 'partial_output'
   | 'circuit_open'
+  | 'provider_unavailable'
   | 'unknown';
 
 /** Map a thrown error from the structured-LLM port to its observability
@@ -525,6 +527,10 @@ type LlmFallbackFailureReason =
 function classifyFallbackFailure(err: unknown): LlmFallbackFailureReason {
   if (err instanceof StructuredLlmTimeoutError) return 'timeout';
   if (err instanceof StructuredLlmRefusalError) return 'refusal';
+  // Move 1: a transport-level provider rejection (auth / credit / 5xx). Checked
+  // before ValidationError so a credit/auth outage is no longer mis-labelled
+  // `validation`.
+  if (err instanceof StructuredLlmProviderError) return 'provider_unavailable';
   if (err instanceof StructuredLlmValidationError) return 'validation';
   if (err instanceof StructuredLlmPartialOutputError) return 'partial_output';
   if (err instanceof StructuredLlmCircuitOpenError) return 'circuit_open';

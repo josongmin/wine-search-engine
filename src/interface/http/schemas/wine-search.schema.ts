@@ -48,6 +48,7 @@
  */
 
 import { z } from 'zod';
+import { DEGRADED_REASONS } from '../../../domain/shared/types/degraded-reason.js';
 import {
   HTTP_DEFAULT_REQUEST_TIMEOUT_MS,
   MAX_AGENT_HTTP_QUERY_CHARS,
@@ -304,35 +305,9 @@ export type WineSearchAnswerLayer = z.infer<typeof WineSearchAnswerLayerSchema>;
 /** Optional degradation tag — populated only when the runner fell back
  *  from the primary structured-LLM path. Matches `DegradedReason` in
  *  `synthesis-schemas.ts`. */
-export const WineSearchDegradedReasonSchema = z.enum([
-  'malformed_llm_output',
-  'timeout',
-  'circuit_open',
-  'no_results',
-  'policy_blocked',
-  // Unmodeled runtime failure inside the primary structured-LLM path —
-  // distinguished from `malformed_llm_output` so client telemetry and
-  // server-side dashboards can separate "LLM produced a bad shape" from
-  // "something else blew up" (P-M1 finding).
-  'unexpected_error',
-  // S3 grounding-verify: primary answer asserted a factual claim absent from
-  // the grounding union; re-synth still ungrounded → degraded to the
-  // deterministic layer ladder.
-  'ungrounded_claim',
-  // Wave 1 (Cluster F): DecisionEngine emitted `NO_CORPUS_MATCH` because the
-  // planner had a high-confidence anchor but the resolver returned 0
-  // candidates. Synthesizer emitted the deterministic `corpusGapAdmission`
-  // template ("not in our catalogue"). Distinct from `no_results`
-  // (no-grounding path) and from `policy_blocked` (security / unsupported
-  // intent) so dashboards can monitor catalogue coverage gaps.
-  'no_corpus_match',
-  // LLM PROVIDER unavailable (auth / credit-exhausted / circuit-open /
-  // timeout) — the synthesizer never ran, so the runner emitted the honest
-  // `llmUnavailable` message instead of fabricating a grounded one-line
-  // answer. Distinct from `malformed_llm_output` (a working LLM that emitted
-  // bad output) and `unexpected_error` (unmodeled local failure).
-  'llm_unavailable',
-]);
+// SSoT (rule 30): the HTTP wire enum derives from the single `DEGRADED_REASONS`
+// tuple, so it can never drift from the domain type / application schema.
+export const WineSearchDegradedReasonSchema = z.enum(DEGRADED_REASONS);
 
 /** Query intent classifier output. Matches `QueryIntentSchema` in
  *  `wine-search-schemas.ts`, plus a `'rejected'` slot the orchestrator

@@ -63,50 +63,11 @@ export type SynthesisAnswer = z.infer<typeof SynthesisAnswerSchema>;
 
 export type AnswerLayer = 'primary' | 'layer2' | 'layer3' | 'layer4';
 
-export type DegradedReason =
-  | 'malformed_llm_output'
-  | 'timeout'
-  | 'circuit_open'
-  | 'no_results'
-  | 'policy_blocked'
-  /**
-   * The structured-LLM PROVIDER was unavailable — the model never produced
-   * output: an HTTP transport rejection (auth / credit-exhausted / 4xx-5xx),
-   * not a schema-validation failure of model output. Distinguished from
-   * `malformed_llm_output` (a working LLM that emitted bad JSON) because the
-   * remedy differs: provider-unavailable means the synthesizer cannot run AT
-   * ALL, so the runner must fail honestly (no fabricated grounded fallback)
-   * rather than naming an arbitrary grounded wine as if it answered.
-   */
-  | 'llm_unavailable'
-  /**
-   * The primary structured-LLM call threw an exception that is NOT one of
-   * the typed {@link StructuredLlm*Error} classes — i.e. an unmodeled
-   * runtime failure (network hiccup, downstream adapter bug, generic
-   * `Error`). Distinguished from `malformed_llm_output` so operations can
-   * tell schema-validation noise apart from genuine surprises.
-   */
-  | 'unexpected_error'
-  /**
-   * S3 grounding-verify: the primary synthesis answer asserted a factual
-   * wine claim (canonical label / region / grape / vintage / price) that
-   * could not be matched against the UNION of GROUNDING_JSON blocks across
-   * all tool outcomes. One re-synth attempt is made; if the re-synth answer
-   * is still ungrounded, the runner degrades to the deterministic Layer 2
-   * template and tags the result with this reason.
-   */
-  | 'ungrounded_claim'
-  /**
-   * Wave 1 (Cluster F): the DecisionEngine emitted
-   * `failureReason: 'NO_CORPUS_MATCH'` — the planner extracted a
-   * high-confidence anchor but the resolver returned 0 candidates. The
-   * synthesizer emitted the deterministic `corpusGapAdmission` template
-   * (not in our catalogue / 카탈로그에서 찾지 못했어요). Distinct from
-   * `no_results` (which is the no-grounding path) and from
-   * `policy_blocked` (which is security / unsupported intent) so
-   * operators can monitor catalogue-coverage gaps as a separate signal.
-   */
-  | 'no_corpus_match';
+// DegradedReason is the SSoT taxonomy (rule 30) — see
+// `@domain/shared/types/degraded-reason.ts`. Imported for local use and
+// re-exported so existing `synthesis-schemas` importers are unaffected.
+import type { DegradedReason } from '@domain/shared/types/degraded-reason.js';
+export type { DegradedReason };
 
 export interface AnswerResult {
   /** Non-empty answer string — invariant guaranteed by the runner's

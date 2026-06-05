@@ -12,6 +12,7 @@ import type {
   AmbiguityRegistrySnapshotRow,
   EntitySnapshotRecord,
 } from './search-snapshot-schema.js';
+import { chunkArray } from './etl-utils.js';
 
 /** Rows ingested from the automated snapshot pipeline before human review. */
 export const CANONICAL_ENTITY_APPROVAL_SNAPSHOT_PROJECTED = 'snapshot_projected' as const;
@@ -21,6 +22,14 @@ export const ENTITY_SOURCE_LINK_KIND_SILVER_ROW = 'etl_silver_row' as const;
 
 /** Automated ETL link confidence (deterministic join, not a learned score). */
 const AUTOMATED_ENTITY_LINK_CONFIDENCE = 1.0;
+const CANONICAL_GRAPH_ENTITY_BATCH_SIZE = 1_000;
+// Canonical alias projection runs inside the same publish-time transaction
+// budget as runtime substrate staging. Keep alias batches aligned with the
+// bounded runtime publish batch so canonical sync does not reintroduce minute-
+// long jsonb_to_recordset statements on the same ~80k alias plane.
+const CANONICAL_GRAPH_ALIAS_BATCH_SIZE = 500;
+const CANONICAL_GRAPH_LINK_BATCH_SIZE = 1_000;
+const CANONICAL_GRAPH_AMBIGUITY_BATCH_SIZE = 1_000;
 
 const SourceRefSchema = z
   .object({
@@ -207,59 +216,40 @@ async function reconcileCanonicalAliases(
   searchSnapshotId: string,
   aliasRows: readonly CanonicalAliasSyncRow[],
 ): Promise<void> {
-  const aliasIds = aliasRows.map((row) => row.alias_id);
-  if (aliasRows.length === 0) {
-    await client.query(
-      `DELETE FROM canonical_aliases
-        WHERE search_snapshot_id = $1`,
-      [searchSnapshotId],
-    );
-    return;
-  }
-
   await client.query(
     `DELETE FROM canonical_aliases
-      WHERE search_snapshot_id = $1
-        AND NOT (alias_id = ANY($2::text[]))`,
-    [searchSnapshotId, aliasIds],
+      WHERE search_snapshot_id = $1`,
+    [searchSnapshotId],
   );
 
-  const aliasJson = JSON.stringify(aliasRows);
-  await client.query(
-    `WITH input AS (
-       SELECT *
-       FROM jsonb_to_recordset($1::jsonb) AS rows(
-         search_snapshot_id text,
-         alias_id text,
-         canonical_entity_id text,
-         surface_form text,
-         normalized_surface text,
-         alias_type text,
-         scope text,
-         approval_state text,
-         source text,
-         source_trust double precision
+  for (const aliasBatch of chunkArray(aliasRows, CANONICAL_GRAPH_ALIAS_BATCH_SIZE)) {
+    await client.query(
+      `WITH input AS (
+         SELECT *
+         FROM jsonb_to_recordset($1::jsonb) AS rows(
+           search_snapshot_id text,
+           alias_id text,
+           canonical_entity_id text,
+           surface_form text,
+           normalized_surface text,
+           alias_type text,
+           scope text,
+           approval_state text,
+           source text,
+           source_trust double precision
+         )
        )
-     )
-     INSERT INTO canonical_aliases (
-       search_snapshot_id, alias_id, canonical_entity_id, surface_form, normalized_surface,
-       alias_type, scope, approval_state, source, source_trust
-     )
-     SELECT
-       search_snapshot_id, alias_id, canonical_entity_id, surface_form, normalized_surface,
-       alias_type, scope, approval_state, source, source_trust
-     FROM input
-     ON CONFLICT (search_snapshot_id, alias_id) DO UPDATE SET
-       canonical_entity_id = EXCLUDED.canonical_entity_id,
-       surface_form = EXCLUDED.surface_form,
-       normalized_surface = EXCLUDED.normalized_surface,
-       alias_type = EXCLUDED.alias_type,
-       scope = EXCLUDED.scope,
-       approval_state = EXCLUDED.approval_state,
-       source = EXCLUDED.source,
-       source_trust = EXCLUDED.source_trust`,
-    [aliasJson],
-  );
+       INSERT INTO canonical_aliases (
+         search_snapshot_id, alias_id, canonical_entity_id, surface_form, normalized_surface,
+         alias_type, scope, approval_state, source, source_trust
+       )
+       SELECT
+         search_snapshot_id, alias_id, canonical_entity_id, surface_form, normalized_surface,
+         alias_type, scope, approval_state, source, source_trust
+       FROM input`,
+      [JSON.stringify(aliasBatch)],
+    );
+  }
 }
 
 async function reconcileCanonicalEntities(
@@ -284,45 +274,46 @@ async function reconcileCanonicalEntities(
     [searchSnapshotId, canonicalEntityIds],
   );
 
-  const canonicalJson = JSON.stringify(canonicalRows);
-  await client.query(
-    `WITH input AS (
-       SELECT *
-       FROM jsonb_to_recordset($1::jsonb) AS rows(
-         search_snapshot_id text,
-         canonical_entity_id text,
-         entity_type text,
-         canonical_label text,
-         identity_signature text,
-         producer_ref text,
-         region_ref text,
-         vintage integer,
-         attributes jsonb,
-         approval_state text,
-         source_provenance jsonb
+  for (const canonicalBatch of chunkArray(canonicalRows, CANONICAL_GRAPH_ENTITY_BATCH_SIZE)) {
+    await client.query(
+      `WITH input AS (
+         SELECT *
+         FROM jsonb_to_recordset($1::jsonb) AS rows(
+           search_snapshot_id text,
+           canonical_entity_id text,
+           entity_type text,
+           canonical_label text,
+           identity_signature text,
+           producer_ref text,
+           region_ref text,
+           vintage integer,
+           attributes jsonb,
+           approval_state text,
+           source_provenance jsonb
+         )
        )
-     )
-     INSERT INTO canonical_entities (
-       search_snapshot_id, canonical_entity_id, entity_type, canonical_label, identity_signature,
-       producer_ref, region_ref, vintage, attributes, approval_state, source_provenance
-     )
-     SELECT
-       search_snapshot_id, canonical_entity_id, entity_type, canonical_label, identity_signature,
-       producer_ref, region_ref, vintage, attributes, approval_state, source_provenance
-     FROM input
-     ON CONFLICT (search_snapshot_id, canonical_entity_id) DO UPDATE SET
-       entity_type = EXCLUDED.entity_type,
-       canonical_label = EXCLUDED.canonical_label,
-       identity_signature = EXCLUDED.identity_signature,
-       producer_ref = EXCLUDED.producer_ref,
-       region_ref = EXCLUDED.region_ref,
-       vintage = EXCLUDED.vintage,
-       attributes = EXCLUDED.attributes,
-       approval_state = EXCLUDED.approval_state,
-       source_provenance = EXCLUDED.source_provenance,
-       updated_at = NOW()`,
-    [canonicalJson],
-  );
+       INSERT INTO canonical_entities (
+         search_snapshot_id, canonical_entity_id, entity_type, canonical_label, identity_signature,
+         producer_ref, region_ref, vintage, attributes, approval_state, source_provenance
+       )
+       SELECT
+         search_snapshot_id, canonical_entity_id, entity_type, canonical_label, identity_signature,
+         producer_ref, region_ref, vintage, attributes, approval_state, source_provenance
+       FROM input
+       ON CONFLICT (search_snapshot_id, canonical_entity_id) DO UPDATE SET
+         entity_type = EXCLUDED.entity_type,
+         canonical_label = EXCLUDED.canonical_label,
+         identity_signature = EXCLUDED.identity_signature,
+         producer_ref = EXCLUDED.producer_ref,
+         region_ref = EXCLUDED.region_ref,
+         vintage = EXCLUDED.vintage,
+         attributes = EXCLUDED.attributes,
+         approval_state = EXCLUDED.approval_state,
+         source_provenance = EXCLUDED.source_provenance,
+         updated_at = NOW()`,
+      [JSON.stringify(canonicalBatch)],
+    );
+  }
 }
 
 async function reconcileEntitySourceLinks(
@@ -355,37 +346,38 @@ async function reconcileEntitySourceLinks(
     [searchSnapshotId, JSON.stringify(linkKeys)],
   );
 
-  const linkJson = JSON.stringify(linkRows);
-  await client.query(
-    `WITH input AS (
-       SELECT *
-       FROM jsonb_to_recordset($1::jsonb) AS rows(
-         search_snapshot_id text,
-         canonical_entity_id text,
-         source_system text,
-         source_record_id text,
-         link_kind text,
-         confidence double precision,
-         approved boolean
+  for (const linkBatch of chunkArray(linkRows, CANONICAL_GRAPH_LINK_BATCH_SIZE)) {
+    await client.query(
+      `WITH input AS (
+         SELECT *
+         FROM jsonb_to_recordset($1::jsonb) AS rows(
+           search_snapshot_id text,
+           canonical_entity_id text,
+           source_system text,
+           source_record_id text,
+           link_kind text,
+           confidence double precision,
+           approved boolean
+         )
        )
-     )
-     INSERT INTO entity_source_links (
-       search_snapshot_id, canonical_entity_id, source_system, source_record_id, link_kind, confidence, approved
-     )
-     SELECT
-       search_snapshot_id, canonical_entity_id, source_system, source_record_id, link_kind, confidence, approved
-     FROM input
-     ON CONFLICT (search_snapshot_id, source_system, source_record_id) DO UPDATE SET
-       -- T-011/W3: canonical_entity_id is INTENTIONALLY NOT in the SET list.
-       -- Any remap attempt is blocked pre-flight by assertSourceLinkRemapBlocked
-       -- above; here we only update mutable metadata (link_kind / confidence /
-       -- approved / linked_at).
-       link_kind = EXCLUDED.link_kind,
-       confidence = EXCLUDED.confidence,
-       approved = EXCLUDED.approved,
-       linked_at = NOW()`,
-    [linkJson],
-  );
+       INSERT INTO entity_source_links (
+         search_snapshot_id, canonical_entity_id, source_system, source_record_id, link_kind, confidence, approved
+       )
+       SELECT
+         search_snapshot_id, canonical_entity_id, source_system, source_record_id, link_kind, confidence, approved
+       FROM input
+       ON CONFLICT (search_snapshot_id, source_system, source_record_id) DO UPDATE SET
+         -- T-011/W3: canonical_entity_id is INTENTIONALLY NOT in the SET list.
+         -- Any remap attempt is blocked pre-flight by assertSourceLinkRemapBlocked
+         -- above; here we only update mutable metadata (link_kind / confidence /
+         -- approved / linked_at).
+         link_kind = EXCLUDED.link_kind,
+         confidence = EXCLUDED.confidence,
+         approved = EXCLUDED.approved,
+         linked_at = NOW()`,
+      [JSON.stringify(linkBatch)],
+    );
+  }
 }
 
 async function reconcileCanonicalAmbiguityRegistry(
@@ -393,21 +385,10 @@ async function reconcileCanonicalAmbiguityRegistry(
   searchSnapshotId: string,
   ambiguityRows: readonly CanonicalAmbiguitySyncRow[],
 ): Promise<void> {
-  const registryIds = ambiguityRows.map((row) => row.registry_id);
-  if (ambiguityRows.length === 0) {
-    await client.query(
-      `DELETE FROM canonical_ambiguity_registry
-        WHERE search_snapshot_id = $1`,
-      [searchSnapshotId],
-    );
-    return;
-  }
-
   await client.query(
     `DELETE FROM canonical_ambiguity_registry
-      WHERE search_snapshot_id = $1
-        AND NOT (registry_id = ANY($2::text[]))`,
-    [searchSnapshotId, registryIds],
+      WHERE search_snapshot_id = $1`,
+    [searchSnapshotId],
   );
 
   const serializable = ambiguityRows.map((row) => ({
@@ -419,34 +400,29 @@ async function reconcileCanonicalAmbiguityRegistry(
     severity: row.severity,
     approval_state: row.approval_state,
   }));
-  const ambiguityJson = JSON.stringify(serializable);
-  await client.query(
-    `WITH input AS (
-       SELECT *
-       FROM jsonb_to_recordset($1::jsonb) AS rows(
-         search_snapshot_id text,
-         registry_id text,
-         normalized_form text,
-         canonical_entity_ids jsonb,
-         ambiguity_types jsonb,
-         severity text,
-         approval_state text
+  for (const ambiguityBatch of chunkArray(serializable, CANONICAL_GRAPH_AMBIGUITY_BATCH_SIZE)) {
+    await client.query(
+      `WITH input AS (
+         SELECT *
+         FROM jsonb_to_recordset($1::jsonb) AS rows(
+           search_snapshot_id text,
+           registry_id text,
+           normalized_form text,
+           canonical_entity_ids jsonb,
+           ambiguity_types jsonb,
+           severity text,
+           approval_state text
+         )
        )
-     )
-     INSERT INTO canonical_ambiguity_registry (
-       search_snapshot_id, registry_id, normalized_form, canonical_entity_ids, ambiguity_types, severity, approval_state
-     )
-     SELECT
-       search_snapshot_id, registry_id, normalized_form, canonical_entity_ids, ambiguity_types, severity, approval_state
-     FROM input
-     ON CONFLICT (search_snapshot_id, registry_id) DO UPDATE SET
-       normalized_form = EXCLUDED.normalized_form,
-       canonical_entity_ids = EXCLUDED.canonical_entity_ids,
-       ambiguity_types = EXCLUDED.ambiguity_types,
-       severity = EXCLUDED.severity,
-       approval_state = EXCLUDED.approval_state`,
-    [ambiguityJson],
-  );
+       INSERT INTO canonical_ambiguity_registry (
+         search_snapshot_id, registry_id, normalized_form, canonical_entity_ids, ambiguity_types, severity, approval_state
+       )
+       SELECT
+         search_snapshot_id, registry_id, normalized_form, canonical_entity_ids, ambiguity_types, severity, approval_state
+       FROM input`,
+      [JSON.stringify(ambiguityBatch)],
+    );
+  }
 }
 
 function readVintageYear(attributes: Readonly<Record<string, unknown>>): number | null {

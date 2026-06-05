@@ -58,13 +58,21 @@ import { warnStartupMisconfigurations } from './startup-preflight.js';
 import { SearchSnapshotEntityLookup } from '../infrastructure/adapter/search-snapshot-entity-lookup.js';
 import { SearchSnapshotResolverProjectionLookup } from '../infrastructure/adapter/search-snapshot-resolver-projection-lookup.js';
 import { SearchSnapshotAmbiguityDictionary } from '../infrastructure/adapter/search-snapshot-ambiguity-dictionary.js';
+import { SearchSnapshotConceptRedirectRegistry } from '../infrastructure/adapter/search-snapshot-concept-redirect-registry.js';
+import { SearchSnapshotExactSafeRegistry } from '../infrastructure/adapter/search-snapshot-exact-safe-registry.js';
 import type { AnchorRefreshCallback } from '../domain/query/service/anchor-refresh.js';
+import type {
+  LookupConceptRedirectRegistryPort,
+  LookupExactSafeRegistryPort,
+} from '../domain/resolver/v2/lookup-v2-types.js';
+import type { LookupPlannerPort } from '../application/search/entity-lookup-v2/lookup-planner.port.js';
+import { RuntimeLookupPlanner } from '../application/search/entity-lookup-v2/runtime-lookup-planner.js';
 
 export interface CoreContainerServices {
   // T1.2: typed as QueryPlannerPort for backward compat while Planner returns QueryPlanV2.
   // T1.5 will update the port to QueryPlanV2.
   readonly queryPlanner: QueryPlannerPort;
-  readonly lookupQueryPlanner: QueryPlannerPort;
+  readonly lookupPlanner: LookupPlannerPort;
   readonly entityLookupAnchorRefresh: AnchorRefreshCallback;
   readonly blocker: BlockingUseCasePort;
   readonly chatLlm?: ChatLlmPort;
@@ -83,6 +91,8 @@ export interface CoreContainerServices {
   /** Persisted ambiguity substrate (registry-backed) — for the T-ELV2-06 clarification graph. */
   readonly ambiguityDictionary: AmbiguityDictionary;
   readonly lookupAmbiguityDictionary: AmbiguityDictionary;
+  readonly lookupConceptRedirectRegistry?: LookupConceptRedirectRegistryPort | undefined;
+  readonly lookupExactSafeRegistry?: LookupExactSafeRegistryPort | undefined;
   readonly snapshotVersions: SnapshotVersions;
   readonly querySanitizer: RuntimeSupportServices['querySanitizer'];
   readonly injectionJudge?: RuntimeSupportServices['injectionJudge'];
@@ -123,6 +133,12 @@ export async function buildCoreContainerServices(
   const lookupAmbiguityDictionary: AmbiguityDictionary = runtime.searchSnapshotManifestPath !== undefined
     ? await SearchSnapshotAmbiguityDictionary.loadFromManifest(runtime.searchSnapshotManifestPath)
     : adapters.ambiguityDict;
+  const lookupConceptRedirectRegistry = runtime.searchSnapshotManifestPath !== undefined
+    ? await SearchSnapshotConceptRedirectRegistry.loadFromManifest(runtime.searchSnapshotManifestPath)
+    : undefined;
+  const lookupExactSafeRegistry = runtime.searchSnapshotManifestPath !== undefined
+    ? await SearchSnapshotExactSafeRegistry.loadFromManifest(runtime.searchSnapshotManifestPath)
+    : undefined;
   const resolverProjectionLookup = runtime.searchSnapshotManifestPath !== undefined
     ? await SearchSnapshotResolverProjectionLookup.loadFromManifest(runtime.searchSnapshotManifestPath)
     : undefined;
@@ -154,26 +170,13 @@ export async function buildCoreContainerServices(
       anchorRefresh: entityLookupAnchorRefresh,
     },
   );
-  const lookupQueryPlanner: QueryPlannerPort = new PlannerV1Adapter(
-    await buildQueryPlanner(
-      adapters,
-      runtime.pool,
-      adapters.chatLlm,
-      config.openai.llmQueryInterpreter,
-      config.openai.llmQueryInterpreterTimeoutMs,
-      support.phraseCache,
-      runtime.searchSnapshotId,
-      {
-        ambiguityDictionary: lookupAmbiguityDictionary,
-        forceRuleOnlyNlMapper: true,
-        disableTopologyPlanner: true,
-        disableAmbiguityIntentCompiler: true,
-      },
-    ),
-    {
-      anchorRefresh: entityLookupAnchorRefresh,
-    },
-  );
+  const lookupPlanner: LookupPlannerPort = new RuntimeLookupPlanner({
+    aliasMatcher: adapters.aliasMatcher,
+    ambiguityDictionary: lookupAmbiguityDictionary,
+    ...(lookupExactSafeRegistry !== undefined
+      ? { exactSafeRegistry: lookupExactSafeRegistry }
+      : {}),
+  });
   const entityResolver = buildEntityResolver(adapters, config);
   const candidatePool = buildCandidatePool(adapters, support, config);
   const browseRetriever = buildBrowseRetriever(adapters);
@@ -187,7 +190,7 @@ export async function buildCoreContainerServices(
   return {
     ...(runtime.pool !== undefined ? { pool: runtime.pool } : {}),
     queryPlanner,
-    lookupQueryPlanner,
+    lookupPlanner,
     entityLookupAnchorRefresh,
     blocker: buildBlockingUseCaseAdapter(adapters),
     entityResolver,
@@ -199,6 +202,8 @@ export async function buildCoreContainerServices(
     aliasMatcher: adapters.aliasMatcher,
     ambiguityDictionary: adapters.ambiguityDict,
     lookupAmbiguityDictionary,
+    ...(lookupConceptRedirectRegistry !== undefined ? { lookupConceptRedirectRegistry } : {}),
+    ...(lookupExactSafeRegistry !== undefined ? { lookupExactSafeRegistry } : {}),
     ...(adapters.chatLlm !== undefined ? { chatLlm: adapters.chatLlm } : {}),
     ranker,
     decisionEngine: buildDecisionEngine(adapters, config),

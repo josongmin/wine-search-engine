@@ -1,0 +1,229 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { existsSync } from 'node:fs';
+import type { CanonicalEntityId } from '../../src/domain/shared/types/entity-id.js';
+import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
+import { compactForLookup } from '../../src/domain/query/service/phonetic-skeleton.js';
+import type { LookupIdentityCertificate } from '../../src/domain/shared/types/search-snapshot-lookup-runtime.js';
+import type { AliasSnapshotRecord } from './search-snapshot-schema.js';
+
+export type LookupExactSafePromotionClass = 'exact_safe' | 'compact_exact_safe';
+export type LookupExactSafeLocale = 'ko' | 'global';
+
+export interface LookupExactSafeRegistryRow {
+  readonly surface: string;
+  readonly entityId: CanonicalEntityId;
+  readonly promotionClass: LookupExactSafePromotionClass;
+  readonly locale: LookupExactSafeLocale;
+  readonly sourceEvidence: string;
+  readonly reviewedAt: string;
+}
+
+export interface LookupRuntimeOverlayAlias {
+  readonly entityId: CanonicalEntityId;
+  readonly value: string;
+  readonly normalizedValue: string;
+  readonly promotionClass: LookupExactSafePromotionClass;
+  readonly aliasType: 'observed_query_alias';
+  readonly source: 'registry:lookup_exact_safe_v1';
+  readonly sourceTrust: 1;
+  readonly confidencePrior: 0.98;
+}
+
+export const DEFAULT_LOOKUP_EXACT_SAFE_REGISTRY_PATH = path.resolve(
+  path.dirname(new URL(import.meta.url).pathname),
+  '..',
+  '..',
+  'data',
+  'lookup-v2',
+  'korean-exact-safe-registry-v1.jsonl',
+);
+
+interface RawLookupExactSafeRegistryRow {
+  readonly surface?: unknown;
+  readonly entityId?: unknown;
+  readonly promotionClass?: unknown;
+  readonly locale?: unknown;
+  readonly sourceEvidence?: unknown;
+  readonly reviewedAt?: unknown;
+}
+
+function parseLookupExactSafeRegistryRow(
+  raw: RawLookupExactSafeRegistryRow,
+  lineNo: number,
+): LookupExactSafeRegistryRow {
+  if (typeof raw.surface !== 'string' || raw.surface.trim().length === 0) {
+    throw new Error(`lookup exact-safe registry row ${lineNo} missing surface`);
+  }
+  if (typeof raw.entityId !== 'string' || raw.entityId.trim().length === 0) {
+    throw new Error(`lookup exact-safe registry row ${lineNo} missing entityId`);
+  }
+  if (raw.promotionClass !== 'exact_safe' && raw.promotionClass !== 'compact_exact_safe') {
+    throw new Error(`lookup exact-safe registry row ${lineNo} has invalid promotionClass`);
+  }
+  if (raw.locale !== 'ko' && raw.locale !== 'global') {
+    throw new Error(`lookup exact-safe registry row ${lineNo} has invalid locale`);
+  }
+  if (typeof raw.sourceEvidence !== 'string' || raw.sourceEvidence.trim().length === 0) {
+    throw new Error(`lookup exact-safe registry row ${lineNo} missing sourceEvidence`);
+  }
+  if (typeof raw.reviewedAt !== 'string' || Number.isNaN(Date.parse(raw.reviewedAt))) {
+    throw new Error(`lookup exact-safe registry row ${lineNo} has invalid reviewedAt`);
+  }
+
+  return {
+    surface: raw.surface.trim(),
+    entityId: raw.entityId as CanonicalEntityId,
+    promotionClass: raw.promotionClass,
+    locale: raw.locale,
+    sourceEvidence: raw.sourceEvidence.trim(),
+    reviewedAt: raw.reviewedAt,
+  };
+}
+
+export async function loadLookupExactSafeRegistry(
+  registryPath: string = DEFAULT_LOOKUP_EXACT_SAFE_REGISTRY_PATH,
+): Promise<readonly LookupExactSafeRegistryRow[]> {
+  if (!existsSync(registryPath)) {
+    return [];
+  }
+
+  const raw = await fs.readFile(registryPath, 'utf8');
+  const rows: LookupExactSafeRegistryRow[] = [];
+  const exactOwners = new Map<string, CanonicalEntityId>();
+  const compactOwners = new Map<string, CanonicalEntityId>();
+
+  for (const [index, line] of raw.split('\n').entries()) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+    const parsed = parseLookupExactSafeRegistryRow(
+      JSON.parse(trimmed) as RawLookupExactSafeRegistryRow,
+      index + 1,
+    );
+    const normalized = normalizeForMatch(parsed.surface);
+    if (normalized.length === 0) {
+      throw new Error(`lookup exact-safe registry row ${index + 1} normalizes to empty`);
+    }
+
+    const exactOwner = exactOwners.get(normalized);
+    if (exactOwner !== undefined && exactOwner !== parsed.entityId) {
+      throw new Error(
+        `lookup exact-safe registry exact collision on "${parsed.surface}" between ${exactOwner} and ${parsed.entityId}`,
+      );
+    }
+    exactOwners.set(normalized, parsed.entityId);
+
+    if (parsed.promotionClass === 'compact_exact_safe') {
+      const compact = compactForLookup(normalized);
+      if (compact.length === 0) {
+        throw new Error(`lookup exact-safe registry row ${index + 1} compact-normalizes to empty`);
+      }
+      const compactOwner = compactOwners.get(compact);
+      if (compactOwner !== undefined && compactOwner !== parsed.entityId) {
+        throw new Error(
+          `lookup exact-safe registry compact collision on "${parsed.surface}" between ${compactOwner} and ${parsed.entityId}`,
+        );
+      }
+      compactOwners.set(compact, parsed.entityId);
+    }
+
+    rows.push(parsed);
+  }
+
+  return rows;
+}
+
+export function buildLookupRuntimeOverlayAliases(
+  rows: readonly LookupExactSafeRegistryRow[],
+  snapshotEntityIds: ReadonlySet<CanonicalEntityId>,
+): readonly LookupRuntimeOverlayAlias[] {
+  return rows
+    .filter((row) => snapshotEntityIds.has(row.entityId))
+    .map((row) => ({
+      entityId: row.entityId,
+      value: row.surface,
+      normalizedValue: normalizeForMatch(row.surface),
+      promotionClass: row.promotionClass,
+      aliasType: 'observed_query_alias',
+      source: 'registry:lookup_exact_safe_v1',
+      sourceTrust: 1,
+      confidencePrior: 0.98,
+    }))
+    .sort((left, right) =>
+      left.entityId.localeCompare(right.entityId)
+      || left.normalizedValue.localeCompare(right.normalizedValue)
+      || left.value.localeCompare(right.value),
+    );
+}
+
+export function buildLookupIdentityCertificatesByEntity(
+  rows: readonly LookupExactSafeRegistryRow[],
+  snapshotEntityIds: ReadonlySet<CanonicalEntityId>,
+): ReadonlyMap<CanonicalEntityId, readonly LookupIdentityCertificate[]> {
+  const byEntity = new Map<CanonicalEntityId, LookupIdentityCertificate[]>();
+  for (const row of rows) {
+    if (!snapshotEntityIds.has(row.entityId)) {
+      continue;
+    }
+    const next = byEntity.get(row.entityId) ?? [];
+    next.push({
+      kind: row.promotionClass,
+      normalizedSurface: normalizeForMatch(row.surface),
+      ...(row.promotionClass === 'compact_exact_safe'
+        ? { compactSurface: compactForLookup(normalizeForMatch(row.surface)) }
+        : {}),
+      sourceTier: 'curated',
+      singleton: true,
+      collisionFree: true,
+    });
+    byEntity.set(row.entityId, next);
+  }
+
+  return new Map(
+    [...byEntity.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([entityId, certificates]) => [
+        entityId,
+        certificates
+          .slice()
+          .sort((left, right) =>
+            left.normalizedSurface.localeCompare(right.normalizedSurface)
+            || left.kind.localeCompare(right.kind),
+          ),
+      ]),
+  );
+}
+
+export function assertLookupExactSafeRegistryCompatibleWithBaseAliases(args: {
+  readonly baseAliases: readonly AliasSnapshotRecord[];
+  readonly registryRows: readonly LookupExactSafeRegistryRow[];
+}): void {
+  const exactOwners = new Map<string, CanonicalEntityId>();
+  const compactOwners = new Map<string, CanonicalEntityId>();
+
+  for (const row of args.registryRows) {
+    const normalized = normalizeForMatch(row.surface);
+    const exactOwner = exactOwners.get(normalized);
+    if (exactOwner !== undefined && exactOwner !== row.entityId) {
+      throw new Error(
+        `lookup exact-safe registry exact collision on "${row.surface}" between curated owners ${exactOwner} and ${row.entityId}`,
+      );
+    }
+    exactOwners.set(normalized, row.entityId);
+
+    if (row.promotionClass === 'compact_exact_safe') {
+      const compact = compactForLookup(normalized);
+      const compactOwner = compactOwners.get(compact);
+      if (compactOwner !== undefined && compactOwner !== row.entityId) {
+        throw new Error(
+          `lookup exact-safe registry compact collision on "${row.surface}" between curated owners ${compactOwner} and ${row.entityId}`,
+        );
+      }
+      if (compact.length > 0) {
+        compactOwners.set(compact, row.entityId);
+      }
+    }
+  }
+}

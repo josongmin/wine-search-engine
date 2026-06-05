@@ -4,6 +4,7 @@ import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseEnv } from '../../../src/config/env.js';
 import { buildHealthRouteOptions } from '../../../src/config/readiness.js';
+import { SEARCH_SNAPSHOT_STATE_VERSION } from '../../../src/domain/shared/constants/search-snapshot.js';
 const {
   mockVerifySearchSnapshotRuntimeStateLive,
   mockLoadSearchSnapshotRuntimeState,
@@ -83,23 +84,27 @@ function makeRuntimeStatePayload(args: {
   readonly fieldAvailability?: unknown;
 }) {
   return {
-    schemaVersion: 'search_snapshot_runtime_state.v5',
+    schemaVersion: SEARCH_SNAPSHOT_STATE_VERSION,
     snapshotId: 'search-snapshot:v1:test',
     contentHash: 'abc123',
     publishedAt: '2026-04-12T00:00:00.000Z',
     manifestPath: '/tmp/manifest.json',
     nlMappingsRuntimePath: args.nlMappingsPath,
     lookupAliasRuntimePath: path.join(args.dir, 'lookup-alias-runtime.json'),
+    lookupExactSafeRuntimePath: path.join(args.dir, 'lookup-exact-safe-runtime.json'),
     lookupResolverProjectionPath: path.join(args.dir, 'lookup-resolver-projection.json'),
     lookupEntityProjectionPath: path.join(args.dir, 'lookup-entity-projection.json'),
     lookupAmbiguityRuntimePath: path.join(args.dir, 'lookup-ambiguity-runtime.json'),
+    lookupConceptRedirectRuntimePath: path.join(args.dir, 'lookup-concept-redirect-runtime.json'),
     counts: {
       entities: 10,
       aliases: 10,
       lookupAliasRuntimeAliases: 10,
+      lookupExactSafeRuntimeEntries: 0,
       lookupResolverProjectionDocuments: 10,
       lookupEntityProjectionDocuments: 10,
       lookupAmbiguityRuntimeEntries: 0,
+      lookupConceptRedirectRuntimeEntries: 0,
       ambiguityRegistry: 0,
       nlMappings: 1,
       activeLtrModels: args.activeLtrModels,
@@ -108,9 +113,11 @@ function makeRuntimeStatePayload(args: {
       entities: 'entities-hash',
       aliases: 'aliases-hash',
       lookupAliasRuntime: 'lookup-alias-runtime-hash',
+      lookupExactSafeRuntime: 'lookup-exact-safe-runtime-hash',
       lookupResolverProjection: 'lookup-resolver-projection-hash',
       lookupEntityProjection: 'lookup-entity-projection-hash',
       lookupAmbiguityRuntime: 'lookup-ambiguity-runtime-hash',
+      lookupConceptRedirectRuntime: 'lookup-concept-redirect-runtime-hash',
       ambiguityRegistry: 'ambiguity-hash',
       nlMappings: args.nlMappingsPayloadHash,
       activeLtrModels: 'ltr-hash',

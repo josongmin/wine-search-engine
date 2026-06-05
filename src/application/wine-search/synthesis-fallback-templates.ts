@@ -129,6 +129,17 @@ export const FALLBACK_TEMPLATES = {
     korean: '지금은 답변을 생성할 수 없어요 (요약 엔진이 일시적으로 사용 불가합니다). 아래 검색 결과를 직접 확인해 주세요.',
     english: 'We could not generate an answer right now (the summarization engine is temporarily unavailable). Please review the search results below.',
   },
+  /**
+   * Move 2: the query produced no deterministic signal AND the analyzer's LLM
+   * fallback was attempted and FAILED. The cause is an AI-analysis outage, not
+   * an out-of-scope query — so we say so honestly instead of asking the user to
+   * rephrase / supply a wine name (the `unsupportedIntent` copy). Free of any
+   * "your query is unsupported" framing.
+   */
+  analysisUnavailable: {
+    korean: '지금은 검색어를 분석하지 못했어요 (AI 분석 엔진이 일시적으로 사용 불가합니다). 잠시 후 다시 시도해 주세요.',
+    english: 'We could not analyze your query right now (the AI analysis engine is temporarily unavailable). Please try again shortly.',
+  },
   referenceSimilarity: {
     korean: (
       anchorLabel: string | undefined,

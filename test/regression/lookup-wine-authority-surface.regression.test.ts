@@ -62,8 +62,21 @@ describe('V2-only lookup cutover — removed surfaces stay removed', () => {
   it('the lookup coverage runner uses the same PG-backed V2 authority substrate as the authority rail', () => {
     const coverage = read('scripts/eval/run-lookup-v2-coverage-report.ts');
     expect(coverage).toContain("import { getPgPool } from '../../src/infrastructure/db/pg-pool.js';");
+    expect(coverage).toContain("import { createLookupDirectContainer } from '../../src/config/container-lookup.js';");
     expect(coverage).toContain('const pool = getPgPool();');
-    expect(coverage).toContain('const container = await createContainer(config, pool);');
+    expect(coverage).toContain('const container = await createLookupDirectContainer(config, {');
     expect(coverage).toContain('await pool.end();');
+  });
+
+  it('lookup eval/debug runners all use the dedicated lookup-direct container', () => {
+    const authority = read('scripts/eval/run-entity-resolution-validation.ts');
+    const shadow = read('scripts/eval/run-lookup-v2-shadow-compare.ts');
+    const latency = read('scripts/eval/run-lookup-v2-latency-korean-famous.ts');
+    const canary = read('scripts/eval/run-lookup-v2-canary-replay.ts');
+    const debug = read('scripts/eval/debug-one-lookup.ts');
+    for (const script of [authority, shadow, latency, canary, debug]) {
+      expect(script).toContain("createLookupDirectContainer");
+      expect(script).not.toContain('createContainer(config');
+    }
   });
 });

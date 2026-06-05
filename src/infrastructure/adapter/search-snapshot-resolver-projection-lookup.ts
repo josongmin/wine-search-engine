@@ -45,6 +45,7 @@ function parseResolverProjection(
       canonicalLabel: doc.canonicalLabel,
       aliasesIdentitySafe: [...doc.aliasesIdentitySafe],
       identitySafeKeys: [...doc.identitySafeKeys],
+      ...(doc.identityCertificates !== undefined ? { identityCertificates: doc.identityCertificates } : {}),
       ...(doc.producer !== undefined ? { producer: doc.producer } : {}),
       ...(doc.attributeHints !== undefined ? { attributeHints: doc.attributeHints } : {}),
       ...(doc.sourceRecordRefs !== undefined ? { sourceRecordRefs: doc.sourceRecordRefs } : {}),

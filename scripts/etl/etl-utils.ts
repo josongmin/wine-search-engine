@@ -384,3 +384,17 @@ export function parseLocaleFloat(value: string | number | null | undefined): num
 export function contentHash(content: string): string {
   return crypto.createHash('sha256').update(content).digest('hex');
 }
+
+export function chunkArray<T>(items: readonly T[], size: number): readonly T[][] {
+  if (!Number.isInteger(size) || size <= 0) {
+    throw new Error(`chunkArray size must be a positive integer, got ${size}`);
+  }
+  if (items.length === 0) {
+    return [];
+  }
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size) as T[]);
+  }
+  return chunks;
+}

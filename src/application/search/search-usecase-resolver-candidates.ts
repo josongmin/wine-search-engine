@@ -15,6 +15,8 @@ import type {
 } from '../../domain/resolver/model/entity-candidate-generator-input.js';
 import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
 import { SHORT_QUERY_AMBIGUOUS_ANCHOR_CONFIDENCE_THRESHOLD } from '../../domain/query/service/planner.js';
+import { compactForLookup } from '../../domain/query/service/phonetic-skeleton.js';
+import { normalizeForMatch } from '../../domain/alias/service/normalize.js';
 import {
   hasExactLikeLookupStrategy,
   hasPhoneticLookupStrategy,
@@ -27,6 +29,7 @@ type ResolverProjectionLike =
   Pick<LookupResolverProjection, 'entityId' | 'entityType' | 'canonicalLabel' | 'aliasesIdentitySafe'>
   & {
     readonly identitySafeKeys?: readonly string[] | undefined;
+    readonly identityCertificates?: LookupResolverProjection['identityCertificates'];
     readonly producer?: string | undefined;
     readonly attributeHints?: Readonly<Record<string, unknown>> | undefined;
     readonly sourceRecordRefs?: RetrievalDocument['sourceRecordRefs'];
@@ -46,6 +49,25 @@ function adaptRetrievalDocumentToResolverProjection(
     ...(doc.sourceRecordRefs !== undefined && doc.sourceRecordRefs.length > 0
       ? { sourceRecordRefs: doc.sourceRecordRefs }
       : {}),
+  };
+}
+
+function mergeResolverProjectionLike(
+  base: ResolverProjectionLike | undefined,
+  overlay: ResolverProjectionLike,
+): ResolverProjectionLike {
+  if (base === undefined) {
+    return overlay;
+  }
+  return {
+    ...base,
+    ...overlay,
+    aliasesIdentitySafe: overlay.aliasesIdentitySafe ?? base.aliasesIdentitySafe,
+    identitySafeKeys: overlay.identitySafeKeys ?? base.identitySafeKeys,
+    identityCertificates: overlay.identityCertificates ?? base.identityCertificates,
+    producer: overlay.producer ?? base.producer,
+    attributeHints: overlay.attributeHints ?? base.attributeHints,
+    sourceRecordRefs: overlay.sourceRecordRefs ?? base.sourceRecordRefs,
   };
 }
 
@@ -210,6 +232,62 @@ function collectQueryIdentityKeys(
   return keys;
 }
 
+function collectCertificateNormalizedKeys(
+  rawQuery: string,
+  normalizedQuery: string,
+): ReadonlySet<string> {
+  const views = buildNormalizedQueryViews(rawQuery);
+  const surfaces = [
+    rawQuery,
+    normalizedQuery,
+    views.strict,
+    views.accentless,
+    views.collapsedWhitespace,
+    views.punctuationStripped,
+    views.compact,
+    views.vintageCanonicalized,
+    views.vintageStripped,
+    views.transliterated,
+    ...(views.lookupVariants ?? []),
+  ];
+  const keys = new Set<string>();
+  for (const surface of surfaces) {
+    if (typeof surface !== 'string' || surface.length === 0) {
+      continue;
+    }
+    const normalized = normalizeForMatch(surface);
+    if (normalized.length > 0) {
+      keys.add(normalized);
+    }
+  }
+  return keys;
+}
+
+function matchIdentityCertificates(
+  rawQuery: string,
+  normalizedQuery: string,
+  doc: ResolverProjectionLike,
+): ResolverCandidate['identityCertificates'] {
+  if (doc.identityCertificates === undefined || doc.identityCertificates.length === 0) {
+    return undefined;
+  }
+
+  const queryIdentityKeys = collectQueryIdentityKeys(rawQuery, normalizedQuery);
+  const queryCertificateKeys = collectCertificateNormalizedKeys(rawQuery, normalizedQuery);
+  const compactQuery = compactForLookup(normalizedQuery);
+  const matched = doc.identityCertificates.filter((certificate) =>
+    queryIdentityKeys.has(certificate.normalizedSurface)
+    || queryCertificateKeys.has(certificate.normalizedSurface)
+    || (
+      certificate.compactSurface !== undefined
+      && compactQuery.length > 0
+      && certificate.compactSurface === compactQuery
+    ),
+  );
+
+  return matched.length > 0 ? matched : undefined;
+}
+
 function shouldProjectAnchorIdentityKeys(
   rawQuery: string,
   anchor: AnchorCandidate,
@@ -274,6 +352,14 @@ function anchorMatchesIdentitySafeProjection(
   }
 
   return false;
+}
+
+function anchorMatchesExactSafeCertificate(
+  rawQuery: string,
+  normalizedQuery: string,
+  doc: ResolverProjectionLike,
+): boolean {
+  return (matchIdentityCertificates(rawQuery, normalizedQuery, doc)?.length ?? 0) > 0;
 }
 
 /**
@@ -376,9 +462,15 @@ function buildSignals(
     anchor.confidence >= SHORT_QUERY_AMBIGUOUS_ANCHOR_CONFIDENCE_THRESHOLD &&
     !isStrictPrefixOfAnchorSurface(normalizedQuery, anchor.normalizedForm);
 
-  const identitySafeMatch = exactLike && !isTrustedPrefixSingleEntityAnchor
+  const identitySafeProjectionMatch = exactLike && !isTrustedPrefixSingleEntityAnchor
     ? anchorMatchesIdentitySafeProjection(rawQuery, normalizedQuery, anchor, doc)
     : undefined;
+  const identitySafeCertificateMatch = exactLike && !isTrustedPrefixSingleEntityAnchor
+    ? anchorMatchesExactSafeCertificate(rawQuery, normalizedQuery, doc)
+    : false;
+  const identitySafeMatch = identitySafeProjectionMatch === true || identitySafeCertificateMatch
+    ? true
+    : identitySafeProjectionMatch;
   const exactSignalAllowed = identitySafeMatch !== false;
   // `canonicalNormalizedMatch` is the IDENTITY-normalized lane (scorer weight
   // 0.9, second only to canonicalExactMatch). It must carry confidence ONLY for
@@ -505,13 +597,32 @@ export async function buildResolverCandidatesFromGenerator(
   // Single-fetch supplement has been removed (T-E4-01): getDocuments() is the
   // only production hydration path. Partial resolution is forbidden -- any
   // unresolved IDs are a loud error.
+  const projectionOverlayIds = resolverProjectionLookup !== undefined
+    ? [...allEntityIds].filter((id) => docMap.get(id)?.identityCertificates === undefined)
+    : [];
+
+  if (projectionOverlayIds.length > 0 && resolverProjectionLookup !== undefined) {
+    try {
+      const docs = await resolverProjectionLookup.getResolverProjections(projectionOverlayIds);
+      for (const [id, doc] of docs) {
+        docMap.set(id, mergeResolverProjectionLike(docMap.get(id), doc));
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new DomainError(
+        'INTERNAL_INCONSISTENCY',
+        `resolver_projection_overlay_failed: resolver projection lookup threw for ${projectionOverlayIds.length} ids | ${message}`,
+      );
+    }
+  }
+
   const missingIds = [...allEntityIds].filter((id) => !docMap.has(id));
   if (missingIds.length > 0) {
     try {
       if (resolverProjectionLookup !== undefined) {
         const docs = await resolverProjectionLookup.getResolverProjections(missingIds);
         for (const [id, doc] of docs) {
-          docMap.set(id, doc);
+          docMap.set(id, mergeResolverProjectionLike(docMap.get(id), doc));
         }
       } else if (entityLookup !== undefined) {
         const docs = await entityLookup.getDocuments(missingIds);
@@ -562,6 +673,11 @@ export async function buildResolverCandidatesFromGenerator(
         matchScore: anchor.confidence,
       } as const;
       const incomingSignals = buildSignals(input.rawQuery, input.normalizedQuery, anchor, doc);
+      const matchedIdentityCertificates = matchIdentityCertificates(
+        input.rawQuery,
+        input.normalizedQuery,
+        doc,
+      );
       const existing = candidatesById.get(key);
       if (existing === undefined) {
         candidatesById.set(key, {
@@ -569,6 +685,9 @@ export async function buildResolverCandidatesFromGenerator(
           entityType: doc.entityType,
           canonicalLabel: doc.canonicalLabel,
           aliasMatches: [incomingAliasMatch],
+          ...(matchedIdentityCertificates !== undefined
+            ? { identityCertificates: matchedIdentityCertificates }
+            : {}),
           ...(attributeHints !== undefined ? { attributeHints } : {}),
           ...(doc.sourceRecordRefs !== undefined && doc.sourceRecordRefs.length > 0
             ? { sourceRecordRefs: doc.sourceRecordRefs }
@@ -594,6 +713,19 @@ export async function buildResolverCandidatesFromGenerator(
       candidatesById.set(key, {
         ...existing,
         aliasMatches,
+        ...(matchedIdentityCertificates !== undefined
+          ? {
+              identityCertificates: [
+                ...(existing.identityCertificates ?? []),
+                ...matchedIdentityCertificates,
+              ].filter((certificate, index, all) => all.findIndex((candidate) =>
+                candidate.kind === certificate.kind
+                && candidate.normalizedSurface === certificate.normalizedSurface
+                && candidate.compactSurface === certificate.compactSurface
+                && candidate.sourceTier === certificate.sourceTier,
+              ) === index),
+            }
+          : {}),
         sourceSignals: mergeSignals(existing.sourceSignals, incomingSignals),
         ...(mergedSources !== undefined ? { sources: mergedSources } : {}),
         ...(mergedSources !== undefined && mergedSources.length === 1
@@ -619,6 +751,9 @@ export async function buildResolverCandidatesFromGenerator(
       entityType: doc.entityType,
       canonicalLabel: doc.canonicalLabel,
       aliasMatches: [],
+      ...(matchIdentityCertificates(input.rawQuery, input.normalizedQuery, doc) !== undefined
+        ? { identityCertificates: matchIdentityCertificates(input.rawQuery, input.normalizedQuery, doc) }
+        : {}),
       ...(attributeHints !== undefined ? { attributeHints } : {}),
       ...(doc.sourceRecordRefs !== undefined && doc.sourceRecordRefs.length > 0
         ? { sourceRecordRefs: doc.sourceRecordRefs }

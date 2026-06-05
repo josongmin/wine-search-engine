@@ -12,6 +12,7 @@ import type {
 } from '@domain/ai/port/structured-llm.port.js';
 import {
   StructuredLlmCircuitOpenError,
+  StructuredLlmProviderError,
   StructuredLlmTimeoutError,
   StructuredLlmValidationError,
 } from '@domain/ai/port/structured-llm.port.js';
@@ -175,6 +176,7 @@ async function run(
     readonly abortSignal?: AbortSignal;
     readonly intent?: WineSearchAnalysis['intent'];
     readonly callerInterpretation?: WineSearchAnalysis['callerInterpretation'];
+    readonly blockedKind?: 'security_block' | 'unsupported_intent' | 'analysis_unavailable';
   },
 ): Promise<AnswerResult> {
   const { runner } = makeRunner(llm);
@@ -192,6 +194,7 @@ async function run(
     policyBlocked: overrides.policyBlocked ?? false,
     perStepTimeoutMs: PER_STEP_TIMEOUT_MS,
     maxOutputTokens: MAX_OUTPUT_TOKENS,
+    ...(overrides.blockedKind !== undefined ? { blockedKind: overrides.blockedKind } : {}),
     ...(overrides.abortSignal !== undefined ? { abortSignal: overrides.abortSignal } : {}),
   });
 }
@@ -519,6 +522,28 @@ describe('SynthesisRunner — policy blocked branch', () => {
     expect(result.degradedReason).toBe('policy_blocked');
     expect(result.synthesisAttempts).toBe(0);
     expect(result.tokenUsage.inputTokens).toBe(0);
+  });
+
+  it('analysis_unavailable → honest "AI analysis unavailable" message + degradedReason llm_unavailable (NOT query-blaming)', async () => {
+    // Move 2: when the router reports the reject was caused by an analyzer LLM
+    // failure, the synthesizer must say so honestly — not render the
+    // unsupported_intent copy that asks the user for a wine name.
+    const llm = makeStubLlm(async () => {
+      throw new Error('LLM must not be called when blocked');
+    });
+    const result = await run(llm, {
+      query: '보르고뉴',
+      policyBlocked: true,
+      blockedKind: 'analysis_unavailable',
+      hangulDominant: true,
+      toolOutcomes: [],
+    });
+    expect(result.layer).toBe('layer4');
+    expect(result.degradedReason).toBe('llm_unavailable');
+    expect(result.answer).toBe(FALLBACK_TEMPLATES.analysisUnavailable.korean);
+    // must NOT be the unsupported_intent copy that blames the query
+    expect(result.answer).not.toBe(FALLBACK_TEMPLATES.unsupportedIntent.korean);
+    expect(result.synthesisAttempts).toBe(0);
   });
 });
 
@@ -1213,6 +1238,24 @@ describe('SynthesisRunner — provider unavailable fails honestly (no fabricatio
     expect(result.answer).toBe(FALLBACK_TEMPLATES.llmUnavailable.korean);
     // must NOT fabricate a wine-name answer
     expect(result.answer).not.toContain('Château Margaux');
+    expect(result.answer).not.toContain('검색 결과:');
+  });
+
+  it('provider error (HTTP transport rejection, first-class) → honest message, not Layer 2 fabrication', async () => {
+    // Move 1: the adapter now throws a dedicated StructuredLlmProviderError for
+    // HTTP non-2xx (credit/auth/5xx) instead of conflating it into a
+    // ValidationError. The synthesizer treats it as provider-unavailable.
+    const llm = makeStubLlm(async () => {
+      throw new StructuredLlmProviderError(400, 'Anthropic: credit balance too low');
+    });
+    const result = await run(llm, {
+      query: '보르고뉴 와인 얼마',
+      hangulDominant: true,
+      toolOutcomes: [groundedOutcome()],
+    });
+    expect(result.degradedReason).toBe('llm_unavailable');
+    expect(result.layer).toBe('layer4');
+    expect(result.answer).toBe(FALLBACK_TEMPLATES.llmUnavailable.korean);
     expect(result.answer).not.toContain('검색 결과:');
   });
 

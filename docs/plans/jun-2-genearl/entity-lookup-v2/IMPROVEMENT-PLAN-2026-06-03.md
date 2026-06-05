@@ -19,12 +19,31 @@ V2 품질 gate를 실제로 통과시킨 뒤, lookup authority를 V1에서 V2로
 - `Viña Espectro Maipo Valley Carmenere` wrong-positive closed by the
   resolve-certificate gate.
 - `2018 St. Supéry Élu` false-abstain closed at the shared ambiguity seam.
-- 15-row hotset smoke is still **PASS** (`V2 wrong+=0`), but
+- 26-row hotset smoke is still **PASS** (`V2 wrong+=0`), but
   hotset is not the cutover authority.
 - Public `/v1/lookup/wine`, local CLI `lookupWine`, and agent `lookup_wine`
   are now compatibility-backed V2 authority surfaces.
 - Earlier `V1 93.5%` numbers are historical only; the current explicit
   `legacy_core` rerun is `V1 46.5%`.
+- Korean-famous coverage is now **53/53**, non-entity handling is **22/22**,
+  and canonical active runtime is now
+  `search-snapshot:v1:7bcd44a5484b2be5`.
+- Current canonical active runtime readiness is green:
+  - bootstrap verify PASS
+  - pointer parity verify PASS
+- Current canonical active latency truth is green on the dedicated lookup
+  bootstrap path:
+  - `/tmp/lookup-v2-latency-korean-famous-active-v7-postmigrate.json`
+  - `bootstrap_ms=1165.313`
+  - `first_query_ms=375.211`
+  - `warm_p95_ms=154.544`
+  - verdict: **PASS**
+- Current executable self-canary replay is green:
+  - `/tmp/lookup-v2-canary-replay-active-postmigrate.json`
+  - `hard_drift=0`, `soft_abstain_drift=0`, labeled `75/75`
+- Remaining closeout residue is operational only:
+  - real traffic canary replay input
+  - operator-plane PG publish availability on this host
 
 ## Authority Docs
 
@@ -74,7 +93,10 @@ V2 품질 gate를 실제로 통과시킨 뒤, lookup authority를 V1에서 V2로
 - **Track C — surface cutover**: complete for public/local/agent lookup via the
   compatibility seam.
 - **Track D — proof-lane cleanup**: completed for executable lane/doc alignment.
-  Remaining residue is operational closeout (live canary + post-release legacy
+- **Track E — lookup-direct bootstrap split**: completed. lookup eval/debug/CLI
+  surfaces now boot through `createLookupDirectContainer`, so generic
+  `createContainer` bootstrap tax is no longer charged to lookup proof lanes.
+- Remaining residue is operational closeout (live canary + post-release legacy
   resolver deletion), not missing or misleading bench/doc entrypoints.
 
 ## Ticket ELV2-C1 — Close the `no_match` wrong-positive
@@ -322,30 +344,48 @@ bench and docs so proof lanes match real execution surfaces.
 
 ## Phase 2 — Post-Cutover Latency Hardening (2026-06-03)
 
-현재 상태는 **correctness green / latency green / Korean-famous coverage weak** 다.
-authority truth는 `215/215 PASS`이고, Korean-famous full latency lane도
-이제 `warm_p95_ms=1830.716`으로 pass다. 남은 owner seam은 serving latency가 아니라
-alias/data-plane coverage다.
+historical closeout note:
+
+- `search-snapshot:v1:e88a45bedcb8d41f` 기준 older publish-green proof는
+  historical only다.
+
+current canonical note (2026-06-04):
+
+- active runtime is now current-contract:
+  - runtime state `search_snapshot_runtime_state.v7`
+  - manifest `search_snapshot.v5`
+  - snapshot `search-snapshot:v1:7bcd44a5484b2be5`
+- `etl:migrate-runtime-state -- --manifest ...7bcd44a5484b2be5...` now
+  provides a deterministic one-shot offline promote path for current-contract
+  runtime cutover when operator-plane PG publish is unavailable.
+- remaining owner seam is no longer lookup drift or lookup bootstrap. It is
+  **real traffic canary / operator-plane environment**.
 
 ### Current Latency Truth
 
 - executable lane:
-  - `pnpm run eval:lookup-v2:latency:korean-famous -- --output /tmp/lookup-v2-latency-korean-famous-sotaplus-v5.json`
+  - `pnpm run eval:lookup-v2:latency:korean-famous -- --useActiveRuntime --output /tmp/lookup-v2-latency-korean-famous-active-v7-postmigrate.json`
 - latest result:
-  - `bootstrap_ms=2298.600`
-  - `first_query_ms=4021.383`
-  - `warm_p50_ms=538.761`
-  - `warm_p95_ms=1830.716`
+  - `bootstrap_ms=1165.313`
+  - `first_query_ms=375.211`
+  - `warm_p50_ms=31.755`
+  - `warm_p95_ms=154.544`
   - verdict: **PASS**
 - latest coverage truth:
-  - `pnpm run eval:lookup-v2:coverage:korean-famous -- --output /tmp/lookup-v2-coverage-korean-famous-sotaplus-v5.json`
-  - `hot_entities=11/46 (23.9%)`
-  - `non_entity=15/19`
-  - `curation_tasks=35`
+  - `pnpm run eval:lookup-v2:coverage -- --useActiveRuntime --corpus test/fixtures/lookup-v2-korean-famous-expanded.jsonl --output /tmp/lookup-v2-coverage-korean-famous-active-v7-postmigrate.json`
+  - `hot_entities=53/53`
+  - `non_entity=22/22`
+  - `curation_tasks=0`
+- latest publish truth:
+  - `pnpm run etl:migrate-runtime-state -- --runtime-state /Users/songmin/.wine-search-engine/data/runtime-search-snapshot.json --active-nl-mappings /Users/songmin/.wine-search-engine/data/nl-mappings.json --manifest /Users/songmin/.wine-search-engine/data/search-snapshots/search-snapshot:v1:7bcd44a5484b2be5/manifest.json`
+  - active runtime snapshot `search-snapshot:v1:7bcd44a5484b2be5`
+- latest operator-plane publish note:
+  - `pnpm run etl:publish-runtime-substrates -- --manifest /Users/songmin/.wine-search-engine/data/search-snapshots/search-snapshot:v1:7bcd44a5484b2be5/manifest.json --runtime-state /Users/songmin/.wine-search-engine/data/runtime-search-snapshot.json --runtime-nl-mappings /Users/songmin/.wine-search-engine/data/nl-mappings.json --refresh-active-runtime-substrates`
+  - failed on this host with `getaddrinfo ENOTFOUND wine-engine-pg...`
 - conclusion:
-  - serving/runtime latency seam is no longer the active blocker
-  - current blocker is Korean-famous alias/data-plane coverage
-  - the latency fixes must be preserved while coverage curation proceeds
+  - canonical active correctness / shadow / coverage / latency / self-canary are green
+  - lookup bootstrap green came from the dedicated lookup-direct split, not a threshold relaxation
+  - remaining non-code residue is real traffic canary + operator-plane environment
 
 ### Phase-2 Invariants
 

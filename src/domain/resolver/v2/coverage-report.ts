@@ -48,7 +48,7 @@ export interface CoverageHole {
 export interface CoverageReport {
   /** Rows whose gold expectation is a resolve (hot entities). */
   readonly hotEntityCount: number;
-  /** Hot entities that resolved correctly. */
+  /** Hot-entity rows whose observed status stayed inside the accepted set. */
   readonly coveredCount: number;
   /** Hot entities that failed to resolve — these need curation. */
   readonly holes: readonly CoverageHole[];
@@ -76,7 +76,7 @@ export function buildCoverageReport(rows: readonly CoverageInputRow[]): Coverage
   const holes: CoverageHole[] = [];
   let coveredCount = 0;
   for (const row of hotRows) {
-    if (row.observedStatus === 'resolved') {
+    if (acceptedStatuses(row).includes(row.observedStatus)) {
       coveredCount += 1;
     } else {
       holes.push({ qid: row.qid, query: row.query, class: row.class, observedStatus: row.observedStatus });

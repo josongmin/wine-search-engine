@@ -3,7 +3,10 @@ import { buildResolverCandidatesFromGenerator } from '../../../../src/applicatio
 import { createEntityId } from '../../../../src/domain/shared/types/index.js';
 import type { CanonicalEntityId } from '../../../../src/domain/shared/types/index.js';
 import type { RetrievalDocument } from '../../../../src/domain/retrieval/model/retrieval-document.js';
-import type { EntityDocumentLookupPort } from '../../../../src/application/search/port/search-pipeline-deps.port.js';
+import type {
+  EntityDocumentLookupPort,
+  LookupResolverProjectionPort,
+} from '../../../../src/application/search/port/search-pipeline-deps.port.js';
 import type { EntityCandidateGeneratorInput } from '../../../../src/domain/resolver/model/entity-candidate-generator-input.js';
 import type { AliasType } from '../../../../src/domain/alias/model/alias.js';
 
@@ -81,6 +84,66 @@ describe('buildResolverCandidatesFromGenerator', () => {
         sources: ['alias'],
       }),
     ]);
+  });
+
+  it('mints exact-like identity evidence from a matched exact-safe certificate even when identitySafeKeys do not carry the Korean surface', async () => {
+    const entityId = createEntityId('haut-brion-1967');
+    const resolverProjectionLookup: LookupResolverProjectionPort = {
+      getResolverProjections: vi.fn(async (ids: readonly CanonicalEntityId[]) => {
+        const map = new Map();
+        for (const id of ids) {
+          map.set(id, {
+            entityId,
+            entityType: 'wine' as const,
+            canonicalLabel: '1967 Château Haut-Brion',
+            aliasesIdentitySafe: ['Chateau Haut-Brion'],
+            identitySafeKeys: ['chateau haut brion'],
+            identityCertificates: [{
+              kind: 'exact_safe' as const,
+              normalizedSurface: '오브리옹',
+              singleton: true,
+              collisionFree: true,
+              sourceTier: 'curated' as const,
+            }],
+            attributeHints: {
+              producer: 'Château Haut-Brion',
+            },
+          });
+        }
+        return map;
+      }),
+    };
+
+    const candidates = await buildResolverCandidatesFromGenerator(
+      {
+        rawQuery: '오브리옹',
+        normalizedQuery: '오브리옹',
+        anchors: [
+          {
+            surfaceForm: '오브리옹',
+            normalizedForm: '오브리옹',
+            candidateEntityIds: [entityId],
+            lookupStrategies: ['exact'],
+            aliasType: 'observed_query_alias',
+            confidence: 0.98,
+            source: 'alias',
+          },
+        ],
+      },
+      undefined,
+      resolverProjectionLookup,
+    );
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.identityCertificates).toEqual([
+      expect.objectContaining({
+        kind: 'exact_safe',
+        normalizedSurface: '오브리옹',
+      }),
+    ]);
+    expect(candidates[0]?.sourceSignals.aliasExactMatch).toBeCloseTo(0.98);
+    expect(candidates[0]?.sourceSignals.canonicalNormalizedMatch).toBeCloseTo(0.98);
+    expect(candidates[0]?.sourceSignals.canonicalExactMatch).toBe(1);
   });
 
   it('merges mixed-source support for the same entity without losing provenance', async () => {
@@ -915,5 +978,70 @@ describe('mergeSignals — 수학적 속성 (교환법칙 · 멱등법칙 · 3-a
     expect(r1[0]?.sourceSignals.aliasExactMatch).toBeCloseTo(0.95);
     expect(r2[0]?.sourceSignals.aliasExactMatch).toBeCloseTo(0.95);
     expect(r3[0]?.sourceSignals.aliasExactMatch).toBeCloseTo(0.95);
+  });
+
+  it('hydrates exact-safe certificates from resolver projections even when preloadedDocs already filled the doc map', async () => {
+    const entityId = createEntityId('haut-brion-1967');
+    const lookup = makeBatchLookup(async () => ({
+      entityId,
+      entityType: 'wine',
+      canonicalLabel: '1967 Château Haut-Brion Pessac-Léognan (Premier Grand Cru Classé)',
+      aliasesIdentitySafe: ['Haut-Brion', '오브리옹'],
+    } as unknown as RetrievalDocument));
+    const resolverProjectionLookup: LookupResolverProjectionPort = {
+      getResolverProjections: vi.fn(async (ids) => new Map(ids.map((id) => [id, {
+        entityId: id,
+        entityType: 'wine',
+        canonicalLabel: '1967 Château Haut-Brion Pessac-Léognan (Premier Grand Cru Classé)',
+        aliasesIdentitySafe: ['Haut-Brion', '오브리옹'],
+        identityCertificates: [{
+          kind: 'exact_safe',
+          singleton: true,
+          collisionFree: true,
+          sourceTier: 'curated',
+          normalizedSurface: '오브리옹',
+        }],
+      }] as const))),
+    };
+
+    const preloadedDocs = new Map<string, RetrievalDocument>([
+      [String(entityId), {
+        entityId,
+        entityType: 'wine',
+        canonicalLabel: '1967 Château Haut-Brion Pessac-Léognan (Premier Grand Cru Classé)',
+        aliasesIdentitySafe: ['Haut-Brion', '오브리옹'],
+      } as unknown as RetrievalDocument],
+    ]);
+
+    const candidates = await buildResolverCandidatesFromGenerator(
+      {
+        rawQuery: '오브리옹',
+        normalizedQuery: '오브리옹',
+        anchors: [
+          {
+            surfaceForm: '오브리옹',
+            normalizedForm: '오브리옹',
+            candidateEntityIds: [entityId],
+            lookupStrategies: ['exact'],
+            aliasType: 'translation',
+            confidence: 0.98,
+            source: 'alias',
+          },
+        ],
+        preloadedDocs,
+      },
+      lookup,
+      resolverProjectionLookup,
+    );
+
+    expect(resolverProjectionLookup.getResolverProjections).toHaveBeenCalledWith([entityId]);
+    expect(candidates[0]?.identityCertificates).toEqual([
+      expect.objectContaining({
+        kind: 'exact_safe',
+        singleton: true,
+        collisionFree: true,
+        normalizedSurface: '오브리옹',
+      }),
+    ]);
   });
 });

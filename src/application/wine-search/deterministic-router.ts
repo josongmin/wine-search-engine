@@ -232,7 +232,16 @@ export class DeterministicRouter {
       && getAllAnalysisConstraints(analysis).length === 0
       && !WINE_DOMAIN_KEYWORD_RE.test(analysis.preservedSurface)
     ) {
-      return { kind: PLAN_KIND_REJECT, reason: 'unsupported_intent' };
+      // Move 2 — carry the analyzer's already-captured failure cause forward.
+      // When intent=unknown is the result of the LLM fallback being ATTEMPTED
+      // and FAILING (not a genuinely out-of-scope query), reject with the
+      // honest `analysis_unavailable` reason so the response reflects the real
+      // cause (AI analysis down) rather than blaming the user's query.
+      const reason =
+        analysis.llmFallbackOutcome?.kind === 'failed_preserved_unknown'
+          ? 'analysis_unavailable'
+          : 'unsupported_intent';
+      return { kind: PLAN_KIND_REJECT, reason };
     }
 
     // Rule 2 — parallel-slot decomposition.

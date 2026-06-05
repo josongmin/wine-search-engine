@@ -75,6 +75,28 @@ export interface LookupAdmissionVerdict {
   readonly conceptTermsMatched?: readonly string[] | undefined;
 }
 
+export interface LookupConceptRedirectInfo {
+  readonly conceptClass: 'grape' | 'region' | 'style' | 'recommendation' | 'pairing' | 'generic';
+  readonly redirectReason: 'concept_query' | 'generic_non_entity_query';
+  readonly sourceEvidence: string;
+}
+
+export interface LookupConceptRedirectRegistryPort {
+  get(surfaceForm: string): LookupConceptRedirectInfo | null;
+}
+
+export interface LookupExactSafeMatch {
+  readonly entityId: CanonicalEntityId;
+  readonly locale: 'ko' | 'global';
+  readonly kind: 'exact_safe' | 'compact_exact_safe';
+  readonly normalizedSurface: string;
+  readonly compactSurface?: string | undefined;
+}
+
+export interface LookupExactSafeRegistryPort {
+  match(views: NormalizedQueryViews): LookupExactSafeMatch | null;
+}
+
 /**
  * Front-door admission classifier port.
  *

@@ -49,6 +49,13 @@ export type { ResolverInput } from '../model/resolver-input.js';
 const LEARNED_MATCH_RAW_SCORE_BLEND = 0.6;
 const LEARNED_MATCH_PROBABILITY_BLEND = 0.4;
 
+function hasCollisionFreeExactSafeCertificate(candidate: ResolverCandidate | undefined): boolean {
+  return candidate?.identityCertificates?.some((certificate) =>
+    certificate.singleton === true
+    && certificate.collisionFree === true,
+  ) ?? false;
+}
+
 /**
  * The core entity resolver — Track A of the Wine Intelligence Engine,
  * per RFC-006.
@@ -271,14 +278,21 @@ export class Resolver {
     const thresholds = this.getThresholds(input.queryClass);
     const singletonBypass = !learnedMatcherDegraded
       && blendedScored.length === 1
-      && calibrated.decisionConfidenceC >= thresholds.resolveTau;
+      && (
+        calibrated.decisionConfidenceC >= thresholds.resolveTau
+        || hasCollisionFreeExactSafeCertificate(blendedScored[0]?.candidate)
+      );
 
     // Step 6: Apply decision boundary
     const { status, nextAction, reasonCodes } = singletonBypass
       ? {
           status: 'resolved' as const,
           nextAction: 'return_result' as const,
-          reasonCodes: ['SINGLETON_BYPASS_RESOLVED'],
+          reasonCodes: [
+            hasCollisionFreeExactSafeCertificate(blendedScored[0]?.candidate)
+              ? 'SINGLETON_EXACT_SAFE_CERTIFICATE_RESOLVED'
+              : 'SINGLETON_BYPASS_RESOLVED',
+          ],
         }
       : this.applyDecisionBoundary(
           input,

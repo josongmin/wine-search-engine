@@ -23,9 +23,14 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { loadConfig } from '../../src/config/env.js';
-import { createContainer } from '../../src/config/container.js';
+import { createLookupDirectContainer } from '../../src/config/container-lookup.js';
 import { getPgPool } from '../../src/infrastructure/db/pg-pool.js';
+import { SEARCH_SNAPSHOT_SCHEMA_VERSION } from '../../src/domain/shared/constants/search-snapshot.js';
 import { LOOKUP_V2_DEFAULT_MAX_CANDIDATES } from '../../src/interface/http/constants.js';
+import {
+  DEFAULT_RUNTIME_STATE_PATH,
+  loadSearchSnapshotRuntimeState,
+} from '../../src/infrastructure/health/search-snapshot-readiness.js';
 import {
   buildCoverageReport,
   formatCoverageReport,
@@ -86,10 +91,17 @@ async function main(): Promise<void> {
     options: {
       corpus: { type: 'string', default: 'test/fixtures/lookup-v2-hotset.jsonl' },
       output: { type: 'string', default: '/tmp/lookup-v2-coverage-report.json' },
+      runtimeState: { type: 'string' },
+      useActiveRuntime: { type: 'boolean', default: false },
     },
   });
   const corpusPath = values.corpus ?? 'test/fixtures/lookup-v2-hotset.jsonl';
   const outputPath = values.output ?? '/tmp/lookup-v2-coverage-report.json';
+  const runtimeStatePath = values.runtimeState;
+  const useActiveRuntime = values.useActiveRuntime ?? false;
+  if (runtimeStatePath === undefined && !useActiveRuntime) {
+    throw new Error('Explicit runtime binding required: pass --runtimeState <path> or --useActiveRuntime');
+  }
 
   const hotset = parseHotset(corpusPath);
   if (hotset.length === 0) {
@@ -98,7 +110,14 @@ async function main(): Promise<void> {
 
   const config = loadConfig();
   const pool = getPgPool();
-  const container = await createContainer(config, pool);
+  const effectiveRuntimeStatePath = runtimeStatePath ?? DEFAULT_RUNTIME_STATE_PATH;
+  const runtimeState = await loadSearchSnapshotRuntimeState(effectiveRuntimeStatePath);
+  const container = await createLookupDirectContainer(config, {
+    pool,
+    searchSnapshotId: runtimeState.snapshotId,
+    searchSnapshotManifestPath: runtimeState.manifestPath,
+    searchSnapshotFieldAvailability: runtimeState.fieldAvailability,
+  });
 
   const inputRows: CoverageInputRow[] = [];
   for (const row of hotset) {
@@ -140,7 +159,20 @@ async function main(): Promise<void> {
   }
   writeFileSync(
     outputPath,
-    JSON.stringify({ generatedAt: new Date().toISOString(), gitSha, corpus: corpusPath, report, curationTasks }, null, 2),
+    JSON.stringify({
+      generatedAt: new Date().toISOString(),
+      gitSha,
+      corpus: corpusPath,
+      runtime: {
+        runtime_state_path: effectiveRuntimeStatePath,
+        runtime_state_schema: runtimeState.schemaVersion,
+        manifest_schema: SEARCH_SNAPSHOT_SCHEMA_VERSION,
+        snapshot_id: runtimeState.snapshotId,
+        artifact_hashes: runtimeState.hashes,
+      },
+      report,
+      curationTasks,
+    }, null, 2),
     'utf8',
   );
 

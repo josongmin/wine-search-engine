@@ -39,6 +39,13 @@ const SEVERITY_HIGH_TYPE_COUNT = 3;
 /** ≥ this many distinct ambiguity types → 'medium' severity. */
 const SEVERITY_MEDIUM_TYPE_COUNT = 2;
 
+function hasCollisionFreeExactSafeCertificate(candidate: ResolverCandidate): boolean {
+  return candidate.identityCertificates?.some((certificate) =>
+    certificate.singleton === true
+    && certificate.collisionFree === true,
+  ) ?? false;
+}
+
 /**
  * Classifies ambiguity among resolution candidates, per RFC-006 §7.
  *
@@ -215,6 +222,20 @@ export class AmbiguityClassifier {
     const topScore = top.sourceSignals.canonicalNormalizedMatch;
     if (topScore === 0) {
       return false;
+    }
+    const topProducer = top.attributeHints?.['producer'];
+    if (hasCollisionFreeExactSafeCertificate(top) && typeof topProducer === 'string') {
+      const competitiveSiblings = candidates
+        .slice(0, AMBIGUITY_TOP_CANDIDATE_SCAN_K)
+        .filter((candidate) =>
+          candidate.sourceSignals.canonicalNormalizedMatch / topScore >= STRONG_MATCH_RATIO,
+        );
+      if (
+        competitiveSiblings.length > 0
+        && competitiveSiblings.every((candidate) => candidate.attributeHints?.['producer'] === topProducer)
+      ) {
+        return false;
+      }
     }
 
     const producerCounts = new Map<string, number>();

@@ -25,6 +25,7 @@
 import {
   StructuredLlmCircuitOpenError,
   StructuredLlmPartialOutputError,
+  StructuredLlmProviderError,
   StructuredLlmRefusalError,
   StructuredLlmTimeoutError,
   StructuredLlmValidationError,
@@ -489,7 +490,7 @@ interface SynthesisRunnerDeps {
  * query is wine-domain and well-formed; we simply lack the requested
  * entity in our catalogue). See {@link SynthesisDecisionStatus} below.
  */
-type SynthesisBlockedKind = 'security_block' | 'unsupported_intent';
+type SynthesisBlockedKind = 'security_block' | 'unsupported_intent' | 'analysis_unavailable';
 
 /**
  * Decision-engine outcome signal passed to the synthesizer so it can pick
@@ -827,11 +828,16 @@ export class SynthesisRunner {
           attempts,
           degradedReason: 'circuit_open',
         };
+      } else if (err instanceof StructuredLlmProviderError) {
+        // Move 1: a first-class provider rejection (HTTP non-2xx —
+        // auth/credit/5xx). The model never ran, so fail honestly as
+        // `llm_unavailable` (no grounded Layer 2 fabrication) and do not retry.
+        return { usage: aggregatedUsage, attempts, degradedReason: 'llm_unavailable' };
       } else if (err instanceof StructuredLlmValidationError) {
-        // An HTTP transport rejection (auth / credit / 4xx-5xx) is the provider
-        // being unavailable, NOT a working LLM emitting bad JSON. Fail honestly
-        // instead of falling through to the grounded Layer 2 fabrication, and
-        // do not retry — a credit/auth rejection will not change mid-request.
+        // Legacy compatibility: until every adapter throws ProviderError, an
+        // HTTP transport rejection may still arrive shaped as a ValidationError
+        // (empty issues + rawOutput.httpStatus). Treat that as provider-down
+        // too; a genuine output-schema failure (zod issues) is malformed.
         if (isProviderTransportRejection(err)) {
           return { usage: aggregatedUsage, attempts, degradedReason: 'llm_unavailable' };
         }
@@ -967,6 +973,10 @@ export class SynthesisRunner {
     queryHasHangul: boolean,
   ): AnswerResult {
     let answer: string;
+    // Move 2: `analysis_unavailable` is an AI-OUTAGE degradation, not a policy
+    // block — it carries `llm_unavailable` so the wire honestly reflects "the
+    // analyzer LLM was down", not "blocked by policy".
+    let degradedReason: DegradedReason = 'policy_blocked';
     switch (kind) {
       case 'security_block':
         answer = queryHasHangul
@@ -978,6 +988,12 @@ export class SynthesisRunner {
           ? FALLBACK_TEMPLATES.unsupportedIntent.korean
           : FALLBACK_TEMPLATES.unsupportedIntent.english;
         break;
+      case 'analysis_unavailable':
+        answer = queryHasHangul
+          ? FALLBACK_TEMPLATES.analysisUnavailable.korean
+          : FALLBACK_TEMPLATES.analysisUnavailable.english;
+        degradedReason = 'llm_unavailable';
+        break;
     }
     return {
       answer,
@@ -986,7 +1002,7 @@ export class SynthesisRunner {
       synthesisAttempts: 0,
       verificationAttempts: 0,
       tokenUsage: makeZeroTokenUsage(),
-      degradedReason: 'policy_blocked',
+      degradedReason,
     };
   }
 

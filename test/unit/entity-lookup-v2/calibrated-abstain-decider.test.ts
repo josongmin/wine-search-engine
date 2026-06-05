@@ -89,6 +89,22 @@ describe('CalibratedAbstainDecider (T-ELV2-05) — precision-first, downgrade-on
     expect(d.reasonCode).toBe('no_match');
   });
 
+  it('honors a resolver exact-safe singleton certificate even when calibrated confidence is zero', () => {
+    const d = decider.decide(
+      makeResult({
+        status: 'resolved',
+        candidateCount: 1,
+        top1: 0,
+        trusted: true,
+        reasonCodes: ['SINGLETON_EXACT_SAFE_CERTIFICATE_RESOLVED'],
+      }),
+      'known-item',
+      'identity_grade',
+    );
+    expect(d.status).toBe('resolved');
+    expect(d.reasonCode).toBe('exact_safe_singleton_certificate');
+  });
+
   it('never upgrades: a resolver "failed"/"ambiguous" stays at least as conservative', () => {
     expect(decider.decide(makeResult({ status: 'failed', candidateCount: 2, top1: 0.95, gap: 0.5, trusted: true }), 'known-item', 'recall_only').status).toBe('failed');
     expect(decider.decide(makeResult({ status: 'ambiguous', candidateCount: 2, top1: 0.95, gap: 0.5, trusted: true }), 'known-item', 'recall_only').status).toBe('ambiguous');

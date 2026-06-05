@@ -2,17 +2,50 @@
 import 'dotenv/config';
 import process from 'node:process';
 import { loadConfig } from '../../src/config/env.js';
-import { createContainer } from '../../src/config/container.js';
+import { createLookupDirectContainer } from '../../src/config/container-lookup.js';
 import { getPgPool } from '../../src/infrastructure/db/pg-pool.js';
 import { LOOKUP_V2_DEFAULT_MAX_CANDIDATES } from '../../src/interface/http/constants.js';
+import {
+  DEFAULT_RUNTIME_STATE_PATH,
+  loadSearchSnapshotRuntimeState,
+} from '../../src/infrastructure/health/search-snapshot-readiness.js';
 
 async function main(): Promise<void> {
-  const query = process.argv.slice(2).filter((a) => a !== '--').join(' ') || '2018 Orin Swift Papillon';
+  const argv = process.argv.slice(2).filter((a) => a !== '--');
+  let runtimeStatePath: string | undefined;
+  let useActiveRuntime = false;
+  const queryParts: string[] = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === '--runtime-state') {
+      runtimeStatePath = argv[index + 1] ?? runtimeStatePath;
+      index += 1;
+      continue;
+    }
+    if (arg === '--use-active-runtime') {
+      useActiveRuntime = true;
+      continue;
+    }
+    queryParts.push(arg);
+  }
+  if (runtimeStatePath === undefined && !useActiveRuntime) {
+    throw new Error('Explicit runtime binding required: pass --runtime-state <path> or --use-active-runtime');
+  }
+  const query = queryParts.join(' ') || '2018 Orin Swift Papillon';
   const config = loadConfig();
   const pool = getPgPool();
-  const container = await createContainer(config, pool);
+  const effectiveRuntimeStatePath = runtimeStatePath ?? DEFAULT_RUNTIME_STATE_PATH;
+  const runtimeState = await loadSearchSnapshotRuntimeState(effectiveRuntimeStatePath);
+  const container = await createLookupDirectContainer(config, {
+    pool,
+    searchSnapshotId: runtimeState.snapshotId,
+    searchSnapshotManifestPath: runtimeState.manifestPath,
+    searchSnapshotFieldAvailability: runtimeState.fieldAvailability,
+  });
 
   process.stderr.write(`\n===== QUERY: ${query} =====\n`);
+  process.stderr.write(`runtime_state=${effectiveRuntimeStatePath}\n`);
+  process.stderr.write(`snapshot_id=${runtimeState.snapshotId}\n`);
 
   const v2 = await container.entityLookupV2UseCase.execute(
     { query, maxCandidates: LOOKUP_V2_DEFAULT_MAX_CANDIDATES, mode: 'default', requestId: 'debug-1' },

@@ -7,7 +7,6 @@ import { EntityLookupV2UseCase } from '../application/search/entity-lookup-v2/en
 import { CurationUseCase } from '../application/curation/curation.usecase.js';
 import { PgCurationStore } from '../infrastructure/curation/pg-curation-store.js';
 import { MultiChannelRetrievalEngine } from '../application/search/entity-lookup-v2/multi-channel-retrieval-engine.js';
-import { PgFamilyGraph } from '../infrastructure/adapter/pg-family-graph.js';
 import { ConceptAdmissionGate } from '../domain/resolver/v2/concept-admission-gate.js';
 import { LtrRerankDecider } from '../domain/resolver/v2/ltr-rerank-decider.js';
 import { AutocompleteUseCase } from '../application/search/autocomplete.usecase.js';
@@ -72,9 +71,8 @@ export function buildUseCaseContainerServices(
   // discovery primitives — reuses the resolver primitives as substrate, owns
   // the admission gate + 4-state calibrated decision.
   const entityLookupV2UseCase = new EntityLookupV2UseCase({
-    admissionGate: new ConceptAdmissionGate(),
-    queryPlanner: core.lookupQueryPlanner,
-    blocker: core.blocker,
+    admissionGate: new ConceptAdmissionGate(core.lookupConceptRedirectRegistry),
+    lookupPlanner: core.lookupPlanner,
     entityResolver: core.entityResolver,
     entityLookup: core.entityLookup,
     ...(core.resolverProjectionLookup !== undefined
@@ -88,10 +86,6 @@ export function buildUseCaseContainerServices(
       ...(core.resolverProjectionLookup !== undefined
         ? { resolverProjectionLookup: core.resolverProjectionLookup }
         : {}),
-      // T-ELV2-06 Half B: producer family graph recall channel (PG-backed,
-      // snapshot-scoped). Wired when a pool exists; degrades to dormant when the
-      // entity_family table is unpublished.
-      ...(core.pool !== undefined ? { familyGraph: new PgFamilyGraph(core.pool) } : {}),
     }),
     // T-ELV2-05: learned reranker — wired ONLY when LTR serving is on AND a model
     // is loaded (core.ltrModels present). When absent we OMIT the reranker entirely

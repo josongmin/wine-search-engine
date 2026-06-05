@@ -1,0 +1,9 @@
+{"surface":"샤또","locale":"ko","ambiguityTypes":["broad_icon"],"severity":"high","sourceEvidence":"reviewed:korean-famous:elv2-kr-045","reviewedAt":"2026-06-04T00:00:00.000Z"}
+{"surface":"샤토","locale":"ko","ambiguityTypes":["broad_icon"],"severity":"high","sourceEvidence":"reviewed:korean-famous:elv2-kr-046","reviewedAt":"2026-06-04T00:00:00.000Z"}
+{"surface":"크리스탈","locale":"ko","ambiguityTypes":["common_noun_collision"],"severity":"high","sourceEvidence":"reviewed:korean-famous:elv2-kr-048","reviewedAt":"2026-06-04T00:00:00.000Z"}
+{"surface":"디켐","locale":"ko","ambiguityTypes":["short_form"],"severity":"high","sourceEvidence":"reviewed:korean-famous:elv2-kr-050","reviewedAt":"2026-06-04T00:00:00.000Z"}
+{"surface":"이켐","locale":"ko","ambiguityTypes":["short_form"],"severity":"high","sourceEvidence":"reviewed:korean-famous:elv2-kr-051","reviewedAt":"2026-06-04T00:00:00.000Z"}
+{"surface":"DRC","locale":"global","ambiguityTypes":["broad_icon"],"severity":"high","sourceEvidence":"reviewed:korean-famous:elv2-kr-052","reviewedAt":"2026-06-04T00:00:00.000Z"}
+{"surface":"샹베르탱","locale":"ko","ambiguityTypes":["appellation_collision"],"severity":"high","sourceEvidence":"reviewed:korean-famous:elv2-kr-054","reviewedAt":"2026-06-04T00:00:00.000Z"}
+{"surface":"펜폴즈","locale":"ko","ambiguityTypes":["broad_icon"],"severity":"high","sourceEvidence":"reviewed:korean-famous:elv2-kr-055","reviewedAt":"2026-06-04T00:00:00.000Z"}
+{"surface":"바롤로","locale":"ko","ambiguityTypes":["appellation_collision"],"severity":"high","sourceEvidence":"reviewed:korean-famous:elv2-kr-049","reviewedAt":"2026-06-04T00:00:00.000Z"}

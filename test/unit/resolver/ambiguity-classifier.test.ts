@@ -365,5 +365,25 @@ describe('AmbiguityClassifier', () => {
       const state = classifier.classify(candidates, 'short_entity');
       expect(state.types).not.toContain('producer_family_collision');
     });
+
+    it('does not raise producer_family_collision when the head carries a collision-free exact-safe certificate', () => {
+      const producer = 'Château Haut-Brion';
+      const candidates: ResolverCandidate[] = [
+        {
+          ...makeProducerWine('haut-brion', '1967 Château Haut-Brion', producer, 0.98),
+          identityCertificates: [{
+            kind: 'exact_safe',
+            normalizedSurface: '오브리옹',
+            sourceTier: 'curated',
+            singleton: true,
+            collisionFree: true,
+          }],
+        },
+        makeProducerWine('clarence', '1985 Château Haut-Brion Le Clarence', producer, 0.93),
+        makeProducerWine('mission', '2017 Château La Mission Haut-Brion', producer, 0.9),
+      ];
+      const state = classifier.classify(candidates, 'short_entity');
+      expect(state.types).not.toContain('producer_family_collision');
+    });
   });
 });

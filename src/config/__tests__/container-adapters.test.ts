@@ -14,7 +14,6 @@ import { VespaNetworkError } from '../../infrastructure/vespa/vespa-client.js';
 import type { SparseHit } from '../../domain/retrieval/port/search-index.port.js';
 import { CircuitBreakerOpenError } from '../../domain/shared/error/circuit-breaker-open-error.js';
 import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
-import { LazyFuzzyMatcher } from '../../infrastructure/adapter/lazy-fuzzy-matcher.js';
 
 describe('buildCoreAdapterServices', () => {
   afterEach(() => {
@@ -109,7 +108,6 @@ describe('buildCoreAdapterServices', () => {
   });
 
   it('uses search-index alias authority when PostgreSQL is unavailable', async () => {
-    const warmSpy = vi.spyOn(LazyFuzzyMatcher.prototype, 'warm');
     const loadSpy = vi
       .spyOn(SearchSnapshotAliasMatcher, 'loadFromRuntimeState')
       .mockResolvedValue({
@@ -194,7 +192,6 @@ describe('buildCoreAdapterServices', () => {
   });
 
   it('uses snapshot-manifest alias substrate for non-live snapshot bindings without PostgreSQL', async () => {
-    const warmSpy = vi.spyOn(LazyFuzzyMatcher.prototype, 'warm');
     const exactQuery = '2017 delas le clos rouge crozes-hermitage';
     const exactMatch = {
       surfaceForm: 'Delas Le Clos Rouge Crozes-Hermitage',
@@ -235,9 +232,7 @@ describe('buildCoreAdapterServices', () => {
       ]);
       expect(misses).toEqual([]);
       expect(sparseSearchSpy).not.toHaveBeenCalled();
-      expect(warmSpy).toHaveBeenCalledTimes(1);
     } finally {
-      warmSpy.mockRestore();
       loadFromManifestSpy.mockRestore();
       sparseSearchSpy.mockRestore();
     }

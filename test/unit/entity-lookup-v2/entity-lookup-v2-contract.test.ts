@@ -14,8 +14,8 @@ import { createEntityId } from '../../../src/domain/shared/types/index.js';
 import type { NormalizedQueryViews } from '../../../src/domain/query/model/query-views.js';
 import type {
   EntityResolverPort,
-  QueryPlannerPort,
 } from '../../../src/application/search/port/search-pipeline-deps.port.js';
+import type { LookupPlannerPort } from '../../../src/application/search/entity-lookup-v2/lookup-planner.port.js';
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
@@ -119,7 +119,7 @@ function makeUseCase(
   resolver: EntityResolverPort,
   extra: Partial<{ reranker: unknown; ambiguityDictionary: unknown; aliasRegistryVersion: unknown }> = {},
 ): EntityLookupV2UseCase {
-  const queryPlanner: QueryPlannerPort = { plan: vi.fn().mockResolvedValue(plannerPlan) };
+  const lookupPlanner: LookupPlannerPort = { plan: vi.fn().mockResolvedValue(plannerPlan as never) };
   // Anchor-driven candidate generation needs an entityLookup port. The stubbed
   // resolver ignores the generated candidates (it returns a canned result), so
   // this only satisfies the generator and lets the anchor supply evidence grade.
@@ -134,7 +134,7 @@ function makeUseCase(
   };
   return new EntityLookupV2UseCase({
     admissionGate: new ConceptAdmissionGate(),
-    queryPlanner,
+    lookupPlanner,
     entityResolver: resolver,
     entityLookup: entityLookup as never,
     querySanitizer: { sanitize: vi.fn((q: string) => ({ safe: true, sanitizedQuery: q })) } as never,
@@ -351,10 +351,10 @@ describe('EntityLookupV2UseCase', () => {
 
   it('fails closed on Layer 1 sanitizer rejection WITHOUT calling the planner', async () => {
     const resolver = makeResolver('failed', []);
-    const queryPlanner: QueryPlannerPort = { plan: vi.fn().mockResolvedValue(makePlan()) };
+    const lookupPlanner: LookupPlannerPort = { plan: vi.fn().mockResolvedValue(makePlan() as never) };
     const useCase = new EntityLookupV2UseCase({
       admissionGate: new ConceptAdmissionGate(),
-      queryPlanner,
+      lookupPlanner,
       entityResolver: resolver,
       querySanitizer: {
         sanitize: vi.fn().mockReturnValue({
@@ -372,7 +372,7 @@ describe('EntityLookupV2UseCase', () => {
           reason: 'SYSTEM_PROMPT_INJECTION',
         },
       });
-    expect(queryPlanner.plan).not.toHaveBeenCalled();
+    expect(lookupPlanner.plan).not.toHaveBeenCalled();
     expect(resolver.resolve).not.toHaveBeenCalled();
   });
 
@@ -421,10 +421,10 @@ describe('T-ELV2-06 clarification contract on the wire', () => {
       { id: 'opus-one-2018', label: 'Opus One 2018', score: 0.6 },
       { id: 'opus-one-2019', label: 'Opus One 2019', score: 0.55 },
     ]);
-    const queryPlanner: QueryPlannerPort = { plan: vi.fn().mockResolvedValue(makePlan()) };
+    const lookupPlanner: LookupPlannerPort = { plan: vi.fn().mockResolvedValue(makePlan() as never) };
     const useCase = new EntityLookupV2UseCase({
       admissionGate: new ConceptAdmissionGate(),
-      queryPlanner,
+      lookupPlanner,
       entityResolver: resolver,
       entityLookup: {
         getDocuments: vi.fn(async (ids: readonly unknown[]) => {
@@ -450,17 +450,14 @@ describe('T-ELV2-06 clarification contract on the wire', () => {
       { id: 'latour-2018', label: 'Chateau Latour 2018', score: 0.6 },
       { id: 'latour-2019', label: 'Chateau Latour 2019', score: 0.55 },
     ]);
-    const queryPlanner: QueryPlannerPort = {
+    const lookupPlanner: LookupPlannerPort = {
       plan: vi.fn().mockResolvedValue(makePlan({
         rawQuery: '샤또',
         normalizedQuery: '샤또',
         normalizedQueryViews: makeViews('샤또'),
         queryClass: 'short_entity',
         anchors: [],
-      })),
-    };
-    const blocker = {
-      block: vi.fn().mockResolvedValue([createEntityId('latour-2018')]),
+      }) as never),
     };
     const ambiguityDictionary = {
       isKnownAmbiguous: vi.fn().mockResolvedValue(true),
@@ -472,12 +469,11 @@ describe('T-ELV2-06 clarification contract on the wire', () => {
     };
     const useCase = new EntityLookupV2UseCase({
       admissionGate: new ConceptAdmissionGate(),
-      queryPlanner,
+      lookupPlanner,
       entityResolver: resolver,
       entityLookup: {
         getDocuments: vi.fn(async () => new Map()),
       } as never,
-      blocker: blocker as never,
       ambiguityDictionary: ambiguityDictionary as never,
       querySanitizer: { sanitize: vi.fn((q: string) => ({ safe: true, sanitizedQuery: q })) } as never,
     });
@@ -485,10 +481,234 @@ describe('T-ELV2-06 clarification contract on the wire', () => {
     const out = await useCase.execute({ query: '샤또', maxCandidates: 10, mode: 'default' });
 
     expect(out.status).toBe('ambiguous');
-    expect(blocker.block).not.toHaveBeenCalled();
+    expect(resolver.resolve).not.toHaveBeenCalled();
     expect(ambiguityDictionary.getAmbiguityInfo).toHaveBeenCalledTimes(1);
     expect(out.evidenceSummary.ambiguityTypes).toEqual(['fixture_curated_ambiguity']);
     expect(out.evidenceSummary.ambiguitySeverity).toBe('high');
+  });
+
+  it('fails closed to ambiguous before blocker/resolver when a persisted ambiguity surface exists without an exact-safe witness', async () => {
+    const resolver = makeResolver('resolved', [
+      { id: 'margaux-2015', label: 'Chateau Margaux 2015', score: 0.99 },
+    ]);
+    const lookupPlanner: LookupPlannerPort = {
+      plan: vi.fn().mockResolvedValue(makePlan({
+        rawQuery: '마고',
+        normalizedQuery: '마고',
+        normalizedQueryViews: makeViews('마고'),
+        queryClass: 'known-item',
+        anchors: [{
+          surfaceForm: '마고',
+          normalizedForm: '마고',
+          candidateEntityIds: [createEntityId('margaux-2015')],
+          lookupStrategies: ['prefix_exact'],
+          aliasType: 'translation',
+          confidence: 0.82,
+          source: 'alias',
+        }],
+      }) as never),
+    };
+    const ambiguityDictionary = {
+      isKnownAmbiguous: vi.fn().mockResolvedValue(true),
+      getAmbiguityInfo: vi.fn().mockResolvedValue({
+        types: ['fixture_curated_ambiguity'],
+        severity: 'high',
+        entityIds: ['margaux-2015', 'margaux-appellation'],
+      }),
+      getAmbiguityInfoBatch: vi.fn().mockResolvedValue(new Map()),
+    };
+    const useCase = new EntityLookupV2UseCase({
+      admissionGate: new ConceptAdmissionGate(),
+      lookupPlanner,
+      entityResolver: resolver,
+      entityLookup: {
+        getDocuments: vi.fn(async () => new Map()),
+      } as never,
+      ambiguityDictionary: ambiguityDictionary as never,
+      querySanitizer: { sanitize: vi.fn((q: string) => ({ safe: true, sanitizedQuery: q })) } as never,
+    });
+
+    const out = await useCase.execute({ query: '마고', maxCandidates: 10, mode: 'default' });
+
+    expect(out.status).toBe('ambiguous');
+    expect(out.evidenceSummary.decisionReasonCode).toBe('persisted_ambiguity_surface');
+    expect(out.candidates).toHaveLength(0);
+    expect(resolver.resolve).not.toHaveBeenCalled();
+  });
+
+  it('normalizes failed -> ambiguous when a persisted ambiguity surface exists', async () => {
+    const resolver = makeResolver('failed', [
+      { id: 'romanee-conti-2015', label: 'DRC Romanée-Conti 2015', score: 0.06 },
+    ]);
+    const lookupPlanner: LookupPlannerPort = {
+      plan: vi.fn().mockResolvedValue(makePlan({
+        rawQuery: 'DRC',
+        normalizedQuery: 'drc',
+        normalizedQueryViews: makeViews('DRC'),
+        queryClass: 'ambiguous_short_form',
+        anchors: [{
+          surfaceForm: 'DRC',
+          normalizedForm: 'drc',
+          candidateEntityIds: [createEntityId('romanee-conti-2015')],
+          lookupStrategies: ['exact'],
+          aliasType: 'abbreviation',
+          confidence: 0.65,
+          source: 'alias',
+        }],
+      }) as never),
+    };
+    const ambiguityDictionary = {
+      isKnownAmbiguous: vi.fn().mockResolvedValue(true),
+      getAmbiguityInfo: vi.fn().mockResolvedValue({
+        types: ['fixture_curated_ambiguity'],
+        severity: 'high',
+      }),
+      getAmbiguityInfoBatch: vi.fn().mockResolvedValue(new Map()),
+    };
+    const out = await new EntityLookupV2UseCase({
+      admissionGate: new ConceptAdmissionGate(),
+      lookupPlanner,
+      entityResolver: resolver,
+      entityLookup: {
+        getDocuments: vi.fn(async (ids: readonly unknown[]) => new Map(
+          ids.map((id) => [id, { entityId: id, entityType: 'wine', canonicalLabel: 'DRC Romanée-Conti 2015' }]),
+        )),
+      } as never,
+      ambiguityDictionary: ambiguityDictionary as never,
+      querySanitizer: { sanitize: vi.fn((q: string) => ({ safe: true, sanitizedQuery: q })) } as never,
+    }).execute({ query: 'DRC', maxCandidates: 10, mode: 'default' });
+
+    expect(out.status).toBe('ambiguous');
+    expect(out.evidenceSummary.decisionReasonCode).toBe('persisted_ambiguity_surface');
+    expect(out.evidenceSummary.ambiguityTypes).toEqual(['fixture_curated_ambiguity']);
+  });
+
+  it('normalizes failed short-entity exact witnesses -> ambiguous when the surface is a known ambiguity entry', async () => {
+    const resolver = makeResolver('failed', [
+      { id: 'w-louis-roederer-cristal-2014', label: 'Louis Roederer Cristal 2014', score: 0 },
+    ]);
+    const lookupPlanner: LookupPlannerPort = {
+      plan: vi.fn().mockResolvedValue(makePlan({
+        rawQuery: '크리스탈',
+        normalizedQuery: '크리스탈',
+        normalizedQueryViews: makeViews('크리스탈'),
+        queryClass: 'short_entity',
+        anchors: [{
+          surfaceForm: '크리스탈',
+          normalizedForm: '크리스탈',
+          candidateEntityIds: [createEntityId('w-louis-roederer-cristal-2014')],
+          lookupStrategies: ['exact'],
+          aliasType: 'translation',
+          confidence: 1,
+          source: 'alias',
+        }],
+      }) as never),
+    };
+    const ambiguityDictionary = {
+      isKnownAmbiguous: vi.fn().mockResolvedValue(true),
+      getAmbiguityInfo: vi.fn().mockResolvedValue({
+        types: ['fixture_curated_ambiguity'],
+        severity: 'high',
+      }),
+      getAmbiguityInfoBatch: vi.fn().mockResolvedValue(new Map()),
+    };
+    const out = await new EntityLookupV2UseCase({
+      admissionGate: new ConceptAdmissionGate(),
+      lookupPlanner,
+      entityResolver: resolver,
+      entityLookup: {
+        getDocuments: vi.fn(async (ids: readonly unknown[]) => new Map(
+          ids.map((id) => [id, { entityId: id, entityType: 'wine', canonicalLabel: 'Louis Roederer Cristal 2014' }]),
+        )),
+      } as never,
+      ambiguityDictionary: ambiguityDictionary as never,
+      querySanitizer: { sanitize: vi.fn((q: string) => ({ safe: true, sanitizedQuery: q })) } as never,
+    }).execute({ query: '크리스탈', maxCandidates: 10, mode: 'default' });
+
+    expect(out.status).toBe('ambiguous');
+    expect(out.evidenceSummary.decisionReasonCode).toBe('persisted_ambiguity_surface');
+    expect(out.evidenceSummary.ambiguityTypes).toEqual(['fixture_curated_ambiguity']);
+  });
+
+  it('normalizes recall-only ambiguous garbage -> failed', async () => {
+    const resolver = makeResolver('ambiguous', [
+      { id: 'a', label: '2019 Château de Nalys Châteauneuf-du-Pape Rouge', score: 0.25 },
+      { id: 'b', label: '2004 Château La Nerthe Châteauneuf-du-Pape', score: 0.25 },
+    ]);
+    const plan = makePlan({
+      rawQuery: 'Chateau Fantaisie 2025',
+      normalizedQuery: 'chateau fantaisie 2025',
+      normalizedQueryViews: makeViews('Chateau Fantaisie 2025'),
+      queryClass: 'short_entity',
+      anchors: [
+        {
+          surfaceForm: '2019 Château de Nalys Châteauneuf-du-Pape Rouge',
+          normalizedForm: '2019 chateau de nalys chateauneuf-du-pape rouge',
+          candidateEntityIds: [createEntityId('a')],
+          lookupStrategies: ['fuzzy_char_ngram'],
+          aliasType: 'translation',
+          confidence: 1,
+          source: 'alias',
+        },
+        {
+          surfaceForm: '2004 Château La Nerthe Châteauneuf-du-Pape',
+          normalizedForm: '2004 chateau la nerthe chateauneuf-du-pape',
+          candidateEntityIds: [createEntityId('b')],
+          lookupStrategies: ['fuzzy_char_ngram'],
+          aliasType: 'translation',
+          confidence: 1,
+          source: 'alias',
+        },
+      ],
+    });
+    const out = await makeUseCase(plan, resolver).execute({ query: 'Chateau Fantaisie 2025', maxCandidates: 10, mode: 'default' });
+
+    expect(out.status).toBe('failed');
+    expect(out.evidenceSummary.decisionReasonCode).toBe('recall_only_no_match');
+    expect(out.clarificationOptions).toHaveLength(0);
+  });
+
+  it('normalizes ambiguous generic exact-alias noise without identity evidence -> failed', async () => {
+    const resolver = makeResolver('ambiguous', [
+      { id: 'a', label: '2021 Seresin Sauvignon Blanc', score: 0.11 },
+      { id: 'b', label: '2023 Allan Scott Sauvignon Blanc', score: 0.11 },
+    ]);
+    const plan = makePlan({
+      rawQuery: 'Cloudy Dreams Marlborough Sauvignon Blanc',
+      normalizedQuery: 'cloudy dreams marlborough sauvignon blanc',
+      normalizedQueryViews: makeViews('Cloudy Dreams Marlborough Sauvignon Blanc'),
+      queryClass: 'exact_entity',
+      anchors: [
+        {
+          surfaceForm: 'Sauvignon Blanc',
+          normalizedForm: 'sauvignon blanc',
+          candidateEntityIds: [createEntityId('a')],
+          lookupStrategies: ['exact'],
+          aliasType: 'translation',
+          confidence: 0.8,
+          source: 'alias',
+        },
+        {
+          surfaceForm: 'Sauvignon Blanc',
+          normalizedForm: 'sauvignon blanc',
+          candidateEntityIds: [createEntityId('b')],
+          lookupStrategies: ['exact'],
+          aliasType: 'translation',
+          confidence: 0.8,
+          source: 'alias',
+        },
+      ],
+    });
+
+    const out = await makeUseCase(plan, resolver).execute({
+      query: 'Cloudy Dreams Marlborough Sauvignon Blanc',
+      maxCandidates: 10,
+      mode: 'default',
+    });
+
+    expect(out.status).toBe('failed');
+    expect(out.evidenceSummary.decisionReasonCode).toBe('recall_only_no_match');
+    expect(out.clarificationOptions).toHaveLength(0);
   });
 
   // T-ELV2 vintage guard — the WIRED downgrade cascade (not just the predicate).

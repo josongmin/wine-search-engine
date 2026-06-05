@@ -10,6 +10,7 @@ import type {
   RetrievalDrinkingWindowProjection,
 } from '../../../domain/retrieval/model/retrieval-document.js';
 import type { SourceRecordRef } from '../../../domain/entity/model/source-record-ref.js';
+import type { LookupIdentityCertificate } from '../../../domain/shared/types/search-snapshot-lookup-runtime.js';
 import type { RrfFusionTrace, CandidateDropRecord } from '../../../domain/retrieval/model/candidate-envelope.js';
 import type { RetrievalDegradationSignal } from '../../../domain/retrieval/port/retrieval-degradation-observer.port.js';
 import type { RetrievalDegradationCode } from '../../../domain/retrieval/port/retrieval-degradation-observer.port.js';
@@ -113,6 +114,7 @@ export interface LookupResolverProjection {
   readonly canonicalLabel: string;
   readonly aliasesIdentitySafe: readonly string[];
   readonly identitySafeKeys: readonly string[];
+  readonly identityCertificates?: readonly LookupIdentityCertificate[] | undefined;
   readonly producer?: string | undefined;
   readonly attributeHints?: Readonly<Record<string, unknown>> | undefined;
   readonly sourceRecordRefs?: readonly SourceRecordRef[] | undefined;

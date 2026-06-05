@@ -26,8 +26,8 @@ import type { NormalizedQueryViews } from '../../src/domain/query/model/query-vi
 import type { EntityResolveResult } from '../../src/domain/resolver/model/resolve-result.js';
 import type {
   EntityResolverPort,
-  QueryPlannerPort,
 } from '../../src/application/search/port/search-pipeline-deps.port.js';
+import type { LookupPlannerPort } from '../../src/application/search/entity-lookup-v2/lookup-planner.port.js';
 
 function makeViews(query: string): NormalizedQueryViews {
   const lower = query.toLowerCase();
@@ -93,7 +93,7 @@ describe('audit HIGH — trusted calibration still requires identity-grade evide
       }),
     };
     const doc = { entityId: eid, entityType: 'wine' as const, canonicalLabel: '2022 Vinas Mora kaamen III' };
-    const queryPlanner: QueryPlannerPort = {
+    const lookupPlanner: LookupPlannerPort = {
       plan: vi.fn().mockResolvedValue({
         rawQuery: 'vina espectro', normalizedQuery: 'vina espectro', intent: 'known_item', route: 'entity',
         retrievalMode: 'entity_lookup', queryClass: 'short_entity',
@@ -101,11 +101,11 @@ describe('audit HIGH — trusted calibration still requires identity-grade evide
         constraints: { hard: [], soft: [], inferred: [] }, expansions: { lexical: [], semantic: [] },
         policy: {}, uncertainty: {}, normalizedQueryViews: makeViews('vina espectro'),
         plannerVersion: '1', policyRuleVersion: '1', thresholdProfileId: 'default',
-      }),
+      } as never),
     };
     return new EntityLookupV2UseCase({
       admissionGate: new ConceptAdmissionGate(),
-      queryPlanner,
+      lookupPlanner,
       entityResolver: resolver,
       entityLookup: {
         getDocument: vi.fn().mockResolvedValue(doc),
@@ -115,10 +115,10 @@ describe('audit HIGH — trusted calibration still requires identity-grade evide
     });
   }
 
-  it('ABSTAINS when trusted top candidate is supported only by fuzzy recall', async () => {
+  it('FAILS closed when trusted top candidate is supported only by fuzzy recall', async () => {
     const out = await trustedUseCase('fuzzy_char_ngram').execute({ query: 'vina espectro', maxCandidates: 5, mode: 'default' });
-    expect(out.status).toBe('ambiguous');
-    expect(out.evidenceSummary.decisionReasonCode).toBe('identity_evidence_required');
+    expect(out.status).toBe('failed');
+    expect(out.evidenceSummary.decisionReasonCode).toBe('recall_only_no_match');
   });
 
   it('RESOLVES when trusted top candidate carries identity-grade evidence', async () => {
@@ -184,19 +184,19 @@ describe('audit MED — max_candidates caps the surfaced candidate list', () => 
       }),
     };
     const doc = (id: ReturnType<typeof createEntityId>) => ({ entityId: id, entityType: 'wine' as const, canonicalLabel: 'E' });
-    const queryPlanner: QueryPlannerPort = {
+    const lookupPlanner: LookupPlannerPort = {
       plan: vi.fn().mockResolvedValue({
         rawQuery: 'opus one', normalizedQuery: 'opus one', intent: 'known_item', route: 'entity',
         retrievalMode: 'entity_lookup', queryClass: 'known-item',
-        anchors: [{ surfaceForm: 'opus one', normalizedForm: 'opus one', candidateEntityIds: ids, lookupStrategies: ['fuzzy_char_ngram'], confidence: 0.6 }],
+        anchors: [{ surfaceForm: 'opus one', normalizedForm: 'opus one', candidateEntityIds: ids, lookupStrategies: ['exact'], confidence: 0.97 }],
         constraints: { hard: [], soft: [], inferred: [] }, expansions: { lexical: [], semantic: [] },
         policy: {}, uncertainty: {}, normalizedQueryViews: makeViews('opus one'),
         plannerVersion: '1', policyRuleVersion: '1', thresholdProfileId: 'default',
-      }),
+      } as never),
     };
     const useCase = new EntityLookupV2UseCase({
       admissionGate: new ConceptAdmissionGate(),
-      queryPlanner,
+      lookupPlanner,
       entityResolver: resolver,
       entityLookup: {
         getDocument: vi.fn().mockImplementation(async (id) => doc(id)),
@@ -234,7 +234,7 @@ describe('audit R2 HIGH — untrusted resolve is not forgeable by a recall strat
       }),
     };
     const doc = { entityId: eid, entityType: 'wine' as const, canonicalLabel: 'Chateau Margaux' };
-    const queryPlanner: QueryPlannerPort = {
+    const lookupPlanner: LookupPlannerPort = {
       plan: vi.fn().mockResolvedValue({
         rawQuery: 'margaux', normalizedQuery: 'margaux', intent: 'known_item', route: 'entity',
         retrievalMode: 'entity_lookup', queryClass: 'short_entity',
@@ -242,11 +242,11 @@ describe('audit R2 HIGH — untrusted resolve is not forgeable by a recall strat
         constraints: { hard: [], soft: [], inferred: [] }, expansions: { lexical: [], semantic: [] },
         policy: {}, uncertainty: {}, normalizedQueryViews: makeViews('margaux'),
         plannerVersion: '1', policyRuleVersion: '1', thresholdProfileId: 'default',
-      }),
+      } as never),
     };
     return new EntityLookupV2UseCase({
       admissionGate: new ConceptAdmissionGate(),
-      queryPlanner,
+      lookupPlanner,
       entityResolver: resolver,
       entityLookup: {
         getDocument: vi.fn().mockResolvedValue(doc),
@@ -256,10 +256,10 @@ describe('audit R2 HIGH — untrusted resolve is not forgeable by a recall strat
     });
   }
 
-  it('ABSTAINS when untrusted top candidate has only a lexical_exact (recall) strategy', async () => {
+  it('FAILS closed when untrusted top candidate has only a lexical_exact (recall) strategy', async () => {
     const out = await untrustedUseCase('lexical_exact').execute({ query: 'margaux', maxCandidates: 5, mode: 'default' });
-    expect(out.status).toBe('ambiguous');
-    expect(out.evidenceSummary.decisionReasonCode).toBe('uncalibrated_low_trust');
+    expect(out.status).toBe('failed');
+    expect(out.evidenceSummary.decisionReasonCode).toBe('recall_only_no_match');
   });
 
   it('RESOLVES when untrusted top candidate has a strict exact strategy', async () => {

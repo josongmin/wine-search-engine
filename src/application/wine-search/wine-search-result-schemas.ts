@@ -58,6 +58,7 @@
  */
 
 import { z } from 'zod';
+import { DEGRADED_REASONS } from '@domain/shared/types/degraded-reason.js';
 import type { AgentTerminationReason } from '@domain/agent/model/agent-step.js';
 import type { ToolOutcome } from '@domain/agent/model/tool-outcome.js';
 import type { TokenUsage } from '@domain/ai/port/structured-llm.port.js';
@@ -259,29 +260,9 @@ const AgentTerminationReasonSchema = z.enum([
 
 const AnswerLayerSchema = z.enum(['primary', 'layer2', 'layer3', 'layer4']);
 
-export const DegradedReasonSchema = z.enum([
-  'malformed_llm_output',
-  'timeout',
-  'circuit_open',
-  'no_results',
-  'policy_blocked',
-  // Unmodeled runtime failure inside the primary structured-LLM path —
-  // distinguished from `malformed_llm_output` so operations can tell
-  // schema-validation noise apart from genuine surprises (P-M1 finding).
-  'unexpected_error',
-  // S3 grounding-verify: primary answer asserted a factual claim absent from
-  // the grounding union; one re-synth was attempted and still ungrounded, so
-  // the runner degraded to the deterministic layer ladder.
-  'ungrounded_claim',
-  // Wave 1 (Cluster F): DecisionEngine emitted NO_CORPUS_MATCH (high-confidence
-  // anchor but resolver returned 0 candidates) → deterministic corpusGapAdmission.
-  'no_corpus_match',
-  // LLM PROVIDER unavailable (auth / credit-exhausted / circuit-open / timeout):
-  // the synthesizer never ran, so the runner emitted the honest llmUnavailable
-  // message instead of fabricating a grounded one-line answer. MUST mirror
-  // `DegradedReason` in synthesis-schemas.ts (SSoT — rule 30).
-  'llm_unavailable',
-]);
+// SSoT (rule 30): derived from the single `DEGRADED_REASONS` tuple so this
+// enum can never drift from the type or the HTTP wire enum.
+export const DegradedReasonSchema = z.enum(DEGRADED_REASONS);
 
 const PlanKindSchema = z.enum([
   'single-search',

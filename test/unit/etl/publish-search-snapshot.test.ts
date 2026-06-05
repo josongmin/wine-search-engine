@@ -52,6 +52,10 @@ import {
   serializePreparedVespaFeedDocuments,
 } from '../../../scripts/etl/index-to-vespa.js';
 import { serializeNdjson, type SearchSnapshotManifest } from '../../../scripts/etl/search-snapshot-schema.js';
+import {
+  SEARCH_SNAPSHOT_SCHEMA_VERSION,
+  SEARCH_SNAPSHOT_STATE_VERSION,
+} from '../../../src/domain/shared/constants/search-snapshot.js';
 
 async function makeTempDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'publish-search-snapshot-'));
@@ -86,26 +90,39 @@ const FIELD_AVAILABILITY = {
 } as const;
 
 function makeManifest(feedPath: string): SearchSnapshotManifest {
+  const dir = path.dirname(feedPath);
   return {
-    schemaVersion: 'search_snapshot.v1',
+    schemaVersion: SEARCH_SNAPSHOT_SCHEMA_VERSION,
     snapshotId: 'search-snapshot:v1:test',
     generatedAt: '2026-04-14T00:00:00.000Z',
     contentHash: 'content-hash',
     sourceInputPath: '/tmp/silver-trackc.ndjson',
     artifacts: {
-      documentsNdjson: '/tmp/documents.ndjson',
+      documentsNdjson: path.join(dir, 'documents.ndjson'),
       vespaFeedNdjson: feedPath,
-      entitiesNdjson: '/tmp/entities.ndjson',
-      aliasesNdjson: '/tmp/aliases.ndjson',
-      ambiguityRegistryNdjson: '/tmp/ambiguity.ndjson',
-      nlMappingsJson: '/tmp/nl-mappings.json',
-      metadataJson: '/tmp/metadata.json',
+      entitiesNdjson: path.join(dir, 'entities.ndjson'),
+      aliasesNdjson: path.join(dir, 'aliases.ndjson'),
+      lookupAliasRuntimeJson: path.join(dir, 'lookup-alias-runtime.json'),
+      lookupExactSafeRuntimeJson: path.join(dir, 'lookup-exact-safe-runtime.json'),
+      lookupResolverProjectionJson: path.join(dir, 'lookup-resolver-projection.json'),
+      lookupEntityProjectionJson: path.join(dir, 'lookup-entity-projection.json'),
+      lookupAmbiguityRuntimeJson: path.join(dir, 'lookup-ambiguity-runtime.json'),
+      lookupConceptRedirectRuntimeJson: path.join(dir, 'lookup-concept-redirect-runtime.json'),
+      ambiguityRegistryNdjson: path.join(dir, 'ambiguity.ndjson'),
+      nlMappingsJson: path.join(dir, 'nl-mappings.json'),
+      metadataJson: path.join(dir, 'metadata.json'),
     },
     counts: {
       documents: 1,
       vespaFeed: 1,
       entities: 1,
       aliases: 1,
+      lookupAliasRuntimeAliases: 1,
+      lookupExactSafeRuntimeEntries: 0,
+      lookupResolverProjectionDocuments: 1,
+      lookupEntityProjectionDocuments: 1,
+      lookupAmbiguityRuntimeEntries: 0,
+      lookupConceptRedirectRuntimeEntries: 0,
       ambiguityRegistry: 0,
       nlMappings: 1,
     },
@@ -114,6 +131,12 @@ function makeManifest(feedPath: string): SearchSnapshotManifest {
       vespaFeed: 'vespa-feed-hash',
       entities: 'entities-hash',
       aliases: 'aliases-hash',
+      lookupAliasRuntime: 'lookup-alias-runtime-hash',
+      lookupExactSafeRuntime: 'lookup-exact-safe-runtime-hash',
+      lookupResolverProjection: 'lookup-resolver-projection-hash',
+      lookupEntityProjection: 'lookup-entity-projection-hash',
+      lookupAmbiguityRuntime: 'lookup-ambiguity-runtime-hash',
+      lookupConceptRedirectRuntime: 'lookup-concept-redirect-runtime-hash',
       ambiguityRegistry: 'ambiguity-hash',
       nlMappings: 'nl-hash',
     },
@@ -130,7 +153,7 @@ function makeManifest(feedPath: string): SearchSnapshotManifest {
 
 function makeCoverageManifest(dir: string): SearchSnapshotManifest {
   return {
-    schemaVersion: 'search_snapshot.v1',
+    schemaVersion: SEARCH_SNAPSHOT_SCHEMA_VERSION,
     snapshotId: 'search-snapshot:v1:coverage',
     generatedAt: '2026-04-16T00:00:00.000Z',
     contentHash: 'coverage-hash',
@@ -140,6 +163,12 @@ function makeCoverageManifest(dir: string): SearchSnapshotManifest {
       vespaFeedNdjson: path.join(dir, 'vespa-feed.ndjson'),
       entitiesNdjson: path.join(dir, 'entities.ndjson'),
       aliasesNdjson: path.join(dir, 'aliases.ndjson'),
+      lookupAliasRuntimeJson: path.join(dir, 'lookup-alias-runtime.json'),
+      lookupExactSafeRuntimeJson: path.join(dir, 'lookup-exact-safe-runtime.json'),
+      lookupResolverProjectionJson: path.join(dir, 'lookup-resolver-projection.json'),
+      lookupEntityProjectionJson: path.join(dir, 'lookup-entity-projection.json'),
+      lookupAmbiguityRuntimeJson: path.join(dir, 'lookup-ambiguity-runtime.json'),
+      lookupConceptRedirectRuntimeJson: path.join(dir, 'lookup-concept-redirect-runtime.json'),
       ambiguityRegistryNdjson: path.join(dir, 'ambiguity.ndjson'),
       nlMappingsJson: path.join(dir, 'nl-mappings.json'),
       metadataJson: path.join(dir, 'metadata.json'),
@@ -149,6 +178,12 @@ function makeCoverageManifest(dir: string): SearchSnapshotManifest {
       vespaFeed: 3,
       entities: 3,
       aliases: 1,
+      lookupAliasRuntimeAliases: 1,
+      lookupExactSafeRuntimeEntries: 0,
+      lookupResolverProjectionDocuments: 3,
+      lookupEntityProjectionDocuments: 3,
+      lookupAmbiguityRuntimeEntries: 0,
+      lookupConceptRedirectRuntimeEntries: 0,
       ambiguityRegistry: 0,
       nlMappings: 1,
     },
@@ -157,6 +192,12 @@ function makeCoverageManifest(dir: string): SearchSnapshotManifest {
       vespaFeed: 'vespa-feed-hash',
       entities: 'entities-hash',
       aliases: 'aliases-hash',
+      lookupAliasRuntime: 'lookup-alias-runtime-hash',
+      lookupExactSafeRuntime: 'lookup-exact-safe-runtime-hash',
+      lookupResolverProjection: 'lookup-resolver-projection-hash',
+      lookupEntityProjection: 'lookup-entity-projection-hash',
+      lookupAmbiguityRuntime: 'lookup-ambiguity-runtime-hash',
+      lookupConceptRedirectRuntime: 'lookup-concept-redirect-runtime-hash',
       ambiguityRegistry: 'ambiguity-hash',
       nlMappings: 'nl-hash',
     },
@@ -552,6 +593,23 @@ describe('loadPublishedRuntimeState', () => {
       /Unexpected end of JSON input|Expected property name or '}' in JSON|Malformed runtime search snapshot state/,
     );
   });
+
+  it('rejects a legacy v6 runtime state instead of dual-reading it', async () => {
+    const dir = await makeTempDir();
+    const runtimeStatePath = path.join(dir, 'runtime-state.json');
+    await fs.writeFile(
+      runtimeStatePath,
+      `${JSON.stringify({
+        schemaVersion: 'search_snapshot_runtime_state.v6',
+        snapshotId: 'search-snapshot:v1:legacy',
+        manifestPath: '/tmp/legacy-manifest.json',
+      })}\n`,
+    );
+
+    await expect(loadPublishedRuntimeState(runtimeStatePath)).rejects.toThrow(
+      /Malformed runtime search snapshot state/,
+    );
+  });
 });
 
 describe('runtime substrate promotion state machine', () => {
@@ -565,23 +623,27 @@ describe('runtime substrate promotion state machine', () => {
     await fs.writeFile(
       stagedStatePath,
       `${JSON.stringify({
-        schemaVersion: 'search_snapshot_runtime_state.v5',
+        schemaVersion: SEARCH_SNAPSHOT_STATE_VERSION,
         snapshotId: 'search-snapshot:v1:test',
         contentHash: 'content-hash',
         publishedAt: '2026-04-14T00:00:00.000Z',
         manifestPath: '/tmp/manifest.json',
         nlMappingsRuntimePath: stagedNlMappingsPath,
         lookupAliasRuntimePath: path.join(dir, 'lookup-alias-runtime.json'),
+        lookupExactSafeRuntimePath: path.join(dir, 'lookup-exact-safe-runtime.json'),
         lookupResolverProjectionPath: path.join(dir, 'lookup-resolver-projection.json'),
         lookupEntityProjectionPath: path.join(dir, 'lookup-entity-projection.json'),
         lookupAmbiguityRuntimePath: path.join(dir, 'lookup-ambiguity-runtime.json'),
+        lookupConceptRedirectRuntimePath: path.join(dir, 'lookup-concept-redirect-runtime.json'),
         counts: {
           entities: 1,
           aliases: 1,
           lookupAliasRuntimeAliases: 1,
+          lookupExactSafeRuntimeEntries: 0,
           lookupResolverProjectionDocuments: 1,
           lookupEntityProjectionDocuments: 1,
           lookupAmbiguityRuntimeEntries: 0,
+          lookupConceptRedirectRuntimeEntries: 0,
           ambiguityRegistry: 0,
           nlMappings: 1,
           activeLtrModels: 1,
@@ -590,9 +652,11 @@ describe('runtime substrate promotion state machine', () => {
           entities: 'entities-hash',
           aliases: 'aliases-hash',
           lookupAliasRuntime: 'lookup-alias-runtime-hash',
+          lookupExactSafeRuntime: 'lookup-exact-safe-runtime-hash',
           lookupResolverProjection: 'lookup-resolver-projection-hash',
           lookupEntityProjection: 'lookup-entity-projection-hash',
           lookupAmbiguityRuntime: 'lookup-ambiguity-runtime-hash',
+          lookupConceptRedirectRuntime: 'lookup-concept-redirect-runtime-hash',
           ambiguityRegistry: 'ambiguity-hash',
           nlMappings: 'nl-hash',
           activeLtrModels: 'ltr-hash',

@@ -48,6 +48,22 @@ describe('buildCoverageReport (T-ELV2-03 hot-entity coverage)', () => {
     expect(report.nonEntityCorrect).toBe(1);
   });
 
+  it('does not emit a coverage hole when a hot row explicitly accepts ambiguous as well as resolved', () => {
+    const report = buildCoverageReport([
+      {
+        qid: 'm2',
+        query: 'Margaux',
+        expectedStatus: 'ambiguous',
+        acceptedStatuses: ['ambiguous', 'resolved'],
+        class: 'ambiguity_broad_icon',
+        observedStatus: 'ambiguous',
+      },
+    ]);
+    expect(report.hotEntityCount).toBe(1);
+    expect(report.coveredCount).toBe(1);
+    expect(report.holes).toHaveLength(0);
+  });
+
   it('reports zero holes when every hot entity resolves', () => {
     const report = buildCoverageReport([
       { qid: 'a', query: 'X', expectedStatus: 'resolved', class: 'e', observedStatus: 'resolved' },

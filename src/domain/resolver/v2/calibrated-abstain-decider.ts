@@ -68,6 +68,29 @@ export class CalibratedAbstainDecider {
       return decision('ambiguous', 'uncalibrated_low_trust', 'Calibration is untrusted and there is no exact-identity evidence — abstaining.', topConfidence, margin, calibrationTrusted);
     }
 
+    // Resolver-owned exact-safe singleton certificate: the resolver has
+    // already established a collision-free singleton identity witness and
+    // emitted an explicit reason code. Re-applying the generic calibrated
+    // confidence floor here would silently demote that structural certificate
+    // back to failed when top1CalibratedScore is 0/near-0 under a sparse or
+    // conservative calibrator fit. Honor the resolver's certificate-owned
+    // outcome, but ONLY when the final V2 evidence grade is still
+    // identity-bearing and there is no competitive runner-up.
+    if (
+      evidenceGrade === 'identity_grade'
+      && isMarginClear(margin, gapThreshold)
+      && hasExactSafeSingletonResolverOutcome(trace.outcomeReasonCodes)
+    ) {
+      return decision(
+        'resolved',
+        'exact_safe_singleton_certificate',
+        'Resolved on an exact-safe singleton identity certificate.',
+        topConfidence,
+        margin,
+        calibrationTrusted,
+      );
+    }
+
     // Trusted calibration: enforce confidence floor + margin.
     if (topConfidence < resolveThreshold) {
       return decision('failed', 'below_resolve_threshold', 'Top candidate confidence is below the resolve threshold.', topConfidence, margin, calibrationTrusted);
@@ -90,6 +113,10 @@ function isMarginClear(margin: number | undefined, gapThreshold: number): boolea
 
 function firstReason(codes: readonly string[], fallback: string): string {
   return codes[0] ?? fallback;
+}
+
+function hasExactSafeSingletonResolverOutcome(codes: readonly string[]): boolean {
+  return codes.includes('SINGLETON_EXACT_SAFE_CERTIFICATE_RESOLVED');
 }
 
 function decision(

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { SearchUseCase } from '../../../../src/application/search/search.usecase.js';
 import {
+  findRawQueryExactSafeSingletonAliasWitness,
   hasDeterministicSingletonAliasWitness,
   shouldSuppressBlockerSeedExpansion,
   shouldSuppressBlockerSeedExpansionForKnownShortAmbiguity,
@@ -137,6 +138,55 @@ describe('shouldSuppressBlockerSeedExpansion', () => {
     expect(shouldSuppressBlockerSeedExpansion(plan.anchors)).toBe(false);
   });
 
+  it('finds a raw-query exact-safe singleton witness without requiring confidence=1', () => {
+    const plan = makeExactCanonicalAnchorPlan();
+    plan.rawQuery = '샤또 마고';
+    plan.normalizedQuery = '샤또 마고';
+    plan.anchors = [{
+      ...plan.anchors[0]!,
+      surfaceForm: '샤또 마고',
+      normalizedForm: '샤또 마고',
+      aliasType: 'observed_query_alias',
+      confidence: 0.98,
+      lookupStrategies: ['exact'],
+    }];
+    expect(hasDeterministicSingletonAliasWitness(plan.anchors)).toBe(false);
+    expect(findRawQueryExactSafeSingletonAliasWitness(plan.rawQuery, plan.normalizedQuery, plan.anchors)?.entityId)
+      .toBe(PRIMARY_ENTITY_ID);
+  });
+
+  it('finds a raw-query exact-safe singleton witness even when normalizedQuery was broadened by typo correction', () => {
+    const plan = makeExactCanonicalAnchorPlan();
+    plan.rawQuery = '라피트 로쉴드';
+    plan.normalizedQuery = '샤또 라피트';
+    plan.anchors = [{
+      ...plan.anchors[0]!,
+      surfaceForm: '라피트 로쉴드',
+      normalizedForm: '라피트 로쉴드',
+      aliasType: 'observed_query_alias',
+      confidence: 0.98,
+      lookupStrategies: ['exact'],
+    }];
+    expect(findRawQueryExactSafeSingletonAliasWitness(plan.rawQuery, plan.normalizedQuery, plan.anchors)?.entityId)
+      .toBe(PRIMARY_ENTITY_ID);
+  });
+
+  it('finds a singleton translation witness when the raw query is more specific than normalizedQuery', () => {
+    const plan = makeExactCanonicalAnchorPlan();
+    plan.rawQuery = '도멘 드 라 로마네 콩티';
+    plan.normalizedQuery = '로마네 콩티';
+    plan.anchors = [{
+      ...plan.anchors[0]!,
+      surfaceForm: '도멘 드 라 로마네 콩티',
+      normalizedForm: '도멘 드 라 로마네 콩티',
+      aliasType: 'translation',
+      confidence: 0.98,
+      lookupStrategies: ['exact', 'compact_exact'],
+    }];
+    expect(findRawQueryExactSafeSingletonAliasWitness(plan.rawQuery, plan.normalizedQuery, plan.anchors)?.entityId)
+      .toBe(PRIMARY_ENTITY_ID);
+  });
+
   it('returns true for known ambiguous short_entity queries without a singleton alias witness', () => {
     const plan = makeExactCanonicalAnchorPlan();
     plan.queryClass = 'short_entity';
@@ -151,9 +201,32 @@ describe('shouldSuppressBlockerSeedExpansion', () => {
   it('returns false for known ambiguity when a singleton alias witness already exists', () => {
     const plan = makeExactCanonicalAnchorPlan();
     expect(shouldSuppressBlockerSeedExpansionForKnownShortAmbiguity({
+      rawQuery: plan.rawQuery,
       queryClass: 'short_entity',
       anchors: plan.anchors,
       persistedAmbiguity: { types: ['fixture_curated_ambiguity'], severity: 'high' },
+      normalizedQuery: plan.normalizedQuery,
+    })).toBe(false);
+  });
+
+  it('returns false for known ambiguity when a raw-query exact-safe witness exists', () => {
+    const plan = makeExactCanonicalAnchorPlan();
+    plan.rawQuery = '샤또 마고';
+    plan.normalizedQuery = '샤또 마고';
+    plan.anchors = [{
+      ...plan.anchors[0]!,
+      surfaceForm: '샤또 마고',
+      normalizedForm: '샤또 마고',
+      aliasType: 'observed_query_alias',
+      confidence: 0.98,
+      lookupStrategies: ['exact'],
+    }];
+    expect(shouldSuppressBlockerSeedExpansionForKnownShortAmbiguity({
+      rawQuery: plan.rawQuery,
+      queryClass: 'short_entity',
+      anchors: plan.anchors,
+      persistedAmbiguity: { types: ['fixture_curated_ambiguity'], severity: 'high' },
+      normalizedQuery: plan.normalizedQuery,
     })).toBe(false);
   });
 });

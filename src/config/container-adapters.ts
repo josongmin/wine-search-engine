@@ -216,11 +216,6 @@ export async function buildCoreAdapterServices(
     inMemoryAliasMatcher !== undefined
       ? (() => {
           const matcher = new LazyFuzzyMatcher(inMemoryAliasMatcher.getSurfaceForms());
-          // Cold-starting the BK-tree on the first user query caused the
-          // initial hybrid request after deploy to spend tens of seconds in
-          // planner pre-route. Warm the in-memory fuzzy index during startup
-          // so the cost is paid before the server serves traffic.
-          matcher.warm();
           return matcher;
         })()
       : undefined;

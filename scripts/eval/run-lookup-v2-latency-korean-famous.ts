@@ -2,9 +2,10 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { loadConfig } from '../../src/config/env.js';
-import { createContainer } from '../../src/config/container.js';
+import { createLookupDirectContainer } from '../../src/config/container-lookup.js';
 import { createStageTimer } from '../../src/domain/shared/stage-timer.js';
 import { SearchSnapshotAliasMatcher } from '../../src/infrastructure/adapter/search-snapshot-alias-matcher.js';
+import { SEARCH_SNAPSHOT_SCHEMA_VERSION } from '../../src/domain/shared/constants/search-snapshot.js';
 import {
   DEFAULT_RUNTIME_STATE_PATH,
   loadSearchSnapshotRuntimeState,
@@ -114,10 +115,11 @@ async function main(): Promise<void> {
       corpus: { type: 'string', default: 'test/fixtures/lookup-v2-korean-famous-expanded.jsonl' },
       output: { type: 'string', default: '/tmp/lookup-v2-latency-korean-famous.json' },
       limit: { type: 'string' },
-      runtimeState: { type: 'string', default: DEFAULT_RUNTIME_STATE_PATH },
-      bootstrapThresholdMs: { type: 'string', default: '3000' },
-      firstQueryThresholdMs: { type: 'string', default: '5000' },
-      warmP95ThresholdMs: { type: 'string', default: '2000' },
+      runtimeState: { type: 'string' },
+      useActiveRuntime: { type: 'boolean', default: false },
+      bootstrapThresholdMs: { type: 'string', default: '2500' },
+      firstQueryThresholdMs: { type: 'string', default: '800' },
+      warmP95ThresholdMs: { type: 'string', default: '800' },
     },
     strict: true,
     allowPositionals: false,
@@ -125,11 +127,16 @@ async function main(): Promise<void> {
 
   const corpusPath = values.corpus ?? 'test/fixtures/lookup-v2-korean-famous-expanded.jsonl';
   const outputPath = values.output ?? '/tmp/lookup-v2-latency-korean-famous.json';
-  const runtimeStatePath = values.runtimeState ?? DEFAULT_RUNTIME_STATE_PATH;
+  const runtimeStatePath = values.runtimeState;
+  const useActiveRuntime = values.useActiveRuntime ?? false;
+  if (runtimeStatePath === undefined && !useActiveRuntime) {
+    throw new Error('Explicit runtime binding required: pass --runtimeState <path> or --useActiveRuntime');
+  }
+  const effectiveRuntimeStatePath = runtimeStatePath ?? DEFAULT_RUNTIME_STATE_PATH;
   const requestedLimit = values.limit === undefined ? undefined : Number.parseInt(values.limit, 10);
-  const bootstrapThresholdMs = Number.parseFloat(values.bootstrapThresholdMs ?? '3000');
-  const firstQueryThresholdMs = Number.parseFloat(values.firstQueryThresholdMs ?? '5000');
-  const warmP95ThresholdMs = Number.parseFloat(values.warmP95ThresholdMs ?? '2000');
+  const bootstrapThresholdMs = Number.parseFloat(values.bootstrapThresholdMs ?? '2500');
+  const firstQueryThresholdMs = Number.parseFloat(values.firstQueryThresholdMs ?? '800');
+  const warmP95ThresholdMs = Number.parseFloat(values.warmP95ThresholdMs ?? '800');
 
   const hotset = parseHotset(corpusPath);
   if (hotset.length === 0) {
@@ -137,8 +144,8 @@ async function main(): Promise<void> {
   }
   const rows = requestedLimit === undefined ? hotset : hotset.slice(0, Math.max(1, requestedLimit));
 
-  const runtimeState = await loadSearchSnapshotRuntimeState(runtimeStatePath);
-  const probeMatcher = await SearchSnapshotAliasMatcher.loadFromRuntimeState(runtimeStatePath);
+  const runtimeState = await loadSearchSnapshotRuntimeState(effectiveRuntimeStatePath);
+  const probeMatcher = await SearchSnapshotAliasMatcher.loadFromRuntimeState(effectiveRuntimeStatePath);
   if (probeMatcher === undefined) {
     throw new Error(`[elv2-latency] failed to load alias runtime matcher from ${runtimeStatePath}`);
   }
@@ -154,7 +161,12 @@ async function main(): Promise<void> {
   const config = loadConfig();
   const pool = getPgPool();
   const bootstrapStartedAt = performance.now();
-  const container = await createContainer(config, pool);
+  const container = await createLookupDirectContainer(config, {
+    pool,
+    searchSnapshotId: runtimeState.snapshotId,
+    searchSnapshotManifestPath: runtimeState.manifestPath,
+    searchSnapshotFieldAvailability: runtimeState.fieldAvailability,
+  });
   const bootstrapMs = roundMs(performance.now() - bootstrapStartedAt);
 
   const queryRows: QueryLatencyRow[] = [];
@@ -246,8 +258,12 @@ async function main(): Promise<void> {
     generatedAt: new Date().toISOString(),
     gitSha,
     corpus: corpusPath,
-    runtimeStatePath,
+    container_profile: 'lookup_direct_container',
+    runtimeStatePath: effectiveRuntimeStatePath,
+    runtime_state_schema: runtimeState.schemaVersion,
+    manifest_schema: SEARCH_SNAPSHOT_SCHEMA_VERSION,
     snapshotId: runtimeState.snapshotId,
+    artifact_hashes: runtimeState.hashes,
     thresholds: {
       bootstrap_ms: bootstrapThresholdMs,
       first_query_ms: firstQueryThresholdMs,

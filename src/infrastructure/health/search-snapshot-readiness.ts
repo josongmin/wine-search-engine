@@ -193,13 +193,14 @@ async function fetchVespaWineTypePayloadProbe(
   wineType: CriticalWineType,
   mtls?: VespaMtlsConfig,
 ): Promise<VespaPayloadProbeResult> {
+  const snapshotFilter = `search_snapshot_id matches ${JSON.stringify(`^${snapshotId}$`)}`;
+  const wineTypeFilter = `wine_type matches ${JSON.stringify(`^${wineType}$`)}`;
   const body = await fetchVespaSearchJson(
     vespaUrl,
     {
       yql:
-        `select * from sources * where ` +
-        `search_snapshot_id contains ${JSON.stringify(snapshotId)} and ` +
-        `wine_type contains ${JSON.stringify(wineType)} limit ${VESPA_RAW_FIELD_PROBE_LIMIT};`,
+        `select * from wine_entity where ${snapshotFilter} and ${wineTypeFilter} `
+        + `limit ${VESPA_RAW_FIELD_PROBE_LIMIT};`,
     },
     `Vespa payload probe failed for ${wineType}`,
     mtls,
@@ -232,9 +233,11 @@ export interface LoadedSearchSnapshotRuntimeState {
   readonly manifestPath: string;
   readonly nlMappingsRuntimePath: string;
   readonly lookupAliasRuntimePath: string;
+  readonly lookupExactSafeRuntimePath: string;
   readonly lookupResolverProjectionPath: string;
   readonly lookupEntityProjectionPath: string;
   readonly lookupAmbiguityRuntimePath: string;
+  readonly lookupConceptRedirectRuntimePath: string;
   readonly quality: {
     readonly status: 'canonical' | 'degraded';
     readonly blockers: readonly string[];
@@ -247,9 +250,11 @@ export interface LoadedSearchSnapshotRuntimeState {
     readonly entities: number;
     readonly aliases: number;
     readonly lookupAliasRuntimeAliases: number;
+    readonly lookupExactSafeRuntimeEntries: number;
     readonly lookupResolverProjectionDocuments: number;
     readonly lookupEntityProjectionDocuments: number;
     readonly lookupAmbiguityRuntimeEntries: number;
+    readonly lookupConceptRedirectRuntimeEntries: number;
     readonly ambiguityRegistry: number;
     readonly nlMappings: number;
     readonly activeLtrModels: number;
@@ -258,9 +263,11 @@ export interface LoadedSearchSnapshotRuntimeState {
     readonly entities: string;
     readonly aliases: string;
     readonly lookupAliasRuntime: string;
+    readonly lookupExactSafeRuntime: string;
     readonly lookupResolverProjection: string;
     readonly lookupEntityProjection: string;
     readonly lookupAmbiguityRuntime: string;
+    readonly lookupConceptRedirectRuntime: string;
     readonly ambiguityRegistry: string;
     readonly nlMappings: string;
     readonly activeLtrModels: string;
@@ -322,9 +329,11 @@ type RuntimeStateShape = {
   readonly manifestPath?: unknown;
   readonly nlMappingsRuntimePath?: unknown;
   readonly lookupAliasRuntimePath?: unknown;
+  readonly lookupExactSafeRuntimePath?: unknown;
   readonly lookupResolverProjectionPath?: unknown;
   readonly lookupEntityProjectionPath?: unknown;
   readonly lookupAmbiguityRuntimePath?: unknown;
+  readonly lookupConceptRedirectRuntimePath?: unknown;
   readonly quality?: {
     readonly status?: unknown;
     readonly blockers?: unknown;
@@ -363,9 +372,11 @@ type RuntimeStateShape = {
     readonly entities?: unknown;
     readonly aliases?: unknown;
     readonly lookupAliasRuntimeAliases?: unknown;
+    readonly lookupExactSafeRuntimeEntries?: unknown;
     readonly lookupResolverProjectionDocuments?: unknown;
     readonly lookupEntityProjectionDocuments?: unknown;
     readonly lookupAmbiguityRuntimeEntries?: unknown;
+    readonly lookupConceptRedirectRuntimeEntries?: unknown;
     readonly ambiguityRegistry?: unknown;
     readonly nlMappings?: unknown;
     readonly activeLtrModels?: unknown;
@@ -374,9 +385,11 @@ type RuntimeStateShape = {
     readonly entities?: unknown;
     readonly aliases?: unknown;
     readonly lookupAliasRuntime?: unknown;
+    readonly lookupExactSafeRuntime?: unknown;
     readonly lookupResolverProjection?: unknown;
     readonly lookupEntityProjection?: unknown;
     readonly lookupAmbiguityRuntime?: unknown;
+    readonly lookupConceptRedirectRuntime?: unknown;
     readonly ambiguityRegistry?: unknown;
     readonly nlMappings?: unknown;
     readonly activeLtrModels?: unknown;
@@ -544,9 +557,11 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
   if (typeof parsed.manifestPath !== 'string' || parsed.manifestPath.length === 0) malformedReasons.push('manifestPath');
   if (typeof parsed.nlMappingsRuntimePath !== 'string' || parsed.nlMappingsRuntimePath.length === 0) malformedReasons.push('nlMappingsRuntimePath');
   if (typeof parsed.lookupAliasRuntimePath !== 'string' || parsed.lookupAliasRuntimePath.length === 0) malformedReasons.push('lookupAliasRuntimePath');
+  if (typeof parsed.lookupExactSafeRuntimePath !== 'string' || parsed.lookupExactSafeRuntimePath.length === 0) malformedReasons.push('lookupExactSafeRuntimePath');
   if (typeof parsed.lookupResolverProjectionPath !== 'string' || parsed.lookupResolverProjectionPath.length === 0) malformedReasons.push('lookupResolverProjectionPath');
   if (typeof parsed.lookupEntityProjectionPath !== 'string' || parsed.lookupEntityProjectionPath.length === 0) malformedReasons.push('lookupEntityProjectionPath');
   if (typeof parsed.lookupAmbiguityRuntimePath !== 'string' || parsed.lookupAmbiguityRuntimePath.length === 0) malformedReasons.push('lookupAmbiguityRuntimePath');
+  if (typeof parsed.lookupConceptRedirectRuntimePath !== 'string' || parsed.lookupConceptRedirectRuntimePath.length === 0) malformedReasons.push('lookupConceptRedirectRuntimePath');
   if (quality === undefined) malformedReasons.push('quality');
   if (!hasValidFieldAvailability) malformedReasons.push('fieldAvailability');
   if (counts === undefined) malformedReasons.push('counts');
@@ -554,9 +569,11 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
     if (!isFiniteCount(counts.entities)) malformedReasons.push('counts.entities');
     if (!isFiniteCount(counts.aliases)) malformedReasons.push('counts.aliases');
     if (!isFiniteCount(counts.lookupAliasRuntimeAliases)) malformedReasons.push('counts.lookupAliasRuntimeAliases');
+    if (!isFiniteCount(counts.lookupExactSafeRuntimeEntries)) malformedReasons.push('counts.lookupExactSafeRuntimeEntries');
     if (!isFiniteCount(counts.lookupResolverProjectionDocuments)) malformedReasons.push('counts.lookupResolverProjectionDocuments');
     if (!isFiniteCount(counts.lookupEntityProjectionDocuments)) malformedReasons.push('counts.lookupEntityProjectionDocuments');
     if (!isFiniteCount(counts.lookupAmbiguityRuntimeEntries)) malformedReasons.push('counts.lookupAmbiguityRuntimeEntries');
+    if (!isFiniteCount(counts.lookupConceptRedirectRuntimeEntries)) malformedReasons.push('counts.lookupConceptRedirectRuntimeEntries');
     if (!isFiniteCount(counts.ambiguityRegistry)) malformedReasons.push('counts.ambiguityRegistry');
     if (!isFiniteCount(counts.nlMappings)) malformedReasons.push('counts.nlMappings');
     if (!isFiniteCount(counts.activeLtrModels)) malformedReasons.push('counts.activeLtrModels');
@@ -566,9 +583,11 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
     if (typeof hashes.entities !== 'string' || hashes.entities.length === 0) malformedReasons.push('hashes.entities');
     if (typeof hashes.aliases !== 'string' || hashes.aliases.length === 0) malformedReasons.push('hashes.aliases');
     if (typeof hashes.lookupAliasRuntime !== 'string' || hashes.lookupAliasRuntime.length === 0) malformedReasons.push('hashes.lookupAliasRuntime');
+    if (typeof hashes.lookupExactSafeRuntime !== 'string' || hashes.lookupExactSafeRuntime.length === 0) malformedReasons.push('hashes.lookupExactSafeRuntime');
     if (typeof hashes.lookupResolverProjection !== 'string' || hashes.lookupResolverProjection.length === 0) malformedReasons.push('hashes.lookupResolverProjection');
     if (typeof hashes.lookupEntityProjection !== 'string' || hashes.lookupEntityProjection.length === 0) malformedReasons.push('hashes.lookupEntityProjection');
     if (typeof hashes.lookupAmbiguityRuntime !== 'string' || hashes.lookupAmbiguityRuntime.length === 0) malformedReasons.push('hashes.lookupAmbiguityRuntime');
+    if (typeof hashes.lookupConceptRedirectRuntime !== 'string' || hashes.lookupConceptRedirectRuntime.length === 0) malformedReasons.push('hashes.lookupConceptRedirectRuntime');
     if (typeof hashes.ambiguityRegistry !== 'string' || hashes.ambiguityRegistry.length === 0) malformedReasons.push('hashes.ambiguityRegistry');
     if (typeof hashes.nlMappings !== 'string' || hashes.nlMappings.length === 0) malformedReasons.push('hashes.nlMappings');
     if (typeof hashes.activeLtrModels !== 'string' || hashes.activeLtrModels.length === 0) malformedReasons.push('hashes.activeLtrModels');
@@ -586,9 +605,11 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
   const validatedManifestPath = parsed.manifestPath as string;
   const validatedNlMappingsRuntimePath = parsed.nlMappingsRuntimePath as string;
   const validatedLookupAliasRuntimePath = parsed.lookupAliasRuntimePath as string;
+  const validatedLookupExactSafeRuntimePath = parsed.lookupExactSafeRuntimePath as string;
   const validatedLookupResolverProjectionPath = parsed.lookupResolverProjectionPath as string;
   const validatedLookupEntityProjectionPath = parsed.lookupEntityProjectionPath as string;
   const validatedLookupAmbiguityRuntimePath = parsed.lookupAmbiguityRuntimePath as string;
+  const validatedLookupConceptRedirectRuntimePath = parsed.lookupConceptRedirectRuntimePath as string;
   const validatedQuality = quality as RuntimeStateQuality;
   const validatedFieldAvailability = normalizedFieldAvailability as SearchSnapshotFieldAvailability;
   const validatedCounts = counts as LoadedSearchSnapshotRuntimeState['counts'];
@@ -613,18 +634,22 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
     manifestPath: validatedManifestPath,
     nlMappingsRuntimePath: validatedNlMappingsRuntimePath,
     lookupAliasRuntimePath: validatedLookupAliasRuntimePath,
+    lookupExactSafeRuntimePath: validatedLookupExactSafeRuntimePath,
     lookupResolverProjectionPath: validatedLookupResolverProjectionPath,
     lookupEntityProjectionPath: validatedLookupEntityProjectionPath,
     lookupAmbiguityRuntimePath: validatedLookupAmbiguityRuntimePath,
+    lookupConceptRedirectRuntimePath: validatedLookupConceptRedirectRuntimePath,
     quality: normalizedQuality,
     fieldAvailability: validatedFieldAvailability,
     counts: {
       entities: validatedCounts.entities,
       aliases: validatedCounts.aliases,
       lookupAliasRuntimeAliases: validatedCounts.lookupAliasRuntimeAliases,
+      lookupExactSafeRuntimeEntries: validatedCounts.lookupExactSafeRuntimeEntries,
       lookupResolverProjectionDocuments: validatedCounts.lookupResolverProjectionDocuments,
       lookupEntityProjectionDocuments: validatedCounts.lookupEntityProjectionDocuments,
       lookupAmbiguityRuntimeEntries: validatedCounts.lookupAmbiguityRuntimeEntries,
+      lookupConceptRedirectRuntimeEntries: validatedCounts.lookupConceptRedirectRuntimeEntries,
       ambiguityRegistry: validatedCounts.ambiguityRegistry,
       nlMappings: validatedCounts.nlMappings,
       activeLtrModels: validatedCounts.activeLtrModels,
@@ -633,9 +658,11 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
       entities: validatedHashes.entities,
       aliases: validatedHashes.aliases,
       lookupAliasRuntime: validatedHashes.lookupAliasRuntime,
+      lookupExactSafeRuntime: validatedHashes.lookupExactSafeRuntime,
       lookupResolverProjection: validatedHashes.lookupResolverProjection,
       lookupEntityProjection: validatedHashes.lookupEntityProjection,
       lookupAmbiguityRuntime: validatedHashes.lookupAmbiguityRuntime,
+      lookupConceptRedirectRuntime: validatedHashes.lookupConceptRedirectRuntime,
       ambiguityRegistry: validatedHashes.ambiguityRegistry,
       nlMappings: validatedHashes.nlMappings,
       activeLtrModels: validatedHashes.activeLtrModels,
@@ -700,7 +727,7 @@ async function fetchVespaSnapshotDocumentCount(
   const body = await fetchVespaSearchJson(
     vespaUrl,
     {
-      yql: `select * from sources * where search_snapshot_id contains ${JSON.stringify(snapshotId)} limit 0;`,
+      yql: `select * from wine_entity where search_snapshot_id matches ${JSON.stringify(`^${snapshotId}$`)} limit 0;`,
     },
     'Vespa snapshot readiness query failed',
     mtls,
@@ -721,7 +748,9 @@ async function fetchVespaWineTypeDocumentCount(
   const body = await fetchVespaSearchJson(
     vespaUrl,
     {
-      yql: `select * from sources * where search_snapshot_id contains ${JSON.stringify(snapshotId)} and wine_type contains ${JSON.stringify(wineType)} limit 0;`,
+      yql:
+        `select * from wine_entity where search_snapshot_id matches ${JSON.stringify(`^${snapshotId}$`)} `
+        + `and wine_type matches ${JSON.stringify(`^${wineType}$`)} limit 0;`,
     },
     `Vespa wine_type readiness query failed for ${wineType}`,
     mtls,

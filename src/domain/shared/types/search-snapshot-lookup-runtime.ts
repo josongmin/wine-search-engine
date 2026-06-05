@@ -13,6 +13,8 @@ const LOOKUP_RUNTIME_ALIAS_TYPES = [
 ] as const;
 
 type AliasType = (typeof LOOKUP_RUNTIME_ALIAS_TYPES)[number];
+export type LookupIdentityCertificateKind = 'exact_safe' | 'compact_exact_safe';
+export type LookupIdentityCertificateSourceTier = 'curated' | 'catalog' | 'translation';
 
 interface LookupRuntimeSourceRecordRef {
   readonly sourceSystem: string;
@@ -23,6 +25,8 @@ export const LOOKUP_ALIAS_RUNTIME_SCHEMA_VERSION = 'lookup_alias_runtime.v1' as 
 export const LOOKUP_RESOLVER_PROJECTION_SCHEMA_VERSION = 'lookup_resolver_projection.v1' as const;
 export const LOOKUP_ENTITY_PROJECTION_SCHEMA_VERSION = 'lookup_entity_projection.v1' as const;
 export const LOOKUP_AMBIGUITY_RUNTIME_SCHEMA_VERSION = 'lookup_ambiguity_runtime.v1' as const;
+export const LOOKUP_CONCEPT_REDIRECT_RUNTIME_SCHEMA_VERSION = 'lookup_concept_redirect_runtime.v1' as const;
+export const LOOKUP_EXACT_SAFE_RUNTIME_SCHEMA_VERSION = 'lookup_exact_safe_runtime.v1' as const;
 
 export interface LookupAliasRuntimeRow {
   readonly aliasId: string;
@@ -86,9 +90,19 @@ export interface LookupResolverProjectionDocument {
   readonly canonicalLabel: string;
   readonly aliasesIdentitySafe: readonly string[];
   readonly identitySafeKeys: readonly string[];
+  readonly identityCertificates?: readonly LookupIdentityCertificate[] | undefined;
   readonly producer?: string | undefined;
   readonly attributeHints?: Readonly<Record<string, string | number | readonly string[]>> | undefined;
   readonly sourceRecordRefs?: readonly LookupRuntimeSourceRecordRef[] | undefined;
+}
+
+export interface LookupIdentityCertificate {
+  readonly kind: LookupIdentityCertificateKind;
+  readonly normalizedSurface: string;
+  readonly compactSurface?: string | undefined;
+  readonly sourceTier: LookupIdentityCertificateSourceTier;
+  readonly singleton: true;
+  readonly collisionFree: true;
 }
 
 export interface LookupResolverProjectionArtifact {
@@ -117,6 +131,43 @@ export interface LookupAmbiguityRuntimeArtifact {
   readonly snapshotId: string;
   readonly generatedAt: string;
   readonly entries: Readonly<Record<string, LookupAmbiguityRuntimeEntry>>;
+}
+
+export type LookupConceptRedirectClass =
+  | 'grape'
+  | 'region'
+  | 'style'
+  | 'recommendation'
+  | 'pairing'
+  | 'generic';
+
+export interface LookupConceptRedirectRuntimeEntry {
+  readonly normalizedForm: string;
+  readonly locale: 'ko' | 'global';
+  readonly conceptClass: LookupConceptRedirectClass;
+  readonly redirectReason: 'concept_query' | 'generic_non_entity_query';
+  readonly sourceEvidence: string;
+}
+
+export interface LookupConceptRedirectRuntimeArtifact {
+  readonly schemaVersion: typeof LOOKUP_CONCEPT_REDIRECT_RUNTIME_SCHEMA_VERSION;
+  readonly snapshotId: string;
+  readonly generatedAt: string;
+  readonly entries: Readonly<Record<string, LookupConceptRedirectRuntimeEntry>>;
+}
+
+export interface LookupExactSafeRuntimeEntry {
+  readonly entityId: string;
+  readonly locale: 'ko' | 'global';
+  readonly certificate: LookupIdentityCertificate;
+}
+
+export interface LookupExactSafeRuntimeArtifact {
+  readonly schemaVersion: typeof LOOKUP_EXACT_SAFE_RUNTIME_SCHEMA_VERSION;
+  readonly snapshotId: string;
+  readonly generatedAt: string;
+  readonly exactEntries: Readonly<Record<string, LookupExactSafeRuntimeEntry>>;
+  readonly compactEntries: Readonly<Record<string, LookupExactSafeRuntimeEntry>>;
 }
 
 const NonNegativeIntArraySchema = z.array(z.number().int().nonnegative());
@@ -157,6 +208,15 @@ const LookupRuntimeSourceRecordRefSchema = z.object({
   sourceRecordId: z.string().min(1),
 }).strict();
 
+const LookupIdentityCertificateSchema = z.object({
+  kind: z.enum(['exact_safe', 'compact_exact_safe']),
+  normalizedSurface: z.string().min(1),
+  compactSurface: z.string().min(1).optional(),
+  sourceTier: z.enum(['curated', 'catalog', 'translation']),
+  singleton: z.literal(true),
+  collisionFree: z.literal(true),
+}).strict();
+
 export const LookupAliasRuntimeArtifactSchema = z.object({
   schemaVersion: z.literal(LOOKUP_ALIAS_RUNTIME_SCHEMA_VERSION),
   snapshotId: z.string().min(1),
@@ -180,6 +240,7 @@ const LookupResolverProjectionDocumentSchema = z.object({
   canonicalLabel: z.string().min(1),
   aliasesIdentitySafe: z.array(z.string()),
   identitySafeKeys: z.array(z.string().min(1)),
+  identityCertificates: z.array(LookupIdentityCertificateSchema).optional(),
   producer: z.string().optional(),
   attributeHints: LookupResolverProjectionHintsSchema.optional(),
   sourceRecordRefs: z.array(LookupRuntimeSourceRecordRefSchema).optional(),
@@ -228,6 +289,35 @@ export const LookupAmbiguityRuntimeArtifactSchema = z.object({
   snapshotId: z.string().min(1),
   generatedAt: z.string().min(1),
   entries: z.record(z.string().min(1), LookupAmbiguityRuntimeEntrySchema),
+}).strict();
+
+const LookupConceptRedirectRuntimeEntrySchema = z.object({
+  normalizedForm: z.string().min(1),
+  locale: z.enum(['ko', 'global']),
+  conceptClass: z.enum(['grape', 'region', 'style', 'recommendation', 'pairing', 'generic']),
+  redirectReason: z.enum(['concept_query', 'generic_non_entity_query']),
+  sourceEvidence: z.string().min(1),
+}).strict();
+
+export const LookupConceptRedirectRuntimeArtifactSchema = z.object({
+  schemaVersion: z.literal(LOOKUP_CONCEPT_REDIRECT_RUNTIME_SCHEMA_VERSION),
+  snapshotId: z.string().min(1),
+  generatedAt: z.string().min(1),
+  entries: z.record(z.string().min(1), LookupConceptRedirectRuntimeEntrySchema),
+}).strict();
+
+const LookupExactSafeRuntimeEntrySchema = z.object({
+  entityId: z.string().min(1),
+  locale: z.enum(['ko', 'global']),
+  certificate: LookupIdentityCertificateSchema,
+}).strict();
+
+export const LookupExactSafeRuntimeArtifactSchema = z.object({
+  schemaVersion: z.literal(LOOKUP_EXACT_SAFE_RUNTIME_SCHEMA_VERSION),
+  snapshotId: z.string().min(1),
+  generatedAt: z.string().min(1),
+  exactEntries: z.record(z.string().min(1), LookupExactSafeRuntimeEntrySchema),
+  compactEntries: z.record(z.string().min(1), LookupExactSafeRuntimeEntrySchema),
 }).strict();
 
 export function parseLookupAliasRuntimeArtifact(
@@ -282,6 +372,32 @@ export function parseLookupAmbiguityRuntimeArtifact(
   }
 }
 
+export function parseLookupConceptRedirectRuntimeArtifact(
+  raw: string,
+  filePath: string,
+): LookupConceptRedirectRuntimeArtifact {
+  try {
+    return LookupConceptRedirectRuntimeArtifactSchema.parse(JSON.parse(raw));
+  } catch (error) {
+    throw new Error(
+      `Malformed lookup concept redirect runtime artifact at ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+export function parseLookupExactSafeRuntimeArtifact(
+  raw: string,
+  filePath: string,
+): LookupExactSafeRuntimeArtifact {
+  try {
+    return LookupExactSafeRuntimeArtifactSchema.parse(JSON.parse(raw));
+  } catch (error) {
+    throw new Error(
+      `Malformed lookup exact-safe runtime artifact at ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
 export function buildLookupAliasRuntimeArtifactHash(
   artifact: LookupAliasRuntimeArtifact,
 ): string {
@@ -325,5 +441,24 @@ export function buildLookupAmbiguityRuntimeArtifactHash(
   return hashStableJson({
     schemaVersion: artifact.schemaVersion,
     entries: artifact.entries,
+  });
+}
+
+export function buildLookupConceptRedirectRuntimeArtifactHash(
+  artifact: LookupConceptRedirectRuntimeArtifact,
+): string {
+  return hashStableJson({
+    schemaVersion: artifact.schemaVersion,
+    entries: artifact.entries,
+  });
+}
+
+export function buildLookupExactSafeRuntimeArtifactHash(
+  artifact: LookupExactSafeRuntimeArtifact,
+): string {
+  return hashStableJson({
+    schemaVersion: artifact.schemaVersion,
+    exactEntries: artifact.exactEntries,
+    compactEntries: artifact.compactEntries,
   });
 }

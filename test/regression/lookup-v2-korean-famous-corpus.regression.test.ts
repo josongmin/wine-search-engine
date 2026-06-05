@@ -33,10 +33,10 @@ describe('lookup-v2 Korean-famous expanded corpus stays large and diverse', () =
       { resolved: 0, ambiguous: 0, failed: 0, redirect_discovery: 0 },
     );
 
-    expect(rows.length).toBeGreaterThanOrEqual(65);
+    expect(rows.length).toBeGreaterThanOrEqual(75);
     expect(qids.size).toBe(rows.length);
 
-    expect(statusCounts.resolved).toBeGreaterThanOrEqual(40);
+    expect(statusCounts.resolved).toBeGreaterThanOrEqual(48);
     expect(statusCounts.ambiguous).toBeGreaterThanOrEqual(10);
     expect(statusCounts.redirect_discovery).toBeGreaterThanOrEqual(6);
     expect(statusCounts.failed).toBeGreaterThanOrEqual(4);
@@ -59,6 +59,8 @@ describe('lookup-v2 Korean-famous expanded corpus stays large and diverse', () =
       'concept_region',
       'concept_style_korean',
       'concept_recommendation',
+      'concept_recommendation_korean',
+      'concept_pairing_korean',
       'adversarial_no_match',
     ]) {
       expect(classes.has(requiredClass)).toBe(true);
@@ -70,11 +72,11 @@ describe('lookup-v2 Korean-famous expanded corpus stays large and diverse', () =
     const hangulRows = rows.filter((row) => /[가-힣]/u.test(row.query));
     const iconicResolved = rows.filter((row) => row.expected_status === 'resolved' && row.class.startsWith('korean_icon_'));
     const ambiguityRows = rows.filter((row) => row.class.startsWith('ambiguity_'));
-    const conceptRows = rows.filter((row) => row.expected_status === 'redirect_discovery');
+    const conceptRows = rows.filter((row) => row.class.startsWith('concept_'));
 
-    expect(hangulRows.length).toBeGreaterThanOrEqual(50);
-    expect(iconicResolved.length).toBeGreaterThanOrEqual(40);
+    expect(hangulRows.length).toBeGreaterThanOrEqual(58);
+    expect(iconicResolved.length).toBeGreaterThanOrEqual(48);
     expect(ambiguityRows.length).toBeGreaterThanOrEqual(10);
-    expect(conceptRows.length).toBeGreaterThanOrEqual(6);
+    expect(conceptRows.length).toBeGreaterThanOrEqual(8);
   });
 });

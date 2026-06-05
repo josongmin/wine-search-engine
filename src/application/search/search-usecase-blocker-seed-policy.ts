@@ -1,24 +1,23 @@
 import type { AnchorCandidate } from '../../domain/query/model/anchor-candidate.js';
 import type { QueryClass } from '../../domain/shared/types/query-class.js';
 import type { AmbiguityInfo } from '../../domain/query/port/ambiguity-dictionary.port.js';
-import { isExactLikeLookupStrategy } from '../../domain/query/service/lookup-strategy-taxonomy.js';
+import {
+  findRawQueryExactSafeSingletonAliasWitness as findRawQueryExactSafeSingletonAliasWitnessInternal,
+  hasDeterministicSingletonAliasWitness as hasDeterministicSingletonAliasWitnessInternal,
+} from '../../domain/query/service/exact-safe-anchor-witness.js';
 
 export function hasDeterministicSingletonAliasWitness(
   anchors: readonly AnchorCandidate[],
 ): boolean {
-  const uniqueAnchorEntityIds = new Set(
-    anchors.flatMap((anchor) => anchor.candidateEntityIds.map(String)),
-  );
-  if (uniqueAnchorEntityIds.size !== 1) {
-    return false;
-  }
+  return hasDeterministicSingletonAliasWitnessInternal(anchors);
+}
 
-  return anchors.some((anchor) =>
-    anchor.source === 'alias'
-    && anchor.confidence === 1
-    && anchor.candidateEntityIds.length === 1
-    && (anchor.lookupStrategies?.some((strategy) => isExactLikeLookupStrategy(strategy)) ?? false),
-  );
+export function findRawQueryExactSafeSingletonAliasWitness(
+  rawQuery: string,
+  normalizedQuery: string,
+  anchors: readonly AnchorCandidate[],
+) {
+  return findRawQueryExactSafeSingletonAliasWitnessInternal(rawQuery, normalizedQuery, anchors);
 }
 
 /**
@@ -40,14 +39,23 @@ export function shouldSuppressBlockerSeedExpansion(
 }
 
 export function shouldSuppressBlockerSeedExpansionForKnownShortAmbiguity(args: {
+  readonly rawQuery?: string | undefined;
   readonly queryClass: QueryClass;
   readonly anchors: readonly AnchorCandidate[];
   readonly persistedAmbiguity: AmbiguityInfo | null;
+  readonly normalizedQuery?: string | undefined;
 }): boolean {
   if (args.persistedAmbiguity === null) {
     return false;
   }
   if (hasDeterministicSingletonAliasWitness(args.anchors)) {
+    return false;
+  }
+  if (
+    typeof args.rawQuery === 'string'
+    && typeof args.normalizedQuery === 'string'
+    && findRawQueryExactSafeSingletonAliasWitness(args.rawQuery, args.normalizedQuery, args.anchors) !== undefined
+  ) {
     return false;
   }
   return args.queryClass === 'short_entity' || args.queryClass === 'ambiguous_short_form';

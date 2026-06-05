@@ -29,6 +29,7 @@ import {
   resolveWineSnapshotEntity,
   type SourceEntityContinuityRecord as _SourceEntityContinuityRecord,
 } from './snapshot-entity-identity.js';
+import { normalizeCanonicalLabelForIdentity } from '../../src/domain/entity/model/identity-signature.js';
 import type {
   CanonicalEntityId,
   SourceRecordId,
@@ -56,34 +57,72 @@ import {
   canonicalizeAmbiguitySnapshotRows,
   canonicalizeEntitySnapshotRecords,
 } from '../../src/domain/shared/utils/search-snapshot-canonicalization.js';
-import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
-import { compactForLookup } from '../../src/domain/query/service/phonetic-skeleton.js';
 import {
   buildLookupAliasRuntimeArtifact,
   buildLookupAmbiguityRuntimeArtifact,
+  buildLookupConceptRedirectRuntimeArtifact,
+  buildLookupExactSafeRuntimeArtifact,
   buildLookupResolverProjectionArtifact,
   buildLookupEntityProjectionArtifact,
 } from './build-lookup-runtime-pack.js';
 import {
   buildLookupAliasRuntimeArtifactHash,
   buildLookupAmbiguityRuntimeArtifactHash,
+  buildLookupConceptRedirectRuntimeArtifactHash,
+  buildLookupExactSafeRuntimeArtifactHash,
   buildLookupResolverProjectionArtifactHash,
   buildLookupEntityProjectionArtifactHash,
-  type LookupAmbiguityRuntimeEntry,
 } from '../../src/domain/shared/types/search-snapshot-lookup-runtime.js';
+import {
+  CORE_KOREAN_ICON_AMBIGUITY_CASES,
+  CORE_KOREAN_ICON_QUERY_CASES,
+  CORE_KOREAN_ICON_RELEASE_GATE_CASES,
+} from '../../test/support/core-korean-icon-fixtures.js';
+import {
+  assertLookupExactSafeRegistryCompatibleWithBaseAliases,
+  buildLookupIdentityCertificatesByEntity,
+  buildLookupRuntimeOverlayAliases,
+  loadLookupExactSafeRegistry,
+} from './lookup-exact-safe-registry.js';
+import {
+  buildLookupAmbiguityRegistryEntries,
+  buildLookupConceptRedirectRegistryEntries,
+  loadLookupAmbiguityRegistry,
+  loadLookupConceptRedirectRegistry,
+} from './lookup-authority-registries.js';
 
 export const DEFAULT_INPUT = ETL_ARTIFACT_FILES.trackc;
 export const DEFAULT_OUTPUT_DIR = ETL_ARTIFACT_FILES.searchSnapshotsDir;
 export const DEFAULT_NL_MAPPINGS = ETL_ARTIFACT_FILES.nlMappings;
 export const DEFAULT_RUNTIME_STATE_PATH = resolveDataPath('data/runtime-search-snapshot.json');
-const KOREAN_FAMOUS_EXACT_SAFE_CORPUS_PATH = path.resolve(
+const REPO_GOLD_CATALOG_PATH = path.resolve(
   path.dirname(new URL(import.meta.url).pathname),
   '..',
   '..',
-  'test',
-  'fixtures',
-  'lookup-v2-korean-famous-expanded.jsonl',
+  'data',
+  'gold-wine-catalog.jsonl',
 );
+
+const RepoGoldCatalogRowSchema = z.object({
+  entityId: z.string().min(1),
+  canonicalLabel: z.string().min(1),
+  producer: z.string().min(1),
+  country: z.string().min(1),
+  region: z.string().min(1),
+  appellation: z.string().min(1).optional(),
+  grapes: z.array(z.string().min(1)).min(1),
+  wineType: z.enum(['red', 'white', 'sparkling', 'dessert', 'rosé', 'fortified']),
+  vintageYear: z.number().int().min(0).max(2035),
+  priceUsd: z.number().finite().positive(),
+  body: z.number().int().min(1).max(5).nullable(),
+  tannin: z.number().int().min(1).max(5).nullable(),
+  acidity: z.number().int().min(1).max(5).nullable(),
+  criticScore: z.number().int().min(0).max(100),
+  style: z.string().min(1),
+  koreanAliases: z.array(z.string().min(1)),
+}).strict();
+
+type RepoGoldCatalogRow = z.infer<typeof RepoGoldCatalogRowSchema>;
 
 export interface Args {
   readonly input: string;
@@ -316,29 +355,208 @@ function resolveFixtureRepoRoot(explicit: string | undefined): string | undefine
   return resolveDefaultFixtureRepoRoot();
 }
 
+function collectCoreIconRequiredBenchmarkTargetIds(): readonly string[] {
+  const targetIds = new Set<string>();
+  for (const testCase of CORE_KOREAN_ICON_QUERY_CASES) {
+    targetIds.add(testCase.expectedEntityId);
+  }
+  for (const testCase of CORE_KOREAN_ICON_RELEASE_GATE_CASES) {
+    targetIds.add(testCase.expectedEntityId);
+  }
+  return [...targetIds].sort();
+}
+
+export async function loadRepoLocalCoreIconBenchmarkTargetIds(): Promise<readonly string[]> {
+  if (!existsSync(REPO_GOLD_CATALOG_PATH)) {
+    return [];
+  }
+
+  const content = await fs.readFile(REPO_GOLD_CATALOG_PATH, 'utf8');
+  const repoEntityIds = new Set<string>();
+  for (const [index, line] of content.split('\n').entries()) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+    const parsed = RepoGoldCatalogRowSchema.safeParse(JSON.parse(trimmed) as unknown);
+    if (!parsed.success) {
+      throw new Error(
+        `Repo gold catalog schema validation failed at ${REPO_GOLD_CATALOG_PATH}:${index + 1}: ${parsed.error.message}`,
+      );
+    }
+    repoEntityIds.add(parsed.data.entityId);
+  }
+
+  return collectCoreIconRequiredBenchmarkTargetIds()
+    .filter((entityId) => repoEntityIds.has(entityId));
+}
+
+async function loadRequiredBenchmarkTargetIds(
+  explicitFixtureRepoRoot: string | undefined,
+): Promise<readonly string[]> {
+  const required = new Set<string>();
+
+  if (explicitFixtureRepoRoot == null || explicitFixtureRepoRoot.length === 0) {
+    for (const entityId of await loadRepoLocalCoreIconBenchmarkTargetIds()) {
+      required.add(entityId);
+    }
+  }
+
+  const fixtureRepoRoot = resolveFixtureRepoRoot(explicitFixtureRepoRoot);
+  if (fixtureRepoRoot == null) {
+    return [...required].sort();
+  }
+
+  try {
+    for (const entityId of await loadRequiredFixtureTargetIds(fixtureRepoRoot)) {
+      required.add(entityId);
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error;
+    }
+  }
+
+  return [...required].sort();
+}
+
+async function loadRepoLocalCoreIconBenchmarkIdentitySignaturesByTargetId(): Promise<ReadonlyMap<string, string>> {
+  if (!existsSync(REPO_GOLD_CATALOG_PATH)) {
+    return new Map();
+  }
+
+  const content = await fs.readFile(REPO_GOLD_CATALOG_PATH, 'utf8');
+  const rows = content
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line, index) => {
+      const parsed = RepoGoldCatalogRowSchema.safeParse(JSON.parse(line) as unknown);
+      if (!parsed.success) {
+        throw new Error(
+          `Repo gold catalog schema validation failed at ${REPO_GOLD_CATALOG_PATH}:${index + 1}: ${parsed.error.message}`,
+        );
+      }
+      return parsed.data;
+    });
+
+  const identitySafeQueriesByEntityId = collectCoreIconIdentitySafeQueriesByEntityId();
+  const recallOnlyQueriesByEntityId = collectCoreIconRecallOnlyQueriesByEntityId();
+  const suitabilityArtifact = await loadBenchmarkAnchorSuitabilityArtifact();
+  const signatures = new Map<string, string>();
+
+  for (const entry of rows) {
+    const caseQueries = identitySafeQueriesByEntityId.get(entry.entityId) ?? [];
+    const recallOnlyQueries = recallOnlyQueriesByEntityId.get(entry.entityId) ?? [];
+    const identitySafeProjection = uniqueSurfaceList([
+      entry.canonicalLabel,
+      ...entry.koreanAliases,
+      ...caseQueries,
+    ]).filter(isIdentitySafeCoreIconSurface);
+    const noisyRecallProjection = uniqueSurfaceList([
+      ...entry.koreanAliases,
+      ...caseQueries,
+      ...recallOnlyQueries,
+    ]);
+
+    const record = attachBenchmarkAnchorSuitability({
+      sourceId: `benchmark-anchor-${entry.entityId}` as SourceRecordId,
+      externalId: entry.entityId,
+      canonicalLabel: entry.canonicalLabel,
+      producer: entry.producer,
+      vintageYear: entry.vintageYear,
+      country: entry.country,
+      region: entry.region,
+      appellation: entry.appellation ?? null,
+      wineType: entry.wineType,
+      grapePrimary: entry.grapes[0] ?? null,
+      grapes: entry.grapes,
+      body: normalizeSensoryNullable(entry.body),
+      sweetness: inferBenchmarkAnchorSweetness(entry.wineType),
+      acidity: normalizeSensoryNullable(entry.acidity),
+      tannin: normalizeSensoryNullable(entry.tannin),
+      pairingTags: [],
+      flavorProfiles: [],
+      searchTextEn: buildBenchmarkAnchorSearchTextEn(entry),
+      ratingAvg: Number((entry.criticScore / 20).toFixed(2)),
+      ratingsCount: 1_000,
+      priceUsd: entry.priceUsd,
+      priceBand: deriveBenchmarkAnchorPriceBand(entry.priceUsd),
+      popularityScore: Number(Math.max(0.75, entry.criticScore / 100).toFixed(3)),
+      scrapedAt: BENCHMARK_ANCHOR_FIXTURE_SCRAPED_AT,
+      alcoholPct: null,
+      producerPrestige: Number((entry.criticScore / 100).toFixed(3)),
+      isTopRated: entry.criticScore >= 97,
+      benchmarkAnchorEntityId: entry.entityId as CanonicalEntityId,
+      sourceSystemOverride: SOURCE_SYSTEM_BENCHMARK_ANCHOR_CATALOG,
+      aliases: {
+        proposed: identitySafeProjection
+          .filter((value) => value !== entry.canonicalLabel)
+          .map((value) => ({
+            value,
+            type: 'translation' as const,
+            source: 'benchmark-anchor:repo_gold_core_icon_v1',
+            confidencePrior: 0.95,
+            needsReview: false,
+          })),
+        identitySafeProjection,
+        noisyRecallProjection,
+      },
+    }, suitabilityArtifact);
+
+    const resolved = resolveWineSnapshotEntity(record, new Map(), new Map());
+    signatures.set(entry.entityId, resolved.identitySignature);
+  }
+
+  return signatures;
+}
+
+async function loadRepoLocalCoreIconEquivalentPublicIdsByTargetId(
+  explicitFixtureRepoRoot: string | undefined,
+): Promise<ReadonlyMap<string, CanonicalEntityId>> {
+  const fixtureRepoRoot = resolveFixtureRepoRoot(explicitFixtureRepoRoot);
+  if (fixtureRepoRoot == null || !existsSync(REPO_GOLD_CATALOG_PATH)) {
+    return new Map();
+  }
+
+  const [content, fixtureGoldLookup] = await Promise.all([
+    fs.readFile(REPO_GOLD_CATALOG_PATH, 'utf8'),
+    loadGoldCanonicalLookupForBuild({ fixtureRepoRoot: explicitFixtureRepoRoot }),
+  ]);
+  const equivalentPublicIds = new Map<string, CanonicalEntityId>();
+
+  for (const [index, line] of content.split('\n').entries()) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+    const parsed = RepoGoldCatalogRowSchema.safeParse(JSON.parse(trimmed) as unknown);
+    if (!parsed.success) {
+      throw new Error(
+        `Repo gold catalog schema validation failed at ${REPO_GOLD_CATALOG_PATH}:${index + 1}: ${parsed.error.message}`,
+      );
+    }
+    const key = `${normalizeCanonicalLabelForIdentity(parsed.data.canonicalLabel)}|${parsed.data.vintageYear}`;
+    const equivalentPublicId = fixtureGoldLookup.get(key);
+    if (equivalentPublicId !== undefined && equivalentPublicId !== parsed.data.entityId) {
+      equivalentPublicIds.set(parsed.data.entityId, equivalentPublicId as CanonicalEntityId);
+    }
+  }
+
+  return equivalentPublicIds;
+}
+
 async function loadActiveBenchmarkCarryForwardRecords(args: {
   readonly currentRecords: readonly SnapshotBuildRecord[];
   readonly fixtureRepoRoot?: string | undefined;
   readonly runtimeStatePath?: string | undefined;
 }): Promise<readonly SnapshotBuildRecord[]> {
-  const fixtureRepoRoot = resolveFixtureRepoRoot(args.fixtureRepoRoot);
-  if (fixtureRepoRoot == null) {
-    return [];
-  }
   const runtimeStatePath = args.runtimeStatePath ?? DEFAULT_RUNTIME_STATE_PATH;
   if (!existsSync(runtimeStatePath)) {
     return [];
   }
 
-  let requiredTargetIds: readonly string[];
-  try {
-    requiredTargetIds = await loadRequiredFixtureTargetIds(fixtureRepoRoot);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return [];
-    }
-    throw error;
-  }
+  const requiredTargetIds = await loadRequiredBenchmarkTargetIds(args.fixtureRepoRoot);
   if (requiredTargetIds.length === 0) {
     return [];
   }
@@ -420,24 +638,21 @@ async function findMissingRequiredBenchmarkCoverage(args: {
   readonly fixtureRepoRoot?: string | undefined;
   readonly entities: readonly EntitySnapshotRecord[];
 }): Promise<readonly string[]> {
-  const fixtureRepoRoot = resolveFixtureRepoRoot(args.fixtureRepoRoot);
-  if (fixtureRepoRoot == null) {
-    return [];
-  }
-  let requiredTargetIds: readonly string[];
-  try {
-    requiredTargetIds = await loadRequiredFixtureTargetIds(fixtureRepoRoot);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return [];
-    }
-    throw error;
-  }
+  const requiredTargetIds = await loadRequiredBenchmarkTargetIds(args.fixtureRepoRoot);
   if (requiredTargetIds.length === 0) {
     return [];
   }
 
   const covered = new Set<string>();
+  const existingIdentitySignatures = new Set<string>(args.entities.map((entity) => entity.identitySignature));
+  const equivalentPublicIdsByTargetId =
+    args.fixtureRepoRoot == null || args.fixtureRepoRoot.length === 0
+      ? await loadRepoLocalCoreIconEquivalentPublicIdsByTargetId(args.fixtureRepoRoot)
+      : new Map<string, CanonicalEntityId>();
+  const repoLocalIdentitySignaturesByTargetId =
+    args.fixtureRepoRoot == null || args.fixtureRepoRoot.length === 0
+      ? await loadRepoLocalCoreIconBenchmarkIdentitySignaturesByTargetId()
+      : new Map<string, string>();
   for (const entity of args.entities) {
     if (requiredTargetIds.includes(entity.entityId)) {
       covered.add(entity.entityId);
@@ -448,8 +663,221 @@ async function findMissingRequiredBenchmarkCoverage(args: {
     }
   }
 
+  for (const [targetId, identitySignature] of repoLocalIdentitySignaturesByTargetId) {
+    if (requiredTargetIds.includes(targetId) && existingIdentitySignatures.has(identitySignature)) {
+      covered.add(targetId);
+    }
+  }
+  for (const [targetId, equivalentPublicId] of equivalentPublicIdsByTargetId) {
+    if (requiredTargetIds.includes(targetId) && covered.has(equivalentPublicId)) {
+      covered.add(targetId);
+    }
+  }
+
   const missing = requiredTargetIds.filter((targetId) => !covered.has(targetId));
   return missing;
+}
+
+const BENCHMARK_ANCHOR_FIXTURE_SCRAPED_AT = '2026-06-04T00:00:00.000Z';
+
+function uniqueSurfaceList(values: readonly string[]): readonly string[] {
+  const deduped = new Set<string>();
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (trimmed.length > 0) {
+      deduped.add(trimmed);
+    }
+  }
+  return [...deduped];
+}
+
+function normalizeCoreIconSurfaceKey(value: string): string {
+  return value.normalize('NFC').trim().toLowerCase();
+}
+
+const CORE_KOREAN_ICON_AMBIGUOUS_SURFACES = new Set(
+  CORE_KOREAN_ICON_AMBIGUITY_CASES.map((testCase) => normalizeCoreIconSurfaceKey(testCase.query)),
+);
+
+function isIdentitySafeCoreIconSurface(value: string): boolean {
+  return !CORE_KOREAN_ICON_AMBIGUOUS_SURFACES.has(normalizeCoreIconSurfaceKey(value));
+}
+
+function collectCoreIconIdentitySafeQueriesByEntityId(): ReadonlyMap<string, readonly string[]> {
+  const grouped = new Map<string, string[]>();
+  for (const testCase of CORE_KOREAN_ICON_QUERY_CASES) {
+    const existing = grouped.get(testCase.expectedEntityId) ?? [];
+    if (!existing.includes(testCase.query)) {
+      existing.push(testCase.query);
+    }
+    grouped.set(testCase.expectedEntityId, existing);
+  }
+  for (const testCase of CORE_KOREAN_ICON_RELEASE_GATE_CASES) {
+    if (testCase.identitySafe === false) {
+      continue;
+    }
+    const existing = grouped.get(testCase.expectedEntityId) ?? [];
+    if (!existing.includes(testCase.query)) {
+      existing.push(testCase.query);
+    }
+    grouped.set(testCase.expectedEntityId, existing);
+  }
+  return grouped;
+}
+
+function collectCoreIconRecallOnlyQueriesByEntityId(): ReadonlyMap<string, readonly string[]> {
+  const grouped = new Map<string, string[]>();
+  for (const testCase of CORE_KOREAN_ICON_AMBIGUITY_CASES) {
+    if (testCase.expectedCandidateEntityId === undefined) {
+      continue;
+    }
+    const existing = grouped.get(testCase.expectedCandidateEntityId) ?? [];
+    if (!existing.includes(testCase.query)) {
+      existing.push(testCase.query);
+    }
+    grouped.set(testCase.expectedCandidateEntityId, existing);
+  }
+  for (const testCase of CORE_KOREAN_ICON_RELEASE_GATE_CASES) {
+    if (testCase.identitySafe !== false) {
+      continue;
+    }
+    const existing = grouped.get(testCase.expectedEntityId) ?? [];
+    if (!existing.includes(testCase.query)) {
+      existing.push(testCase.query);
+    }
+    grouped.set(testCase.expectedEntityId, existing);
+  }
+  return grouped;
+}
+
+function normalizeSensoryNullable(value: number | null): number | null {
+  return value === null ? null : Number((value / 5).toFixed(3));
+}
+
+function inferBenchmarkAnchorSweetness(wineType: RepoGoldCatalogRow['wineType']): number {
+  switch (wineType) {
+    case 'dessert':
+      return 0.95;
+    case 'sparkling':
+      return 0.2;
+    default:
+      return 0.1;
+  }
+}
+
+function deriveBenchmarkAnchorPriceBand(priceUsd: number): PriceBand {
+  if (priceUsd < 30) return 'value';
+  if (priceUsd < 100) return 'mid';
+  if (priceUsd < 300) return 'premium';
+  return 'luxury';
+}
+
+function buildBenchmarkAnchorSearchTextEn(entry: RepoGoldCatalogRow): string {
+  return [
+    entry.canonicalLabel,
+    entry.producer,
+    entry.country,
+    entry.region,
+    ...(entry.appellation !== undefined ? [entry.appellation] : []),
+    ...entry.grapes,
+    entry.style,
+  ].join(' ');
+}
+
+export async function loadRepoLocalGoldBenchmarkAnchorRecords(
+  missingTargetIds: readonly string[],
+): Promise<readonly SnapshotBuildRecord[]> {
+  if (missingTargetIds.length === 0 || !existsSync(REPO_GOLD_CATALOG_PATH)) {
+    return [];
+  }
+
+  const content = await fs.readFile(REPO_GOLD_CATALOG_PATH, 'utf8');
+  const rows = content
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line, index) => {
+      const parsed = RepoGoldCatalogRowSchema.safeParse(JSON.parse(line) as unknown);
+      if (!parsed.success) {
+        throw new Error(
+          `Repo gold catalog schema validation failed at ${REPO_GOLD_CATALOG_PATH}:${index + 1}: ${parsed.error.message}`,
+        );
+      }
+      return parsed.data;
+    });
+
+  const rowByEntityId = new Map(rows.map((row) => [row.entityId, row] as const));
+  const identitySafeQueriesByEntityId = collectCoreIconIdentitySafeQueriesByEntityId();
+  const recallOnlyQueriesByEntityId = collectCoreIconRecallOnlyQueriesByEntityId();
+  const suitabilityArtifact = await loadBenchmarkAnchorSuitabilityArtifact();
+  const records: SnapshotBuildRecord[] = [];
+
+  for (const entityId of missingTargetIds) {
+    const entry = rowByEntityId.get(entityId);
+    if (entry === undefined) {
+      continue;
+    }
+
+    const caseQueries = identitySafeQueriesByEntityId.get(entityId) ?? [];
+    const recallOnlyQueries = recallOnlyQueriesByEntityId.get(entityId) ?? [];
+    const identitySafeProjection = uniqueSurfaceList([
+      entry.canonicalLabel,
+      ...entry.koreanAliases,
+      ...caseQueries,
+    ]).filter(isIdentitySafeCoreIconSurface);
+    const noisyRecallProjection = uniqueSurfaceList([
+      ...entry.koreanAliases,
+      ...caseQueries,
+      ...recallOnlyQueries,
+    ]);
+
+    records.push(attachBenchmarkAnchorSuitability({
+      sourceId: `benchmark-anchor-${entry.entityId}` as SourceRecordId,
+      externalId: entry.entityId,
+      canonicalLabel: entry.canonicalLabel,
+      producer: entry.producer,
+      vintageYear: entry.vintageYear,
+      country: entry.country,
+      region: entry.region,
+      appellation: entry.appellation ?? null,
+      wineType: entry.wineType,
+      grapePrimary: entry.grapes[0] ?? null,
+      grapes: entry.grapes,
+      body: normalizeSensoryNullable(entry.body),
+      sweetness: inferBenchmarkAnchorSweetness(entry.wineType),
+      acidity: normalizeSensoryNullable(entry.acidity),
+      tannin: normalizeSensoryNullable(entry.tannin),
+      pairingTags: [],
+      flavorProfiles: [],
+      searchTextEn: buildBenchmarkAnchorSearchTextEn(entry),
+      ratingAvg: Number((entry.criticScore / 20).toFixed(2)),
+      ratingsCount: 1_000,
+      priceUsd: entry.priceUsd,
+      priceBand: deriveBenchmarkAnchorPriceBand(entry.priceUsd),
+      popularityScore: Number(Math.max(0.75, entry.criticScore / 100).toFixed(3)),
+      scrapedAt: BENCHMARK_ANCHOR_FIXTURE_SCRAPED_AT,
+      alcoholPct: null,
+      producerPrestige: Number((entry.criticScore / 100).toFixed(3)),
+      isTopRated: entry.criticScore >= 97,
+      benchmarkAnchorEntityId: entry.entityId as CanonicalEntityId,
+      sourceSystemOverride: SOURCE_SYSTEM_BENCHMARK_ANCHOR_CATALOG,
+      aliases: {
+        proposed: identitySafeProjection
+          .filter((value) => value !== entry.canonicalLabel)
+          .map((value) => ({
+            value,
+            type: 'translation' as const,
+            source: 'benchmark-anchor:repo_gold_core_icon_v1',
+            confidencePrior: 0.95,
+            needsReview: false,
+          })),
+        identitySafeProjection,
+        noisyRecallProjection,
+      },
+    }, suitabilityArtifact));
+  }
+
+  return records.sort((left, right) => left.sourceId.localeCompare(right.sourceId));
 }
 
 async function loadBenchmarkAnchorCatalogRecords(missingTargetIds: readonly string[]): Promise<readonly SnapshotBuildRecord[]> {
@@ -537,7 +965,62 @@ async function loadBenchmarkAnchorCatalogRecords(missingTargetIds: readonly stri
     }, suitabilityArtifact));
   }
 
-  return records.sort((left, right) => left.sourceId.localeCompare(right.sourceId));
+  const covered = new Set(
+    records
+      .map((record) => record.benchmarkAnchorEntityId)
+      .filter((id): id is CanonicalEntityId => id !== undefined),
+  );
+  const coveredIdentitySignatures = new Set(
+    records.map((record) => resolveWineSnapshotEntity(record, new Map(), new Map()).identitySignature),
+  );
+  const repoLocalIdentitySignaturesByTargetId = await loadRepoLocalCoreIconBenchmarkIdentitySignaturesByTargetId();
+  const equivalentPublicIdsByTargetId = await loadRepoLocalCoreIconEquivalentPublicIdsByTargetId(undefined);
+  for (const [targetId, equivalentPublicId] of equivalentPublicIdsByTargetId) {
+    if (covered.has(equivalentPublicId)) {
+      covered.add(targetId as CanonicalEntityId);
+    }
+  }
+  for (const [targetId, identitySignature] of repoLocalIdentitySignaturesByTargetId) {
+    if (coveredIdentitySignatures.has(identitySignature)) {
+      covered.add(targetId as CanonicalEntityId);
+    }
+  }
+  const unresolved = missingTargetIds.filter((entityId) => !covered.has(entityId as CanonicalEntityId));
+  if (unresolved.length > 0) {
+    records.push(...await loadRepoLocalGoldBenchmarkAnchorRecords(unresolved));
+  }
+
+  return records
+    .sort((left, right) => left.sourceId.localeCompare(right.sourceId))
+    .filter((record, index, all) => all.findIndex((candidate) => candidate.sourceId === record.sourceId) === index);
+}
+
+export function filterIdentityConflictingBenchmarkAnchorRecords(args: {
+  readonly existingEntities: readonly EntitySnapshotRecord[];
+  readonly candidateRecords: readonly SnapshotBuildRecord[];
+  readonly goldLookup: ReadonlyMap<string, string>;
+  readonly sourceContinuityLookup: ReadonlyMap<SourceRecordId, {
+    readonly entityId: CanonicalEntityId;
+    readonly identitySignature: string;
+    readonly benchmarkEntityId?: CanonicalEntityId;
+  }>;
+}): readonly SnapshotBuildRecord[] {
+  const existingEntityIdByIdentitySignature = new Map<string, CanonicalEntityId>(
+    args.existingEntities.map((entity) => [entity.identitySignature, entity.entityId as CanonicalEntityId]),
+  );
+
+  return args.candidateRecords.filter((record) => {
+    if (record.benchmarkAnchorEntityId === undefined) {
+      return true;
+    }
+    const resolved = resolveWineSnapshotEntity(
+      record,
+      args.goldLookup,
+      args.sourceContinuityLookup,
+    );
+    const existingEntityId = existingEntityIdByIdentitySignature.get(resolved.identitySignature);
+    return existingEntityId === undefined || existingEntityId === record.benchmarkAnchorEntityId;
+  });
 }
 
 function resolveSourceSystemForRecord(record: EnrichedSilverRecord): string {
@@ -737,20 +1220,10 @@ async function buildArtifactsForRecords(args: {
     entityIdBySourceId,
     approvedAbbreviationOverlay,
   );
-  const koreanExactSafeOverlay = await loadKoreanExactSafeAliasOverlay(
-    [...entityIdBySourceId.values()],
-  );
-  assertNoCuratedExactAliasCollisions({
-    baseAliases: baseAliasArtifact,
-    curatedOverlay: koreanExactSafeOverlay,
-  });
   const aliasArtifact = buildAliasArtifact(
     args.records,
     entityIdBySourceId,
-    mergeAliasOverlayMaps(
-      approvedAbbreviationOverlay,
-      koreanExactSafeOverlay,
-    ),
+    approvedAbbreviationOverlay,
   );
   const { resolvedAliases, ambiguityRows } = resolveAliasClaimsAndBuildAmbiguityRegistry(aliasArtifact);
   return { entityArtifact, resolvedAliases, ambiguityRows, entityIdBySourceId };
@@ -857,167 +1330,6 @@ async function loadApprovedAbbreviationAliasOverlay(
   }
 }
 
-interface KoreanExactSafeAliasFixtureRow {
-  readonly query?: unknown;
-  readonly expected_status?: unknown;
-  readonly expected_entity_id?: unknown;
-  readonly promote_exact_alias?: unknown;
-  readonly accepted_statuses?: unknown;
-  readonly class?: unknown;
-}
-
-interface KoreanCuratedAmbiguityFixtureRow {
-  readonly query?: unknown;
-  readonly expected_status?: unknown;
-  readonly accepted_statuses?: unknown;
-}
-
-function mergeAliasOverlayMaps(
-  ...overlays: readonly ReadonlyMap<CanonicalEntityId, readonly SnapshotAliasOverlayProposal[]>[]
-): ReadonlyMap<CanonicalEntityId, readonly SnapshotAliasOverlayProposal[]> {
-  const merged = new Map<CanonicalEntityId, SnapshotAliasOverlayProposal[]>();
-  for (const overlay of overlays) {
-    for (const [entityId, proposals] of overlay) {
-      const next = merged.get(entityId) ?? [];
-      next.push(...proposals);
-      merged.set(entityId, next);
-    }
-  }
-  return merged;
-}
-
-async function loadKoreanExactSafeAliasOverlay(
-  entityIds: readonly CanonicalEntityId[],
-): Promise<ReadonlyMap<CanonicalEntityId, readonly SnapshotAliasOverlayProposal[]>> {
-  if (!existsSync(KOREAN_FAMOUS_EXACT_SAFE_CORPUS_PATH)) {
-    return new Map();
-  }
-
-  const raw = await fs.readFile(KOREAN_FAMOUS_EXACT_SAFE_CORPUS_PATH, 'utf8');
-  const entityIdSet = new Set(entityIds);
-  const overlay = new Map<CanonicalEntityId, SnapshotAliasOverlayProposal[]>();
-
-  for (const [index, line] of raw.split('\n').entries()) {
-    const trimmed = line.trim();
-    if (trimmed.length === 0) {
-      continue;
-    }
-    const parsed = JSON.parse(trimmed) as KoreanExactSafeAliasFixtureRow;
-    if (
-      parsed.expected_status !== 'resolved'
-      || parsed.promote_exact_alias !== true
-    ) {
-      continue;
-    }
-    if (Array.isArray(parsed.accepted_statuses) && parsed.accepted_statuses.length > 0) {
-      throw new Error(
-        `Korean exact-safe alias row ${index + 1} is not deterministic: accepted_statuses must be omitted when promote_exact_alias=true`,
-      );
-    }
-    if (typeof parsed.query !== 'string' || parsed.query.trim().length === 0) {
-      throw new Error(`Korean exact-safe alias row ${index + 1} is missing query`);
-    }
-    if (typeof parsed.expected_entity_id !== 'string' || parsed.expected_entity_id.trim().length === 0) {
-      throw new Error(`Korean exact-safe alias row ${index + 1} is missing expected_entity_id`);
-    }
-    const targetEntityId = parsed.expected_entity_id as CanonicalEntityId;
-    if (!entityIdSet.has(targetEntityId)) {
-      // The curated corpus is global, but buildSearchSnapshot also serves
-      // partial/tiny fixtures in unit tests and ad hoc snapshot builds.
-      // Exact-safe promotion only applies when the target entity is present
-      // in the current snapshot payload.
-      continue;
-    }
-    const existing = overlay.get(targetEntityId) ?? [];
-    existing.push({
-      value: parsed.query.trim(),
-      type: 'observed_query_alias',
-      source: 'fixture:korean_famous_exact_safe_v1',
-      confidencePrior: 0.98,
-      scope: hasHangul(parsed.query) ? 'locale_ko' : 'global',
-      sourceTrust: 1,
-    });
-    overlay.set(targetEntityId, existing);
-  }
-
-  return overlay;
-}
-
-async function loadKoreanCuratedAmbiguityOverlay(): Promise<readonly LookupAmbiguityRuntimeEntry[]> {
-  if (!existsSync(KOREAN_FAMOUS_EXACT_SAFE_CORPUS_PATH)) {
-    return [];
-  }
-
-  const raw = await fs.readFile(KOREAN_FAMOUS_EXACT_SAFE_CORPUS_PATH, 'utf8');
-  const entries = new Map<string, LookupAmbiguityRuntimeEntry>();
-
-  for (const [index, line] of raw.split('\n').entries()) {
-    const trimmed = line.trim();
-    if (trimmed.length === 0) {
-      continue;
-    }
-    const parsed = JSON.parse(trimmed) as KoreanCuratedAmbiguityFixtureRow;
-    if (parsed.expected_status !== 'ambiguous') {
-      continue;
-    }
-    if (Array.isArray(parsed.accepted_statuses) && parsed.accepted_statuses.length > 0) {
-      continue;
-    }
-    if (typeof parsed.query !== 'string' || parsed.query.trim().length === 0) {
-      throw new Error(`Korean curated ambiguity row ${index + 1} is missing query`);
-    }
-    const normalizedForm = normalizeForMatch(parsed.query);
-    if (normalizedForm.length === 0) {
-      throw new Error(`Korean curated ambiguity row ${index + 1} normalizes to empty`);
-    }
-    entries.set(normalizedForm, {
-      normalizedForm,
-      types: ['fixture_curated_ambiguity'],
-      severity: 'high',
-    });
-  }
-
-  return [...entries.values()].sort((left, right) => left.normalizedForm.localeCompare(right.normalizedForm));
-}
-
-function assertNoCuratedExactAliasCollisions(args: {
-  readonly baseAliases: readonly AliasSnapshotRecord[];
-  readonly curatedOverlay: ReadonlyMap<CanonicalEntityId, readonly SnapshotAliasOverlayProposal[]>;
-}): void {
-  const normalizedOwner = new Map<string, CanonicalEntityId>();
-  const compactOwner = new Map<string, CanonicalEntityId>();
-
-  for (const alias of args.baseAliases) {
-    normalizedOwner.set(alias.normalizedValue, alias.entityId as CanonicalEntityId);
-    const compact = compactForLookup(alias.normalizedValue);
-    if (compact.length > 0) {
-      compactOwner.set(compact, alias.entityId as CanonicalEntityId);
-    }
-  }
-
-  for (const [entityId, proposals] of args.curatedOverlay) {
-    for (const proposal of proposals) {
-      const normalizedValue = normalizeForMatch(proposal.value);
-      const compactValue = compactForLookup(normalizedValue);
-      const normalizedCollision = normalizedOwner.get(normalizedValue);
-      if (normalizedCollision !== undefined && normalizedCollision !== entityId) {
-        throw new Error(
-          `Curated Korean exact alias "${proposal.value}" collides on normalized exact lane with ${normalizedCollision}`,
-        );
-      }
-      const compactCollision = compactValue.length > 0 ? compactOwner.get(compactValue) : undefined;
-      if (compactCollision !== undefined && compactCollision !== entityId) {
-        throw new Error(
-          `Curated Korean exact alias "${proposal.value}" collides on compact exact lane with ${compactCollision}`,
-        );
-      }
-      normalizedOwner.set(normalizedValue, entityId);
-      if (compactValue.length > 0) {
-        compactOwner.set(compactValue, entityId);
-      }
-    }
-  }
-}
 
 export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapshotResult> {
   assertCanonicalTrackCArtifactInput(args.input, 'build-search-snapshot');
@@ -1033,7 +1345,9 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
   assertSuitabilityCoverage(baseRecords);
   const [goldLookup, sourceContinuityLookup, carryForwardRecords] = await Promise.all([
     loadGoldCanonicalLookupForBuild({ fixtureRepoRoot: args.fixtureRepoRoot }),
-    loadActiveSourceEntityContinuity(args.runtimeStatePath),
+    loadActiveSourceEntityContinuity(args.runtimeStatePath, {
+      sourceIds: baseRecords.map((record) => record.sourceId),
+    }),
     loadActiveBenchmarkCarryForwardRecords({
       currentRecords: baseRecords,
       fixtureRepoRoot: args.fixtureRepoRoot,
@@ -1058,7 +1372,12 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     entities: entityArtifact,
   });
   if (missingBenchmarkCoverage.length > 0) {
-    const benchmarkAnchorRecords = await loadBenchmarkAnchorCatalogRecords(missingBenchmarkCoverage);
+    const benchmarkAnchorRecords = filterIdentityConflictingBenchmarkAnchorRecords({
+      existingEntities: entityArtifact,
+      candidateRecords: await loadBenchmarkAnchorCatalogRecords(missingBenchmarkCoverage),
+      goldLookup,
+      sourceContinuityLookup,
+    });
     finalRecords = [...finalRecords, ...benchmarkAnchorRecords]
       .sort((left, right) => left.sourceId.localeCompare(right.sourceId));
     ({
@@ -1087,11 +1406,35 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
   const entityArtifactHash = hashStableJson(canonicalizeEntitySnapshotRecords(entityArtifact));
   const aliasArtifactHash = hashStableJson(canonicalizeAliasSnapshotRecords(resolvedAliases));
   const ambiguityArtifactHash = hashStableJson(canonicalizeAmbiguitySnapshotRows(ambiguityRows));
+  const snapshotEntityIds = new Set<CanonicalEntityId>([...entityIdBySourceId.values()]);
+  const lookupExactSafeRegistry = await loadLookupExactSafeRegistry();
+  const lookupAmbiguityRegistry = await loadLookupAmbiguityRegistry();
+  const lookupConceptRedirectRegistry = await loadLookupConceptRedirectRegistry();
+  assertLookupExactSafeRegistryCompatibleWithBaseAliases({
+    baseAliases: resolvedAliases,
+    registryRows: lookupExactSafeRegistry,
+  });
+  const lookupRuntimeOverlayAliases = buildLookupRuntimeOverlayAliases(
+    lookupExactSafeRegistry,
+    snapshotEntityIds,
+  );
+  const lookupIdentityCertificatesByEntity = buildLookupIdentityCertificatesByEntity(
+    lookupExactSafeRegistry,
+    snapshotEntityIds,
+  );
+
   const lookupAliasRuntimeArtifact = buildLookupAliasRuntimeArtifact({
     snapshotId: '',
     generatedAt,
     aliasRegistryHash: aliasArtifactHash,
     aliases: resolvedAliases,
+    runtimeOverlayAliases: lookupRuntimeOverlayAliases,
+  });
+  const lookupExactSafeRuntimeArtifact = buildLookupExactSafeRuntimeArtifact({
+    snapshotId: '',
+    generatedAt,
+    rows: lookupExactSafeRegistry,
+    snapshotEntityIds,
   });
   const lookupResolverProjectionArtifact = buildLookupResolverProjectionArtifact({
     snapshotId: '',
@@ -1100,6 +1443,7 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     entityIdBySourceId,
     goldCanonicalLookup: goldLookup,
     sourceContinuityLookup,
+    identityCertificatesByEntity: lookupIdentityCertificatesByEntity,
   });
   const lookupEntityProjectionArtifact = buildLookupEntityProjectionArtifact({
     snapshotId: '',
@@ -1109,12 +1453,16 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     goldCanonicalLookup: goldLookup,
     sourceContinuityLookup,
   });
-  const koreanCuratedAmbiguityOverlay = await loadKoreanCuratedAmbiguityOverlay();
   const lookupAmbiguityRuntimeArtifact = buildLookupAmbiguityRuntimeArtifact({
     snapshotId: '',
     generatedAt,
     ambiguityRows,
-    curatedEntries: koreanCuratedAmbiguityOverlay,
+    curatedEntries: buildLookupAmbiguityRegistryEntries(lookupAmbiguityRegistry),
+  });
+  const lookupConceptRedirectRuntimeArtifact = buildLookupConceptRedirectRuntimeArtifact({
+    snapshotId: '',
+    generatedAt,
+    entries: buildLookupConceptRedirectRegistryEntries(lookupConceptRedirectRegistry),
   });
 
   const hashes = {
@@ -1123,9 +1471,11 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     entities: entityArtifactHash,
     aliases: aliasArtifactHash,
     lookupAliasRuntime: buildLookupAliasRuntimeArtifactHash(lookupAliasRuntimeArtifact),
+    lookupExactSafeRuntime: buildLookupExactSafeRuntimeArtifactHash(lookupExactSafeRuntimeArtifact),
     lookupResolverProjection: buildLookupResolverProjectionArtifactHash(lookupResolverProjectionArtifact),
     lookupEntityProjection: buildLookupEntityProjectionArtifactHash(lookupEntityProjectionArtifact),
     lookupAmbiguityRuntime: buildLookupAmbiguityRuntimeArtifactHash(lookupAmbiguityRuntimeArtifact),
+    lookupConceptRedirectRuntime: buildLookupConceptRedirectRuntimeArtifactHash(lookupConceptRedirectRuntimeArtifact),
     ambiguityRegistry: ambiguityArtifactHash,
     nlMappings: hashText(nlMappingsCanonical),
   } as const;
@@ -1137,6 +1487,10 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     ...lookupAliasRuntimeArtifact,
     snapshotId,
     aliasRegistryHash: hashes.aliases,
+  };
+  const finalizedLookupExactSafeRuntimeArtifact = {
+    ...lookupExactSafeRuntimeArtifact,
+    snapshotId,
   };
   const finalizedLookupResolverProjectionArtifact = {
     ...lookupResolverProjectionArtifact,
@@ -1150,10 +1504,16 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     ...lookupAmbiguityRuntimeArtifact,
     snapshotId,
   };
+  const finalizedLookupConceptRedirectRuntimeArtifact = {
+    ...lookupConceptRedirectRuntimeArtifact,
+    snapshotId,
+  };
   const lookupAliasRuntimeJson = `${stableJsonStringify(finalizedLookupAliasRuntimeArtifact)}\n`;
+  const lookupExactSafeRuntimeJson = `${stableJsonStringify(finalizedLookupExactSafeRuntimeArtifact)}\n`;
   const lookupResolverProjectionJson = `${stableJsonStringify(finalizedLookupResolverProjectionArtifact)}\n`;
   const lookupEntityProjectionJson = `${stableJsonStringify(finalizedLookupEntityProjectionArtifact)}\n`;
   const lookupAmbiguityRuntimeJson = `${stableJsonStringify(finalizedLookupAmbiguityRuntimeArtifact)}\n`;
+  const lookupConceptRedirectRuntimeJson = `${stableJsonStringify(finalizedLookupConceptRedirectRuntimeArtifact)}\n`;
   const fieldAvailability = buildFieldAvailability(finalRecords);
   const quality = {
     status: 'canonical' as const,
@@ -1175,9 +1535,11 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
       entitiesNdjson: path.join(snapshotRoot, 'entities.ndjson'),
       aliasesNdjson: path.join(snapshotRoot, 'aliases.ndjson'),
       lookupAliasRuntimeJson: path.join(snapshotRoot, 'lookup-alias-runtime.json'),
+      lookupExactSafeRuntimeJson: path.join(snapshotRoot, 'lookup-exact-safe-runtime.json'),
       lookupResolverProjectionJson: path.join(snapshotRoot, 'lookup-resolver-projection.json'),
       lookupEntityProjectionJson: path.join(snapshotRoot, 'lookup-entity-projection.json'),
       lookupAmbiguityRuntimeJson: path.join(snapshotRoot, 'lookup-ambiguity-runtime.json'),
+      lookupConceptRedirectRuntimeJson: path.join(snapshotRoot, 'lookup-concept-redirect-runtime.json'),
       ambiguityRegistryNdjson: path.join(snapshotRoot, 'ambiguity-registry.ndjson'),
       nlMappingsJson: path.join(snapshotRoot, 'nl-mappings.json'),
       metadataJson: path.join(snapshotRoot, 'metadata.json'),
@@ -1188,9 +1550,13 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
       entities: entityArtifact.length,
       aliases: resolvedAliases.length,
       lookupAliasRuntimeAliases: finalizedLookupAliasRuntimeArtifact.aliases.length,
+      lookupExactSafeRuntimeEntries:
+        Object.keys(finalizedLookupExactSafeRuntimeArtifact.exactEntries).length
+        + Object.keys(finalizedLookupExactSafeRuntimeArtifact.compactEntries).length,
       lookupResolverProjectionDocuments: finalizedLookupResolverProjectionArtifact.documents.length,
       lookupEntityProjectionDocuments: finalizedLookupEntityProjectionArtifact.documents.length,
       lookupAmbiguityRuntimeEntries: Object.keys(finalizedLookupAmbiguityRuntimeArtifact.entries).length,
+      lookupConceptRedirectRuntimeEntries: Object.keys(finalizedLookupConceptRedirectRuntimeArtifact.entries).length,
       ambiguityRegistry: ambiguityRows.length,
       nlMappings: nlMappings.mappingCount,
     },
@@ -1216,9 +1582,11 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     atomicWriteFile(manifest.artifacts.entitiesNdjson, entitiesNdjson),
     atomicWriteFile(manifest.artifacts.aliasesNdjson, aliasesNdjson),
     atomicWriteFile(manifest.artifacts.lookupAliasRuntimeJson, lookupAliasRuntimeJson),
+    atomicWriteFile(manifest.artifacts.lookupExactSafeRuntimeJson, lookupExactSafeRuntimeJson),
     atomicWriteFile(manifest.artifacts.lookupResolverProjectionJson, lookupResolverProjectionJson),
     atomicWriteFile(manifest.artifacts.lookupEntityProjectionJson, lookupEntityProjectionJson),
     atomicWriteFile(manifest.artifacts.lookupAmbiguityRuntimeJson, lookupAmbiguityRuntimeJson),
+    atomicWriteFile(manifest.artifacts.lookupConceptRedirectRuntimeJson, lookupConceptRedirectRuntimeJson),
     atomicWriteFile(manifest.artifacts.ambiguityRegistryNdjson, ambiguityNdjson),
     atomicWriteFile(manifest.artifacts.nlMappingsJson, nlMappingsCanonical),
     atomicWriteFile(manifest.artifacts.metadataJson, `${JSON.stringify(metadata, null, 2)}\n`),

@@ -1452,9 +1452,11 @@ export async function materializePreparedVespaFeedArtifact(args: {
   readonly hash: string;
 }> {
   const goldLookup = await loadGoldCanonicalLookupForBuild({ fixtureRepoRoot: args.fixtureRepoRoot });
-  const sourceContinuityLookup = await loadActiveSourceEntityContinuity();
   const raw = await fs.readFile(args.inputPath, 'utf8');
   const records = parseNdjson<EnrichedSilverRecord>(raw, args.inputPath).records;
+  const sourceContinuityLookup = await loadActiveSourceEntityContinuity(undefined, {
+    sourceIds: records.map((record) => record.sourceId),
+  });
   const reusablePreparedDocs = args.reuseEmbeddingFromPreparedFeedPath !== undefined
     ? parsePreparedVespaFeedDocuments(
       await fs.readFile(args.reuseEmbeddingFromPreparedFeedPath, 'utf8'),
@@ -1509,7 +1511,6 @@ export async function run(): Promise<void> {
   }
 
   const goldLookup = await loadGoldCanonicalLookupForBuild({ fixtureRepoRoot: args.fixtureRepoRoot });
-  const sourceContinuityLookup = await loadActiveSourceEntityContinuity();
   assertCanonicalTrackCArtifactInput(args.input, 'index-to-vespa');
 
   console.log(`Reading enriched Silver from ${args.input} …`);
@@ -1519,6 +1520,9 @@ export async function run(): Promise<void> {
   if (args.limit > 0) {
     records = records.slice(0, args.limit);
   }
+  const sourceContinuityLookup = await loadActiveSourceEntityContinuity(undefined, {
+    sourceIds: records.map((record) => record.sourceId),
+  });
   console.log(`  Records to index: ${records.length}`);
 
   if (args.dryRun) {

@@ -57,6 +57,7 @@ import {
   StructuredLlmPartialOutputError,
   StructuredLlmRefusalError,
   StructuredLlmTimeoutError,
+  StructuredLlmProviderError,
   StructuredLlmValidationError,
 } from '../../domain/ai/port/structured-llm.port.js';
 import { type ChatMessage } from '../../domain/ai/port/chat-llm.port.js';
@@ -904,6 +905,7 @@ export class ClaudeStructuredLlmAdapter implements StructuredLlmPort {
       if (
         err instanceof StructuredLlmRefusalError
         || err instanceof StructuredLlmPartialOutputError
+        || err instanceof StructuredLlmProviderError
         || err instanceof StructuredLlmValidationError
         || err instanceof StructuredLlmTimeoutError
       ) {
@@ -974,16 +976,18 @@ export class ClaudeStructuredLlmAdapter implements StructuredLlmPort {
           if (!response.ok) {
             const status = response.status;
             const text = await response.text().catch(() => '');
-            // 400/422 with a schema-validation-shaped error from Anthropic
-            // surfaces as a validation issue rather than a service failure.
+            // Move 1: ANY HTTP non-2xx is a PROVIDER rejection — the model
+            // never produced output. 400/422 (including Anthropic's "credit
+            // balance too low", which arrives as `invalid_request_error`) is an
+            // account/request rejection, NOT a model-output-schema failure, so
+            // it is a StructuredLlmProviderError — never a ValidationError.
+            // (Replaces the brittle `looksLikeValidationError` text heuristic
+            // that conflated credit/auth outages with malformed output.)
             if (status === HTTP_STATUS_BAD_REQUEST || status === HTTP_STATUS_UNPROCESSABLE_ENTITY) {
-              if (looksLikeValidationError(text)) {
-                throw new StructuredLlmValidationError(
-                  [],
-                  { httpStatus: status, body: text.slice(0, ERROR_PREVIEW_CHARS) },
-                  `Anthropic structured: HTTP ${status} — ${text.slice(0, ERROR_PREVIEW_CHARS)}`,
-                );
-              }
+              throw new StructuredLlmProviderError(
+                status,
+                `Anthropic structured: HTTP ${status} — ${text.slice(0, ERROR_PREVIEW_CHARS)}`,
+              );
             }
             return {
               kind: 'http-error' as const,
@@ -1077,18 +1081,6 @@ function coerceInputObject(input: unknown): Record<string, unknown> {
   return { value: input };
 }
 
-/** Light heuristic — Anthropic 400/422 bodies usually mention "invalid_request"
- *  or "schema". A precise classifier is unnecessary; we only need to decide
- *  between "throw validation" vs "let retry-with-backoff handle it". */
-function looksLikeValidationError(body: string): boolean {
-  const lower = body.toLowerCase();
-  return (
-    lower.includes('invalid_request_error')
-    || lower.includes('schema')
-    || lower.includes('validation')
-  );
-}
-
 function truncateForLog(s: string): string {
   if (s.length <= LOG_CONTENT_PREVIEW_CHARS) return s;
   return `${s.slice(0, LOG_CONTENT_PREVIEW_CHARS)}…[truncated ${s.length - LOG_CONTENT_PREVIEW_CHARS} chars]`;
@@ -1106,6 +1098,5 @@ export const __testOnly = {
   coerceInputObject,
   normalizeTextStopReason,
   hasRefusalIndicator,
-  looksLikeValidationError,
   RESPOND_TOOL_NAME,
 } as const;

@@ -36,7 +36,6 @@ import {
   EXACT_ANCHOR_CONFIDENCE,
 } from './planner-intent-detection.js';
 import { analyzeQueryDecomposition } from './decomposition-detector.js';
-import { correctKoreanWineTypos } from './korean-wine-aliases.js';
 import {
   hasEntityMetadataKeyword,
   hasExactEntityLookupKeyword,
@@ -44,7 +43,7 @@ import {
 } from './exact-entity-metadata-signals.js';
 import { isGenericWineNounToken } from './short-entity-surface.js';
 import type { PolicyDecisionRecord } from '../model/policy-decision-record.js';
-import { buildBundleFromAtoms } from './constraint-reasoner.js';
+import { buildBundleFromAtoms, ConstraintReasoner } from './constraint-reasoner.js';
 import { buildRetrievalPlan } from '../../retrieval/service/retrieval-plan-builder.js';
 import { buildRetrievalObjective } from '../../retrieval/model/retrieval-objective.js';
 import {
@@ -105,8 +104,10 @@ import {
   determineRetrievalMode,
   inferTargetEntityType,
 } from './planner-routing.js';
+import { hasRawQueryExactSafeSingletonAliasWitness } from './exact-safe-anchor-witness.js';
 
 const log = bootstrapLogger.child({ component: 'Planner' });
+const EMPTY_CONSTRAINT_REASONER = new ConstraintReasoner();
 
 /**
  * Re-export the public short-query ambiguity threshold from the constants
@@ -146,6 +147,28 @@ export interface PlannerContext extends RequestExecutionContext {
   readonly lockDiscoveryLane?: boolean | undefined;
 }
 
+interface PlannerOptions {
+  /**
+   * Lookup-authority optimization. When the raw query already carries a
+   * collision-free exact-safe singleton alias witness, skip generic
+   * constraint compilation and keep the planner on the entity-resolution lane.
+   */
+  readonly skipConstraintParsingOnExactSafeWitness?: boolean | undefined;
+  /**
+   * Lookup-authority optimization. Constraint parsing in entity lookup should
+   * not pay LazyFuzzyMatcher warmup cost for short OOV surfaces; anchor recall
+   * already owns fuzzy entity discovery. This flag disables only the
+   * constraint-compiler's fuzzy entity linking, not planner fuzzy fallback.
+   */
+  readonly disableConstraintCompilerFuzzyMatcher?: boolean | undefined;
+  /**
+   * Lookup-authority optimization. If the raw normalized query is already a
+   * persisted ambiguous short form and there is no exact-safe singleton
+   * witness, skip planner fuzzy fallback entirely.
+   */
+  readonly skipFuzzyFallbackOnKnownAmbiguousSurface?: boolean | undefined;
+}
+
 /**
  * The main query planner service.
  *
@@ -169,15 +192,20 @@ export class Planner {
     private readonly fuzzyMatcher?: FuzzyMatcherPort | undefined,
     topologyPlanner?: ConstraintTopologyPlanner,
     private readonly ambiguityIntentCompiler?: AmbiguityIntentCompiler,
+    private readonly options: PlannerOptions = {},
   ) {
+    const constraintCompilerFuzzyMatcher =
+      this.options.disableConstraintCompilerFuzzyMatcher === true
+        ? undefined
+        : fuzzyMatcher;
     this.constraintCompiler = new ConstraintCompiler(
       nlMapper,
-      fuzzyMatcher,
+      constraintCompilerFuzzyMatcher,
       topologyPlanner,
     );
     this.fallbackConstraintCompiler = new ConstraintCompiler(
       EMPTY_FALLBACK_MAPPER,
-      fuzzyMatcher,
+      constraintCompilerFuzzyMatcher,
       topologyPlanner,
     );
   }
@@ -371,18 +399,19 @@ export class Planner {
     context?: PlannerContext,
   ): Promise<QueryPlanV2> {
     const stageTimer = context?.stageTimer;
-    // 1. Normalize + Korean typo correction.
-    const typoFixed = correctKoreanWineTypos(safeQuery);
-    const queryViews = this.queryNormalizer.normalize(typoFixed);
+    // 1. Normalize. QueryNormalizer itself preserves raw exact-safe surfaces
+    // while also emitting typo-corrected lookup variants; the planner must not
+    // destructively pre-rewrite the raw surface before that stage.
+    const queryViews = this.queryNormalizer.normalize(safeQuery);
     const normalizedQuery = queryViews.accentless;
     const exactLookupSafeQuery = hasExactEntityLookupKeyword(normalizedQuery)
-      ? stripExactEntityLookupSuffix(typoFixed)
-      : typoFixed;
+      ? stripExactEntityLookupSuffix(safeQuery)
+      : safeQuery;
     const exactLookupSafeQueryViews = this.queryNormalizer.normalize(exactLookupSafeQuery);
     const exactLookupSafeNormalized = exactLookupSafeQueryViews.accentless;
     const shouldUseExactLookupSurface =
       exactLookupSafeQuery.trim().length > 0
-      && exactLookupSafeQuery !== typoFixed
+      && exactLookupSafeQuery !== safeQuery
       && (
         hasEntityMetadataKeyword(normalizedQuery)
         || hasBoundedVintageYear(exactLookupSafeNormalized)
@@ -464,7 +493,7 @@ export class Planner {
     const queryClassPromise = (async () => {
       stageTimer?.start('planner.query_class');
       try {
-        return await this.determineQueryClass(plannerSurfaceNormalized, intent, allAnchors);
+        return await this.determineQueryClass(originalQuery, plannerSurfaceNormalized, intent, allAnchors);
       } finally {
         stageTimer?.end('planner.query_class');
       }
@@ -477,7 +506,19 @@ export class Planner {
       relativeQuery,
       intent,
     );
+    const rawQueryHasExactSafeSingletonWitness = hasRawQueryExactSafeSingletonAliasWitness(
+      originalQuery,
+      plannerSurfaceNormalized,
+      allAnchors,
+    );
+    const shouldSkipConstraintParsing =
+      this.options.skipConstraintParsingOnExactSafeWitness === true
+      && relativeQuery === null
+      && rawQueryHasExactSafeSingletonWitness;
     const parsedPromise = (async () => {
+      if (shouldSkipConstraintParsing) {
+        return this.buildEmptyConstraintCompilerResult();
+      }
       stageTimer?.start('planner.constraint_parsing');
       try {
         return await this.parseConstraints(
@@ -518,9 +559,17 @@ export class Planner {
       mergedConstraints,
       allAnchors,
     );
+    const shouldSkipFuzzyFallbackForKnownAmbiguousSurface =
+      this.options.skipFuzzyFallbackOnKnownAmbiguousSurface === true
+      && !rawQueryHasExactSafeSingletonWitness
+      && await this.ambiguityDict.isKnownAmbiguous(
+        plannerSurfaceNormalized,
+        context?.abortSignal,
+      );
     if (
       anchors.length === 0
       && this.fuzzyMatcher !== undefined
+      && !shouldSkipFuzzyFallbackForKnownAmbiguousSurface
       && shouldApplyFuzzyAnchorFallback(
         plannerSurfaceNormalized,
         initialClassifiedQueryClass,
@@ -578,6 +627,7 @@ export class Planner {
       : retrievalMode;
     const classifiedQueryClass = intentChanged
       ? await this.determineQueryClass(
+        originalQuery,
         plannerSurfaceNormalized,
         effectiveIntent,
         effectiveAnchors,
@@ -779,10 +829,16 @@ export class Planner {
    * Determines the query class based on intent, anchors, and ambiguity.
    */
   private async determineQueryClass(
+    rawQuery: string,
     normalizedQuery: string,
     intent: QueryIntent,
     anchors: readonly AnchorCandidate[],
   ): Promise<QueryClass> {
+    const rawQueryHasExactSafeSingletonWitness = hasRawQueryExactSafeSingletonAliasWitness(
+      rawQuery,
+      normalizedQuery,
+      anchors,
+    );
     if (
       (intent === 'entity_exact' || intent === 'entity_fuzzy')
       && hasDirectResolvableAttributeEntity(normalizedQuery)
@@ -799,7 +855,7 @@ export class Planner {
       || intent === 'entity_fuzzy'
       || intent === 'comparison_search'
       || intent === 'mixed_query';
-    if (shouldApplyAliasAmbiguityOverride) {
+    if (shouldApplyAliasAmbiguityOverride && !rawQueryHasExactSafeSingletonWitness) {
       const surfaceFormsToCheck = [
         normalizedQuery,
         ...anchors.map((a) => a.normalizedForm),
@@ -825,6 +881,9 @@ export class Planner {
       ? 0
       : normalizedQuery.trim().split(/\s+/).length;
     if (tokenCount <= 2 && anchors.length > 0) {
+      if (rawQueryHasExactSafeSingletonWitness) {
+        return 'short_entity';
+      }
       // Ambiguity here means "the query could resolve to MULTIPLE COMPETING
       // ENTITIES", not "the candidate-generation path produced multiple
       // anchor variants converging on the same entity". The latter is a
@@ -934,6 +993,17 @@ export class Planner {
       );
       return this.fallbackConstraintCompiler.compile(normalizedQuery, abortSignal);
     }
+  }
+
+  private buildEmptyConstraintCompilerResult(): ConstraintCompilerResult {
+    const emptyBundle = { hard: [], soft: [], inferred: [] };
+    return {
+      bundle: emptyBundle,
+      retrievalPlan: buildRetrievalPlan(emptyBundle),
+      resolvedEntities: [],
+      ambiguousEntityHints: [],
+      reasonerOutput: EMPTY_CONSTRAINT_REASONER.reason(emptyBundle),
+    };
   }
 
   private async buildFuzzyFallbackAnchors(

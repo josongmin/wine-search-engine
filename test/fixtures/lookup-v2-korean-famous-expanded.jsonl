@@ -2,6 +2,7 @@
 {"qid":"elv2-kr-002","query":"오푸스 원","expected_status":"resolved","expected_entity_hint":"opus one","expected_entity_id":"opus-one-2018","promote_exact_alias":true,"class":"korean_icon_napa_cult","note":"spaced Korean alias"}
 {"qid":"elv2-kr-003","query":"오퍼스원","expected_status":"resolved","expected_entity_hint":"opus one","expected_entity_id":"opus-one-2018","promote_exact_alias":true,"class":"korean_icon_napa_cult","note":"alternate Korean transliteration"}
 {"qid":"elv2-kr-004","query":"오 푸 스 원 18","expected_status":"resolved","expected_entity_hint":"opus one","class":"korean_icon_napa_cult","note":"IME-spaced + short vintage suffix"}
+{"qid":"elv2-kr-066","query":"오퍼스 원 18","expected_status":"resolved","expected_entity_hint":"opus one","expected_entity_id":"opus-one-2018","promote_exact_alias":true,"class":"korean_icon_napa_cult","note":"alternate transliteration + spaced short vintage suffix"}
 {"qid":"elv2-kr-005","query":"샤또 마고","expected_status":"resolved","expected_entity_hint":"chateau margaux","expected_entity_id":"chateau-margaux-2015","class":"korean_icon_bordeaux","note":"First Growth Korean icon; exact-safe promotion blocked by sibling collision"}
 {"qid":"elv2-kr-006","query":"샤토마고","expected_status":"resolved","expected_entity_hint":"chateau margaux","expected_entity_id":"chateau-margaux-2015","class":"korean_icon_bordeaux","note":"collapsed Korean Margaux alias; exact-safe promotion blocked by compact sibling collision"}
 {"qid":"elv2-kr-007","query":"샤또 라뚜르","expected_status":"resolved","expected_entity_hint":"chateau latour","expected_entity_id":"wine-ce-ecff2ce36910240d9c0a7b46dfbe578fcf4fffd2d995ab9d2fc3c3ef06ec8f96","promote_exact_alias":true,"class":"korean_icon_bordeaux","note":"Latour Korean variant exact-safe"}
@@ -20,11 +21,16 @@
 {"qid":"elv2-kr-020","query":"도멘 드 라 로마네 콩티","expected_status":"resolved","expected_entity_hint":"romanee conti","class":"korean_icon_burgundy","note":"full producer-prefixed DRC"}
 {"qid":"elv2-kr-021","query":"코슈 뒤리","expected_status":"resolved","expected_entity_hint":"coche dury","class":"korean_icon_burgundy","note":"Coche-Dury variant"}
 {"qid":"elv2-kr-022","query":"도멘 코슈 뒤리","expected_status":"resolved","expected_entity_hint":"coche dury","class":"korean_icon_burgundy","note":"producer-prefixed Coche-Dury"}
+{"qid":"elv2-kr-071","query":"로마네 콩티","expected_status":"resolved","expected_entity_hint":"romanee conti","class":"korean_icon_burgundy","note":"spaced Korean iconic Romanée-Conti alias"}
 {"qid":"elv2-kr-023","query":"크룩","expected_status":"resolved","expected_entity_hint":"krug","class":"korean_icon_champagne","note":"Krug common Korean phonetic variant"}
 {"qid":"elv2-kr-024","query":"크루그 그랑 뀌베","expected_status":"resolved","expected_entity_hint":"krug","class":"korean_icon_champagne","note":"Krug Grande Cuvée Korean variant"}
 {"qid":"elv2-kr-025","query":"돔 페리뇬","expected_status":"resolved","expected_entity_hint":"dom perignon","class":"korean_icon_champagne","note":"Dom Perignon phonetic typo"}
 {"qid":"elv2-kr-026","query":"돔 페리뇽 모엣","expected_status":"resolved","expected_entity_hint":"dom perignon","class":"korean_icon_champagne","note":"brand suffix included"}
 {"qid":"elv2-kr-027","query":"루이로드레 크리스탈","expected_status":"resolved","expected_entity_hint":"cristal","class":"korean_icon_champagne","note":"Cristal compact Korean alias"}
+{"qid":"elv2-kr-067","query":"돔페리뇽","expected_status":"resolved","expected_entity_hint":"dom perignon","class":"korean_icon_champagne","note":"compact Korean Dom Perignon alias"}
+{"qid":"elv2-kr-068","query":"돔 페리뇽","expected_status":"resolved","expected_entity_hint":"dom perignon","class":"korean_icon_champagne","note":"canonical spaced Korean Dom Perignon alias"}
+{"qid":"elv2-kr-069","query":"루이 로드레 크리스탈","expected_status":"resolved","expected_entity_hint":"cristal","class":"korean_icon_champagne","note":"spaced producer + cuvee Korean alias"}
+{"qid":"elv2-kr-070","query":"크루그","expected_status":"resolved","expected_entity_hint":"krug","class":"korean_icon_champagne","note":"common Korean Krug spelling"}
 {"qid":"elv2-kr-028","query":"사시까이아","expected_status":"resolved","expected_entity_hint":"sassicaia","expected_entity_id":"sassicaia-2018","promote_exact_alias":true,"class":"korean_icon_super_tuscan","note":"Sassicaia Korean typo variant"}
 {"qid":"elv2-kr-029","query":"사씨까이아","expected_status":"resolved","expected_entity_hint":"sassicaia","expected_entity_id":"sassicaia-2018","promote_exact_alias":true,"class":"korean_icon_super_tuscan","note":"hard Korean typo variant"}
 {"qid":"elv2-kr-030","query":"띠냐넬로","expected_status":"resolved","expected_entity_hint":"tignanello","expected_entity_id":"wine-ce-ec554e2fcb667805374292b066f0ef20c47452384b98391828c7800f171ce3c4","promote_exact_alias":true,"class":"korean_icon_super_tuscan","note":"Tignanello Korean variant exact-safe"}
@@ -32,8 +38,10 @@
 {"qid":"elv2-kr-032","query":"자코모콘테르노","expected_status":"resolved","expected_entity_hint":"giacomo conterno","class":"korean_icon_iberia_latam","note":"Giacomo Conterno compact Korean alias"}
 {"qid":"elv2-kr-033","query":"베가시실리아 우니코","expected_status":"resolved","expected_entity_hint":"vega sicilia","expected_entity_id":"wine-ce-0cf11be6a33dbbc907d31b65c3378baa13f3b51d3dd12bf894a28f61370e8581","promote_exact_alias":true,"class":"korean_icon_iberia_latam","note":"Vega Sicilia Unico Korean exact-safe"}
 {"qid":"elv2-kr-034","query":"핑거스","expected_status":"resolved","expected_entity_hint":"pingus","expected_entity_id":"wine-ce-44388d455e84223a4672800e1ae39185ec5ff1fce7157b6ed0a5b4f4d46fa74e","promote_exact_alias":true,"class":"korean_icon_iberia_latam","note":"Pingus Korean typo exact-safe"}
-{"qid":"elv2-kr-035","query":"알마 비바","expected_status":"resolved","expected_entity_hint":"almaviva","expected_entity_id":"wine-ce-981fc4f2f2c2af784e8bafed183d3db7ced5bd8f512c46948f0eae9c1e32279c","promote_exact_alias":true,"class":"korean_icon_iberia_latam","note":"Almaviva split Korean alias exact-safe"}
+{"qid":"elv2-kr-035","query":"알마 비바","expected_status":"resolved","expected_entity_hint":"almaviva","expected_entity_id":"w-almaviva-2019","promote_exact_alias":true,"class":"korean_icon_iberia_latam","note":"Almaviva split Korean alias exact-safe"}
 {"qid":"elv2-kr-036","query":"돈멜초","expected_status":"resolved","expected_entity_hint":"don melchor","expected_entity_id":"wine-ce-8173702402542bd60848f23756297bb8a309d9c4063af666be00a0872f022c0f","promote_exact_alias":true,"class":"korean_icon_iberia_latam","note":"Don Melchor compact Korean alias exact-safe"}
+{"qid":"elv2-kr-072","query":"알마비바","expected_status":"resolved","expected_entity_hint":"almaviva","expected_entity_id":"w-almaviva-2019","promote_exact_alias":true,"class":"korean_icon_iberia_latam","note":"compact Korean Almaviva alias exact-safe"}
+{"qid":"elv2-kr-073","query":"돈 멜초","expected_status":"resolved","expected_entity_hint":"don melchor","expected_entity_id":"wine-ce-8173702402542bd60848f23756297bb8a309d9c4063af666be00a0872f022c0f","promote_exact_alias":true,"class":"korean_icon_iberia_latam","note":"spaced Korean Don Melchor alias exact-safe"}
 {"qid":"elv2-kr-037","query":"스크리밍이글","expected_status":"resolved","expected_entity_hint":"screaming eagle","class":"korean_icon_napa_cult","note":"Screaming Eagle compact Korean alias"}
 {"qid":"elv2-kr-038","query":"할란 에스테이트","expected_status":"resolved","expected_entity_hint":"harlan estate","class":"korean_icon_napa_cult","note":"Harlan Estate Korean variant"}
 {"qid":"elv2-kr-039","query":"펜폴즈 그랜지","expected_status":"resolved","expected_entity_hint":"grange","expected_entity_id":"wine-ce-ae3675d0f1a45cc578ba15452d8b0a4af984beaaa20087665e714fd72c03e344","promote_exact_alias":true,"class":"korean_icon_australia","note":"Penfolds Grange Korean exact-safe"}
@@ -46,7 +54,7 @@
 {"qid":"elv2-kr-046","query":"샤토","expected_status":"ambiguous","class":"ambiguity_broad_icon","note":"alternate broad producer prefix"}
 {"qid":"elv2-kr-047","query":"마고","expected_status":"ambiguous","accepted_statuses":["ambiguous","resolved"],"expected_entity_hint":"margaux","class":"ambiguity_broad_icon","note":"region/entity collision; correct resolve acceptable, wrong resolve forbidden"}
 {"qid":"elv2-kr-048","query":"크리스탈","expected_status":"ambiguous","class":"ambiguity_common_noun_collision","note":"common noun vs iconic champagne collision"}
-{"qid":"elv2-kr-049","query":"바롤로","expected_status":"ambiguous","accepted_statuses":["ambiguous","resolved"],"expected_entity_hint":"monfortino","class":"ambiguity_appellation_collision","note":"appellation vs famous entity collision"}
+{"qid":"elv2-kr-049","query":"바롤로","expected_status":"redirect_discovery","class":"concept_appellation_redirect","note":"appellation concept must redirect to discovery before entity planning"}
 {"qid":"elv2-kr-050","query":"디켐","expected_status":"ambiguous","class":"ambiguity_short_form","note":"Yquem short-form should stay fail-closed"}
 {"qid":"elv2-kr-051","query":"이켐","expected_status":"ambiguous","class":"ambiguity_short_form","note":"alternate Yquem short-form"}
 {"qid":"elv2-kr-052","query":"DRC","expected_status":"ambiguous","class":"ambiguity_broad_icon","note":"acronym surface should not silently exact-resolve"}
@@ -59,6 +67,8 @@
 {"qid":"elv2-kr-059","query":"Bordeaux","expected_status":"redirect_discovery","class":"concept_region","note":"region concept should redirect"}
 {"qid":"elv2-kr-060","query":"달콤한 화이트","expected_status":"redirect_discovery","class":"concept_style_korean","note":"style concept in Korean should redirect"}
 {"qid":"elv2-kr-061","query":"와인 추천해줘","expected_status":"redirect_discovery","class":"concept_recommendation","note":"recommendation intent should redirect"}
+{"qid":"elv2-kr-074","query":"샴페인 추천","expected_status":"redirect_discovery","class":"concept_recommendation_korean","note":"category + recommendation phrase should redirect through concept registry"}
+{"qid":"elv2-kr-075","query":"스테이크랑 어울리는 와인","expected_status":"redirect_discovery","class":"concept_pairing_korean","note":"pairing intent should redirect through concept registry"}
 {"qid":"elv2-kr-062","query":"Cloudy Dreams Marlborough Sauvignon Blanc","expected_status":"failed","class":"adversarial_no_match","note":"realistic invented wine must fail closed"}
 {"qid":"elv2-kr-063","query":"Chateau Fantaisie 2025","expected_status":"failed","class":"adversarial_no_match","note":"fake chateau + future vintage must fail closed"}
 {"qid":"elv2-kr-064","query":"Bodega Fantasma Rioja Especial","expected_status":"failed","class":"adversarial_no_match","note":"fake but plausible Rioja label must fail closed"}

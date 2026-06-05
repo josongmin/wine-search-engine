@@ -27,6 +27,7 @@ import {
 } from '../../src/domain/shared/constants/search-snapshot.js';
 
 const DEFAULT_RUNTIME_STATE_PATH = resolveDataPath('data/runtime-search-snapshot.json');
+const READINESS_VERIFY_STATEMENT_TIMEOUT_MS = 5 * 60_000;
 
 interface Args {
   readonly runtimeStatePath: string;
@@ -115,7 +116,11 @@ export async function verifySearchSnapshotReadiness(args: Args): Promise<void> {
     throw new Error(`Runtime state content hash ${runtimeState.contentHash} != manifest ${manifest.contentHash}`);
   }
 
-  const pool = createPgPool(config.pg);
+  const pool = createPgPool(config.pg, {
+    statementTimeoutMs: READINESS_VERIFY_STATEMENT_TIMEOUT_MS,
+    idleInTransactionSessionTimeoutMs: READINESS_VERIFY_STATEMENT_TIMEOUT_MS,
+    queryTimeoutMs: READINESS_VERIFY_STATEMENT_TIMEOUT_MS + 5_000,
+  });
   try {
     await verifySearchSnapshotRuntimeStateLive({
       pool,

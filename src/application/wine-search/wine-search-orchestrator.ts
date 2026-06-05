@@ -536,6 +536,14 @@ export class WineSearchOrchestrator {
     // for template selection. When absent, the synthesizer runs the LLM
     // path as before.
     const dispatchKind = dispatchResult.terminationKind;
+    // Move 2: a router reject caused by an analyzer LLM failure carries the
+    // honest `analysis_unavailable` reason. Route the synthesizer to the
+    // AI-outage template (degradedReason `llm_unavailable`) instead of the
+    // query-blaming unsupported_intent copy. `plan` is in scope here.
+    const blockedKind: 'security_block' | 'unsupported_intent' | 'analysis_unavailable' | undefined =
+      plan.kind === 'reject' && plan.reason === 'analysis_unavailable'
+        ? 'analysis_unavailable'
+        : dispatchKind;
     let answer: AnswerResult;
     try {
       // Wave 3 SOTA++: when any tool outcome carries the decision engine's
@@ -552,7 +560,7 @@ export class WineSearchOrchestrator {
         analysis,
         toolOutcomes: state.toolOutcomes,
         policyBlocked: dispatchKind !== undefined || dispatchResult.policyBlocked,
-        ...(dispatchKind !== undefined ? { blockedKind: dispatchKind } : {}),
+        ...(blockedKind !== undefined ? { blockedKind } : {}),
         ...(decisionStatus !== undefined ? { decisionStatus } : {}),
         perStepTimeoutMs: baseConfig.perStepTimeoutMs,
         maxOutputTokens: ORCHESTRATOR_DEFAULT_SYNTHESIS_MAX_OUTPUT_TOKENS,
