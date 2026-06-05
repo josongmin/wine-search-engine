@@ -1505,6 +1505,37 @@ describe('Planner – regression (same query → same intent, anchors, constrain
     expect(plan.suggestedRetrievalMode).toBe('entity_lookup');
   });
 
+  it('drops atomic grape and region span anchors when they are deterministic constraint surfaces inside a longer query', async () => {
+    const grapeEntityId = 'wine-generic-sauvignon';
+    const regionEntityId = 'wine-generic-marlborough';
+    const planner = new Planner(
+      noAmbiguityDict,
+      new AnchorExtractor(new ExactAliasMatcher(new Map([
+        ['sauvignon', [{
+          surfaceForm: '1997 Dunn Cabernet Sauvignon',
+          normalizedForm: '1997 dunn cabernet sauvignon',
+          entityIds: [grapeEntityId] as unknown as AliasMatchResult['entityIds'],
+          matchConfidence: 1,
+          lookupStrategy: 'lexical_exact',
+        }]],
+        ['marlborough', [{
+          surfaceForm: 'Cloudy Bay Marlborough Sauvignon Blanc',
+          normalizedForm: 'cloudy bay marlborough sauvignon blanc',
+          entityIds: [regionEntityId] as unknown as AliasMatchResult['entityIds'],
+          matchConfidence: 1,
+          lookupStrategy: 'lexical_exact',
+        }]],
+      ]))),
+      new ExpansionBuilder(),
+      noOpNLMapper,
+    );
+
+    const plan = await planner.plan('Cloudy Dreams Marlborough Sauvignon Blanc');
+
+    expect(plan.anchors).toHaveLength(0);
+    expect(plan.queryClass).not.toBe('ambiguous_short_form');
+  });
+
   it('uncertainty is populated with expected shape', async () => {
     const planner = makePlanner();
     const plan = await planner.plan('Opus One');

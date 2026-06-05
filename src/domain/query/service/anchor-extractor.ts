@@ -332,6 +332,10 @@ export class AnchorExtractor {
     const spanQueries: LookupQueryPlan[] = [];
     const seenBase = new Set<string>();
     const seenSpanRecallMode = new Map<string, AliasRecallMode | undefined>();
+    const fullQueryTokenCount = tokenizeConstraintSurface(normalizedQuery).length;
+    const globalDeterministicConstraintTokens = fullQueryTokenCount > 1
+      ? this.collectDeterministicConstraintTokens(normalizedQuery)
+      : new Set<string>();
     const add = (target: string[], seen: Set<string>, value: string): void => {
       const trimmed = value.trim();
       if (trimmed.length === 0 || seen.has(trimmed)) {
@@ -372,6 +376,13 @@ export class AnchorExtractor {
     const lookupPlan = buildAliasSurfaceLookupPlan(normalizedQuery, queryViews);
     const primaryQueries = lookupPlan.tokenList;
     for (const query of primaryQueries) {
+      if (this.shouldSkipAtomicDeterministicConstraintQuery(
+        query,
+        fullQueryTokenCount,
+        globalDeterministicConstraintTokens,
+      )) {
+        continue;
+      }
       add(baseQueries, seenBase, query);
     }
     for (const query of extraBaseQueries) {
@@ -389,11 +400,21 @@ export class AnchorExtractor {
     ]);
     for (const query of spanSeedQueries) {
       const parsedSpans = parseSpans(query);
+      const queryTokenCount = tokenizeConstraintSurface(query).length;
       const surfaceOnlyAtomicSpans = this.collectSurfaceOnlyAtomicSpans(parsedSpans);
       const deterministicConstraintTokens = tokenizeConstraintSurface(query).length > 1
         ? this.collectDeterministicConstraintTokens(query)
         : new Set<string>();
       for (const span of parsedSpans) {
+        if (
+          this.shouldSkipAtomicDeterministicConstraintQuery(
+            span.text,
+            queryTokenCount,
+            deterministicConstraintTokens,
+          )
+        ) {
+          continue;
+        }
         const spanTokens = tokenizeConstraintSurface(span.text);
         if (
           deterministicConstraintTokens.size > 0
@@ -412,6 +433,28 @@ export class AnchorExtractor {
     }
 
     return { baseQueries, spanQueries };
+  }
+
+  private isAtomicSpanDeterministicConstraintSurface(spanText: string): boolean {
+    const resolved = resolveEntity(spanText, { preferEntityOverStyle: true });
+    return isDirectEntityResolution(resolved)
+      && isDeterministicConstraintEntityType(resolved.entityType);
+  }
+
+  private shouldSkipAtomicDeterministicConstraintQuery(
+    query: string,
+    fullQueryTokenCount: number,
+    deterministicConstraintTokens: ReadonlySet<string>,
+  ): boolean {
+    if (fullQueryTokenCount <= 1) {
+      return false;
+    }
+    const tokens = tokenizeConstraintSurface(query);
+    if (tokens.length !== 1) {
+      return false;
+    }
+    return deterministicConstraintTokens.has(tokens[0]!)
+      || this.isAtomicSpanDeterministicConstraintSurface(query);
   }
 
   private collectDeterministicConstraintTokens(normalizedQuery: string): ReadonlySet<string> {
@@ -436,6 +479,21 @@ export class AnchorExtractor {
       }
       for (const token of tokenizeConstraintSurface(resolved.matchedSurface)) {
         coveredTokens.add(token);
+      }
+    }
+    const queryTokens = tokenizeConstraintSurface(normalizedQuery);
+    for (let start = 0; start < queryTokens.length; start += 1) {
+      for (let end = start + 2; end <= queryTokens.length; end += 1) {
+        const candidateSurface = queryTokens.slice(start, end).join(' ');
+        const resolved = resolveEntity(candidateSurface, { preferEntityOverStyle: true });
+        if (
+          isDirectEntityResolution(resolved)
+          && isDeterministicConstraintEntityType(resolved.entityType)
+        ) {
+          for (const token of tokenizeConstraintSurface(resolved.matchedSurface)) {
+            coveredTokens.add(token);
+          }
+        }
       }
     }
     return coveredTokens;
