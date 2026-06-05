@@ -351,6 +351,7 @@ export function buildLookupEntityProjectionArtifact(args: {
   readonly entityIdBySourceId: ReadonlyMap<SourceRecordId, CanonicalEntityId>;
   readonly goldCanonicalLookup: ReadonlyMap<string, string>;
   readonly sourceContinuityLookup: ReadonlyMap<SourceRecordId, SourceEntityContinuityRecord>;
+  readonly identityCertificatesByEntity?: ReadonlyMap<CanonicalEntityId, readonly LookupIdentityCertificate[]> | undefined;
 }): LookupEntityProjectionArtifact {
   const documents: LookupEntityProjectionDocument[] = args.records.map((record) => {
     const entityId = args.entityIdBySourceId.get(record.sourceId);
@@ -362,14 +363,69 @@ export function buildLookupEntityProjectionArtifact(args: {
       args.goldCanonicalLookup,
       args.sourceContinuityLookup,
     );
-    return {
+    const attributeHintDoc = {
       entityId,
       entityType: indexable.entityType,
       canonicalLabel: indexable.canonicalLabel,
       aliasesIdentitySafe: indexable.aliasesIdentitySafe,
       aliasesNoisyRecall: indexable.aliasesNoisyRecall,
+      producer: record.producer,
+      region: indexable.region ?? record.region,
+      grapes: indexable.grapes,
+      searchTextKo: indexable.searchTextKo,
+      searchTextEn: record.searchTextEn,
+      semanticSummary: indexable.semanticSummary,
+      pairing: indexable.pairing,
+      availability: indexable.availability,
+      popularityScore: indexable.popularityScore,
+      ...(indexable.vintageYear !== undefined ? { vintageYear: indexable.vintageYear } : {}),
+      ...(indexable.appellation !== undefined ? { appellation: indexable.appellation } : {}),
+      ...(indexable.country !== undefined ? { country: indexable.country } : {}),
+      ...(indexable.regionHierarchy !== undefined ? { regionHierarchy: indexable.regionHierarchy } : {}),
+      ...(indexable.grapePrimary !== undefined ? { grapePrimary: indexable.grapePrimary } : {}),
+      ...(indexable.style !== undefined ? { style: indexable.style } : {}),
+      ...(indexable.closure !== undefined ? { closure: indexable.closure } : {}),
+      ...(indexable.priceBand !== undefined ? { priceBand: indexable.priceBand } : {}),
+      ...(indexable.occasion !== undefined ? { occasion: indexable.occasion } : {}),
+      ...(indexable.body !== undefined ? { body: indexable.body } : {}),
+      ...(indexable.tannin !== undefined ? { tannin: indexable.tannin } : {}),
+      ...(indexable.acidity !== undefined ? { acidity: indexable.acidity } : {}),
+      ...(indexable.sweetness !== undefined ? { sweetness: indexable.sweetness } : {}),
+      ...(indexable.finishLength !== undefined ? { finishLength: indexable.finishLength } : {}),
+      ...(indexable.wineType !== undefined ? { wineType: indexable.wineType } : {}),
+      ...(indexable.classification !== undefined ? { classification: indexable.classification } : {}),
+      ...(indexable.alcoholPct !== undefined ? { alcoholPct: indexable.alcoholPct } : {}),
+      ...(indexable.priceUsd !== undefined ? { priceUsd: indexable.priceUsd } : {}),
+      ...(indexable.producerPrestige !== undefined ? { producerPrestige: indexable.producerPrestige } : {}),
+      ...(indexable.criticScoreNormalized !== undefined ? { criticScoreNormalized: indexable.criticScoreNormalized } : {}),
+      ...(indexable.certifications !== undefined ? { certifications: indexable.certifications } : {}),
+      ...(indexable.soilType !== undefined ? { soilType: indexable.soilType } : {}),
+      ...(indexable.producerType !== undefined ? { producerType: indexable.producerType } : {}),
+      ...(indexable.grapeFamily !== undefined ? { grapeFamily: indexable.grapeFamily } : {}),
+      ...(indexable.flavorProfiles !== undefined ? { flavorProfiles: indexable.flavorProfiles } : {}),
+      ...(indexable.drinkingWindowStart !== undefined ? { drinkingWindowStart: indexable.drinkingWindowStart } : {}),
+      ...(indexable.drinkingWindowEnd !== undefined ? { drinkingWindowEnd: indexable.drinkingWindowEnd } : {}),
+      ...(indexable.drinkingWindowModelVersion !== undefined ? { drinkingWindowModelVersion: indexable.drinkingWindowModelVersion } : {}),
+    };
+    const attributeHints = buildResolverCandidateAttributeHints(attributeHintDoc);
+    return {
+      entityId,
+      entityType: indexable.entityType,
+      canonicalLabel: indexable.canonicalLabel,
+      aliasesIdentitySafe: indexable.aliasesIdentitySafe,
+      identitySafeKeys: buildIdentitySafeKeys({
+        entityType: indexable.entityType,
+        canonicalLabel: indexable.canonicalLabel,
+        aliasesIdentitySafe: indexable.aliasesIdentitySafe,
+        producer: record.producer,
+      }),
+      ...(args.identityCertificatesByEntity?.get(entityId) !== undefined
+        ? { identityCertificates: args.identityCertificatesByEntity.get(entityId)! }
+        : {}),
+      aliasesNoisyRecall: indexable.aliasesNoisyRecall,
       ...(indexable.aliasPrefixTerms !== undefined ? { aliasPrefixTerms: indexable.aliasPrefixTerms } : {}),
       producer: record.producer,
+      ...(attributeHints !== undefined ? { attributeHints } : {}),
       region: indexable.region ?? record.region,
       grapes: indexable.grapes,
       searchTextKo: indexable.searchTextKo,

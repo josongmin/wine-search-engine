@@ -260,6 +260,46 @@ describe('SynthesisRunner — primary structured-LLM path', () => {
   });
 });
 
+describe('SynthesisRunner — deterministic language directive', () => {
+  // Minor fix: weak models (e.g. OpenAI gpt-*-mini) don't reliably honor the
+  // system-prompt's "respond in Korean if the query is Korean" bullet — a
+  // Korean query ("보르고뉴") came back in English. We detect the language
+  // deterministically (containsHangul) and inject an EXPLICIT, salient
+  // per-request directive so language is not left to model judgment.
+  it('Korean query → synthesis messages carry an explicit Korean directive', async () => {
+    const llm = makeStubLlm(async () => ({
+      data: { answer: 'ok' },
+      usage: makeTokenUsage(10, 5),
+      durationMs: 1,
+    }));
+    await run(llm, {
+      query: '보르고뉴 와인 추천',
+      hangulDominant: true,
+      toolOutcomes: [makeSearchOutcome([{ canonicalLabel: 'X' }])],
+    });
+    const messages = llm.synthesizeMock.mock.calls[0]?.[0]?.messages ?? [];
+    const joined = messages.map((m: { content: string }) => m.content).join('\n');
+    expect(joined).toMatch(/한국어|Korean/);
+  });
+
+  it('English query → explicit English directive, not the Korean one', async () => {
+    const llm = makeStubLlm(async () => ({
+      data: { answer: 'ok' },
+      usage: makeTokenUsage(10, 5),
+      durationMs: 1,
+    }));
+    await run(llm, {
+      query: 'recommend a Bordeaux',
+      hangulDominant: false,
+      toolOutcomes: [makeSearchOutcome([{ canonicalLabel: 'X' }])],
+    });
+    const messages = llm.synthesizeMock.mock.calls[0]?.[0]?.messages ?? [];
+    const joined = messages.map((m: { content: string }) => m.content).join('\n');
+    expect(joined).toMatch(/English/);
+    expect(joined).not.toMatch(/한국어/);
+  });
+});
+
 describe('SynthesisRunner — validation retry', () => {
   it('validation failure → retry → success → attempts=2', async () => {
     let call = 0;

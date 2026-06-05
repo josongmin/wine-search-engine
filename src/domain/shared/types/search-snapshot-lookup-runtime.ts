@@ -71,8 +71,12 @@ export interface LookupEntityProjectionDocument {
   readonly entityType: string;
   readonly canonicalLabel: string;
   readonly aliasesIdentitySafe: readonly string[];
+  readonly identitySafeKeys?: readonly string[] | undefined;
+  readonly identityCertificates?: readonly LookupIdentityCertificate[] | undefined;
   readonly aliasesNoisyRecall: readonly string[];
   readonly producer: string;
+  readonly attributeHints?: Readonly<Record<string, string | number | readonly string[]>> | undefined;
+  readonly sourceRecordRefs?: readonly LookupRuntimeSourceRecordRef[] | undefined;
   readonly region: string;
   readonly grapes: readonly string[];
   readonly searchTextKo: string;
@@ -251,8 +255,12 @@ const LookupEntityProjectionDocumentSchema = z.object({
   entityType: z.string().min(1),
   canonicalLabel: z.string().min(1),
   aliasesIdentitySafe: z.array(z.string()),
+  identitySafeKeys: z.array(z.string().min(1)).optional(),
+  identityCertificates: z.array(LookupIdentityCertificateSchema).optional(),
   aliasesNoisyRecall: z.array(z.string()),
   producer: z.string(),
+  attributeHints: LookupResolverProjectionHintsSchema.optional(),
+  sourceRecordRefs: z.array(LookupRuntimeSourceRecordRefSchema).optional(),
   region: z.string(),
   grapes: z.array(z.string()),
   searchTextKo: z.string(),

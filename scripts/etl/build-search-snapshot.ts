@@ -1452,6 +1452,7 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     entityIdBySourceId,
     goldCanonicalLookup: goldLookup,
     sourceContinuityLookup,
+    identityCertificatesByEntity: lookupIdentityCertificatesByEntity,
   });
   const lookupAmbiguityRuntimeArtifact = buildLookupAmbiguityRuntimeArtifact({
     snapshotId: '',

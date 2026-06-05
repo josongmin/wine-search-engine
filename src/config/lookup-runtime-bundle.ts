@@ -5,7 +5,7 @@ import { SearchSnapshotAmbiguityDictionary } from '../infrastructure/adapter/sea
 import { SearchSnapshotConceptRedirectRegistry } from '../infrastructure/adapter/search-snapshot-concept-redirect-registry.js';
 import { SearchSnapshotEntityLookup } from '../infrastructure/adapter/search-snapshot-entity-lookup.js';
 import { SearchSnapshotExactSafeRegistry } from '../infrastructure/adapter/search-snapshot-exact-safe-registry.js';
-import { SearchSnapshotResolverProjectionLookup } from '../infrastructure/adapter/search-snapshot-resolver-projection-lookup.js';
+import { buildResolverCandidateAttributeHints } from '../application/search/search-usecase-entity-attribute-projection.js';
 import { buildAliasRegistryVersion } from '../domain/alias/model/alias-registry-version.js';
 import { SEARCH_SNAPSHOT_SCHEMA_VERSION } from '../domain/shared/constants/search-snapshot.js';
 import {
@@ -13,15 +13,19 @@ import {
   parseLookupConceptRedirectRuntimeArtifact,
   parseLookupEntityProjectionArtifact,
   parseLookupExactSafeRuntimeArtifact,
-  parseLookupResolverProjectionArtifact,
   parseTrustedLookupAliasRuntimeArtifact,
 } from '../domain/shared/types/search-snapshot-lookup-runtime.js';
 import { createCanonicalEntityId } from '../domain/shared/types/index.js';
-import type { LookupResolverProjection } from '../application/search/port/search-pipeline-deps.port.js';
+import type {
+  LookupResolverProjection,
+  LookupResolverProjectionPort,
+} from '../application/search/port/search-pipeline-deps.port.js';
 import type { CanonicalEntityId } from '../domain/shared/types/index.js';
 import type { RetrievalDocument } from '../domain/retrieval/model/retrieval-document.js';
 import type { AmbiguityInfo } from '../domain/query/port/ambiguity-dictionary.port.js';
 import type { LookupConceptRedirectInfo, LookupExactSafeMatch } from '../domain/resolver/v2/lookup-v2-types.js';
+import type { LookupIdentityCertificate } from '../domain/shared/types/search-snapshot-lookup-runtime.js';
+import { buildNormalizedQueryViews } from '../domain/query/service/query-normalizer.js';
 
 const LookupRuntimeBundleManifestSchema = z.object({
   schemaVersion: z.literal(SEARCH_SNAPSHOT_SCHEMA_VERSION),
@@ -52,33 +56,143 @@ function parseBundleManifest(
   }
 }
 
-function buildResolverProjectionMap(
-  raw: string,
-  filePath: string,
-): ReadonlyMap<CanonicalEntityId, LookupResolverProjection> {
-  const artifact = parseLookupResolverProjectionArtifact(raw, filePath);
-  const docs = new Map<CanonicalEntityId, LookupResolverProjection>();
-  for (const doc of artifact.documents) {
-    const entityId = createCanonicalEntityId(doc.entityId);
-    if (docs.has(entityId)) {
-      throw new Error(`duplicate entity_id ${doc.entityId}`);
+function buildResolverProjectionFromEntityDoc(
+  entityId: CanonicalEntityId,
+  doc: RetrievalDocument,
+  exactSafeCertificatesByEntity: ReadonlyMap<CanonicalEntityId, readonly LookupIdentityCertificate[]>,
+): LookupResolverProjection {
+  const overlayDoc = doc as RetrievalDocument & {
+    readonly identitySafeKeys?: readonly string[] | undefined;
+    readonly identityCertificates?: LookupResolverProjection['identityCertificates'];
+    readonly attributeHints?: Readonly<Record<string, unknown>> | undefined;
+    readonly sourceRecordRefs?: LookupResolverProjection['sourceRecordRefs'];
+  };
+  const identitySafeKeys = overlayDoc.identitySafeKeys !== undefined
+    ? [...overlayDoc.identitySafeKeys]
+    : buildIdentitySafeKeysFromEntityDoc(doc);
+  const identityCertificates = overlayDoc.identityCertificates ?? exactSafeCertificatesByEntity.get(entityId);
+  const attributeHints = overlayDoc.attributeHints ?? buildResolverCandidateAttributeHints(doc);
+  return {
+    entityId,
+    entityType: doc.entityType,
+    canonicalLabel: doc.canonicalLabel,
+    aliasesIdentitySafe: [...doc.aliasesIdentitySafe],
+    identitySafeKeys,
+    ...(identityCertificates !== undefined ? { identityCertificates } : {}),
+    ...(doc.producer !== undefined ? { producer: doc.producer } : {}),
+    ...(attributeHints !== undefined ? { attributeHints } : {}),
+    ...(overlayDoc.sourceRecordRefs !== undefined ? { sourceRecordRefs: overlayDoc.sourceRecordRefs } : {}),
+  };
+}
+
+class EntityBackedResolverProjectionLookup implements LookupResolverProjectionPort {
+  private readonly cache = new Map<CanonicalEntityId, LookupResolverProjection>();
+
+  constructor(
+    private readonly entityDocs: ReadonlyMap<CanonicalEntityId, RetrievalDocument>,
+    private readonly exactSafeCertificatesByEntity: ReadonlyMap<CanonicalEntityId, readonly LookupIdentityCertificate[]>,
+  ) {}
+
+  async getResolverProjections(
+    entityIds: readonly CanonicalEntityId[],
+  ): Promise<ReadonlyMap<CanonicalEntityId, LookupResolverProjection>> {
+    const docs = new Map<CanonicalEntityId, LookupResolverProjection>();
+    for (const entityId of entityIds) {
+      let projection = this.cache.get(entityId);
+      if (projection === undefined) {
+        const entityDoc = this.entityDocs.get(entityId);
+        if (entityDoc === undefined) {
+          continue;
+        }
+        projection = buildResolverProjectionFromEntityDoc(
+          entityId,
+          entityDoc,
+          this.exactSafeCertificatesByEntity,
+        );
+        this.cache.set(entityId, projection);
+      }
+      docs.set(entityId, projection);
     }
-    docs.set(entityId, {
-      entityId,
-      entityType: doc.entityType,
-      canonicalLabel: doc.canonicalLabel,
-      aliasesIdentitySafe: [...doc.aliasesIdentitySafe],
-      identitySafeKeys: [...doc.identitySafeKeys],
-      ...(doc.identityCertificates !== undefined ? { identityCertificates: doc.identityCertificates } : {}),
-      ...(doc.producer !== undefined ? { producer: doc.producer } : {}),
-      ...(doc.attributeHints !== undefined ? { attributeHints: doc.attributeHints } : {}),
-      ...(doc.sourceRecordRefs !== undefined ? { sourceRecordRefs: doc.sourceRecordRefs } : {}),
-    });
+    return docs;
   }
-  if (docs.size === 0) {
-    throw new Error(`Search snapshot resolver projection at ${filePath} contains zero documents`);
+}
+
+function normalizeIdentitySurface(value: string): string {
+  return value
+    .normalize('NFKD')
+    .replace(/\p{Diacritic}/gu, '')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function explicitIdentitySurfaceKeys(value: string): readonly string[] {
+  const views = buildNormalizedQueryViews(value);
+  const surfaces = [
+    views.strict,
+    views.accentless,
+    views.collapsedWhitespace,
+    views.punctuationStripped,
+    views.compact,
+    views.vintageCanonicalized,
+    views.transliterated,
+  ];
+
+  return [...new Set(
+    surfaces
+      .filter((surface): surface is string => typeof surface === 'string' && surface.length > 0)
+      .map(normalizeIdentitySurface)
+      .filter((key) => key.length > 0),
+  )];
+}
+
+function stripParenthetical(value: string): string {
+  return value.replace(/\([^)]*\)/gu, ' ');
+}
+
+function coreIdentityKey(value: string): string {
+  return normalizeIdentitySurface(buildNormalizedQueryViews(stripParenthetical(value)).vintageStripped);
+}
+
+function removeAllOccurrences(value: string, needle: string): string {
+  if (needle.length === 0) {
+    return value;
   }
-  return docs;
+  return value
+    .split(needle)
+    .join(' ')
+    .replace(/\s+/gu, ' ')
+    .trim();
+}
+
+function isProducerOnlyAliasForDistinctWine(doc: RetrievalDocument, identitySurface: string): boolean {
+  if (doc.entityType !== 'wine' || typeof doc.producer !== 'string' || doc.producer.trim().length === 0) {
+    return false;
+  }
+
+  const producerKey = coreIdentityKey(doc.producer);
+  const aliasKey = coreIdentityKey(identitySurface);
+  if (producerKey.length === 0 || aliasKey !== producerKey) {
+    return false;
+  }
+
+  const canonicalKey = coreIdentityKey(doc.canonicalLabel);
+  return removeAllOccurrences(canonicalKey, producerKey).length > 0;
+}
+
+function buildIdentitySafeKeysFromEntityDoc(doc: RetrievalDocument): readonly string[] {
+  const keys = new Set<string>();
+  const surfaces = [doc.canonicalLabel, ...doc.aliasesIdentitySafe];
+  for (const surface of surfaces) {
+    if (isProducerOnlyAliasForDistinctWine(doc, surface)) {
+      continue;
+    }
+    for (const key of explicitIdentitySurfaceKeys(surface)) {
+      keys.add(key);
+    }
+  }
+  return [...keys].sort();
 }
 
 function buildEntityProjectionMap(
@@ -143,8 +257,30 @@ function buildExactSafeMaps(
 ): {
   readonly exactEntries: ReadonlyMap<string, LookupExactSafeMatch>;
   readonly compactEntries: ReadonlyMap<string, LookupExactSafeMatch>;
+  readonly certificatesByEntity: ReadonlyMap<CanonicalEntityId, readonly LookupIdentityCertificate[]>;
 } {
   const artifact = parseLookupExactSafeRuntimeArtifact(raw, filePath);
+  const certificatesByEntityMutable = new Map<CanonicalEntityId, LookupIdentityCertificate[]>();
+  const pushCertificate = (entityId: CanonicalEntityId, certificate: LookupIdentityCertificate): void => {
+    const existing = certificatesByEntityMutable.get(entityId) ?? [];
+    if (
+      existing.some((entry) =>
+        entry.kind === certificate.kind
+        && entry.normalizedSurface === certificate.normalizedSurface
+        && entry.compactSurface === certificate.compactSurface
+        && entry.sourceTier === certificate.sourceTier
+      )
+    ) {
+      return;
+    }
+    existing.push(certificate);
+    certificatesByEntityMutable.set(entityId, existing);
+  };
+
+  for (const entry of [...Object.values(artifact.exactEntries), ...Object.values(artifact.compactEntries)]) {
+    pushCertificate(createCanonicalEntityId(entry.entityId), entry.certificate);
+  }
+
   return {
     exactEntries: new Map(
       Object.entries(artifact.exactEntries).map(([surface, entry]) => [
@@ -172,7 +308,20 @@ function buildExactSafeMaps(
             ? { compactSurface: entry.certificate.compactSurface }
             : {}),
         } satisfies LookupExactSafeMatch,
-      ]),
+        ]),
+    ),
+    certificatesByEntity: new Map(
+      [...certificatesByEntityMutable.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([entityId, certificates]) => [
+          entityId,
+          certificates
+            .slice()
+            .sort((left, right) =>
+              left.normalizedSurface.localeCompare(right.normalizedSurface)
+              || left.kind.localeCompare(right.kind),
+            ),
+        ]),
     ),
   };
 }
@@ -182,7 +331,7 @@ export interface LookupRuntimeBundle {
   readonly manifestPath: string;
   readonly aliasMatcher: SearchSnapshotAliasMatcher;
   readonly entityLookup: SearchSnapshotEntityLookup;
-  readonly resolverProjectionLookup: SearchSnapshotResolverProjectionLookup;
+  readonly resolverProjectionLookup: LookupResolverProjectionPort;
   readonly ambiguityDictionary: SearchSnapshotAmbiguityDictionary;
   readonly conceptRedirectRegistry: SearchSnapshotConceptRedirectRegistry;
   readonly exactSafeRegistry: SearchSnapshotExactSafeRegistry;
@@ -213,14 +362,12 @@ export async function loadLookupRuntimeBundle(
     const [
       aliasRuntimeRaw,
       exactSafeRuntimeRaw,
-      resolverProjectionRaw,
       entityProjectionRaw,
       ambiguityRuntimeRaw,
       conceptRedirectRuntimeRaw,
     ] = await Promise.all([
       fs.readFile(manifest.artifacts.lookupAliasRuntimeJson, 'utf8'),
       fs.readFile(manifest.artifacts.lookupExactSafeRuntimeJson, 'utf8'),
-      fs.readFile(manifest.artifacts.lookupResolverProjectionJson, 'utf8'),
       fs.readFile(manifest.artifacts.lookupEntityProjectionJson, 'utf8'),
       fs.readFile(manifest.artifacts.lookupAmbiguityRuntimeJson, 'utf8'),
       fs.readFile(manifest.artifacts.lookupConceptRedirectRuntimeJson, 'utf8'),
@@ -230,10 +377,16 @@ export async function loadLookupRuntimeBundle(
       manifest.artifacts.lookupAliasRuntimeJson,
     );
 
+    const entityProjection = buildEntityProjectionMap(
+      entityProjectionRaw,
+      manifest.artifacts.lookupEntityProjectionJson,
+    );
+    const exactSafeMaps = buildExactSafeMaps(
+      exactSafeRuntimeRaw,
+      manifest.artifacts.lookupExactSafeRuntimeJson,
+    );
     const [
       aliasMatcher,
-      entityLookup,
-      resolverProjectionLookup,
       ambiguityDictionary,
       conceptRedirectRegistry,
       exactSafeRegistry,
@@ -247,22 +400,6 @@ export async function loadLookupRuntimeBundle(
             snapshotId: manifest.snapshotId,
             aliasContentHash: manifest.hashes.aliases,
           }),
-        ),
-      ),
-      Promise.resolve(
-        new SearchSnapshotEntityLookup(
-          buildEntityProjectionMap(
-            entityProjectionRaw,
-            manifest.artifacts.lookupEntityProjectionJson,
-          ),
-        ),
-      ),
-      Promise.resolve(
-        new SearchSnapshotResolverProjectionLookup(
-          buildResolverProjectionMap(
-            resolverProjectionRaw,
-            manifest.artifacts.lookupResolverProjectionJson,
-          ),
         ),
       ),
       Promise.resolve(
@@ -281,14 +418,18 @@ export async function loadLookupRuntimeBundle(
           ),
         ),
       ),
-      Promise.resolve((() => {
-        const { exactEntries, compactEntries } = buildExactSafeMaps(
-          exactSafeRuntimeRaw,
-          manifest.artifacts.lookupExactSafeRuntimeJson,
-        );
-        return new SearchSnapshotExactSafeRegistry(exactEntries, compactEntries);
-      })()),
+      Promise.resolve(
+        new SearchSnapshotExactSafeRegistry(
+          exactSafeMaps.exactEntries,
+          exactSafeMaps.compactEntries,
+        ),
+      ),
     ]);
+    const entityLookup = new SearchSnapshotEntityLookup(entityProjection);
+    const resolverProjectionLookup = new EntityBackedResolverProjectionLookup(
+      entityProjection,
+      exactSafeMaps.certificatesByEntity,
+    );
 
     if (aliasMatcher === undefined) {
       throw new Error(`Lookup runtime bundle failed to load alias runtime from ${manifestPath}`);

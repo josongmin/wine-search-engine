@@ -438,6 +438,19 @@ const SYNTHESIS_SYSTEM_PROMPT = [
 ].join('\n');
 
 /**
+ * Explicit, deterministic language directive injected as a dedicated synthesis
+ * message. Weak models (OpenAI gpt-*-mini) don't reliably honor the
+ * system-prompt's "respond in Korean if the query is Korean" bullet, so we
+ * decide the language ourselves (containsHangul) and state it as a salient
+ * final instruction rather than leaving it to model judgment.
+ */
+function buildLanguageDirective(queryHasHangul: boolean): string {
+  return queryHasHangul
+    ? 'IMPORTANT: Write the entire `answer` in natural Korean (한국어). Do not answer in English.'
+    : 'IMPORTANT: Write the entire `answer` in English. Do not answer in Korean.';
+}
+
+/**
  * Structured user-message body that the synthesizer LLM sees as
  * `Tool outcomes:`. Built from {@link buildSynthesisGroundingPayload}, which
  * extracts a compact wine-record list and per-outcome metadata. This replaces
@@ -785,6 +798,7 @@ export class SynthesisRunner {
     const baseMessages: readonly ChatMessage[] = [
       { role: 'user', content: `User query: ${input.query}` },
       { role: 'user', content: `Tool outcomes:\n${grounding}` },
+      { role: 'user', content: buildLanguageDirective(containsHangul(input.query)) },
     ];
 
     let aggregatedUsage = makeZeroTokenUsage();
@@ -1247,6 +1261,9 @@ export class SynthesisRunner {
     const messages: readonly ChatMessage[] = [
       { role: 'user', content: `User query: ${input.query}` },
       { role: 'user', content: `Tool outcomes:\n${grounding}` },
+      // Language directive BEFORE the re-synth directive so the latter stays the
+      // final, most-salient operative instruction (grounding re-anchor).
+      { role: 'user', content: buildLanguageDirective(containsHangul(input.query)) },
       { role: 'user', content: buildResynthDirective(ungroundedClaims, facts) },
     ];
     let usage = makeZeroTokenUsage();
