@@ -10,6 +10,11 @@ import {
   DEFAULT_RUNTIME_STATE_PATH,
   loadSearchSnapshotRuntimeState,
 } from '../../src/infrastructure/health/search-snapshot-readiness.js';
+import {
+  EVAL_RUNTIME_BINDING_OPTIONS,
+  requireExplicitEvalRuntimeBinding,
+  resolveEvalRuntimeBinding,
+} from './runtime-binding-args.js';
 import { getPgPool } from '../../src/infrastructure/db/pg-pool.js';
 import { LOOKUP_V2_DEFAULT_MAX_CANDIDATES } from '../../src/interface/http/constants.js';
 
@@ -115,8 +120,7 @@ async function main(): Promise<void> {
       corpus: { type: 'string', default: 'test/fixtures/lookup-v2-korean-famous-expanded.jsonl' },
       output: { type: 'string', default: '/tmp/lookup-v2-latency-korean-famous.json' },
       limit: { type: 'string' },
-      runtimeState: { type: 'string' },
-      useActiveRuntime: { type: 'boolean', default: false },
+      ...EVAL_RUNTIME_BINDING_OPTIONS,
       bootstrapThresholdMs: { type: 'string', default: '2500' },
       firstQueryThresholdMs: { type: 'string', default: '800' },
       warmP95ThresholdMs: { type: 'string', default: '800' },
@@ -127,11 +131,8 @@ async function main(): Promise<void> {
 
   const corpusPath = values.corpus ?? 'test/fixtures/lookup-v2-korean-famous-expanded.jsonl';
   const outputPath = values.output ?? '/tmp/lookup-v2-latency-korean-famous.json';
-  const runtimeStatePath = values.runtimeState;
-  const useActiveRuntime = values.useActiveRuntime ?? false;
-  if (runtimeStatePath === undefined && !useActiveRuntime) {
-    throw new Error('Explicit runtime binding required: pass --runtimeState <path> or --useActiveRuntime');
-  }
+  const { runtimeStatePath, useActiveRuntime } = resolveEvalRuntimeBinding(values);
+  requireExplicitEvalRuntimeBinding({ runtimeStatePath, useActiveRuntime });
   const effectiveRuntimeStatePath = runtimeStatePath ?? DEFAULT_RUNTIME_STATE_PATH;
   const requestedLimit = values.limit === undefined ? undefined : Number.parseInt(values.limit, 10);
   const bootstrapThresholdMs = Number.parseFloat(values.bootstrapThresholdMs ?? '2500');
@@ -223,6 +224,13 @@ async function main(): Promise<void> {
   const warmLatencies = queryRows.slice(1).map((row) => row.total_ms).sort((left, right) => left - right);
   const warmP50Ms = percentile(warmLatencies, 0.5);
   const warmP95Ms = percentile(warmLatencies, 0.95);
+  const hydrationPass =
+    probeMatcher.isFullyHydratedRuntimeArtifact()
+    && JSON.stringify(buildStateBefore) === JSON.stringify(buildStateAfter);
+  const coldBootPass = bootstrapMs <= bootstrapThresholdMs;
+  const requestPass =
+    firstQueryMs <= firstQueryThresholdMs
+    && (warmP95Ms === null || warmP95Ms <= warmP95ThresholdMs);
 
   const violations: string[] = [];
   if (!probeMatcher.isFullyHydratedRuntimeArtifact()) {
@@ -264,6 +272,27 @@ async function main(): Promise<void> {
     manifest_schema: SEARCH_SNAPSHOT_SCHEMA_VERSION,
     snapshotId: runtimeState.snapshotId,
     artifact_hashes: runtimeState.hashes,
+    slo: {
+      cold_boot: {
+        threshold_ms: bootstrapThresholdMs,
+        measured_ms: bootstrapMs,
+        pass: coldBootPass,
+      },
+      request: {
+        first_query_threshold_ms: firstQueryThresholdMs,
+        first_query_ms: firstQueryMs,
+        warm_p95_threshold_ms: warmP95ThresholdMs,
+        warm_p95_ms: warmP95Ms,
+        pass: requestPass,
+      },
+      runtime_hydration: {
+        fully_hydrated_runtime_artifact: probeMatcher.isFullyHydratedRuntimeArtifact(),
+        lazy_build_detected_during_probe:
+          JSON.stringify(buildStateBefore) !== JSON.stringify(buildStateAfter),
+        pass: hydrationPass,
+      },
+      overall_pass: violations.length === 0,
+    },
     thresholds: {
       bootstrap_ms: bootstrapThresholdMs,
       first_query_ms: firstQueryThresholdMs,
@@ -292,6 +321,7 @@ async function main(): Promise<void> {
 
   console.log(`[elv2-latency] snapshot=${runtimeState.snapshotId}`);
   console.log(`[elv2-latency] bootstrap_ms=${bootstrapMs.toFixed(3)} first_query_ms=${firstQueryMs.toFixed(3)} warm_p50_ms=${warmP50Ms?.toFixed(3) ?? 'n/a'} warm_p95_ms=${warmP95Ms?.toFixed(3) ?? 'n/a'}`);
+  console.log(`[elv2-latency] cold_boot_slo=${coldBootPass ? 'PASS' : 'FAIL'} request_slo=${requestPass ? 'PASS' : 'FAIL'} hydration_slo=${hydrationPass ? 'PASS' : 'FAIL'}`);
   console.log(`[elv2-latency] probe=${probeQuery} probe_ms=${probeMs.toFixed(3)} hydrated=${probeMatcher.isFullyHydratedRuntimeArtifact() ? 'yes' : 'no'}`);
   if (violations.length === 0) {
     console.log('[elv2-latency] gate: PASS');

@@ -4,6 +4,10 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { SearchSnapshotAliasMatcher } from '../search-snapshot-alias-matcher.js';
 import {
+  SEARCH_SNAPSHOT_SCHEMA_VERSION,
+  SEARCH_SNAPSHOT_STATE_VERSION,
+} from '../../../domain/shared/constants/search-snapshot.js';
+import {
   LOOKUP_ALIAS_RUNTIME_SCHEMA_VERSION,
   buildLookupAliasRuntimeArtifactHash,
 } from '../../../domain/shared/types/search-snapshot-lookup-runtime.js';
@@ -463,7 +467,7 @@ describe('SearchSnapshotAliasMatcher', () => {
     await fs.writeFile(
       manifestPath,
       `${JSON.stringify({
-        schemaVersion: 'search_snapshot.v3',
+        schemaVersion: SEARCH_SNAPSHOT_SCHEMA_VERSION,
         snapshotId: 'search-snapshot:v1:test1234',
         generatedAt: '2026-04-16T00:00:00.000Z',
         contentHash: 'hash1234',
@@ -516,23 +520,27 @@ describe('SearchSnapshotAliasMatcher', () => {
     await fs.writeFile(
       runtimeStatePath,
       `${JSON.stringify({
-        schemaVersion: 'search_snapshot_runtime_state.v5',
+        schemaVersion: SEARCH_SNAPSHOT_STATE_VERSION,
         snapshotId: 'search-snapshot:v1:test1234',
         contentHash: 'hash1234',
         publishedAt: '2026-04-16T00:00:00.000Z',
         manifestPath,
         nlMappingsRuntimePath: '/tmp/nl-mappings.runtime.json',
         lookupAliasRuntimePath,
+        lookupExactSafeRuntimePath: '/tmp/lookup-exact-safe-runtime.json',
         lookupResolverProjectionPath: '/tmp/lookup-resolver-projection.json',
         lookupEntityProjectionPath: '/tmp/lookup-entity-projection.json',
         lookupAmbiguityRuntimePath: '/tmp/lookup-ambiguity-runtime.json',
+        lookupConceptRedirectRuntimePath: '/tmp/lookup-concept-redirect-runtime.json',
         counts: {
           entities: 1,
           aliases: 1,
           lookupAliasRuntimeAliases: 1,
+          lookupExactSafeRuntimeEntries: 0,
           lookupResolverProjectionDocuments: 1,
           lookupEntityProjectionDocuments: 1,
           lookupAmbiguityRuntimeEntries: 0,
+          lookupConceptRedirectRuntimeEntries: 0,
           ambiguityRegistry: 0,
           nlMappings: 0,
           activeLtrModels: 1,
@@ -541,9 +549,11 @@ describe('SearchSnapshotAliasMatcher', () => {
           entities: 'h3',
           aliases: 'h4',
           lookupAliasRuntime: buildLookupAliasRuntimeArtifactHash(aliasRuntimeArtifact),
+          lookupExactSafeRuntime: 'h5a',
           lookupResolverProjection: 'h6',
           lookupEntityProjection: 'h7',
           lookupAmbiguityRuntime: 'h8',
+          lookupConceptRedirectRuntime: 'h8a',
           ambiguityRegistry: 'h5',
           nlMappings: 'h9',
           activeLtrModels: 'h10',
@@ -596,7 +606,7 @@ describe('SearchSnapshotAliasMatcher', () => {
     await fs.writeFile(
       manifestPath,
       `${JSON.stringify({
-        schemaVersion: 'search_snapshot.v3',
+        schemaVersion: SEARCH_SNAPSHOT_SCHEMA_VERSION,
         snapshotId: 'search-snapshot:v1:test5678',
         generatedAt: '2026-04-16T00:00:00.000Z',
         contentHash: 'hash5678',
@@ -649,23 +659,27 @@ describe('SearchSnapshotAliasMatcher', () => {
     await fs.writeFile(
       runtimeStatePath,
       `${JSON.stringify({
-        schemaVersion: 'search_snapshot_runtime_state.v5',
+        schemaVersion: SEARCH_SNAPSHOT_STATE_VERSION,
         snapshotId: 'search-snapshot:v1:test5678',
         contentHash: 'hash5678',
         publishedAt: '2026-04-16T00:00:00.000Z',
         manifestPath,
         nlMappingsRuntimePath: '/tmp/nl-mappings.runtime.json',
         lookupAliasRuntimePath,
+        lookupExactSafeRuntimePath: '/tmp/lookup-exact-safe-runtime.json',
         lookupResolverProjectionPath: '/tmp/lookup-resolver-projection.json',
         lookupEntityProjectionPath: '/tmp/lookup-entity-projection.json',
         lookupAmbiguityRuntimePath: '/tmp/lookup-ambiguity-runtime.json',
+        lookupConceptRedirectRuntimePath: '/tmp/lookup-concept-redirect-runtime.json',
         counts: {
           entities: 1,
           aliases: 1,
           lookupAliasRuntimeAliases: 1,
+          lookupExactSafeRuntimeEntries: 0,
           lookupResolverProjectionDocuments: 1,
           lookupEntityProjectionDocuments: 1,
           lookupAmbiguityRuntimeEntries: 0,
+          lookupConceptRedirectRuntimeEntries: 0,
           ambiguityRegistry: 0,
           nlMappings: 0,
           activeLtrModels: 1,
@@ -674,9 +688,11 @@ describe('SearchSnapshotAliasMatcher', () => {
           entities: 'h3',
           aliases: 'h4',
           lookupAliasRuntime: buildLookupAliasRuntimeArtifactHash(aliasRuntimeArtifact),
+          lookupExactSafeRuntime: 'h5a',
           lookupResolverProjection: 'h6',
           lookupEntityProjection: 'h7',
           lookupAmbiguityRuntime: 'h8',
+          lookupConceptRedirectRuntime: 'h8a',
           ambiguityRegistry: 'h5',
           nlMappings: 'h9',
           activeLtrModels: 'h10',

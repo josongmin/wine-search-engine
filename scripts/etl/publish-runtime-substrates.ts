@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { PoolClient } from 'pg';
 import { loadConfig } from '../../src/config/env.js';
+import { isLtrServingEnabled } from '../../src/config/ltr-serving-mode.js';
 import { createPgPool, shouldUsePgPool } from '../../src/infrastructure/db/pg-pool.js';
 import { loadSearchSnapshotRuntimeState } from '../../src/infrastructure/health/search-snapshot-readiness.js';
 import { atomicWriteFile, chunkArray } from './etl-utils.js';
@@ -124,6 +125,7 @@ interface Args {
   readonly runtimeStatePath: string;
   readonly runtimeNlMappingsPath: string;
   readonly refreshActiveRuntimeSubstrates: boolean;
+  readonly artifactOnlyPromote: boolean;
 }
 
 interface StageSnapshotRuntimeSubstratesArgs {
@@ -143,6 +145,7 @@ function parseArgs(argv: readonly string[]): Args {
   let runtimeStatePath = DEFAULT_RUNTIME_STATE_PATH;
   let runtimeNlMappingsPath = DEFAULT_RUNTIME_NL_MAPPINGS_PATH;
   let refreshActiveRuntimeSubstrates = false;
+  let artifactOnlyPromote = false;
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--manifest' || arg === '-m') {
@@ -156,6 +159,8 @@ function parseArgs(argv: readonly string[]): Args {
       i += 1;
     } else if (arg === '--refresh-active-runtime-substrates') {
       refreshActiveRuntimeSubstrates = true;
+    } else if (arg === '--artifact-only-promote') {
+      artifactOnlyPromote = true;
     } else if (arg === '--allow-missing-ltr') {
       throw new Error('--allow-missing-ltr has been removed; LTR is now optional for canonical runtime publish and the flag is obsolete');
     }
@@ -163,7 +168,13 @@ function parseArgs(argv: readonly string[]): Args {
   if (manifestPath.length === 0) {
     throw new Error('--manifest is required');
   }
-  return { manifestPath, runtimeStatePath, runtimeNlMappingsPath, refreshActiveRuntimeSubstrates };
+  return {
+    manifestPath,
+    runtimeStatePath,
+    runtimeNlMappingsPath,
+    refreshActiveRuntimeSubstrates,
+    artifactOnlyPromote,
+  };
 }
 
 function buildSnapshotArtifactPath(basePath: string, snapshotId: string): string {
@@ -667,6 +678,56 @@ async function restoreRuntimeNlMappings(
   await atomicWriteFile(runtimePath, previousContents);
 }
 
+function buildArtifactOnlyRuntimeState(args: {
+  readonly manifest: SearchSnapshotManifest;
+  readonly manifestPath: string;
+  readonly runtimeNlMappingsPath: string;
+  readonly runtimeNlMappingsCount: number;
+}): SearchSnapshotRuntimeState {
+  return {
+    schemaVersion: SEARCH_SNAPSHOT_STATE_VERSION,
+    snapshotId: args.manifest.snapshotId,
+    contentHash: args.manifest.contentHash,
+    publishedAt: new Date().toISOString(),
+    manifestPath: args.manifestPath,
+    nlMappingsRuntimePath: args.runtimeNlMappingsPath,
+    lookupAliasRuntimePath: args.manifest.artifacts.lookupAliasRuntimeJson,
+    lookupExactSafeRuntimePath: args.manifest.artifacts.lookupExactSafeRuntimeJson,
+    lookupResolverProjectionPath: args.manifest.artifacts.lookupResolverProjectionJson,
+    lookupEntityProjectionPath: args.manifest.artifacts.lookupEntityProjectionJson,
+    lookupAmbiguityRuntimePath: args.manifest.artifacts.lookupAmbiguityRuntimeJson,
+    lookupConceptRedirectRuntimePath: args.manifest.artifacts.lookupConceptRedirectRuntimeJson,
+    quality: args.manifest.quality,
+    fieldAvailability: args.manifest.fieldAvailability,
+    counts: {
+      entities: args.manifest.counts.entities,
+      aliases: args.manifest.counts.aliases,
+      lookupAliasRuntimeAliases: args.manifest.counts.lookupAliasRuntimeAliases,
+      lookupExactSafeRuntimeEntries: args.manifest.counts.lookupExactSafeRuntimeEntries,
+      lookupResolverProjectionDocuments: args.manifest.counts.lookupResolverProjectionDocuments,
+      lookupEntityProjectionDocuments: args.manifest.counts.lookupEntityProjectionDocuments,
+      lookupAmbiguityRuntimeEntries: args.manifest.counts.lookupAmbiguityRuntimeEntries,
+      lookupConceptRedirectRuntimeEntries: args.manifest.counts.lookupConceptRedirectRuntimeEntries,
+      ambiguityRegistry: args.manifest.counts.ambiguityRegistry,
+      nlMappings: args.runtimeNlMappingsCount,
+      activeLtrModels: 0,
+    },
+    hashes: {
+      entities: args.manifest.hashes.entities,
+      aliases: args.manifest.hashes.aliases,
+      lookupAliasRuntime: args.manifest.hashes.lookupAliasRuntime,
+      lookupExactSafeRuntime: args.manifest.hashes.lookupExactSafeRuntime,
+      lookupResolverProjection: args.manifest.hashes.lookupResolverProjection,
+      lookupEntityProjection: args.manifest.hashes.lookupEntityProjection,
+      lookupAmbiguityRuntime: args.manifest.hashes.lookupAmbiguityRuntime,
+      lookupConceptRedirectRuntime: args.manifest.hashes.lookupConceptRedirectRuntime,
+      ambiguityRegistry: args.manifest.hashes.ambiguityRegistry,
+      nlMappings: args.manifest.hashes.nlMappings,
+      activeLtrModels: hashStableJson([]),
+    },
+  };
+}
+
 function buildEntityRowsJson(
   entities: readonly EntitySnapshotRecord[],
   searchSnapshotId: string,
@@ -1085,6 +1146,32 @@ export async function publishRuntimeSubstrates(args: Args): Promise<SearchSnapsh
   }
 }
 
+export async function publishRuntimeSubstratesArtifactOnly(
+  args: Pick<Args, 'manifestPath' | 'runtimeStatePath' | 'runtimeNlMappingsPath'>,
+): Promise<SearchSnapshotRuntimeState> {
+  const manifest = await loadManifest(args.manifestPath);
+  await assertSnapshotArtifactLearnedFacetCoverage(manifest);
+  await assertLookupRuntimeArtifactsReady(manifest);
+  const config = loadConfig();
+  if (isLtrServingEnabled(config)) {
+    throw new Error(
+      'artifact-only runtime substrate promote requires LTR_SERVING_ENABLED=false; live registry-backed LTR verification is unavailable in offline mode',
+    );
+  }
+
+  const nlMappingsRaw = await fs.readFile(manifest.artifacts.nlMappingsJson, 'utf8');
+  await atomicWriteFile(args.runtimeNlMappingsPath, nlMappingsRaw);
+  const runtimeNlMappingsCount = await loadNlMappingsCount(args.runtimeNlMappingsPath);
+  const state = buildArtifactOnlyRuntimeState({
+    manifest,
+    manifestPath: args.manifestPath,
+    runtimeNlMappingsPath: args.runtimeNlMappingsPath,
+    runtimeNlMappingsCount,
+  });
+  await atomicWriteFile(args.runtimeStatePath, `${JSON.stringify(state, null, 2)}\n`);
+  return state;
+}
+
 async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const previousRuntimeStateContents = await readOptionalFile(args.runtimeStatePath);
@@ -1096,11 +1183,19 @@ async function run(): Promise<void> {
     runtimeStatePath: args.runtimeStatePath,
     runtimeNlMappingsPath: args.runtimeNlMappingsPath,
   });
-  await publishRuntimeSubstrates({
-    ...args,
-    runtimeStatePath: cutoverPaths.stagedRuntimeStatePath,
-    runtimeNlMappingsPath: args.runtimeNlMappingsPath,
-  });
+  if (args.artifactOnlyPromote) {
+    await publishRuntimeSubstratesArtifactOnly({
+      manifestPath: args.manifestPath,
+      runtimeStatePath: cutoverPaths.stagedRuntimeStatePath,
+      runtimeNlMappingsPath: cutoverPaths.stagedRuntimeNlMappingsPath,
+    });
+  } else {
+    await publishRuntimeSubstrates({
+      ...args,
+      runtimeStatePath: cutoverPaths.stagedRuntimeStatePath,
+      runtimeNlMappingsPath: args.runtimeNlMappingsPath,
+    });
+  }
   try {
     phases.advance('pg_stage');
     phases.advance('graph_sync');

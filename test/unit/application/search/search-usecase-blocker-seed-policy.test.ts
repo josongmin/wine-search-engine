@@ -194,7 +194,7 @@ describe('shouldSuppressBlockerSeedExpansion', () => {
     expect(shouldSuppressBlockerSeedExpansionForKnownShortAmbiguity({
       queryClass: plan.queryClass,
       anchors: plan.anchors,
-      persistedAmbiguity: { types: ['fixture_curated_ambiguity'], severity: 'high' },
+      persistedAmbiguity: { types: ['broad_icon'], severity: 'high' },
     })).toBe(true);
   });
 
@@ -204,7 +204,7 @@ describe('shouldSuppressBlockerSeedExpansion', () => {
       rawQuery: plan.rawQuery,
       queryClass: 'short_entity',
       anchors: plan.anchors,
-      persistedAmbiguity: { types: ['fixture_curated_ambiguity'], severity: 'high' },
+      persistedAmbiguity: { types: ['broad_icon'], severity: 'high' },
       normalizedQuery: plan.normalizedQuery,
     })).toBe(false);
   });
@@ -225,7 +225,7 @@ describe('shouldSuppressBlockerSeedExpansion', () => {
       rawQuery: plan.rawQuery,
       queryClass: 'short_entity',
       anchors: plan.anchors,
-      persistedAmbiguity: { types: ['fixture_curated_ambiguity'], severity: 'high' },
+      persistedAmbiguity: { types: ['broad_icon'], severity: 'high' },
       normalizedQuery: plan.normalizedQuery,
     })).toBe(false);
   });

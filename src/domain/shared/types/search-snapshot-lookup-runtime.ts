@@ -333,6 +333,75 @@ export function parseLookupAliasRuntimeArtifact(
   }
 }
 
+function isRuntimeArtifactRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isRuntimeArtifactStringRecord(
+  value: unknown,
+): value is Readonly<Record<string, unknown>> {
+  return isRuntimeArtifactRecord(value);
+}
+
+export function parseTrustedLookupAliasRuntimeArtifact(
+  raw: string,
+  filePath: string,
+): LookupAliasRuntimeArtifact {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isRuntimeArtifactRecord(parsed)) {
+      throw new Error('root is not an object');
+    }
+    if (parsed.schemaVersion !== LOOKUP_ALIAS_RUNTIME_SCHEMA_VERSION) {
+      throw new Error(`schemaVersion must be ${LOOKUP_ALIAS_RUNTIME_SCHEMA_VERSION}`);
+    }
+    if (typeof parsed.snapshotId !== 'string' || parsed.snapshotId.length === 0) {
+      throw new Error('snapshotId is required');
+    }
+    if (typeof parsed.generatedAt !== 'string' || parsed.generatedAt.length === 0) {
+      throw new Error('generatedAt is required');
+    }
+    if (typeof parsed.aliasRegistryHash !== 'string' || parsed.aliasRegistryHash.length === 0) {
+      throw new Error('aliasRegistryHash is required');
+    }
+    if (!Array.isArray(parsed.aliases)) {
+      throw new Error('aliases must be an array');
+    }
+    if (!Array.isArray(parsed.surfaceForms)) {
+      throw new Error('surfaceForms must be an array');
+    }
+    if (!isRuntimeArtifactStringRecord(parsed.exactIndex)) {
+      throw new Error('exactIndex must be an object');
+    }
+    if (!isRuntimeArtifactStringRecord(parsed.compactIndex)) {
+      throw new Error('compactIndex must be an object');
+    }
+    if (!isRuntimeArtifactStringRecord(parsed.wholeTokenIndex)) {
+      throw new Error('wholeTokenIndex must be an object');
+    }
+    if (!isRuntimeArtifactStringRecord(parsed.phoneticIndex)) {
+      throw new Error('phoneticIndex must be an object');
+    }
+    if (!isRuntimeArtifactStringRecord(parsed.doubleMetaphoneIndex)) {
+      throw new Error('doubleMetaphoneIndex must be an object');
+    }
+    if (!isRuntimeArtifactStringRecord(parsed.doubleMetaphoneKeysByAliasId)) {
+      throw new Error('doubleMetaphoneKeysByAliasId must be an object');
+    }
+    if (!Array.isArray(parsed.prefixCatalog)) {
+      throw new Error('prefixCatalog must be an array');
+    }
+    if (!Array.isArray(parsed.hangulCompletionRecords)) {
+      throw new Error('hangulCompletionRecords must be an array');
+    }
+    return parsed as unknown as LookupAliasRuntimeArtifact;
+  } catch (error) {
+    throw new Error(
+      `Malformed trusted lookup alias runtime artifact at ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
 export function parseLookupEntityProjectionArtifact(
   raw: string,
   filePath: string,

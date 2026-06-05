@@ -462,7 +462,7 @@ describe('T-ELV2-06 clarification contract on the wire', () => {
     const ambiguityDictionary = {
       isKnownAmbiguous: vi.fn().mockResolvedValue(true),
       getAmbiguityInfo: vi.fn().mockResolvedValue({
-        types: ['fixture_curated_ambiguity'],
+        types: ['broad_icon'],
         severity: 'high',
       }),
       getAmbiguityInfoBatch: vi.fn().mockResolvedValue(new Map()),
@@ -483,7 +483,7 @@ describe('T-ELV2-06 clarification contract on the wire', () => {
     expect(out.status).toBe('ambiguous');
     expect(resolver.resolve).not.toHaveBeenCalled();
     expect(ambiguityDictionary.getAmbiguityInfo).toHaveBeenCalledTimes(1);
-    expect(out.evidenceSummary.ambiguityTypes).toEqual(['fixture_curated_ambiguity']);
+    expect(out.evidenceSummary.ambiguityTypes).toEqual(['broad_icon']);
     expect(out.evidenceSummary.ambiguitySeverity).toBe('high');
   });
 
@@ -511,7 +511,7 @@ describe('T-ELV2-06 clarification contract on the wire', () => {
     const ambiguityDictionary = {
       isKnownAmbiguous: vi.fn().mockResolvedValue(true),
       getAmbiguityInfo: vi.fn().mockResolvedValue({
-        types: ['fixture_curated_ambiguity'],
+        types: ['broad_icon'],
         severity: 'high',
         entityIds: ['margaux-2015', 'margaux-appellation'],
       }),
@@ -560,7 +560,7 @@ describe('T-ELV2-06 clarification contract on the wire', () => {
     const ambiguityDictionary = {
       isKnownAmbiguous: vi.fn().mockResolvedValue(true),
       getAmbiguityInfo: vi.fn().mockResolvedValue({
-        types: ['fixture_curated_ambiguity'],
+        types: ['broad_icon'],
         severity: 'high',
       }),
       getAmbiguityInfoBatch: vi.fn().mockResolvedValue(new Map()),
@@ -580,7 +580,7 @@ describe('T-ELV2-06 clarification contract on the wire', () => {
 
     expect(out.status).toBe('ambiguous');
     expect(out.evidenceSummary.decisionReasonCode).toBe('persisted_ambiguity_surface');
-    expect(out.evidenceSummary.ambiguityTypes).toEqual(['fixture_curated_ambiguity']);
+    expect(out.evidenceSummary.ambiguityTypes).toEqual(['broad_icon']);
   });
 
   it('normalizes failed short-entity exact witnesses -> ambiguous when the surface is a known ambiguity entry', async () => {
@@ -607,7 +607,7 @@ describe('T-ELV2-06 clarification contract on the wire', () => {
     const ambiguityDictionary = {
       isKnownAmbiguous: vi.fn().mockResolvedValue(true),
       getAmbiguityInfo: vi.fn().mockResolvedValue({
-        types: ['fixture_curated_ambiguity'],
+        types: ['common_noun_collision'],
         severity: 'high',
       }),
       getAmbiguityInfoBatch: vi.fn().mockResolvedValue(new Map()),
@@ -627,7 +627,7 @@ describe('T-ELV2-06 clarification contract on the wire', () => {
 
     expect(out.status).toBe('ambiguous');
     expect(out.evidenceSummary.decisionReasonCode).toBe('persisted_ambiguity_surface');
-    expect(out.evidenceSummary.ambiguityTypes).toEqual(['fixture_curated_ambiguity']);
+    expect(out.evidenceSummary.ambiguityTypes).toEqual(['common_noun_collision']);
   });
 
   it('normalizes recall-only ambiguous garbage -> failed', async () => {

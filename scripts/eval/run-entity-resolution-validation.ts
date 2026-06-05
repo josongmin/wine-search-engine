@@ -19,6 +19,7 @@
  *
  * Usage:
  *   pnpm run eval:lookup-v2:authority -- \
+ *     --use-active-runtime \
  *     [--limit-per-class N] [--output <file.json>]
  *
  * Post-cutover note: direct SearchUseCase callers default to the
@@ -29,6 +30,7 @@ import 'dotenv/config';
 import process from 'node:process';
 import { writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { parseArgs } from 'node:util';
 import { pathToFileURL } from 'node:url';
 
 import { loadConfig } from '../../src/config/env.js';
@@ -40,6 +42,11 @@ import {
   DEFAULT_RUNTIME_STATE_PATH,
   loadSearchSnapshotRuntimeState,
 } from '../../src/infrastructure/health/search-snapshot-readiness.js';
+import {
+  EVAL_RUNTIME_BINDING_OPTIONS,
+  requireExplicitEvalRuntimeBinding,
+  resolveEvalRuntimeBinding,
+} from './runtime-binding-args.js';
 import {
   evaluatePerClassGate,
   type ClassTally,
@@ -115,39 +122,36 @@ export function toPerClassEntries(
     });
 }
 
-function parseArgs(argv: readonly string[]): {
+function parseCliArgs(argv: readonly string[]): {
   limitPerClass: number;
   output: string;
   runtimeStatePath?: string | undefined;
   useActiveRuntime: boolean;
 } {
-  let limitPerClass = 1000;
-  let output = '/tmp/entity-resolution-validation.json';
-  let runtimeStatePath: string | undefined;
-  let useActiveRuntime = false;
-  for (let i = 0; i < argv.length; i += 1) {
-    if (argv[i] === '--limit-per-class') {
-      const n = Number.parseInt(argv[i + 1] ?? '', 10);
-      if (Number.isFinite(n) && n > 0) limitPerClass = n;
-      i += 1;
-    } else if (argv[i] === '--output') {
-      output = argv[i + 1] ?? output;
-      i += 1;
-    } else if (argv[i] === '--runtime-state') {
-      runtimeStatePath = argv[i + 1] ?? runtimeStatePath;
-      i += 1;
-    } else if (argv[i] === '--use-active-runtime') {
-      useActiveRuntime = true;
-    }
-  }
-  return { limitPerClass, output, runtimeStatePath, useActiveRuntime };
+  const args = argv.filter((arg) => arg !== '--');
+  const { values } = parseArgs({
+    args,
+    options: {
+      'limit-per-class': { type: 'string', default: '1000' },
+      output: { type: 'string', default: '/tmp/entity-resolution-validation.json' },
+      ...EVAL_RUNTIME_BINDING_OPTIONS,
+    },
+    strict: true,
+    allowPositionals: false,
+  });
+  const limitPerClass = Number.parseInt(values['limit-per-class'] ?? '1000', 10);
+  const binding = resolveEvalRuntimeBinding(values);
+  return {
+    limitPerClass: Number.isFinite(limitPerClass) && limitPerClass > 0 ? limitPerClass : 1000,
+    output: values.output ?? '/tmp/entity-resolution-validation.json',
+    runtimeStatePath: binding.runtimeStatePath,
+    useActiveRuntime: binding.useActiveRuntime,
+  };
 }
 
 async function main(): Promise<void> {
-  const { limitPerClass, output, runtimeStatePath, useActiveRuntime } = parseArgs(process.argv.slice(2));
-  if (runtimeStatePath === undefined && !useActiveRuntime) {
-    throw new Error('Explicit runtime binding required: pass --runtime-state <path> or --use-active-runtime');
-  }
+  const { limitPerClass, output, runtimeStatePath, useActiveRuntime } = parseCliArgs(process.argv.slice(2));
+  requireExplicitEvalRuntimeBinding({ runtimeStatePath, useActiveRuntime });
   const effectiveRuntimeStatePath = runtimeStatePath ?? DEFAULT_RUNTIME_STATE_PATH;
   const config = loadConfig();
   const pool = getPgPool();

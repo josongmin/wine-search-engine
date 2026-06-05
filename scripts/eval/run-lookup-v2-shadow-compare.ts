@@ -32,6 +32,11 @@ import {
   loadSearchSnapshotRuntimeState,
 } from '../../src/infrastructure/health/search-snapshot-readiness.js';
 import {
+  EVAL_RUNTIME_BINDING_OPTIONS,
+  requireExplicitEvalRuntimeBinding,
+  resolveEvalRuntimeBinding,
+} from './runtime-binding-args.js';
+import {
   buildShadowReport,
   type ShadowRow,
   type ShadowSideOutcome,
@@ -95,17 +100,13 @@ async function main(): Promise<void> {
     options: {
       corpus: { type: 'string', default: 'test/fixtures/lookup-v2-hotset.jsonl' },
       output: { type: 'string', default: '/tmp/lookup-v2-shadow-report.json' },
-      runtimeState: { type: 'string' },
-      useActiveRuntime: { type: 'boolean', default: false },
+      ...EVAL_RUNTIME_BINDING_OPTIONS,
     },
   });
   const corpusPath = values.corpus ?? 'test/fixtures/lookup-v2-hotset.jsonl';
   const outputPath = values.output ?? '/tmp/lookup-v2-shadow-report.json';
-  const runtimeStatePath = values.runtimeState;
-  const useActiveRuntime = values.useActiveRuntime ?? false;
-  if (runtimeStatePath === undefined && !useActiveRuntime) {
-    throw new Error('Explicit runtime binding required: pass --runtimeState <path> or --useActiveRuntime');
-  }
+  const { runtimeStatePath, useActiveRuntime } = resolveEvalRuntimeBinding(values);
+  requireExplicitEvalRuntimeBinding({ runtimeStatePath, useActiveRuntime });
 
   const hotset = parseHotset(corpusPath);
   if (hotset.length === 0) {

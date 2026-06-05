@@ -33,17 +33,23 @@ V2 품질 gate를 실제로 통과시킨 뒤, lookup authority를 V1에서 V2로
   - pointer parity verify PASS
 - Current canonical active latency truth is green on the dedicated lookup
   bootstrap path:
-  - `/tmp/lookup-v2-latency-korean-famous-active-v7-postmigrate.json`
-  - `bootstrap_ms=1165.313`
-  - `first_query_ms=375.211`
-  - `warm_p95_ms=154.544`
+  - `/tmp/lookup-v2-latency-korean-famous-active-2026-06-05-post-bootstrap-fix.json`
+  - `bootstrap_ms=963.213`
+  - `first_query_ms=182.245`
+  - `warm_p95_ms=116.823`
   - verdict: **PASS**
 - Current executable self-canary replay is green:
-  - `/tmp/lookup-v2-canary-replay-active-postmigrate.json`
+  - `/tmp/lookup-v2-canary-replay-active-2026-06-05-post-bootstrap-fix.json`
   - `hard_drift=0`, `soft_abstain_drift=0`, labeled `75/75`
+- Current executable canary corpus build lane is present and verified:
+  - `pnpm run eval:lookup-v2:canary:build -- --input <traffic.ndjson> --output <corpus.jsonl> --query-field <dotted.path> [route/method filters]`
+  - sample proof: `/tmp/lookup-v2-canary-built-sample.jsonl`
+- Current-contract artifact-only publish is executable and verified on this host:
+  - `pnpm run etl:publish-runtime-substrates:artifact-only -- --manifest /Users/songmin/.wine-search-engine/data/search-snapshots/search-snapshot:v1:7bcd44a5484b2be5/manifest.json --runtime-state /Users/songmin/.wine-search-engine/data/runtime-search-snapshot.json --runtime-nl-mappings /Users/songmin/.wine-search-engine/data/nl-mappings.json`
+  - result: PASS
 - Remaining closeout residue is operational only:
-  - real traffic canary replay input
-  - operator-plane PG publish availability on this host
+  - real traffic mirror raw input
+  - operator-plane PG publish availability on this host (non-gate for lookup-only artifact/direct runtime)
 
 ## Authority Docs
 
@@ -349,7 +355,7 @@ historical closeout note:
 - `search-snapshot:v1:e88a45bedcb8d41f` 기준 older publish-green proof는
   historical only다.
 
-current canonical note (2026-06-04):
+current canonical note (2026-06-05):
 
 - active runtime is now current-contract:
   - runtime state `search_snapshot_runtime_state.v7`
@@ -364,15 +370,15 @@ current canonical note (2026-06-04):
 ### Current Latency Truth
 
 - executable lane:
-  - `pnpm run eval:lookup-v2:latency:korean-famous -- --useActiveRuntime --output /tmp/lookup-v2-latency-korean-famous-active-v7-postmigrate.json`
+  - `pnpm run eval:lookup-v2:latency:korean-famous -- --use-active-runtime --output /tmp/lookup-v2-latency-korean-famous-active-2026-06-05-post-bootstrap-fix.json`
 - latest result:
-  - `bootstrap_ms=1165.313`
-  - `first_query_ms=375.211`
-  - `warm_p50_ms=31.755`
-  - `warm_p95_ms=154.544`
+  - `bootstrap_ms=963.213`
+  - `first_query_ms=182.245`
+  - `warm_p50_ms=10.889`
+  - `warm_p95_ms=116.823`
   - verdict: **PASS**
 - latest coverage truth:
-  - `pnpm run eval:lookup-v2:coverage -- --useActiveRuntime --corpus test/fixtures/lookup-v2-korean-famous-expanded.jsonl --output /tmp/lookup-v2-coverage-korean-famous-active-v7-postmigrate.json`
+  - `pnpm run eval:lookup-v2:coverage -- --use-active-runtime --corpus test/fixtures/lookup-v2-korean-famous-expanded.jsonl --output /tmp/lookup-v2-coverage-korean-famous-active-2026-06-05-post-bootstrap-fix.json`
   - `hot_entities=53/53`
   - `non_entity=22/22`
   - `curation_tasks=0`
@@ -384,7 +390,7 @@ current canonical note (2026-06-04):
   - failed on this host with `getaddrinfo ENOTFOUND wine-engine-pg...`
 - conclusion:
   - canonical active correctness / shadow / coverage / latency / self-canary are green
-  - lookup bootstrap green came from the dedicated lookup-direct split, not a threshold relaxation
+  - lookup bootstrap green came from trusted current-runtime alias parse + zero-copy alias hydration + staged lookup-direct bootstrap, not a threshold relaxation
   - remaining non-code residue is real traffic canary + operator-plane environment
 
 ### Phase-2 Invariants

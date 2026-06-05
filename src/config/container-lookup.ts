@@ -8,12 +8,6 @@ import { PgLtrModelRegistry } from '../infrastructure/adapter/pg-ltr-model-regis
 import { loadRuntimeLtrModels } from '../infrastructure/adapter/runtime-ltr-model-loader.js';
 import { LTR_FEATURE_SCHEMA_HASH } from '../domain/ranking/service/lambdamart-ranker.js';
 import { bootstrapLogger } from '../domain/shared/bootstrap-logger.js';
-import { SearchSnapshotAliasMatcher } from '../infrastructure/adapter/search-snapshot-alias-matcher.js';
-import { SearchSnapshotEntityLookup } from '../infrastructure/adapter/search-snapshot-entity-lookup.js';
-import { SearchSnapshotResolverProjectionLookup } from '../infrastructure/adapter/search-snapshot-resolver-projection-lookup.js';
-import { SearchSnapshotAmbiguityDictionary } from '../infrastructure/adapter/search-snapshot-ambiguity-dictionary.js';
-import { SearchSnapshotConceptRedirectRegistry } from '../infrastructure/adapter/search-snapshot-concept-redirect-registry.js';
-import { SearchSnapshotExactSafeRegistry } from '../infrastructure/adapter/search-snapshot-exact-safe-registry.js';
 import { PgBlockingAdapter } from '../infrastructure/adapter/pg-blocking-adapter.js';
 import { PgCalibrationStore } from '../infrastructure/adapter/pg-calibration-store.js';
 import { HttpLearnedMatcherAdapter } from '../infrastructure/adapter/http-learned-matcher.js';
@@ -26,6 +20,7 @@ import { LtrRerankDecider } from '../domain/resolver/v2/ltr-rerank-decider.js';
 import { RuntimeLookupPlanner } from '../application/search/entity-lookup-v2/runtime-lookup-planner.js';
 import type { EntityLookupV2UseCasePort } from '../application/search/port/search-route-usecases.port.js';
 import type { QueryClassWeights } from '../domain/ranking/index.js';
+import { loadLookupRuntimeBundle } from './lookup-runtime-bundle.js';
 
 export interface LookupDirectContainer {
   readonly entityLookupV2UseCase: EntityLookupV2UseCasePort;
@@ -117,30 +112,22 @@ export async function createLookupDirectContainer(
       'Lookup direct container requires searchSnapshotManifestPath for artifact-only lookup authority.',
     );
   }
+  const runtimeBundleCacheKey = runtimeHandles.searchSnapshotId ?? manifestPath;
 
   const querySanitizer = new QuerySanitizer();
   const ltrModelsPromise = loadLookupLtrModels(config, runtimeHandles);
-  const [
+  const [runtimeBundle, ltrModels] = await Promise.all([
+    loadLookupRuntimeBundle(runtimeBundleCacheKey, manifestPath),
+    ltrModelsPromise,
+  ]);
+  const {
     aliasMatcher,
     entityLookup,
     resolverProjectionLookup,
     ambiguityDictionary,
     conceptRedirectRegistry,
     exactSafeRegistry,
-    ltrModels,
-  ] = await Promise.all([
-    SearchSnapshotAliasMatcher.loadFromManifest(manifestPath),
-    SearchSnapshotEntityLookup.loadFromManifest(manifestPath),
-    SearchSnapshotResolverProjectionLookup.loadFromManifest(manifestPath),
-    SearchSnapshotAmbiguityDictionary.loadFromManifest(manifestPath),
-    SearchSnapshotConceptRedirectRegistry.loadFromManifest(manifestPath),
-    SearchSnapshotExactSafeRegistry.loadFromManifest(manifestPath),
-    ltrModelsPromise,
-  ]);
-
-  if (aliasMatcher === undefined) {
-    throw new Error(`Lookup direct container failed to load alias runtime from ${manifestPath}`);
-  }
+  } = runtimeBundle;
 
   const entityResolver = buildEntityResolver(
     {

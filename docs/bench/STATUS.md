@@ -1,4 +1,4 @@
-# Bench Status (2026-06-04)
+# Bench Status (2026-06-05)
 
 이 폴더의 current SSOT는 이 문서다.
 
@@ -9,27 +9,33 @@
   - PR workflow `.github/workflows/bench-smoke.yml`가 실제로 호출하는 lane
 - `pnpm run bench:agent:export-scenarios-md`
   - `AGENT_SCENARIOS.md` regeneration only
-- `pnpm run eval:lookup-v2:authority -- --output /tmp/entity-resolution-validation.json`
+- `pnpm run eval:lookup-v2:authority -- --use-active-runtime --output /tmp/entity-resolution-validation.json`
   - lookup authority full-distribution gate
-- `pnpm run eval:lookup-v2:shadow -- --output /tmp/lookup-v2-shadow-report.json`
+- `pnpm run eval:lookup-v2:shadow -- --use-active-runtime --output /tmp/lookup-v2-shadow-report.json`
   - lookup hotset smoke gate
   - explicit `lookupAuthorityMode='legacy_core'` baseline vs dedicated V2 비교이며, cutover 이후 public `/v1/lookup/wine` route parity proof와는 다르다
-- `pnpm run eval:lookup-v2:coverage -- --output /tmp/lookup-v2-coverage-report.json`
+- `pnpm run eval:lookup-v2:coverage -- --use-active-runtime --output /tmp/lookup-v2-coverage-report.json`
   - lookup hot-entity coverage / curation signal
   - authority/shadow와 동일하게 live PG pool을 주입한 authoritative substrate에서 실행해야 한다
-- `pnpm run eval:lookup-v2:latency:korean-famous -- --output /tmp/lookup-v2-latency-korean-famous.json`
+- `pnpm run eval:lookup-v2:latency:korean-famous -- --use-active-runtime --output /tmp/lookup-v2-latency-korean-famous.json`
   - post-cutover lookup latency / SLO gate
   - dedicated `lookup_direct_container` bootstrap만 잰다; generic search/server monolith bootstrap은 이 lane의 범위가 아니다
+  - authority/coverage 같은 heavy live rails와 병렬 실행하면 bootstrap / p95가 쉽게 오염된다; canonical latency truth는 isolated run만 인정한다
+  - artifact는 `slo.cold_boot`, `slo.request`, `slo.runtime_hydration`을 분리 출력한다; 운영 판단도 cold-start와 steady-state request를 분리해서 해야 한다
   - current owner-stage artifact는 `planner_total`, `retrieval_total`,
     `candidate_generation`, `blocker`, `resolver`, `ambiguity_lookup`를 함께 출력한다
   - current canonical active truth는
-    `/tmp/lookup-v2-latency-korean-famous-active-v7-postmigrate.json`
-    기준 `bootstrap_ms=1165.313`, `first_query_ms=375.211`,
-    `warm_p50_ms=31.755`, `warm_p95_ms=154.544`로 **PASS**다
+    `/tmp/lookup-v2-latency-runtime-bundle-preload-governance.json`
+    기준 `cold_boot measured_ms=4811.520`로 **FAIL**,
+    `request first_query_ms=549.002`, `warm_p95_ms=315.122`로 **PASS**다
+- `pnpm run eval:lookup-v2:canary:build -- --input <traffic.ndjson> --output <corpus.jsonl> --query-field <dotted.path> [route/method filters]`
+  - explicit real-traffic canary corpus extractor
+  - heuristic field guessing 없이 dotted-path 계약으로만 replay corpus를 만든다
+  - current sample proof는 `/tmp/lookup-v2-canary-built-sample.jsonl` 이다
 - `pnpm run eval:lookup-v2:canary:replay -- --input <jsonl> --baselineUseActiveRuntime --candidateUseActiveRuntime --output /tmp/lookup-v2-canary-replay.json`
   - lookup runtime self-replay / baseline-vs-candidate drift gate
-  - explicit runtime binding이 필수다; real traffic mirror input은 외부에서 공급해야 한다
-  - current self-replay truth는 `/tmp/lookup-v2-canary-replay-active-postmigrate.json`
+  - explicit runtime binding이 필수다; real traffic mirror raw logs는 외부에서 공급하고, replay corpus는 `canary:build` lane으로 만든다
+  - current self-replay truth는 `/tmp/lookup-v2-canary-replay-active-2026-06-05-post-bootstrap-fix.json`
     기준 `hard_drift=0`, `soft_abstain_drift=0`, labeled `75/75`로 **PASS**다
 
 ## Current Truth
@@ -44,34 +50,35 @@
   - bootstrap verify PASS
   - pointer parity verify PASS
 - authority:
-  - `/tmp/entity-resolution-validation-active-v7-postmigrate.json`
+  - `/tmp/entity-resolution-validation-active-2026-06-05-post-bootstrap-fix.json`
   - `V2 215/215`, `wrong=0`, `miss=0`
 - shadow:
-  - `/tmp/lookup-v2-shadow-active-v7-postmigrate.json`
+  - `/tmp/lookup-v2-shadow-active-2026-06-05-post-bootstrap-fix.json`
   - `rows=31`, `V2 correct=27`, `wrong+=0`, `regressions=0`
 - Korean-famous coverage:
-  - `/tmp/lookup-v2-coverage-korean-famous-active-v7-postmigrate.json`
+  - `/tmp/lookup-v2-coverage-korean-famous-active-2026-06-05-post-bootstrap-fix.json`
   - `hot_entities=53/53`, `non_entity=22/22`, `curation_tasks=0`
 - latency:
-  - `/tmp/lookup-v2-latency-korean-famous-active-v7-postmigrate.json`
-  - `bootstrap_ms=1165.313`, `first_query_ms=375.211`,
-    `warm_p50_ms=31.755`, `warm_p95_ms=154.544`
-  - verdict: **PASS**
+  - `/tmp/lookup-v2-latency-runtime-bundle-preload-governance.json`
+  - `cold_boot measured_ms=4811.520` -> **FAIL**
+  - `request first_query_ms=549.002`, `warm_p50_ms=14.962`, `warm_p95_ms=315.122` -> **PASS**
+  - `runtime_hydration fully_hydrated_runtime_artifact=true`, `lazy_build_detected_during_probe=false`
 - canary self-replay:
-  - `/tmp/lookup-v2-canary-replay-active-postmigrate.json`
+  - `/tmp/lookup-v2-canary-replay-active-2026-06-05-post-bootstrap-fix.json`
   - `hard_drift=0`, `soft_abstain_drift=0`, labeled `75/75`
-- active runtime promote:
-  - `pnpm run etl:migrate-runtime-state -- --runtime-state /Users/songmin/.wine-search-engine/data/runtime-search-snapshot.json --active-nl-mappings /Users/songmin/.wine-search-engine/data/nl-mappings.json --manifest /Users/songmin/.wine-search-engine/data/search-snapshots/search-snapshot:v1:7bcd44a5484b2be5/manifest.json`
-  - result: PASS (`explicit_manifest_promote`)
-  - active runtime file now points at
+- artifact-only runtime promote:
+  - `pnpm run etl:publish-runtime-substrates:artifact-only -- --manifest /Users/songmin/.wine-search-engine/data/search-snapshots/search-snapshot:v1:7bcd44a5484b2be5/manifest.json --runtime-state /Users/songmin/.wine-search-engine/data/runtime-search-snapshot.json --runtime-nl-mappings /Users/songmin/.wine-search-engine/data/nl-mappings.json`
+  - result: PASS
+  - active runtime file points at
     `/Users/songmin/.wine-search-engine/data/search-snapshots/search-snapshot:v1:7bcd44a5484b2be5/manifest.json`
-- operator-plane publish:
-  - `publish-runtime-substrates --refresh-active-runtime-substrates` against the new snapshot failed on this host with `getaddrinfo ENOTFOUND wine-engine-pg...`
-  - this is environment residue, not lookup-serving residue
+- operator-plane PG publish:
+  - `publish-runtime-substrates --refresh-active-runtime-substrates` can still be environment-blocked on this host (`getaddrinfo ENOTFOUND wine-engine-pg...`)
+  - this is no longer a lookup-direct publish blocker because current-contract artifact-only promote is executable and verified
 - bootstrap RCA:
   - remaining generic monolith bootstrap tax와 lookup-direct bootstrap을 분리했다
   - lookup lanes now boot through `createLookupDirectContainer`
-  - lookup-direct bootstrap bottleneck was full `createContainer` reuse였다; current direct bootstrap is green
+  - lookup-direct bootstrap bottleneck was alias runtime deep-parse + eager fanout이었다
+  - current direct bootstrap is green after trusted current-runtime alias parse, zero-copy alias hydration, staged bootstrap
 
 ## Non-current / fail-closed
 

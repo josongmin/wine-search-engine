@@ -202,7 +202,7 @@ describe('Planner – constraint extraction metadata', () => {
       isKnownAmbiguous: () => Promise.resolve(true),
       getAmbiguityInfo: () => Promise.resolve({
         entityIds: ['yquem-2015', 'dyquem-2015'],
-        types: ['fixture_curated_ambiguity'],
+        types: ['short_form'],
         severity: 'high',
       }),
       getAmbiguityInfoBatch: async (forms) => {
@@ -215,7 +215,7 @@ describe('Planner – constraint extraction metadata', () => {
           if (form === '디켐') {
             map.set(form, {
               entityIds: ['yquem-2015', 'dyquem-2015'],
-              types: ['fixture_curated_ambiguity'],
+              types: ['short_form'],
               severity: 'high',
             });
           }

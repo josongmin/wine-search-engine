@@ -13,17 +13,17 @@
 > `shadow-results-2026-06-02.md`) are retained for RCA/audit, not for current
 > cutover verdicts.
 
-## 0. 현재 상태 (2026-06-04)
+## 0. 현재 상태 (2026-06-05)
 
 현재 cutover authority truth:
 
 - **full eval_cases authority** (`run-entity-resolution-validation.ts`, 215 rows,
   fingerprint `bd8abea5871dcede17272c3cc0bd1dcebcf93ea658d2d4b2ab930e5ba4f26cae`):
   `V1 46.5%, wrong=0, miss=115` vs `V2 100.0%, wrong=0, miss=0`
-- **verdict: code/data/runtime/bench PASS, self-canary PASS, real traffic canary external**
+- **verdict: code/data/runtime/bench PASS, self-canary PASS, artifact-only publish PASS, real traffic mirror input external**
 - **post-cutover latency truth** (`run-lookup-v2-latency-korean-famous.ts`, 75 rows):
   canonical active runtime rerun (`lookup_direct_container`):
-  `bootstrap_ms=1165.313`, `first_query_ms=375.211`, `warm_p95_ms=154.544`
+  `bootstrap_ms=963.213`, `first_query_ms=182.245`, `warm_p95_ms=116.823`
   → **PASS**
 - **coverage truth** (`run-lookup-v2-coverage-report.ts`, Korean-famous 75 rows):
   `hot_entities=53/53`, `non_entity=22/22`, `curation_tasks=0`
@@ -36,7 +36,9 @@
 - readiness:
   - bootstrap verify PASS
   - pointer parity verify PASS
-- current residue는 **real traffic canary + operator-plane PG publish 환경** 이다.
+- current residue는 **real traffic mirror input external** 이다.
+- operator-plane PG publish DNS는 이 호스트에서 여전히 환경 이슈일 수 있지만,
+  lookup-only canonical active promote는 `artifact-only` lane으로 이미 닫혔다.
 - blocker rows closed:
   - `Viña Espectro Maipo Valley Carmenere` →
     recall-only `fuzzy_alias` head no longer self-certifies resolve
@@ -67,15 +69,17 @@
 | 산출물 | 위치 | 상태 |
 |---|---|---|
 | hotset corpus | `test/fixtures/lookup-v2-hotset.jsonl` | ✅ (26 labeled; DoD exemplars 포함) |
-| full authority report | `/tmp/entity-resolution-validation-active-v7-postmigrate.json` | ✅ **AUTHORITY PASS**: explicit `legacy_core` baseline `V1 100/215 (46.5%), wrong=0, miss=115` vs `V2 215/215 (100%), wrong=0, miss=0`, fingerprint `bd8abea5871dcede17272c3cc0bd1dcebcf93ea658d2d4b2ab930e5ba4f26cae` |
+| full authority report | `/tmp/entity-resolution-validation-active-2026-06-05-post-bootstrap-fix.json` | ✅ **AUTHORITY PASS**: explicit `legacy_core` baseline `V1 100/215 (46.5%), wrong=0, miss=115` vs `V2 215/215 (100%), wrong=0, miss=0`, fingerprint `bd8abea5871dcede17272c3cc0bd1dcebcf93ea658d2d4b2ab930e5ba4f26cae` |
 | shadow-compare 메트릭 (pure) | `scripts/eval/lookup-v2-shadow-metrics.ts` | ✅ unit-tested |
 | live shadow runner (V1+V2 실행) | `scripts/eval/run-lookup-v2-shadow-compare.ts` | ✅ 구현·실행됨 |
-| shadow compare report | `/tmp/lookup-v2-shadow-active-v7-postmigrate.json` | ✅ **SMOKE PASS (post-cutover), NOT cutover authority**: `rows=31`, `V2 correct=27`, `wrongPositive=0`, `concept_redirect_acc=1.000`, gate PASS. **주의**: 현재 shadow lane의 `V1`은 public `/v1/lookup/wine` route가 아니라 explicit `legacy_core` baseline이다. 즉 이 lane은 post-cutover에는 public route parity proof가 아니라 legacy-core smoke다. |
-| latency full-corpus report | `/tmp/lookup-v2-latency-korean-famous-active-v7-postmigrate.json` | ✅ **LATENCY PASS**: `bootstrap_ms=1165.313`, `first_query_ms=375.211`, `warm_p95_ms=154.544`. lookup direct bootstrap / warm path 모두 threshold 이내다. |
-| Korean-famous coverage report | `/tmp/lookup-v2-coverage-korean-famous-active-v7-postmigrate.json` | ✅ **COVERAGE PASS**: `hot_entities=53/53`, `non_entity=22/22`, `curation_tasks=0`. |
-| canary self-replay | `/tmp/lookup-v2-canary-replay-active-postmigrate.json` | ✅ **SELF-CANARY PASS**: `hard_drift=0`, `soft_abstain_drift=0`, labeled `75/75`. real traffic mirror input 자체는 여전히 외부 필요. |
-| active runtime proof | `/Users/songmin/.wine-search-engine/data/runtime-search-snapshot.json` | ✅ active runtime now points at `search-snapshot:v1:7bcd44a5484b2be5`; explicit offline promote (`etl:migrate-runtime-state -- --manifest ...`) PASS. |
-| operator publish proof | — | ⚠️ new snapshot `publish-runtime-substrates --refresh-active-runtime-substrates` is environment-blocked on this host (`getaddrinfo ENOTFOUND wine-engine-pg...`). lookup serving proof와 분리해서 본다. |
+| shadow compare report | `/tmp/lookup-v2-shadow-active-2026-06-05-post-bootstrap-fix.json` | ✅ **SMOKE PASS (post-cutover), NOT cutover authority**: `rows=31`, `V2 correct=27`, `wrongPositive=0`, `concept_redirect_acc=1.000`, gate PASS. **주의**: 현재 shadow lane의 `V1`은 public `/v1/lookup/wine` route가 아니라 explicit `legacy_core` baseline이다. 즉 이 lane은 post-cutover에는 public route parity proof가 아니라 legacy-core smoke다. |
+| latency full-corpus report | `/tmp/lookup-v2-latency-korean-famous-active-2026-06-05-post-bootstrap-fix.json` | ✅ **LATENCY PASS**: `bootstrap_ms=963.213`, `first_query_ms=182.245`, `warm_p95_ms=116.823`. lookup direct bootstrap / warm path 모두 threshold 이내다. |
+| Korean-famous coverage report | `/tmp/lookup-v2-coverage-korean-famous-active-2026-06-05-post-bootstrap-fix.json` | ✅ **COVERAGE PASS**: `hot_entities=53/53`, `non_entity=22/22`, `curation_tasks=0`. |
+| canary corpus build | `/tmp/lookup-v2-canary-built-sample.jsonl` | ✅ explicit dotted-path extractor lane PASS (`scanned=4`, `matched=3`, `rows=3`) |
+| canary self-replay | `/tmp/lookup-v2-canary-replay-active-2026-06-05-post-bootstrap-fix.json` | ✅ **SELF-CANARY PASS**: `hard_drift=0`, `soft_abstain_drift=0`, labeled `75/75`. real traffic mirror raw input 자체는 여전히 외부 필요. |
+| active runtime proof | `/Users/songmin/.wine-search-engine/data/runtime-search-snapshot.json` | ✅ active runtime points at `search-snapshot:v1:7bcd44a5484b2be5`; current-contract artifact-only promote PASS. |
+| artifact-only publish proof | — | ✅ `pnpm run etl:publish-runtime-substrates:artifact-only -- --manifest /Users/songmin/.wine-search-engine/data/search-snapshots/search-snapshot:v1:7bcd44a5484b2be5/manifest.json --runtime-state /Users/songmin/.wine-search-engine/data/runtime-search-snapshot.json --runtime-nl-mappings /Users/songmin/.wine-search-engine/data/nl-mappings.json` PASS |
+| operator-plane PG publish | — | ℹ️ host DNS / operator-plane availability issue는 여전히 별도 운영 문제일 수 있다. lookup-only cutover gate와는 분리한다. |
 | product-edge purge rail | `test/regression/lookup-wine-authority-surface.regression.test.ts` | ✅ removed `/v1/lookup/wine` stays gone; local CLI + eval/debug rails are locked to dedicated lookup-direct V2 authority |
 | operator smoke | `/v2/entity-lookup/ops/inspect` + web `/ops/*` | ✅ (T-07 trusted plane) |
 | live canary replay | — | ⬜ (정상 stack 미러 트래픽 필요) |
