@@ -31,6 +31,10 @@ export interface CoverageInputRow {
    * acceptable (`failed` OR `ambiguous`, but never `resolved`).
    */
   readonly acceptedStatuses?: readonly CoverageStatus[] | undefined;
+  /** Optional benchmark gold hint for the expected entity. */
+  readonly expectedEntityHint?: string | undefined;
+  /** Optional exact benchmark gold entity id when the corpus carries it. */
+  readonly expectedEntityId?: string | undefined;
   /** Hotset class tag (e.g. hot_entity_coverage, concept_grape). */
   readonly class: string;
   /** What the engine actually returned. */
@@ -43,6 +47,8 @@ export interface CoverageHole {
   readonly query: string;
   readonly class: string;
   readonly observedStatus: CoverageStatus;
+  readonly expectedEntityHint?: string | undefined;
+  readonly expectedEntityId?: string | undefined;
 }
 
 export interface CoverageReport {
@@ -79,7 +85,14 @@ export function buildCoverageReport(rows: readonly CoverageInputRow[]): Coverage
     if (acceptedStatuses(row).includes(row.observedStatus)) {
       coveredCount += 1;
     } else {
-      holes.push({ qid: row.qid, query: row.query, class: row.class, observedStatus: row.observedStatus });
+      holes.push({
+        qid: row.qid,
+        query: row.query,
+        class: row.class,
+        observedStatus: row.observedStatus,
+        ...(row.expectedEntityHint !== undefined ? { expectedEntityHint: row.expectedEntityHint } : {}),
+        ...(row.expectedEntityId !== undefined ? { expectedEntityId: row.expectedEntityId } : {}),
+      });
     }
   }
 

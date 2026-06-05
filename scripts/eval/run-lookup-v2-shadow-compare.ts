@@ -42,11 +42,16 @@ import {
   type ShadowSideOutcome,
   type ShadowStatus,
 } from './lookup-v2-shadow-metrics.js';
+import {
+  filterLookupV2StretchRows,
+  isLookupV2StretchPartition,
+  type LookupV2StretchPartition,
+} from './lookup-v2-stretch-partitions.js';
 
 interface HotsetRow {
   readonly qid: string;
   readonly query: string;
-  readonly expected_status: ShadowStatus;
+  readonly expectedStatus: ShadowStatus;
   readonly accepted_statuses?: readonly ShadowStatus[] | undefined;
   readonly expected_entity_hint?: string;
   readonly class?: string;
@@ -81,7 +86,7 @@ function parseHotset(corpusPath: string): readonly HotsetRow[] {
     rows.push({
       qid,
       query,
-      expected_status: expected as ShadowStatus,
+      expectedStatus: expected as ShadowStatus,
       ...(acceptedStatuses !== undefined && acceptedStatuses.length > 0 ? { accepted_statuses: acceptedStatuses } : {}),
       ...(typeof obj['expected_entity_hint'] === 'string' ? { expected_entity_hint: obj['expected_entity_hint'] } : {}),
       ...(typeof obj['class'] === 'string' ? { class: obj['class'] } : {}),
@@ -100,17 +105,23 @@ async function main(): Promise<void> {
     options: {
       corpus: { type: 'string', default: 'test/fixtures/lookup-v2-hotset.jsonl' },
       output: { type: 'string', default: '/tmp/lookup-v2-shadow-report.json' },
+      partition: { type: 'string', default: 'all' },
       ...EVAL_RUNTIME_BINDING_OPTIONS,
     },
   });
   const corpusPath = values.corpus ?? 'test/fixtures/lookup-v2-hotset.jsonl';
   const outputPath = values.output ?? '/tmp/lookup-v2-shadow-report.json';
+  const rawPartition = values.partition ?? 'all';
+  if (!isLookupV2StretchPartition(rawPartition)) {
+    throw new Error(`[elv2-shadow] invalid --partition: ${rawPartition}`);
+  }
+  const partition: LookupV2StretchPartition = rawPartition;
   const { runtimeStatePath, useActiveRuntime } = resolveEvalRuntimeBinding(values);
   requireExplicitEvalRuntimeBinding({ runtimeStatePath, useActiveRuntime });
 
-  const hotset = parseHotset(corpusPath);
+  const hotset = filterLookupV2StretchRows(parseHotset(corpusPath), partition);
   if (hotset.length === 0) {
-    throw new Error(`[elv2-shadow] empty hotset corpus: ${corpusPath}`);
+    throw new Error(`[elv2-shadow] empty hotset corpus: ${corpusPath} (partition=${partition})`);
   }
 
   const config = loadConfig();
@@ -154,7 +165,7 @@ async function main(): Promise<void> {
       qid: row.qid,
       query: row.query,
       ...(row.class !== undefined ? { queryClass: row.class } : {}),
-      expectedStatus: row.expected_status,
+      expectedStatus: row.expectedStatus,
       ...(row.accepted_statuses !== undefined ? { acceptedStatuses: row.accepted_statuses } : {}),
       ...(row.expected_entity_hint !== undefined ? { expectedLabelHint: row.expected_entity_hint } : {}),
       v1,
@@ -177,6 +188,7 @@ async function main(): Promise<void> {
       generatedAt: new Date().toISOString(),
       gitSha,
       corpus: corpusPath,
+      partition,
       runtime: {
         runtime_state_path: effectiveRuntimeStatePath,
         runtime_state_schema: runtimeState.schemaVersion,

@@ -43,6 +43,7 @@ import {
   type PreparedVespaFeedDocument,
   parsePreparedVespaFeedDocuments,
 } from './index-to-vespa.js';
+import { ingestCanonicalEntityGraphForManifestPath } from './ingest-canonical-entity-graph.js';
 import {
   createSnapshotPublishStateMachine,
   hasSnapshotPublishReachedPhase,
@@ -1322,6 +1323,13 @@ async function run(): Promise<void> {
         const staleDocIds = currentRuntimeEntityIds.filter((entityId) => !nextEntityIdSet.has(entityId));
         await deleteStaleVespaDocuments(staleDocIds);
       }
+      console.log('🧭 Syncing canonical graph plane');
+      const canonicalGraphIngest = await ingestCanonicalEntityGraphForManifestPath(built.manifestPath);
+      console.log(
+        `🧭 Canonical graph synced: entities=${canonicalGraphIngest.canonical_entities_upserted} `
+          + `aliases=${canonicalGraphIngest.canonical_aliases_inserted} `
+          + `ambiguity=${canonicalGraphIngest.canonical_ambiguity_rows_inserted}`,
+      );
       console.log('🗄️ Publishing runtime substrates');
       runtimeState = await publishRuntimeSubstrates({
         manifestPath: built.manifestPath,

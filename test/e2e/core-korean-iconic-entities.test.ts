@@ -4,6 +4,7 @@ import { closeTestServer, createTestServer, type TestServer } from './helpers/te
 import { postJson } from './helpers/http-transport.js';
 import {
   CORE_KOREAN_ICON_QUERY_CASES,
+  isIdentitySafeCoreKoreanEntityCase,
   loadCoreKoreanIconFixtureBundle,
 } from '../support/core-korean-icon-fixtures.js';
 
@@ -24,7 +25,7 @@ afterAll(async () => {
 });
 
 describe('Core Korean Iconic Entities', () => {
-  it.each(CORE_KOREAN_ICON_QUERY_CASES)(
+  it.each(CORE_KOREAN_ICON_QUERY_CASES.filter(isIdentitySafeCoreKoreanEntityCase))(
     'resolves $query to $expectedEntityId through POST /v2/entity-lookup',
     async ({ query, expectedEntityId }) => {
       const response = await postJson(server.app, '/v2/entity-lookup', { query });

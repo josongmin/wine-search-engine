@@ -10,6 +10,7 @@ import type { EntityId, SourceRecordId } from '../../src/domain/shared/types/ind
 import {
   CORE_KOREAN_ICON_AMBIGUITY_CASES,
   CORE_KOREAN_ICON_QUERY_CASES,
+  isIdentitySafeCoreKoreanEntityCase,
   loadCoreKoreanIconFixtureBundle,
 } from '../support/core-korean-icon-fixtures.js';
 
@@ -41,7 +42,7 @@ function normalizeSurface(value: string): string {
 }
 
 describe('Core Korean iconic alias runtime', () => {
-  it.each(CORE_KOREAN_ICON_QUERY_CASES)(
+  it.each(CORE_KOREAN_ICON_QUERY_CASES.filter(isIdentitySafeCoreKoreanEntityCase))(
     'matches $query to $expectedEntityId through snapshot alias substrate',
     async ({ query, expectedEntityId }) => {
       const matches = await matcher.findMatches(query);

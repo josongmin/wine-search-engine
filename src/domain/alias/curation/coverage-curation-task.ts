@@ -24,6 +24,10 @@ export interface CoverageHoleInput {
   readonly holeClass: string;
   /** The engine status actually observed (failed / ambiguous / redirect). */
   readonly observedStatus: string;
+  /** Optional benchmark gold hint carried from the fixture/report. */
+  readonly benchmarkGoldHint?: string | undefined;
+  /** Optional exact benchmark gold entity id carried from the fixture/report. */
+  readonly benchmarkGoldEntityId?: string | undefined;
 }
 
 export const CURATION_TASK_STATUSES = ['needs_target', 'ready_for_review'] as const;
@@ -40,6 +44,10 @@ export interface CurationTask {
   readonly suggestedAliasType: AliasType;
   /** A coverage hole has no target yet — always `needs_target` at creation. */
   readonly status: CurationTaskStatus;
+  /** Non-authoritative benchmark gold hint for operator triage. */
+  readonly benchmarkGoldHint?: string | undefined;
+  /** Non-authoritative benchmark gold entity id for operator triage. */
+  readonly benchmarkGoldEntityId?: string | undefined;
   /** Human-facing rationale for the curation queue. */
   readonly reason: string;
 }
@@ -83,6 +91,8 @@ export function buildCurationTasks(holes: readonly CoverageHoleInput[]): readonl
       observedStatus: hole.observedStatus,
       suggestedAliasType: suggestAliasTypeForHole(hole.holeClass),
       status: 'needs_target',
+      ...(hole.benchmarkGoldHint !== undefined ? { benchmarkGoldHint: hole.benchmarkGoldHint } : {}),
+      ...(hole.benchmarkGoldEntityId !== undefined ? { benchmarkGoldEntityId: hole.benchmarkGoldEntityId } : {}),
       reason: `Hot-entity coverage hole (${hole.holeClass}): "${hole.surfaceForm}" resolved as "${hole.observedStatus}" — assign a target entity + alias to close it.`,
     });
   }

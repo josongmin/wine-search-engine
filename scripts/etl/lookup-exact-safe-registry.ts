@@ -90,8 +90,6 @@ export async function loadLookupExactSafeRegistry(
 
   const raw = await fs.readFile(registryPath, 'utf8');
   const rows: LookupExactSafeRegistryRow[] = [];
-  const exactOwners = new Map<string, CanonicalEntityId>();
-  const compactOwners = new Map<string, CanonicalEntityId>();
 
   for (const [index, line] of raw.split('\n').entries()) {
     const trimmed = line.trim();
@@ -102,37 +100,69 @@ export async function loadLookupExactSafeRegistry(
       JSON.parse(trimmed) as RawLookupExactSafeRegistryRow,
       index + 1,
     );
-    const normalized = normalizeForMatch(parsed.surface);
-    if (normalized.length === 0) {
-      throw new Error(`lookup exact-safe registry row ${index + 1} normalizes to empty`);
-    }
-
-    const exactOwner = exactOwners.get(normalized);
-    if (exactOwner !== undefined && exactOwner !== parsed.entityId) {
-      throw new Error(
-        `lookup exact-safe registry exact collision on "${parsed.surface}" between ${exactOwner} and ${parsed.entityId}`,
-      );
-    }
-    exactOwners.set(normalized, parsed.entityId);
-
-    if (parsed.promotionClass === 'compact_exact_safe') {
-      const compact = compactForLookup(normalized);
-      if (compact.length === 0) {
-        throw new Error(`lookup exact-safe registry row ${index + 1} compact-normalizes to empty`);
-      }
-      const compactOwner = compactOwners.get(compact);
-      if (compactOwner !== undefined && compactOwner !== parsed.entityId) {
-        throw new Error(
-          `lookup exact-safe registry compact collision on "${parsed.surface}" between ${compactOwner} and ${parsed.entityId}`,
-        );
-      }
-      compactOwners.set(compact, parsed.entityId);
-    }
-
     rows.push(parsed);
   }
 
+  assertLookupExactSafeRegistryRowsValid(rows);
   return rows;
+}
+
+export function assertLookupExactSafeRegistryRowsValid(
+  rows: readonly LookupExactSafeRegistryRow[],
+): void {
+  const exactOwners = new Map<string, CanonicalEntityId>();
+  const compactOwners = new Map<string, CanonicalEntityId>();
+
+  for (const row of rows) {
+    const normalized = normalizeForMatch(row.surface);
+    if (normalized.length === 0) {
+      throw new Error(`lookup exact-safe registry row normalizes to empty for surface=${JSON.stringify(row.surface)}`);
+    }
+
+    const exactOwner = exactOwners.get(normalized);
+    if (exactOwner !== undefined && exactOwner !== row.entityId) {
+      throw new Error(
+        `lookup exact-safe registry exact collision on "${row.surface}" between ${exactOwner} and ${row.entityId}`,
+      );
+    }
+    exactOwners.set(normalized, row.entityId);
+
+    if (row.promotionClass === 'compact_exact_safe') {
+      const compact = compactForLookup(normalized);
+      if (compact.length === 0) {
+        throw new Error(`lookup exact-safe registry compact-normalizes to empty for surface=${JSON.stringify(row.surface)}`);
+      }
+      const compactOwner = compactOwners.get(compact);
+      if (compactOwner !== undefined && compactOwner !== row.entityId) {
+        throw new Error(
+          `lookup exact-safe registry compact collision on "${row.surface}" between ${compactOwner} and ${row.entityId}`,
+        );
+      }
+      compactOwners.set(compact, row.entityId);
+    }
+  }
+}
+
+export function sortLookupExactSafeRegistryRows(
+  rows: readonly LookupExactSafeRegistryRow[],
+): readonly LookupExactSafeRegistryRow[] {
+  return rows
+    .slice()
+    .sort((left, right) =>
+      left.locale.localeCompare(right.locale)
+      || left.entityId.localeCompare(right.entityId)
+      || normalizeForMatch(left.surface).localeCompare(normalizeForMatch(right.surface))
+      || left.surface.localeCompare(right.surface)
+      || left.promotionClass.localeCompare(right.promotionClass)
+      || left.reviewedAt.localeCompare(right.reviewedAt),
+    );
+}
+
+export function serializeLookupExactSafeRegistryRows(
+  rows: readonly LookupExactSafeRegistryRow[],
+): string {
+  const ordered = sortLookupExactSafeRegistryRows(rows);
+  return ordered.map((row) => JSON.stringify(row)).join('\n') + (ordered.length > 0 ? '\n' : '');
 }
 
 export function buildLookupRuntimeOverlayAliases(

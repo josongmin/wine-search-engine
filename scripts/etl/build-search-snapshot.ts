@@ -706,6 +706,9 @@ function isIdentitySafeCoreIconSurface(value: string): boolean {
 function collectCoreIconIdentitySafeQueriesByEntityId(): ReadonlyMap<string, readonly string[]> {
   const grouped = new Map<string, string[]>();
   for (const testCase of CORE_KOREAN_ICON_QUERY_CASES) {
+    if (testCase.identitySafe === false) {
+      continue;
+    }
     const existing = grouped.get(testCase.expectedEntityId) ?? [];
     if (!existing.includes(testCase.query)) {
       existing.push(testCase.query);

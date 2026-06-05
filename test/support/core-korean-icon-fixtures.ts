@@ -9,6 +9,7 @@ import {
   type EntityId,
   type SourceRecordId,
 } from '../../src/domain/shared/types/index.js';
+import { buildNormalizedQueryViews } from '../../src/domain/query/service/query-normalizer.js';
 import type { EnrichedSilverRecord, ProposedAlias } from '../../scripts/etl/types.js';
 import type { TestFixtureAlias } from '../integration/helpers/test-container.js';
 
@@ -40,6 +41,7 @@ type CatalogEntry = z.infer<typeof CatalogEntrySchema>;
 export interface CoreKoreanEntityCase {
   readonly query: string;
   readonly expectedEntityId: string;
+  readonly identitySafe?: boolean;
 }
 
 interface CoreKoreanAmbiguityCase {
@@ -80,8 +82,8 @@ export const CORE_KOREAN_ICON_QUERY_CASES: readonly CoreKoreanEntityCase[] = [
   { query: '사시카이아', expectedEntityId: 'w-sassicaia-2018' },
   { query: '티냐넬로', expectedEntityId: 'w-tignanello-2019' },
   { query: '오르넬라이아', expectedEntityId: 'w-ornellaia-2018' },
-  { query: '자코모 콘테르노', expectedEntityId: 'w-giacomo-conterno-monfortino-2015' },
-  { query: '베가 시실리아', expectedEntityId: 'w-vega-sicilia-unico-2012' },
+  { query: '자코모 콘테르노', expectedEntityId: 'w-giacomo-conterno-monfortino-2015', identitySafe: false },
+  { query: '베가 시실리아', expectedEntityId: 'w-vega-sicilia-unico-2012', identitySafe: false },
   { query: '핑구스', expectedEntityId: 'w-pingus-2019' },
   { query: '알마비바', expectedEntityId: 'w-almaviva-2019' },
   { query: '돈 멜초', expectedEntityId: 'w-don-melchor-2019' },
@@ -119,7 +121,7 @@ export const CORE_KOREAN_ICON_RELEASE_GATE_CASES: readonly CoreKoreanReleaseGate
   { query: '샤또 라투르', expectedEntityId: 'w-chateau-latour-2016', sources: ['gold_wine_catalog'] },
   { query: '샤토 라투르', expectedEntityId: 'w-chateau-latour-2016', sources: ['gold_wine_catalog'] },
   { query: '샤또 라뚜르', expectedEntityId: 'w-chateau-latour-2016', sources: ['korean_wine_aliases', 'entity_alias_catalog', 'web_usage'] },
-  { query: '라뚜르', expectedEntityId: 'w-chateau-latour-2016', sources: ['gold_wine_catalog'] },
+  { query: '라뚜르', expectedEntityId: 'w-chateau-latour-2016', sources: ['gold_wine_catalog'], identitySafe: false },
   { query: '라투르', expectedEntityId: 'w-chateau-latour-2016', sources: ['entity_alias_catalog', 'gold_wine_catalog'] },
 
   { query: '샤또 라피트', expectedEntityId: 'w-chateau-lafite-rothschild-2016', sources: ['gold_wine_catalog'] },
@@ -129,7 +131,7 @@ export const CORE_KOREAN_ICON_RELEASE_GATE_CASES: readonly CoreKoreanReleaseGate
   { query: '샤또 라피트 로칠드', expectedEntityId: 'w-chateau-lafite-rothschild-2016', sources: ['korean_wine_aliases', 'entity_alias_catalog', 'web_usage'] },
   { query: '샤또 라피트 로쉴드', expectedEntityId: 'w-chateau-lafite-rothschild-2016', sources: ['korean_wine_aliases', 'entity_alias_catalog', 'web_usage'] },
   { query: '샤또 라피뜨 로쉴드', expectedEntityId: 'w-chateau-lafite-rothschild-2016', sources: ['korean_wine_aliases', 'entity_alias_catalog', 'web_usage'] },
-  { query: '라피트', expectedEntityId: 'w-chateau-lafite-rothschild-2016', sources: ['entity_alias_catalog', 'gold_wine_catalog'] },
+  { query: '라피트', expectedEntityId: 'w-chateau-lafite-rothschild-2016', sources: ['entity_alias_catalog', 'gold_wine_catalog'], identitySafe: false },
   { query: '라피트 로칠드', expectedEntityId: 'w-chateau-lafite-rothschild-2016', sources: ['korean_wine_aliases', 'entity_alias_catalog', 'web_usage'] },
   { query: '라피트 로쉴드', expectedEntityId: 'w-chateau-lafite-rothschild-2016', sources: ['korean_wine_aliases', 'entity_alias_catalog', 'web_usage'] },
   { query: '라피뜨 로칠드', expectedEntityId: 'w-chateau-lafite-rothschild-2016', sources: ['gold_wine_catalog'] },
@@ -146,7 +148,7 @@ export const CORE_KOREAN_ICON_RELEASE_GATE_CASES: readonly CoreKoreanReleaseGate
   { query: '무통 로쉴드', expectedEntityId: 'w-chateau-mouton-rothschild-2018', sources: ['korean_wine_aliases', 'entity_alias_catalog', 'web_usage'] },
   { query: '무똥 로칠드', expectedEntityId: 'w-chateau-mouton-rothschild-2018', sources: ['korean_wine_aliases', 'entity_alias_catalog', 'web_usage'] },
   { query: '무똥 로쉴드', expectedEntityId: 'w-chateau-mouton-rothschild-2018', sources: ['korean_wine_aliases', 'entity_alias_catalog', 'web_usage'] },
-  { query: '무통', expectedEntityId: 'w-chateau-mouton-rothschild-2018', sources: ['entity_alias_catalog', 'gold_wine_catalog'] },
+  { query: '무통', expectedEntityId: 'w-chateau-mouton-rothschild-2018', sources: ['entity_alias_catalog', 'gold_wine_catalog'], identitySafe: false },
 
   { query: '샤또 오브리옹', expectedEntityId: 'w-chateau-haut-brion-2015', sources: ['gold_wine_catalog'] },
   { query: '샤토 오브리옹', expectedEntityId: 'w-chateau-haut-brion-2015', sources: ['korean_wine_aliases'] },
@@ -228,11 +230,11 @@ export const CORE_KOREAN_ICON_RELEASE_GATE_CASES: readonly CoreKoreanReleaseGate
   { query: '오넬라이아', expectedEntityId: 'w-ornellaia-2018', sources: ['korean_wine_aliases', 'gold_wine_catalog'] },
   { query: '오르넬라이야', expectedEntityId: 'w-ornellaia-2018', sources: ['korean_wine_aliases', 'entity_alias_catalog', 'web_usage'] },
   { query: '오르넬라야', expectedEntityId: 'w-ornellaia-2018', sources: ['korean_wine_aliases', 'entity_alias_catalog', 'web_usage'] },
-  { query: '자코모 콘테르노', expectedEntityId: 'w-giacomo-conterno-monfortino-2015', sources: ['gold_wine_catalog'] },
+  { query: '자코모 콘테르노', expectedEntityId: 'w-giacomo-conterno-monfortino-2015', sources: ['gold_wine_catalog'], identitySafe: false },
   { query: '자코모콘테르노', expectedEntityId: 'w-giacomo-conterno-monfortino-2015', sources: ['gold_wine_catalog'] },
   { query: '몬포르티노', expectedEntityId: 'w-giacomo-conterno-monfortino-2015', sources: ['gold_wine_catalog'] },
 
-  { query: '베가 시실리아', expectedEntityId: 'w-vega-sicilia-unico-2012', sources: ['korean_wine_aliases', 'gold_wine_catalog'] },
+  { query: '베가 시실리아', expectedEntityId: 'w-vega-sicilia-unico-2012', sources: ['korean_wine_aliases', 'gold_wine_catalog'], identitySafe: false },
   { query: '베가시실리아', expectedEntityId: 'w-vega-sicilia-unico-2012', sources: ['korean_wine_aliases', 'gold_wine_catalog'] },
   { query: '베가 시칠리아', expectedEntityId: 'w-vega-sicilia-unico-2012', sources: ['korean_wine_aliases', 'entity_alias_catalog', 'web_usage'] },
   { query: '베가 시실리아 우니코', expectedEntityId: 'w-vega-sicilia-unico-2012', sources: ['korean_wine_aliases', 'entity_alias_catalog', 'web_usage'] },
@@ -260,7 +262,7 @@ export const CORE_KOREAN_ICON_RELEASE_GATE_CASES: readonly CoreKoreanReleaseGate
   { query: '펜폴즈 그레인지', expectedEntityId: 'w-penfolds-grange-2017', sources: ['gold_wine_catalog'] },
   { query: '펜폴즈 그랜지', expectedEntityId: 'w-penfolds-grange-2017', sources: ['korean_wine_aliases', 'entity_alias_catalog', 'web_usage'] },
   { query: '그레인지', expectedEntityId: 'w-penfolds-grange-2017', sources: ['gold_wine_catalog'] },
-  { query: '그랜지', expectedEntityId: 'w-penfolds-grange-2017', sources: ['korean_wine_aliases', 'entity_alias_catalog', 'web_usage'] },
+  { query: '그랜지', expectedEntityId: 'w-penfolds-grange-2017', sources: ['korean_wine_aliases', 'entity_alias_catalog', 'web_usage'], identitySafe: false },
   { query: '그래인지', expectedEntityId: 'w-penfolds-grange-2017', sources: ['korean_wine_aliases'] },
   { query: '펜폴즈 그래인지', expectedEntityId: 'w-penfolds-grange-2017', sources: ['korean_wine_aliases'] },
   { query: '에곤 뮐러', expectedEntityId: 'w-egon-muller-scharzhofberger-kabinett-2020', sources: ['korean_wine_aliases', 'gold_wine_catalog'] },
@@ -336,6 +338,48 @@ export const CORE_KOREAN_ICON_AMBIGUITY_CASES: readonly CoreKoreanAmbiguityCase[
     expectedCandidateEntityId: 'w-drc-romanee-conti-2017',
     forbiddenResolvedEntityId: 'w-drc-romanee-conti-2017',
     ambiguityTypes: ['acronym', 'entity'],
+    severity: 'high',
+  },
+  {
+    query: '라뚜르',
+    expectedCandidateEntityId: 'w-chateau-latour-2016',
+    forbiddenResolvedEntityId: 'w-chateau-latour-2016',
+    ambiguityTypes: ['short_form', 'entity'],
+    severity: 'high',
+  },
+  {
+    query: '라피트',
+    expectedCandidateEntityId: 'w-chateau-lafite-rothschild-2016',
+    forbiddenResolvedEntityId: 'w-chateau-lafite-rothschild-2016',
+    ambiguityTypes: ['short_form', 'entity'],
+    severity: 'high',
+  },
+  {
+    query: '무통',
+    expectedCandidateEntityId: 'w-chateau-mouton-rothschild-2018',
+    forbiddenResolvedEntityId: 'w-chateau-mouton-rothschild-2018',
+    ambiguityTypes: ['short_form', 'entity'],
+    severity: 'high',
+  },
+  {
+    query: '그랜지',
+    expectedCandidateEntityId: 'w-penfolds-grange-2017',
+    forbiddenResolvedEntityId: 'w-penfolds-grange-2017',
+    ambiguityTypes: ['short_form', 'entity'],
+    severity: 'high',
+  },
+  {
+    query: '베가 시실리아',
+    expectedCandidateEntityId: 'w-vega-sicilia-unico-2012',
+    forbiddenResolvedEntityId: 'w-vega-sicilia-unico-2012',
+    ambiguityTypes: ['broad_icon', 'entity'],
+    severity: 'high',
+  },
+  {
+    query: '자코모 콘테르노',
+    expectedCandidateEntityId: 'w-giacomo-conterno-monfortino-2015',
+    forbiddenResolvedEntityId: 'w-giacomo-conterno-monfortino-2015',
+    ambiguityTypes: ['family', 'entity'],
     severity: 'high',
   },
   {
@@ -468,6 +512,9 @@ function collectCaseQueriesByEntityId(
 ): ReadonlyMap<string, readonly string[]> {
   const grouped = new Map<string, string[]>();
   for (const testCase of cases) {
+    if (testCase.identitySafe === false) {
+      continue;
+    }
     const existing = grouped.get(testCase.expectedEntityId) ?? [];
     if (!existing.includes(testCase.query)) {
       existing.push(testCase.query);
@@ -479,6 +526,12 @@ function collectCaseQueriesByEntityId(
 
 function isIdentitySafeReleaseGateCase(
   testCase: CoreKoreanReleaseGateCase,
+): boolean {
+  return testCase.identitySafe !== false;
+}
+
+export function isIdentitySafeCoreKoreanEntityCase(
+  testCase: CoreKoreanEntityCase,
 ): boolean {
   return testCase.identitySafe !== false;
 }
@@ -533,7 +586,7 @@ function collectRequiredEntityIds(
 }
 
 function normalizeSurfaceKey(value: string): string {
-  return value.normalize('NFC').trim().toLowerCase();
+  return buildNormalizedQueryViews(value).strict;
 }
 
 function isIdentitySafeCoreSurface(value: string): boolean {

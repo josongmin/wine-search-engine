@@ -188,11 +188,7 @@ function anchorHasAuthorityLookupVariant(
 
   return lookupVariants.some((variant) => {
     const trimmed = variant.trim();
-    return trimmed.length > 0
-      && (
-        wholeSurfaceQueries.has(trimmed)
-        || tokenizeLookupSurface(trimmed).length > 1
-      );
+    return trimmed.length > 0 && wholeSurfaceQueries.has(trimmed);
   });
 }
 

@@ -43,6 +43,11 @@ import {
   type CoverageStatus,
 } from '../../src/domain/resolver/v2/coverage-report.js';
 import { buildCurationTasks } from '../../src/domain/alias/curation/coverage-curation-task.js';
+import {
+  filterLookupV2StretchRows,
+  isLookupV2StretchPartition,
+  type LookupV2StretchPartition,
+} from './lookup-v2-stretch-partitions.js';
 
 const COVERAGE_STATUSES: ReadonlySet<string> = new Set<CoverageStatus>([
   'resolved',
@@ -56,6 +61,8 @@ interface HotsetRow {
   readonly query: string;
   readonly expectedStatus: CoverageStatus;
   readonly acceptedStatuses?: readonly CoverageStatus[] | undefined;
+  readonly expectedEntityHint?: string | undefined;
+  readonly expectedEntityId?: string | undefined;
   readonly class: string;
 }
 
@@ -83,6 +90,8 @@ function parseHotset(corpusPath: string): readonly HotsetRow[] {
       query,
       expectedStatus: expected as CoverageStatus,
       ...(acceptedStatuses !== undefined && acceptedStatuses.length > 0 ? { acceptedStatuses } : {}),
+      ...(typeof obj['expected_entity_hint'] === 'string' ? { expectedEntityHint: obj['expected_entity_hint'] } : {}),
+      ...(typeof obj['expected_entity_id'] === 'string' ? { expectedEntityId: obj['expected_entity_id'] } : {}),
       class: typeof obj['class'] === 'string' ? obj['class'] : 'unclassified',
     });
   }
@@ -96,17 +105,23 @@ async function main(): Promise<void> {
     options: {
       corpus: { type: 'string', default: 'test/fixtures/lookup-v2-hotset.jsonl' },
       output: { type: 'string', default: '/tmp/lookup-v2-coverage-report.json' },
+      partition: { type: 'string', default: 'all' },
       ...EVAL_RUNTIME_BINDING_OPTIONS,
     },
   });
   const corpusPath = values.corpus ?? 'test/fixtures/lookup-v2-hotset.jsonl';
   const outputPath = values.output ?? '/tmp/lookup-v2-coverage-report.json';
+  const rawPartition = values.partition ?? 'all';
+  if (!isLookupV2StretchPartition(rawPartition)) {
+    throw new Error(`[elv2-coverage] invalid --partition: ${rawPartition}`);
+  }
+  const partition: LookupV2StretchPartition = rawPartition;
   const { runtimeStatePath, useActiveRuntime } = resolveEvalRuntimeBinding(values);
   requireExplicitEvalRuntimeBinding({ runtimeStatePath, useActiveRuntime });
 
-  const hotset = parseHotset(corpusPath);
+  const hotset = filterLookupV2StretchRows(parseHotset(corpusPath), partition);
   if (hotset.length === 0) {
-    throw new Error(`[elv2-coverage] empty hotset corpus: ${corpusPath}`);
+    throw new Error(`[elv2-coverage] empty hotset corpus: ${corpusPath} (partition=${partition})`);
   }
 
   const config = loadConfig();
@@ -137,6 +152,8 @@ async function main(): Promise<void> {
       query: row.query,
       expectedStatus: row.expectedStatus,
       ...(row.acceptedStatuses !== undefined ? { acceptedStatuses: row.acceptedStatuses } : {}),
+      ...(row.expectedEntityHint !== undefined ? { expectedEntityHint: row.expectedEntityHint } : {}),
+      ...(row.expectedEntityId !== undefined ? { expectedEntityId: row.expectedEntityId } : {}),
       class: row.class,
       observedStatus,
     });
@@ -149,6 +166,8 @@ async function main(): Promise<void> {
       surfaceForm: hole.query,
       holeClass: hole.class,
       observedStatus: hole.observedStatus,
+      ...(hole.expectedEntityHint !== undefined ? { benchmarkGoldHint: hole.expectedEntityHint } : {}),
+      ...(hole.expectedEntityId !== undefined ? { benchmarkGoldEntityId: hole.expectedEntityId } : {}),
     })),
   );
 
@@ -164,6 +183,7 @@ async function main(): Promise<void> {
       generatedAt: new Date().toISOString(),
       gitSha,
       corpus: corpusPath,
+      partition,
       runtime: {
         runtime_state_path: effectiveRuntimeStatePath,
         runtime_state_schema: runtimeState.schemaVersion,

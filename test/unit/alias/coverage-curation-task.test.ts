@@ -20,15 +20,15 @@ describe('suggestAliasTypeForHole (T-ELV2-03 curation)', () => {
 
 describe('buildCurationTasks', () => {
   const holes: CoverageHoleInput[] = [
-    { surfaceForm: 'Dom Perignon', holeClass: 'hot_entity_coverage', observedStatus: 'failed' },
-    { surfaceForm: '돔페리뇽', holeClass: 'transliteration', observedStatus: 'failed' },
+    { surfaceForm: 'Dom Perignon', holeClass: 'hot_entity_coverage', observedStatus: 'failed', benchmarkGoldHint: 'dom perignon' },
+    { surfaceForm: '돔페리뇽', holeClass: 'transliteration', observedStatus: 'failed', benchmarkGoldEntityId: 'w-dom-perignon-2013' },
   ];
 
   it('creates one needs_target task per hole with a suggested alias type', () => {
     const tasks = buildCurationTasks(holes);
     expect(tasks).toHaveLength(2);
-    expect(tasks[0]).toMatchObject({ surfaceForm: 'Dom Perignon', status: 'needs_target', suggestedAliasType: 'canonical' });
-    expect(tasks[1]).toMatchObject({ surfaceForm: '돔페리뇽', suggestedAliasType: 'translation' });
+    expect(tasks[0]).toMatchObject({ surfaceForm: 'Dom Perignon', status: 'needs_target', suggestedAliasType: 'canonical', benchmarkGoldHint: 'dom perignon' });
+    expect(tasks[1]).toMatchObject({ surfaceForm: '돔페리뇽', suggestedAliasType: 'translation', benchmarkGoldEntityId: 'w-dom-perignon-2013' });
     expect(tasks[0]?.reason).toContain('coverage hole');
   });
 

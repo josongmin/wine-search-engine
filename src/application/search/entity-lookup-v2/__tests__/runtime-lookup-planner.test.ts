@@ -58,4 +58,23 @@ describe('RuntimeLookupPlanner', () => {
       expect.arrayContaining(['오푸스투']),
     );
   });
+
+  it('drops multi-token subspan anchors without a whole-surface witness', async () => {
+    const planner = new RuntimeLookupPlanner({
+      aliasMatcher: new ExactAliasMatcher(new Map([
+        ['라 투르', [
+          makeMatch(
+            '1996 Château Latour Grand Vin Pauillac (Premier Grand Cru Classé)',
+            ['wine-chateau-latour'],
+            'lexical_exact',
+          ),
+        ]],
+      ])),
+    });
+
+    const plan = await planner.plan('샤또 라 투르 도르 2019');
+
+    expect(plan.anchors).toHaveLength(0);
+    expect(plan.queryClass).toBe('unknown');
+  });
 });

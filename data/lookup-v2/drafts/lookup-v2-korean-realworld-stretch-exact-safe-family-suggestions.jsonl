@@ -1,0 +1,1 @@
+{"entityId":"wine-ce-359d80e914f3afc22ca4d246846e5e4a865e8e433e573e413cbe1cdb9462c791","suggestionStatus":"manual_review","rationale":"requires manual review because source_strength=runtime_identity_safe_alias hole_classes=realworld_brand_suffix, realworld_compact_alias, realworld_mixed_script_alias, realworld_producer_prefixed, realworld_spaced_alias, realworld_vintage_suffix"}
