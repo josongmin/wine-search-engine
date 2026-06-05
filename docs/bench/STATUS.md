@@ -17,6 +17,9 @@
 - `pnpm run eval:lookup-v2:coverage -- --use-active-runtime --output /tmp/lookup-v2-coverage-report.json`
   - lookup hot-entity coverage / curation signal
   - authority/shadow와 동일하게 live PG pool을 주입한 authoritative substrate에서 실행해야 한다
+  - exploratory stretch run:
+    `pnpm run eval:lookup-v2:coverage -- --use-active-runtime --corpus test/fixtures/lookup-v2-korean-realworld-stretch.jsonl --output /tmp/lookup-v2-coverage-korean-realworld-stretch.json`
+    는 non-gating real-world expansion lane이다. green cutover truth가 아니라, 현재 runtime이 놓치는 Korean collapsed typo / producer-prefixed / recommendation phrase gap을 드러내는 목적이다
 - `pnpm run eval:lookup-v2:latency:korean-famous -- --use-active-runtime --output /tmp/lookup-v2-latency-korean-famous.json`
   - post-cutover lookup latency / SLO gate
   - dedicated `lookup_direct_container` bootstrap만 잰다; generic search/server monolith bootstrap은 이 lane의 범위가 아니다
@@ -69,7 +72,9 @@
 - benchmark scope:
   - hotset fixture `test/fixtures/lookup-v2-hotset.jsonl` now covers 45 labeled rows
   - Korean-famous corpus `test/fixtures/lookup-v2-korean-famous-expanded.jsonl` now covers 107 labeled rows
+  - real-world stretch corpus `test/fixtures/lookup-v2-korean-realworld-stretch.jsonl` now covers 46 labeled rows
   - added pressure includes Korean iconic short-form ambiguity (`마고`, `라투르`, `샹베르탱`), Korean typos (`사시카야`, `페트루스`), Korean recommendation phrases (`까쇼 추천해줘`, `기념일 와인 추천`), and Koreanized adversarial no-match (`샤또 미라쥬 2022`, `도멘 판타지 부르고뉴`)
+  - stretch corpus adds harder realistic gaps such as collapsed producer-family spellings (`라피트로쉴드`, `무똥로쉴드`), producer-prefixed forms (`샤또 오브리옹`), French-leaning Korean transliterations (`페트뤼스`), iconic Napa/Burgundy gaps (`도미누스`, `조셉 펠프스 인시그니아`, `코슈뒤리`), and sentence-level recommendation phrases (`샴페인 선물 추천`, `소고기 와인 추천`)
 - artifact-only runtime promote:
   - `pnpm run etl:publish-runtime-substrates:artifact-only -- --manifest /Users/songmin/.wine-search-engine/data/search-snapshots/search-snapshot:v1:7bcd44a5484b2be5/manifest.json --runtime-state /Users/songmin/.wine-search-engine/data/runtime-search-snapshot.json --runtime-nl-mappings /Users/songmin/.wine-search-engine/data/nl-mappings.json`
   - result: PASS
