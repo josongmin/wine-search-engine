@@ -5,12 +5,16 @@ import type { CurationTask } from '../../src/domain/alias/curation/coverage-cura
 import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
 import { loadLookupV2BenchmarkGoldHintMapSync } from './lookup-v2-benchmark-gold-map.js';
 import type { LookupV2FamilyTargetRegistryRow } from './lookup-v2-family-target-registry.js';
-import { loadLookupV2FamilyTargetApprovedMapSync } from './lookup-v2-family-target-registry.js';
+import {
+  DEFAULT_LOOKUP_V2_FAMILY_TARGET_REGISTRY_PATH,
+  loadLookupV2FamilyTargetApprovedMapSync,
+} from './lookup-v2-family-target-registry.js';
 import type { LookupPolicyConflictRegistryRow } from './lookup-v2-policy-conflict-registry.js';
 import { loadLookupPolicyConflictBenchmarkHintOwnerMapSync } from './lookup-v2-policy-conflict-registry.js';
 import type { LookupV2PolicyFamilyDecisionRegistryRow } from './lookup-v2-policy-family-decision-registry.js';
 import {
   buildLookupV2PolicyFamilyDecisionKey,
+  DEFAULT_LOOKUP_V2_POLICY_FAMILY_DECISION_REGISTRY_PATH,
   loadLookupV2PolicyFamilyDecisionMapSync,
 } from './lookup-v2-policy-family-decision-registry.js';
 
@@ -126,18 +130,30 @@ function main(): void {
     options: {
       input: { type: 'string', default: '/tmp/lookup-v2-coverage-korean-realworld-stretch-entity-no-policy.json' },
       output: { type: 'string', default: 'data/lookup-v2/drafts/lookup-v2-curation-draft.jsonl' },
+      familyTargetRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_FAMILY_TARGET_REGISTRY_PATH },
+      policyFamilyDecisionRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_POLICY_FAMILY_DECISION_REGISTRY_PATH },
     },
   });
 
   const inputPath = values.input ?? '/tmp/lookup-v2-coverage-korean-realworld-stretch-entity-no-policy.json';
   const outputPath = values.output ?? 'data/lookup-v2/drafts/lookup-v2-curation-draft.jsonl';
+  const familyTargetRegistryPath = values.familyTargetRegistry ?? DEFAULT_LOOKUP_V2_FAMILY_TARGET_REGISTRY_PATH;
+  const policyFamilyDecisionRegistryPath = values.policyFamilyDecisionRegistry ?? DEFAULT_LOOKUP_V2_POLICY_FAMILY_DECISION_REGISTRY_PATH;
   const parsed = JSON.parse(readFileSync(inputPath, 'utf8')) as {
     generatedAt?: string;
     curationTasks?: readonly CurationTask[];
   };
   const tasks = parsed.curationTasks ?? [];
   const reviewedAt = parsed.generatedAt ?? new Date().toISOString();
-  const rows = buildLookupV2CurationDraftRows(tasks, inputPath, reviewedAt);
+  const rows = buildLookupV2CurationDraftRows(
+    tasks,
+    inputPath,
+    reviewedAt,
+    undefined,
+    loadLookupV2FamilyTargetApprovedMapSync(familyTargetRegistryPath),
+    undefined,
+    loadLookupV2PolicyFamilyDecisionMapSync(policyFamilyDecisionRegistryPath),
+  );
   const autoTargetable = rows.filter((row) => row.triageBucket === 'auto_targetable').length;
   const policyReview = rows.filter((row) => row.triageBucket === 'policy_review').length;
 

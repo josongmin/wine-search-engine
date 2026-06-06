@@ -3,8 +3,8 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { loadConfig } from '../../src/config/env.js';
 import { createLookupDirectContainer } from '../../src/config/container-lookup.js';
+import { loadLookupRuntimeBundle } from '../../src/config/lookup-runtime-bundle.js';
 import { createStageTimer } from '../../src/domain/shared/stage-timer.js';
-import { SearchSnapshotAliasMatcher } from '../../src/infrastructure/adapter/search-snapshot-alias-matcher.js';
 import { SEARCH_SNAPSHOT_SCHEMA_VERSION } from '../../src/domain/shared/constants/search-snapshot.js';
 import {
   DEFAULT_RUNTIME_STATE_PATH,
@@ -146,7 +146,24 @@ async function main(): Promise<void> {
   const rows = requestedLimit === undefined ? hotset : hotset.slice(0, Math.max(1, requestedLimit));
 
   const runtimeState = await loadSearchSnapshotRuntimeState(effectiveRuntimeStatePath);
-  const probeMatcher = await SearchSnapshotAliasMatcher.loadFromRuntimeState(effectiveRuntimeStatePath);
+  const config = loadConfig();
+  const pool = getPgPool();
+  const bootstrapStartedAt = performance.now();
+  const container = await createLookupDirectContainer(config, {
+    pool,
+    searchSnapshotId: runtimeState.snapshotId,
+    searchSnapshotManifestPath: runtimeState.manifestPath,
+    searchSnapshotFieldAvailability: runtimeState.fieldAvailability,
+  });
+  const bootstrapMs = roundMs(performance.now() - bootstrapStartedAt);
+  const bootstrapProfile = container.bootstrapProfile;
+
+  const runtimeBundleCacheKey = runtimeState.snapshotId ?? runtimeState.manifestPath;
+  const runtimeBundle = await loadLookupRuntimeBundle(
+    runtimeBundleCacheKey,
+    runtimeState.manifestPath,
+  );
+  const probeMatcher = runtimeBundle.aliasMatcher;
   if (probeMatcher === undefined) {
     throw new Error(`[elv2-latency] failed to load alias runtime matcher from ${runtimeStatePath}`);
   }
@@ -158,17 +175,6 @@ async function main(): Promise<void> {
   await probeMatcher.findMatches(probeQuery, { scope: 'span', stageTimer: probeTimer });
   const probeMs = roundMs(performance.now() - probeStartedAt);
   const buildStateAfter = probeMatcher.getBuildStateSnapshot();
-
-  const config = loadConfig();
-  const pool = getPgPool();
-  const bootstrapStartedAt = performance.now();
-  const container = await createLookupDirectContainer(config, {
-    pool,
-    searchSnapshotId: runtimeState.snapshotId,
-    searchSnapshotManifestPath: runtimeState.manifestPath,
-    searchSnapshotFieldAvailability: runtimeState.fieldAvailability,
-  });
-  const bootstrapMs = roundMs(performance.now() - bootstrapStartedAt);
 
   const queryRows: QueryLatencyRow[] = [];
   for (const row of rows) {
@@ -308,6 +314,7 @@ async function main(): Promise<void> {
     },
     metrics: {
       bootstrap_ms: bootstrapMs,
+      bootstrap_breakdown_ms: bootstrapProfile ?? null,
       first_query_ms: firstQueryMs,
       warm_p50_ms: warmP50Ms,
       warm_p95_ms: warmP95Ms,

@@ -2,7 +2,10 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import type { LookupExactSafeProposalPacketRow } from './export-lookup-v2-exact-safe-proposal-packet.js';
-import type { LookupExactSafeFamilyReviewPacketRow } from './export-lookup-v2-exact-safe-family-review-packet.js';
+import {
+  buildLookupV2ExactSafeReviewScopeKey,
+  type LookupExactSafeFamilyReviewPacketRow,
+} from './export-lookup-v2-exact-safe-family-review-packet.js';
 
 function isLookupExactSafeProposalPacketRow(value: unknown): value is LookupExactSafeProposalPacketRow {
   if (typeof value !== 'object' || value === null) {
@@ -49,18 +52,23 @@ export function applyLookupV2ExactSafeFamilyReviewPacket(args: {
   readonly familyRows: readonly LookupExactSafeFamilyReviewPacketRow[];
   readonly rowPacketRows: readonly LookupExactSafeProposalPacketRow[];
 }): readonly LookupExactSafeProposalPacketRow[] {
-  const familyByEntityId = new Map<string, LookupExactSafeFamilyReviewPacketRow>();
+  const familyByReviewScopeKey = new Map<string, LookupExactSafeFamilyReviewPacketRow>();
   for (const row of args.familyRows) {
-    if (familyByEntityId.has(row.entityId)) {
-      throw new Error(`duplicate exact-safe family review row for entityId=${row.entityId}`);
+    if (familyByReviewScopeKey.has(row.reviewScopeKey)) {
+      throw new Error(`duplicate exact-safe family review row for reviewScopeKey=${row.reviewScopeKey}`);
     }
-    familyByEntityId.set(row.entityId, row);
+    familyByReviewScopeKey.set(row.reviewScopeKey, row);
   }
 
   return args.rowPacketRows.map((row) => {
-    const family = familyByEntityId.get(row.entityId);
+    const reviewScopeKey = buildLookupV2ExactSafeReviewScopeKey({
+      entityId: row.entityId,
+      holeClass: row.holeClass,
+      suggestedAliasType: row.suggestedAliasType,
+    });
+    const family = familyByReviewScopeKey.get(reviewScopeKey);
     if (family === undefined) {
-      throw new Error(`exact-safe row packet has no family review row for entityId=${row.entityId}`);
+      throw new Error(`exact-safe row packet has no family review row for reviewScopeKey=${reviewScopeKey}`);
     }
     if (family.proposalStatus === 'needs_review') {
       return row;

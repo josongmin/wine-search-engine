@@ -65,6 +65,7 @@ export interface SearchSnapshotManifest {
     readonly entitiesNdjson: string;
     readonly aliasesNdjson: string;
     readonly lookupAliasRuntimeJson: string;
+    readonly lookupAliasBroadRecallRuntimeJson?: string;
     readonly lookupExactSafeRuntimeJson: string;
     readonly lookupResolverProjectionJson: string;
     readonly lookupEntityProjectionJson: string;
@@ -80,6 +81,7 @@ export interface SearchSnapshotManifest {
     readonly entities: number;
     readonly aliases: number;
     readonly lookupAliasRuntimeAliases: number;
+    readonly lookupAliasBroadRecallRuntimeEntries?: number;
     readonly lookupExactSafeRuntimeEntries: number;
     readonly lookupResolverProjectionDocuments: number;
     readonly lookupEntityProjectionDocuments: number;
@@ -94,6 +96,7 @@ export interface SearchSnapshotManifest {
     readonly entities: string;
     readonly aliases: string;
     readonly lookupAliasRuntime: string;
+    readonly lookupAliasBroadRecallRuntime?: string;
     readonly lookupExactSafeRuntime: string;
     readonly lookupResolverProjection: string;
     readonly lookupEntityProjection: string;
@@ -128,6 +131,7 @@ export interface SearchSnapshotRuntimeState {
   readonly manifestPath: string;
   readonly nlMappingsRuntimePath: string;
   readonly lookupAliasRuntimePath: string;
+  readonly lookupAliasBroadRecallRuntimePath?: string;
   readonly lookupExactSafeRuntimePath: string;
   readonly lookupResolverProjectionPath: string;
   readonly lookupEntityProjectionPath: string;
@@ -136,9 +140,10 @@ export interface SearchSnapshotRuntimeState {
   readonly quality: SearchSnapshotQualitySummary;
   readonly counts: {
     readonly entities: number;
-    readonly aliases: number;
-    readonly lookupAliasRuntimeAliases: number;
-    readonly lookupExactSafeRuntimeEntries: number;
+      readonly aliases: number;
+      readonly lookupAliasRuntimeAliases: number;
+      readonly lookupAliasBroadRecallRuntimeEntries?: number;
+      readonly lookupExactSafeRuntimeEntries: number;
     readonly lookupResolverProjectionDocuments: number;
     readonly lookupEntityProjectionDocuments: number;
     readonly lookupAmbiguityRuntimeEntries: number;
@@ -149,9 +154,10 @@ export interface SearchSnapshotRuntimeState {
   };
   readonly hashes: {
     readonly entities: string;
-    readonly aliases: string;
-    readonly lookupAliasRuntime: string;
-    readonly lookupExactSafeRuntime: string;
+      readonly aliases: string;
+      readonly lookupAliasRuntime: string;
+      readonly lookupAliasBroadRecallRuntime?: string;
+      readonly lookupExactSafeRuntime: string;
     readonly lookupResolverProjection: string;
     readonly lookupEntityProjection: string;
     readonly lookupAmbiguityRuntime: string;
@@ -208,6 +214,7 @@ export const SearchSnapshotManifestSchema = z.object({
     entitiesNdjson: z.string().min(1),
     aliasesNdjson: z.string().min(1),
     lookupAliasRuntimeJson: z.string().min(1),
+    lookupAliasBroadRecallRuntimeJson: z.string().min(1).optional(),
     lookupExactSafeRuntimeJson: z.string().min(1),
     lookupResolverProjectionJson: z.string().min(1),
     lookupEntityProjectionJson: z.string().min(1),
@@ -223,6 +230,7 @@ export const SearchSnapshotManifestSchema = z.object({
     entities: z.number().int().nonnegative(),
     aliases: z.number().int().nonnegative(),
     lookupAliasRuntimeAliases: z.number().int().nonnegative(),
+    lookupAliasBroadRecallRuntimeEntries: z.number().int().nonnegative().optional(),
     lookupExactSafeRuntimeEntries: z.number().int().nonnegative(),
     lookupResolverProjectionDocuments: z.number().int().nonnegative(),
     lookupEntityProjectionDocuments: z.number().int().nonnegative(),
@@ -237,6 +245,7 @@ export const SearchSnapshotManifestSchema = z.object({
     entities: z.string().min(1),
     aliases: z.string().min(1),
     lookupAliasRuntime: z.string().min(1),
+    lookupAliasBroadRecallRuntime: z.string().min(1).optional(),
     lookupExactSafeRuntime: z.string().min(1),
     lookupResolverProjection: z.string().min(1),
     lookupEntityProjection: z.string().min(1),
@@ -263,6 +272,7 @@ export const SearchSnapshotRuntimeStateSchema = z.object({
   manifestPath: z.string().min(1),
   nlMappingsRuntimePath: z.string().min(1),
   lookupAliasRuntimePath: z.string().min(1),
+  lookupAliasBroadRecallRuntimePath: z.string().min(1).optional(),
   lookupExactSafeRuntimePath: z.string().min(1),
   lookupResolverProjectionPath: z.string().min(1),
   lookupEntityProjectionPath: z.string().min(1),
@@ -279,6 +289,7 @@ export const SearchSnapshotRuntimeStateSchema = z.object({
     entities: z.number().int().nonnegative(),
     aliases: z.number().int().nonnegative(),
     lookupAliasRuntimeAliases: z.number().int().nonnegative(),
+    lookupAliasBroadRecallRuntimeEntries: z.number().int().nonnegative().optional(),
     lookupExactSafeRuntimeEntries: z.number().int().nonnegative(),
     lookupResolverProjectionDocuments: z.number().int().nonnegative(),
     lookupEntityProjectionDocuments: z.number().int().nonnegative(),
@@ -292,6 +303,7 @@ export const SearchSnapshotRuntimeStateSchema = z.object({
     entities: z.string().min(1),
     aliases: z.string().min(1),
     lookupAliasRuntime: z.string().min(1),
+    lookupAliasBroadRecallRuntime: z.string().min(1).optional(),
     lookupExactSafeRuntime: z.string().min(1),
     lookupResolverProjection: z.string().min(1),
     lookupEntityProjection: z.string().min(1),
@@ -336,6 +348,9 @@ export function buildSearchSnapshotContentHash(hashes: SearchSnapshotArtifactHas
     entities: hashes.entities,
     aliases: hashes.aliases,
     lookupAliasRuntime: hashes.lookupAliasRuntime,
+    ...(hashes.lookupAliasBroadRecallRuntime !== undefined
+      ? { lookupAliasBroadRecallRuntime: hashes.lookupAliasBroadRecallRuntime }
+      : {}),
     lookupExactSafeRuntime: hashes.lookupExactSafeRuntime,
     lookupResolverProjection: hashes.lookupResolverProjection,
     lookupEntityProjection: hashes.lookupEntityProjection,

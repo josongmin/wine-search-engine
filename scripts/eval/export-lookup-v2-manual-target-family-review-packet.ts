@@ -3,7 +3,10 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
 import type { LookupV2CurationDraftRow } from './export-lookup-v2-curation-drafts.js';
-import type { LookupV2RuntimeSurfaceOwnerEvidence } from './lookup-v2-runtime-surface-owner-evidence.js';
+import type {
+  LookupV2RuntimeSurfaceOwnerEvidence,
+  LookupV2RuntimeSurfaceOwnerWitness,
+} from './lookup-v2-runtime-surface-owner-evidence.js';
 import { loadLookupV2RuntimeSurfaceOwnerEvidenceSync } from './lookup-v2-runtime-surface-owner-evidence.js';
 
 export interface LookupV2ManualTargetFamilyReviewPacketRow {
@@ -12,6 +15,7 @@ export interface LookupV2ManualTargetFamilyReviewPacketRow {
   readonly benchmarkGoldHintVariants: readonly string[];
   readonly proposalStatus: 'needs_target_review' | 'target_assigned' | 'rejected';
   readonly reviewTarget: 'lookup_manual_target_resolution_v1';
+  readonly scopeRisk: 'family_only' | 'mixed_vintage_family';
   readonly locales: readonly LookupV2CurationDraftRow['locale'][];
   readonly surfaces: readonly string[];
   readonly holeClasses: readonly string[];
@@ -22,8 +26,10 @@ export interface LookupV2ManualTargetFamilyReviewPacketRow {
   readonly runtimeEvidenceStatus: 'candidate_unique_owner' | 'collision_candidates' | 'missing_runtime_owner';
   readonly runtimeEvidenceEntityId?: string | undefined;
   readonly runtimeEvidenceEntityLabel?: string | undefined;
+  readonly runtimeEvidenceWitnesses?: readonly LookupV2RuntimeSurfaceOwnerWitness[] | undefined;
   readonly runtimeCollisionEntityIds?: readonly string[] | undefined;
   readonly runtimeCollisionEntityLabels?: readonly string[] | undefined;
+  readonly runtimeCollisionWitnesses?: readonly LookupV2RuntimeSurfaceOwnerWitness[] | undefined;
   readonly proposedAt: string;
   readonly targetEntityId?: string | undefined;
   readonly reviewedAt?: string | undefined;
@@ -59,6 +65,15 @@ function parseDraftJsonl(filePath: string): readonly LookupV2CurationDraftRow[] 
 
 function sortUnique(values: readonly string[]): readonly string[] {
   return [...new Set(values)].sort((left, right) => left.localeCompare(right));
+}
+
+function inferScopeRisk(rows: readonly LookupV2CurationDraftRow[]): LookupV2ManualTargetFamilyReviewPacketRow['scopeRisk'] {
+  return rows.some((row) =>
+    row.holeClass === 'realworld_exact_vintage'
+    || row.holeClass === 'realworld_vintage_suffix',
+  )
+    ? 'mixed_vintage_family'
+    : 'family_only';
 }
 
 export function buildLookupV2ManualTargetFamilyReviewPacketRows(args: {
@@ -101,6 +116,8 @@ export function buildLookupV2ManualTargetFamilyReviewPacketRows(args: {
       }
       const uniqueOwner = runtimeOwnerEvidence.uniqueOwners.get(normalizedBenchmarkGoldHint);
       const collidingOwners = runtimeOwnerEvidence.collidingOwners.get(normalizedBenchmarkGoldHint);
+      const uniqueOwnerWitnesses = runtimeOwnerEvidence.uniqueOwnerWitnesses.get(normalizedBenchmarkGoldHint);
+      const collidingOwnerWitnesses = runtimeOwnerEvidence.collidingOwnerWitnesses.get(normalizedBenchmarkGoldHint);
       const proposedAt = [...rows]
         .map((row) => row.reviewedAt)
         .sort((left, right) => left.localeCompare(right))
@@ -111,6 +128,7 @@ export function buildLookupV2ManualTargetFamilyReviewPacketRows(args: {
         benchmarkGoldHintVariants,
         proposalStatus: 'needs_target_review',
         reviewTarget: 'lookup_manual_target_resolution_v1',
+        scopeRisk: inferScopeRisk(rows),
         locales: sortUnique(rows.map((row) => row.locale)) as readonly LookupV2CurationDraftRow['locale'][],
         surfaces: sortUnique(rows.map((row) => row.surface)),
         holeClasses: sortUnique(rows.map((row) => row.holeClass)),
@@ -127,6 +145,9 @@ export function buildLookupV2ManualTargetFamilyReviewPacketRows(args: {
         ...(uniqueOwner !== undefined && runtimeOwnerEvidence.entityLabels.get(uniqueOwner) !== undefined
           ? { runtimeEvidenceEntityLabel: runtimeOwnerEvidence.entityLabels.get(uniqueOwner)! }
           : {}),
+        ...(uniqueOwnerWitnesses !== undefined && uniqueOwnerWitnesses.length > 0
+          ? { runtimeEvidenceWitnesses: uniqueOwnerWitnesses }
+          : {}),
         ...(collidingOwners !== undefined ? { runtimeCollisionEntityIds: collidingOwners } : {}),
         ...(collidingOwners !== undefined
           ? {
@@ -134,6 +155,9 @@ export function buildLookupV2ManualTargetFamilyReviewPacketRows(args: {
                 runtimeOwnerEvidence.entityLabels.get(entityId) ?? entityId,
               ),
             }
+          : {}),
+        ...(collidingOwnerWitnesses !== undefined && collidingOwnerWitnesses.length > 0
+          ? { runtimeCollisionWitnesses: collidingOwnerWitnesses }
           : {}),
         proposedAt,
       };

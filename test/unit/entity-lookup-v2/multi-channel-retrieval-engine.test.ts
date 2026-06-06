@@ -72,6 +72,34 @@ describe('MultiChannelRetrievalEngine (T-ELV2-04 real)', () => {
     expect(translit?.hitCount).toBe(0);
   });
 
+  it('hydrates candidates from resolver projections without requiring entityLookup', async () => {
+    const matcher = matcherReturning({
+      'opus one': [{ surfaceForm: 'Opus One', normalizedForm: 'opus one', entityIds: [opus], matchConfidence: 0.97, lookupStrategy: 'exact' }],
+    });
+    const resolverProjectionLookup = {
+      getResolverProjections: vi.fn(async (ids: readonly ReturnType<typeof createEntityId>[]) => {
+        const m = new Map();
+        for (const id of ids) {
+          m.set(id, {
+            entityId: id,
+            entityType: 'wine',
+            canonicalLabel: 'Opus One 2018',
+            aliasesIdentitySafe: ['Opus One'],
+            identitySafeKeys: ['opus one'],
+          });
+        }
+        return m;
+      }),
+    };
+    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, resolverProjectionLookup });
+
+    const result = await engine.retrieve(input());
+
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0]?.canonicalLabel).toBe('Opus One 2018');
+    expect(resolverProjectionLookup.getResolverProjections).toHaveBeenCalledTimes(1);
+  });
+
   it('caps the union to maxCandidates by best channel score', async () => {
     const ids = Array.from({ length: 5 }, (_, i) => createEntityId(`e-${i}`));
     const matcher = matcherReturning({

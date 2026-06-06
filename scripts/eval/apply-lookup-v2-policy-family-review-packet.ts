@@ -3,6 +3,12 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import type { LookupV2PolicyReviewPacketRow } from './export-lookup-v2-policy-review-packet.js';
 import type { LookupV2PolicyFamilyReviewPacketRow } from './export-lookup-v2-policy-family-review-packet.js';
+import {
+  buildLookupV2PolicyFamilyDecisionKey,
+  DEFAULT_LOOKUP_V2_POLICY_FAMILY_DECISION_REGISTRY_PATH,
+  loadLookupV2PolicyFamilyDecisionMapSync,
+  type LookupV2PolicyFamilyDecisionRegistryRow,
+} from './lookup-v2-policy-family-decision-registry.js';
 
 function isLookupV2PolicyReviewPacketRow(value: unknown): value is LookupV2PolicyReviewPacketRow {
   if (typeof value !== 'object' || value === null) {
@@ -58,6 +64,7 @@ function familyKey(surface: string, benchmarkGoldEntityId: string): string {
 export function applyLookupV2PolicyFamilyReviewPacket(args: {
   readonly familyRows: readonly LookupV2PolicyFamilyReviewPacketRow[];
   readonly rowPacketRows: readonly LookupV2PolicyReviewPacketRow[];
+  readonly policyFamilyDecisionMap: ReadonlyMap<string, LookupV2PolicyFamilyDecisionRegistryRow>;
 }): readonly LookupV2PolicyReviewPacketRow[] {
   const familyByKey = new Map<string, LookupV2PolicyFamilyReviewPacketRow>();
   for (const row of args.familyRows) {
@@ -80,12 +87,26 @@ export function applyLookupV2PolicyFamilyReviewPacket(args: {
     if (family.proposalStatus === 'needs_policy_review') {
       return row;
     }
+    const registryDecision = args.policyFamilyDecisionMap.get(
+      buildLookupV2PolicyFamilyDecisionKey(row.policyConflictSurface, row.benchmarkGoldEntityId),
+    );
+    if (registryDecision === undefined) {
+      throw new Error(`row policy packet has no reviewed policy-family registry decision for surface=${JSON.stringify(row.policyConflictSurface)} entityId=${JSON.stringify(row.benchmarkGoldEntityId)}`);
+    }
+    const expectedDecision = family.proposalStatus === 'approved_exact_safe'
+      ? 'promote_exact_safe'
+      : family.proposalStatus === 'kept_policy_conflict'
+        ? 'keep_policy_conflict'
+        : 'needs_target';
+    if (registryDecision.decision !== expectedDecision) {
+      throw new Error(`row policy packet family review does not match reviewed policy-family registry for surface=${JSON.stringify(row.policyConflictSurface)} entityId=${JSON.stringify(row.benchmarkGoldEntityId)}`);
+    }
     return {
       ...row,
       proposalStatus: family.proposalStatus,
-      reviewedAt: family.reviewedAt,
-      reviewedBy: family.reviewedBy,
-      decisionReason: family.decisionReason,
+      reviewedAt: registryDecision.reviewedAt,
+      reviewedBy: registryDecision.reviewedBy,
+      decisionReason: registryDecision.decisionReason,
     };
   });
 }
@@ -100,16 +121,23 @@ async function main(): Promise<void> {
     options: {
       families: { type: 'string', default: '/tmp/lookup-v2-korean-realworld-stretch-policy-family-review-reviewed.jsonl' },
       rows: { type: 'string', default: 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-policy-review-packet.jsonl' },
+      registry: { type: 'string', default: DEFAULT_LOOKUP_V2_POLICY_FAMILY_DECISION_REGISTRY_PATH },
       output: { type: 'string', default: '/tmp/lookup-v2-korean-realworld-stretch-policy-review-reviewed-from-family.jsonl' },
     },
   });
 
   const familiesPath = values.families ?? '/tmp/lookup-v2-korean-realworld-stretch-policy-family-review-reviewed.jsonl';
   const rowsPath = values.rows ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-policy-review-packet.jsonl';
+  const registryPath = values.registry ?? DEFAULT_LOOKUP_V2_POLICY_FAMILY_DECISION_REGISTRY_PATH;
   const outputPath = values.output ?? '/tmp/lookup-v2-korean-realworld-stretch-policy-review-reviewed-from-family.jsonl';
   const familyRows = parsePacketJsonl(familiesPath, isLookupV2PolicyFamilyReviewPacketRow);
   const rowPacketRows = parsePacketJsonl(rowsPath, isLookupV2PolicyReviewPacketRow);
-  const reviewedRows = applyLookupV2PolicyFamilyReviewPacket({ familyRows, rowPacketRows });
+  const policyFamilyDecisionMap = loadLookupV2PolicyFamilyDecisionMapSync(registryPath);
+  const reviewedRows = applyLookupV2PolicyFamilyReviewPacket({
+    familyRows,
+    rowPacketRows,
+    policyFamilyDecisionMap,
+  });
 
   mkdirSync(path.dirname(outputPath), { recursive: true });
   writeFileSync(outputPath, serializeRows(reviewedRows), 'utf8');

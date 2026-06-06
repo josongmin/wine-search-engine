@@ -34,13 +34,86 @@ describe('lookup authority registries', () => {
     const rows = await loadLookupAmbiguityRegistry(filePath);
     const entries = buildLookupAmbiguityRegistryEntries(rows);
 
-    expect(entries).toEqual([
+    expect(entries).toEqual(expect.arrayContaining([
       {
         normalizedForm: '샤또',
         types: ['broad_icon'],
         severity: 'high',
       },
+    ]));
+  });
+
+  it('expands ambiguity registry rows into query-normalizer runtime variants', async () => {
+    const entries = buildLookupAmbiguityRegistryEntries([
+      {
+        surface: '그랜지',
+        locale: 'ko',
+        ambiguityTypes: ['short_form', 'entity'],
+        severity: 'high',
+        sourceEvidence: 'test',
+        reviewedAt: '2026-06-06T00:00:00.000Z',
+      },
     ]);
+
+    expect(entries).toEqual(expect.arrayContaining([
+      {
+        normalizedForm: '그랜지',
+        types: ['short_form', 'entity'],
+        severity: 'high',
+      },
+      {
+        normalizedForm: '그레인지',
+        types: ['short_form', 'entity'],
+        severity: 'high',
+      },
+    ]));
+  });
+
+  it('does not promote recall-style compact variants into ambiguity authority keys', async () => {
+    const entries = buildLookupAmbiguityRegistryEntries([
+      {
+        surface: '자코모 콘테르노',
+        locale: 'ko',
+        ambiguityTypes: ['family', 'entity'],
+        severity: 'high',
+        sourceEvidence: 'test',
+        reviewedAt: '2026-06-06T00:00:00.000Z',
+      },
+    ]);
+
+    const normalizedForms = entries.map((entry) => entry.normalizedForm);
+    expect(normalizedForms).toContain('자코모 콘테르노');
+    expect(normalizedForms).not.toContain('자코모콘테르노');
+    expect(normalizedForms).not.toContain('콘테르노 자코모');
+  });
+
+  it('merges expanded ambiguity runtime variants across reviewed rows', async () => {
+    const entries = buildLookupAmbiguityRegistryEntries([
+      {
+        surface: '그랜지',
+        locale: 'ko',
+        ambiguityTypes: ['short_form', 'entity'],
+        severity: 'medium',
+        sourceEvidence: 'test',
+        reviewedAt: '2026-06-06T00:00:00.000Z',
+      },
+      {
+        surface: '그레인지',
+        locale: 'ko',
+        ambiguityTypes: ['producer_family_collision'],
+        severity: 'high',
+        sourceEvidence: 'test',
+        reviewedAt: '2026-06-06T00:00:00.000Z',
+      },
+    ]);
+
+    expect(entries).toEqual(expect.arrayContaining([
+      {
+        normalizedForm: '그레인지',
+        types: ['entity', 'producer_family_collision', 'short_form'],
+        severity: 'high',
+      },
+    ]));
   });
 
   it('fails closed on ambiguity normalized collisions', async () => {

@@ -1,6 +1,101 @@
 # Lookup V2 Korean Realworld Stretch Priority Backlog (2026-06-05)
 
-## Scope
+## Current Truth Update (2026-06-06)
+
+- active runtime snapshot:
+  - `search-snapshot:v1:2f196589e595aa8b`
+- main gate status on current code:
+  - authority:
+    - `/tmp/entity-resolution-validation.json`
+    - `V2 215/215`, `wrong=0`, `miss=0`
+  - hotset shadow:
+    - `/tmp/lookup-v2-shadow-report.json`
+    - `rows=45`, `V2 correct=41`, `wrong+=0`, gate **PASS**
+  - Korean-famous coverage:
+    - `/tmp/lookup-v2-coverage-korean-famous.json`
+    - `hot_entities=67/67`, `non_entity=40/40`, `curation_tasks=0`
+  - latency:
+    - `/tmp/lookup-v2-latency-korean-famous.json`
+    - `cold_boot=1179.602ms`, `first_query=15.648ms`, `warm_p95=17.736ms`
+    - request / hydration / cold_boot 모두 **PASS**
+- runtime note:
+  - ambiguity runtime은 normalization-stable view만 authority로 싣고
+    recall-style `lookupVariants`는 제외한다
+  - ambiguity adapters는 `normalizeForMatch` boundary lookup으로 정렬됐다
+- full stretch shadow:
+  - `/tmp/lookup-v2-shadow-korean-realworld-stretch.json`
+  - `rows=746`, `V2 correct=244`, `wrong+=0`, `concept_redirect_acc=0.100`, gate **FAIL**
+- full stretch coverage:
+  - `/tmp/lookup-v2-coverage-korean-realworld-stretch.json`
+  - `hot_entities=67/310`, `non_entity=177/436`, `curation_tasks=243`
+- owner split:
+  - policy review lane:
+    - `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-policy-review-packet.jsonl`
+    - `rows=0`
+  - entity-no-policy write-plane:
+    - `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-write-plane-summary.json`
+    - `draft rows=233`
+    - `auto_targetable=11`
+    - `manual_target=222`
+    - `exact_safe_packet_rows=7`
+    - `reviewed_authority_approved_rows=0`
+    - `exact_safe_family_review_rows=7`
+    - `manual_target_family_review_rows=33`
+    - `manual-target suggestions: unique=4, collision=12, missing=17`
+    - `producer` witness source is now carried as display-only evidence
+- write-plane state:
+  - reviewed policy family registry is active:
+    - `data/lookup-v2/lookup-policy-family-decision-registry-v1.jsonl`
+    - `라뚜르`, `그랜지`, `베가 시실리아`, `무통` seeded as `promote_exact_safe`
+  - family target registry is active:
+    - `data/lookup-v2/lookup-family-target-registry-v1.jsonl`
+    - current approved targets:
+      - `petrus`
+      - `cheval blanc`
+      - `opus one`
+      - `pol roger`
+  - prior manual-target append proof:
+    - `data/lookup-v2/drafts/lookup-v2-stretch-reviewed-registry-overlay-manual-target-append-summary.json`
+    - `auto_targetable 10 -> 21`
+    - `manual_target 239 -> 228`
+    - `manual_target_family_review 36 -> 34`
+  - current manual-target append proof:
+    - `data/lookup-v2/drafts/lookup-v2-stretch-reviewed-registry-overlay-pol-roger-append-summary.json`
+    - `auto_targetable 21 -> 27`
+    - `manual_target 228 -> 222`
+    - `manual_target_family_review 34 -> 33`
+    - `exact_safe_packet_rows 1 -> 7`
+  - exact-safe auto-approve is now limited to reviewed authority sources:
+    `fixture_exact`, `policy_family_decision_registry`
+  - `family_target_registry`는 target SoT다. exact-safe 승격은 family review를 한 번 더 통과해야 한다
+  - current exact-safe review scopes are deterministic, not entity all-or-nothing:
+    - `petrus::translation::realworld_frenchish_korean_gap`
+    - `pol roger::canonical::{brand_suffix, compact_alias, mixed_script_alias, producer_prefixed, spaced_alias, vintage_suffix}`
+  - explicit exact-safe family review decisions:
+    - current `approved=0`, `rejected=7`, `pending=0`
+    - rejection reasons:
+      - `petrus`: `페트루스` wrong-positive reopen 금지
+      - `pol roger`: family/cuvée/vintage/product expansion surfaces라서 singleton exact-safe 금지
+  - current entity-no-policy draft:
+    - `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl`
+    - `rows=242`, `auto_targetable=20`, `policy_review=0`, `manual_target=222`
+  - current exact-safe packet:
+    - `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl`
+    - `rows=7`
+    - `review-plane only`
+  - current manual-target family packet:
+    - `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-manual-target-family-review-packet.jsonl`
+    - `input_rows=222`, `family_rows=33`
+    - packet now carries runtime witness evidence:
+      `runtimeEvidenceWitnesses`, `runtimeCollisionWitnesses`
+  - current overlay verifier:
+    - `data/lookup-v2/drafts/lookup-v2-stretch-reviewed-registry-overlay-summary.json`
+    - baseline == overlay on current reviewed registries
+    - invariants green, no pending delta
+
+아래 section은 archived historical RCA다. current owner 판단은 이 update block만 기준으로 본다.
+
+## Archived Historical Notes
 
 - source artifacts:
   - `/tmp/lookup-v2-shadow-korean-realworld-stretch-post-support-fix.json`
@@ -15,7 +110,7 @@
 - this packet is **entity-lookup only**
   - recommendation / pairing / style / price-band discovery phrases are excluded from the fix lane
 
-## Current Stretch Truth
+## Historical Stretch Truth
 
 - full stretch shadow:
   - `rows=746`
@@ -42,7 +137,7 @@
   - `non_entity=156/280`
   - `curation_tasks=268`
 
-## Owner Split
+## Historical Owner Split
 
 - exact-safe registry owner:
   - `entity-no-policy` 기준 실제 owner
@@ -174,70 +269,73 @@
   - `data/lookup-v2/drafts/ambiguity-priority-candidates-2026-06-05.jsonl`
 - entity-no-policy curation draft:
   - `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl`
-  - current contract carries `benchmarkGoldHint` / `benchmarkGoldEntityId` when the stretch fixture provides them
-  - deterministic strong target resolution now auto-attaches `benchmarkGoldEntityId` for `34/268` rows
-  - weak `hint_resolution` exact-id carries only as suggestion for `12` rows
+  - canonical refresh owner:
+    - `pnpm run eval:lookup-v2:coverage:korean-realworld-stretch:entity-no-policy:refresh-write-plane`
+  - current registry-first contract:
+    - reviewed authority source만 `auto_targetable`에 반영된다
+    - `runtime_identity_safe_alias`, `runtime_unique_surface_owner`, `hint_resolution`는 evidence-only다
   - triage buckets:
-    - `auto_targetable=6`
-    - `policy_review=28`
-    - `manual_target=234`
+    - `auto_targetable=27`
+    - `policy_review=0`
+    - `manual_target=222`
   - family-review compression:
-    - `exact_safe_family_review=1`
-    - `policy_family_review=4`
-    - `manual_target_family_review=36`
-    - total operator fan-out reduced from `268` row-level decisions to `41` family-level decisions
+    - `exact_safe_family_review=7`
+    - `policy_family_review=0`
+    - `manual_target_family_review=33`
+    - total operator fan-out reduced from `249` row-level decisions to `40` review units
   - operator queue still stays `needs_target`; the carried gold fields are non-authoritative triage evidence only
 - exact-safe reviewed proposal packet:
   - `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl`
   - generated only from `triageBucket=auto_targetable`
   - current packet truth:
-    - `rows=6`
+    - `rows=7`
     - current registry exact collision `0`
     - current registry conflicting owner `0`
     - source split:
-      - `runtime_identity_safe_alias=6`
+      - `family_target_registry=7`
   - packet is review-plane only:
-    - `proposalStatus=needs_review`
+    - reviewed-authority append candidate:
+      - `reviewed authority approved rows=0`
+      - `pending rows=7`
     - `reviewTarget=lookup_exact_safe_registry_v1`
     - no runtime-plane write / no registry auto-append
   - family review compression:
     - `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-exact-safe-family-review-packet.jsonl`
-    - `input_rows=6`
-    - `family_rows=1`
-    - operator decision fan-out reduced from `6` row-level decisions to `1` entity decision
-    - current entity:
-      - `wine-ce-359d80e914f3afc22ca4d246846e5e4a865e8e433e573e413cbe1cdb9462c791`
+    - `input_rows=7`
+    - `family_rows=7`
+    - grouping key:
+      - `reviewScopeKey = entityId::suggestedAliasType::holeClass`
   - deterministic suggestion packet:
     - `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-exact-safe-family-suggestions.jsonl`
     - `suggest_approve=0`
-    - `manual_review=1`
-    - `runtime_identity_safe_alias` only는 target authority일 뿐
-      exact-safe auto-approve source가 아니다
+    - `manual_review=7`
+    - `family_target_registry`, `policy_family_decision_registry`, `fixture_exact`만
+      exact-safe reviewed-authority auto-approve source다
     - current decision scaffold:
       `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-exact-safe-family.suggested-decisions.jsonl`
       - `rows=0`
   - family review/apply lane:
     - `pnpm run eval:lookup-v2:coverage:korean-realworld-stretch:entity-no-policy:review-exact-safe-family-review-packet`
       - decision row contract:
-        - `entityId`
+        - `reviewScopeKey`
         - `decision=approve|reject`
         - `reviewedBy`
         - `decisionReason`
         - `reviewedAt`
-      - current empty dry-run:
-        - `packet_rows=1`
-        - `decision_rows=0`
+      - current reviewed truth:
+        - `packet_rows=7`
+        - `decision_rows=7`
         - `approved=0`
-        - `rejected=0`
-        - `pending=1`
+        - `rejected=7`
+        - `pending=0`
     - `pnpm run eval:lookup-v2:coverage:korean-realworld-stretch:entity-no-policy:apply-exact-safe-family-review-packet`
-      - entity-family reviewed decision을 row-level exact-safe packet으로 deterministic projection
-      - current empty dry-run:
-        - `family_rows=1`
-        - `row_packet_rows=6`
+      - review-scope reviewed decision을 row-level exact-safe packet으로 deterministic projection
+      - current reviewed truth:
+        - `family_rows=7`
+        - `row_packet_rows=7`
         - `approved_rows=0`
-        - `rejected_rows=0`
-        - `pending_rows=6`
+        - `rejected_rows=7`
+        - `pending_rows=0`
   - review overlay lane:
     - `pnpm run eval:lookup-v2:coverage:korean-realworld-stretch:entity-no-policy:review-exact-safe-packet`
     - decision row contract:
@@ -252,11 +350,11 @@
       - unknown packet row -> fail
       - re-review terminal row -> fail
     - current dry-run truth:
-      - `packet_rows=18`
-      - `decision_rows=0`
+      - `packet_rows=7`
+      - `decision_rows=7`
       - `approved=0`
-      - `rejected=0`
-      - `pending=18`
+      - `rejected=7`
+      - `pending=0`
   - apply lane:
     - `pnpm run eval:lookup-v2:coverage:korean-realworld-stretch:entity-no-policy:apply-exact-safe-packet`
     - contract:
@@ -268,40 +366,31 @@
       - `approved_rows=0`
       - `inserted_rows=0`
       - `skipped_existing_rows=0`
-  - current class split:
-    - `realworld_exact_vintage=2`
-    - `realworld_mixed_script_alias=3`
-    - `realworld_spaced_alias=3`
-    - `realworld_vintage_suffix=3`
-    - `realworld_brand_suffix=2`
-    - `realworld_compact_alias=2`
-    - `realworld_producer_prefixed=1`
-    - `realworld_frenchish_korean_gap=1`
-    - `realworld_korean_orthography=1`
-  - effect of policy split:
-    - `latour/grange/vega sicilia unico/mouton` family rows no longer leak into exact-safe packet
+  - effect of reviewed-registry split:
+    - `policy_review` lane는 current reviewed policy-family decision registry에서 drain된다
+    - runtime hint/evidence는 exact-safe packet으로 직접 승격되지 않는다
 - manual-target operator queue:
   - `data/lookup-v2/drafts/manual-target-batches/index.json`
   - current batch truth:
-    - `totalRows=234`
-    - `batchCount=11`
+    - `totalRows=239`
+    - `batchCount=10`
   - top queues:
     - `realworld_exact_vintage=41`
-    - `realworld_brand_suffix=29`
-    - `realworld_compact_alias=29`
+    - `realworld_brand_suffix=30`
+    - `realworld_compact_alias=30`
     - `realworld_korean_orthography=30`
-    - `realworld_mixed_script_alias=30`
-    - `realworld_producer_prefixed=26`
-    - `realworld_vintage_suffix=28`
-    - `realworld_spaced_alias=18`
+    - `realworld_mixed_script_alias=31`
+    - `realworld_producer_prefixed=27`
+    - `realworld_vintage_suffix=29`
+    - `realworld_spaced_alias=19`
   - purpose:
     - blind 222-row queue를 class-batched operator work packets으로 분해
     - next target-resolution packet은 이 batch index와 family packet을 source로 잡는다
   - family review compression:
     - `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-manual-target-family-review-packet.jsonl`
-    - `input_rows=234`
+    - `input_rows=239`
     - `family_rows=36`
-    - operator decision fan-out reduced from `234` row-level decisions to `36` benchmark-hint decisions
+    - operator decision fan-out reduced from `239` row-level decisions to `36` benchmark-hint decisions
     - packet carries runtime owner evidence directly:
       - `runtimeEvidenceStatus`
       - `runtimeEvidenceEntityId` / `runtimeEvidenceEntityLabel`
@@ -351,46 +440,30 @@
         - `rejected_families=0`
         - `pending_families=36`
         - `exact_safe_packet_rows=0`
-      - target-assigned rows는 `benchmarkGoldEntityIdSource=manual_family_review_target`로 exact-safe review plane에 진입
+      - reviewed `lookup-family-target-registry-v1` append가 있어야만
+        `benchmarkGoldEntityIdSource=family_target_registry`로 exact-safe review plane에 진입한다
 
 - policy-review packet:
   - `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-policy-review-packet.jsonl`
   - generated only from `triageBucket=policy_review`
   - current packet truth:
-    - `rows=28`
-    - `with benchmarkGoldEntityId=28`
-    - `without target=0`
-    - source split:
-      - `policy_registry_authority=28`
-    - `라뚜르=10`
-    - `그랜지=10`
-    - `베가 시실리아=7`
-    - `무통=1`
+    - `rows=0`
+    - reviewed `lookup-policy-family-decision-registry-v1.jsonl`가 current lane을 drain한다
   - purpose:
     - exact-safe reviewed packet과 operator queue 사이에 authority policy decision plane을 분리
     - short-form / broad-icon family를 registry write backlog와 섞지 않음
   - family review compression:
     - `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-policy-family-review-packet.jsonl`
-    - `input_rows=28`
-    - `family_rows=4`
-    - operator decision fan-out reduced from `28` row-level decisions to `4` family decisions
-    - current families:
-      - `라뚜르`
-      - `그랜지`
-      - `베가 시실리아`
-      - `무통`
+    - `input_rows=0`
+    - `family_rows=0`
+    - current reviewed policy registry가 family lane도 drain한다
   - deterministic suggestion packet:
     - `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-policy-family-suggestions.jsonl`
-    - `suggest_keep_policy_conflict=4`
+    - `suggest_keep_policy_conflict=0`
     - `manual_review=0`
-    - current fail-closed broad-conflict defaults:
-      - `라뚜르`
-      - `그랜지`
-      - `베가 시실리아`
-      - `무통`
     - suggested decision scaffold:
       `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-policy-family.suggested-decisions.jsonl`
-      - `rows=4`
+      - `rows=0`
   - family review/apply lane:
     - `pnpm run eval:lookup-v2:coverage:korean-realworld-stretch:entity-no-policy:review-policy-family-review-packet`
       - decision row contract:
@@ -401,26 +474,19 @@
         - `decisionReason`
         - `reviewedAt`
       - current empty dry-run:
-        - `packet_rows=4`
+        - `packet_rows=0`
         - `decision_rows=0`
         - `approved_exact_safe=0`
         - `kept_policy_conflict=0`
         - `needs_target=0`
-        - `pending=4`
+        - `pending=0`
     - `pnpm run eval:lookup-v2:coverage:korean-realworld-stretch:entity-no-policy:apply-policy-family-review-packet`
       - family-level reviewed decision을 row-level policy-review packet으로 deterministic projection
       - current empty dry-run:
-        - `family_rows=4`
-        - `row_packet_rows=28`
+        - `family_rows=0`
+        - `row_packet_rows=0`
         - `approved_exact_safe_rows=0`
         - `kept_policy_conflict_rows=0`
-        - `needs_target_rows=0`
-        - `pending_rows=28`
-      - suggested dry-run:
-        - `family_rows=4`
-        - `row_packet_rows=28`
-        - `approved_exact_safe_rows=0`
-        - `kept_policy_conflict_rows=28`
         - `needs_target_rows=0`
         - `pending_rows=0`
   - review/apply lane:
@@ -433,19 +499,19 @@
         - `decisionReason`
         - `reviewedAt`
       - current empty dry-run:
-        - `packet_rows=28`
+        - `packet_rows=0`
         - `decision_rows=0`
         - `approved_exact_safe=0`
         - `kept_policy_conflict=0`
         - `needs_target=0`
-        - `pending=28`
+        - `pending=0`
     - `pnpm run eval:lookup-v2:coverage:korean-realworld-stretch:entity-no-policy:apply-policy-review-packet`
       - family-apply 또는 row-level review 결과에서 `approved_exact_safe` row만 approved exact-safe packet으로 변환
       - current empty dry-run:
         - `approved_exact_safe_rows=0`
         - `kept_policy_conflict_rows=0`
         - `needs_target_rows=0`
-        - `pending_rows=28`
+        - `pending_rows=0`
         - `exact_safe_packet_rows=0`
 
 ## Not Included

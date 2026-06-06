@@ -48,8 +48,12 @@ import {
   resolveActiveSnapshot,
 } from '../db/active-snapshot-resolver.js';
 import {
+  type LookupAliasBroadRecallRuntimeArtifact,
+  parseTrustedLookupAliasBroadRecallRuntimeArtifact,
   parseTrustedLookupAliasRuntimeArtifact,
+  parseTrustedLookupAliasRuntimeCoreArtifact,
   type LookupAliasRuntimeArtifact,
+  type LookupAliasRuntimeCoreArtifact,
   type LookupAliasRuntimeHangulCompletionEntry,
   type LookupAliasRuntimePrefixEntry,
 } from '../../domain/shared/types/search-snapshot-lookup-runtime.js';
@@ -112,6 +116,7 @@ const SnapshotManifestSchema = z.object({
   schemaVersion: z.literal(SEARCH_SNAPSHOT_SCHEMA_VERSION),
   artifacts: z.object({
     lookupAliasRuntimeJson: z.string().min(1),
+    lookupAliasBroadRecallRuntimeJson: z.string().min(1).optional(),
   }).passthrough(),
   // T-ELV2-03: capture the registry identity (snapshot id + alias content hash)
   // already present on the manifest — used for the V2 alias-registry version stamp.
@@ -121,6 +126,7 @@ const SnapshotManifestSchema = z.object({
 
 interface ParsedAliasesManifest {
   readonly lookupAliasRuntimePath: string;
+  readonly lookupAliasBroadRecallRuntimePath?: string;
   readonly snapshotId: string;
   readonly aliasContentHash: string;
 }
@@ -157,6 +163,9 @@ function parseAliasesManifestPath(raw: string, manifestPath: string): ParsedAlia
   }
   return {
     lookupAliasRuntimePath: lookupAliasRuntimeJson,
+    ...(manifest.artifacts.lookupAliasBroadRecallRuntimeJson !== undefined
+      ? { lookupAliasBroadRecallRuntimePath: manifest.artifacts.lookupAliasBroadRecallRuntimeJson }
+      : {}),
     snapshotId: manifest.snapshotId,
     aliasContentHash: manifest.hashes.aliases,
   };
@@ -223,23 +232,66 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
     try {
       const manifestRaw = await fs.readFile(manifestPath, 'utf8');
       const parsedManifest = parseAliasesManifestPath(manifestRaw, manifestPath);
-      const artifactRaw = await fs.readFile(parsedManifest.lookupAliasRuntimePath, 'utf8');
-      const artifact = parseTrustedLookupAliasRuntimeArtifact(
+      const [
         artifactRaw,
-        parsedManifest.lookupAliasRuntimePath,
-      );
+        broadRecallArtifactRaw,
+      ] = await Promise.all([
+        fs.readFile(parsedManifest.lookupAliasRuntimePath, 'utf8'),
+        parsedManifest.lookupAliasBroadRecallRuntimePath === undefined
+          ? Promise.resolve(undefined)
+          : fs.readFile(parsedManifest.lookupAliasBroadRecallRuntimePath, 'utf8'),
+      ]);
       const buildStartedAt = Date.now();
-      const registryVersion = buildAliasRegistryVersion({
-        source: 'snapshot_manifest',
-        aliasCount: artifact.aliases.length,
-        snapshotId: parsedManifest.snapshotId,
-        aliasContentHash: parsedManifest.aliasContentHash,
-      });
-      const matcher = SearchSnapshotAliasMatcher.fromRuntimeArtifact(artifact, registryVersion);
+      let aliasCount = 0;
+      let matcher: SearchSnapshotAliasMatcher;
+      if (parsedManifest.lookupAliasBroadRecallRuntimePath === undefined) {
+        const artifact = parseTrustedLookupAliasRuntimeArtifact(
+          artifactRaw,
+          parsedManifest.lookupAliasRuntimePath,
+        );
+        aliasCount = artifact.aliases.length;
+        matcher = SearchSnapshotAliasMatcher.fromRuntimeArtifact(
+          artifact,
+          buildAliasRegistryVersion({
+            source: 'snapshot_manifest',
+            aliasCount,
+            snapshotId: parsedManifest.snapshotId,
+            aliasContentHash: parsedManifest.aliasContentHash,
+          }),
+        );
+      } else {
+        const artifact = parseTrustedLookupAliasRuntimeCoreArtifact(
+          artifactRaw,
+          parsedManifest.lookupAliasRuntimePath,
+        );
+        const broadRecallArtifact =
+          broadRecallArtifactRaw === undefined
+            ? undefined
+            : parseTrustedLookupAliasBroadRecallRuntimeArtifact(
+              broadRecallArtifactRaw,
+              parsedManifest.lookupAliasBroadRecallRuntimePath,
+            );
+        if (broadRecallArtifact === undefined) {
+          throw new Error(
+            `Malformed search snapshot manifest at ${manifestPath}: broad-recall runtime artifact missing`,
+          );
+        }
+        aliasCount = artifact.aliases.length;
+        matcher = SearchSnapshotAliasMatcher.fromRuntimeArtifact(
+          artifact,
+          buildAliasRegistryVersion({
+            source: 'snapshot_manifest',
+            aliasCount,
+            snapshotId: parsedManifest.snapshotId,
+            aliasContentHash: parsedManifest.aliasContentHash,
+          }),
+          broadRecallArtifact,
+        );
+      }
       bootstrapLogger.info(
         {
           manifestPath,
-          aliasCount: artifact.aliases.length,
+          aliasCount,
           buildMs: Date.now() - buildStartedAt,
         },
         '[Container] Search snapshot alias substrate loaded from manifest into memory',
@@ -377,23 +429,63 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
   }
 
   static fromRuntimeArtifact(
-    artifact: LookupAliasRuntimeArtifact,
+    artifact: LookupAliasRuntimeArtifact | LookupAliasRuntimeCoreArtifact,
     registryVersion?: AliasRegistryVersion,
+    broadRecallArtifact?:
+      | LookupAliasBroadRecallRuntimeArtifact
+      | {
+        readonly raw: string;
+        readonly filePath: string;
+      },
   ): SearchSnapshotAliasMatcher {
     const aliases = artifact.aliases as readonly IndexedAliasRecord[];
+    const deferredBroadRecallArtifact =
+      broadRecallArtifact !== undefined
+      && 'raw' in broadRecallArtifact
+        ? broadRecallArtifact
+        : undefined;
+    const eagerBroadRecallArtifact =
+      broadRecallArtifact !== undefined
+      && !('raw' in broadRecallArtifact)
+        ? broadRecallArtifact
+        : undefined;
+    const broadRecallPrecomputed =
+      'wholeTokenIndex' in artifact
+        ? {
+          wholeTokenIndex: artifact.wholeTokenIndex,
+          phoneticIndex: artifact.phoneticIndex,
+          doubleMetaphoneIndex: artifact.doubleMetaphoneIndex,
+          ...(artifact.doubleMetaphoneKeysByAliasId !== undefined
+            ? { doubleMetaphoneKeysByAliasId: artifact.doubleMetaphoneKeysByAliasId }
+            : {}),
+          prefixCatalog: artifact.prefixCatalog,
+          ...(artifact.hangulCompletionRecords !== undefined
+            ? { hangulCompletionRecords: artifact.hangulCompletionRecords }
+            : {}),
+        }
+        : eagerBroadRecallArtifact !== undefined
+          ? {
+            wholeTokenIndex: eagerBroadRecallArtifact.wholeTokenIndex,
+            phoneticIndex: eagerBroadRecallArtifact.phoneticIndex,
+            doubleMetaphoneIndex: eagerBroadRecallArtifact.doubleMetaphoneIndex,
+            ...(eagerBroadRecallArtifact.doubleMetaphoneKeysByAliasId !== undefined
+              ? { doubleMetaphoneKeysByAliasId: eagerBroadRecallArtifact.doubleMetaphoneKeysByAliasId }
+              : {}),
+            prefixCatalog: eagerBroadRecallArtifact.prefixCatalog,
+            ...(eagerBroadRecallArtifact.hangulCompletionRecords !== undefined
+              ? { hangulCompletionRecords: eagerBroadRecallArtifact.hangulCompletionRecords }
+              : {}),
+          }
+        : undefined;
     return new SearchSnapshotAliasMatcher(
       aliases,
       registryVersion,
       {
-        surfaceForms: artifact.surfaceForms,
+        ...(artifact.surfaceForms !== undefined ? { surfaceForms: artifact.surfaceForms } : {}),
         exactIndex: artifact.exactIndex,
         compactIndex: artifact.compactIndex,
-        wholeTokenIndex: artifact.wholeTokenIndex,
-        phoneticIndex: artifact.phoneticIndex,
-        doubleMetaphoneIndex: artifact.doubleMetaphoneIndex,
-        doubleMetaphoneKeysByAliasId: artifact.doubleMetaphoneKeysByAliasId,
-        prefixCatalog: artifact.prefixCatalog,
-        hangulCompletionRecords: artifact.hangulCompletionRecords,
+        ...(broadRecallPrecomputed !== undefined ? broadRecallPrecomputed : {}),
+        ...(deferredBroadRecallArtifact !== undefined ? { deferredBroadRecallArtifact } : {}),
       },
     );
   }
@@ -402,30 +494,37 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
   private readonly wholeTokenIndex: Map<string, IndexedAliasRecord[]>;
   private readonly compactIndex: Map<string, IndexedAliasRecord[]>;
   private readonly phoneticIndex: Map<string, IndexedAliasRecord[]>;
-  private readonly artifactExactIndex: ArtifactAliasIndex | undefined;
-  private readonly artifactWholeTokenIndex: ArtifactAliasIndex | undefined;
-  private readonly artifactCompactIndex: ArtifactAliasIndex | undefined;
-  private readonly artifactPhoneticIndex: ArtifactAliasIndex | undefined;
+  private artifactExactIndex: ArtifactAliasIndex | undefined;
+  private artifactWholeTokenIndex: ArtifactAliasIndex | undefined;
+  private artifactCompactIndex: ArtifactAliasIndex | undefined;
+  private artifactPhoneticIndex: ArtifactAliasIndex | undefined;
   /**
    * Double Metaphone code → aliases. Each alias contributes its
    * primary key and (if distinct) its alternate key. The matcher uses
    * the union of query DM keys to retrieve candidates from this index.
    */
   private readonly doubleMetaphoneIndex: Map<string, IndexedAliasRecord[]>;
-  private readonly artifactDoubleMetaphoneIndex: ArtifactAliasIndex | undefined;
+  private artifactDoubleMetaphoneIndex: ArtifactAliasIndex | undefined;
   /**
    * Cached DM keyset per alias to avoid re-encoding during the strategy
    * decision loop. Empty set for non-Latin aliases.
    */
   private readonly doubleMetaphoneKeysByAliasId: Map<string, ReadonlySet<string>>;
-  private readonly artifactDoubleMetaphoneKeysByAliasId: ArtifactDoubleMetaphoneKeysByAliasId | undefined;
+  private artifactDoubleMetaphoneKeysByAliasId: ArtifactDoubleMetaphoneKeysByAliasId | undefined;
   private readonly prefixCatalog: PrefixCatalogGroupRecord[];
-  private readonly artifactPrefixCatalog: readonly LookupAliasRuntimePrefixEntry[] | undefined;
+  private artifactPrefixCatalog: readonly LookupAliasRuntimePrefixEntry[] | undefined;
   private readonly hangulCompletionRecords: HangulCompletionAliasRecord[];
-  private readonly artifactHangulCompletionRecords: readonly LookupAliasRuntimeHangulCompletionEntry[] | undefined;
+  private artifactHangulCompletionRecords: readonly LookupAliasRuntimeHangulCompletionEntry[] | undefined;
   private readonly aliases: readonly IndexedAliasRecord[];
-  private readonly surfaceForms: readonly string[];
+  private surfaceForms: readonly string[];
+  private surfaceFormsBuilt: boolean;
   private readonly artifactHydrated: boolean;
+  private deferredBroadRecallArtifact:
+    | {
+      readonly raw: string;
+      readonly filePath: string;
+    }
+    | undefined;
   private compactIndexBuilt: boolean;
   private broadRecallIndexesBuilt: boolean;
   private wholeTokenIndexBuilt: boolean;
@@ -438,15 +537,19 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
     aliases: readonly SnapshotAliasRecord[],
     private readonly registryVersion?: AliasRegistryVersion,
     precomputed?: {
-      readonly surfaceForms: readonly string[];
+      readonly surfaceForms?: readonly string[] | undefined;
       readonly exactIndex: ArtifactAliasIndex;
       readonly compactIndex: ArtifactAliasIndex;
-      readonly wholeTokenIndex: ArtifactAliasIndex;
-      readonly phoneticIndex: ArtifactAliasIndex;
-      readonly doubleMetaphoneIndex: ArtifactAliasIndex;
-      readonly doubleMetaphoneKeysByAliasId: ArtifactDoubleMetaphoneKeysByAliasId;
-      readonly prefixCatalog: readonly LookupAliasRuntimePrefixEntry[];
-      readonly hangulCompletionRecords: readonly LookupAliasRuntimeHangulCompletionEntry[];
+      readonly wholeTokenIndex?: ArtifactAliasIndex;
+      readonly phoneticIndex?: ArtifactAliasIndex;
+      readonly doubleMetaphoneIndex?: ArtifactAliasIndex;
+      readonly doubleMetaphoneKeysByAliasId?: ArtifactDoubleMetaphoneKeysByAliasId;
+      readonly prefixCatalog?: readonly LookupAliasRuntimePrefixEntry[];
+      readonly hangulCompletionRecords?: readonly LookupAliasRuntimeHangulCompletionEntry[] | undefined;
+      readonly deferredBroadRecallArtifact?: {
+        readonly raw: string;
+        readonly filePath: string;
+      };
     },
   ) {
     this.aliases = aliases as readonly IndexedAliasRecord[];
@@ -466,16 +569,24 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
     this.artifactDoubleMetaphoneKeysByAliasId = precomputed?.doubleMetaphoneKeysByAliasId;
     this.artifactPrefixCatalog = precomputed?.prefixCatalog;
     this.artifactHangulCompletionRecords = precomputed?.hangulCompletionRecords;
+    this.deferredBroadRecallArtifact = precomputed?.deferredBroadRecallArtifact;
     this.artifactHydrated = precomputed !== undefined;
 
     if (precomputed !== undefined) {
-      this.surfaceForms = precomputed.surfaceForms;
+      this.surfaceForms = precomputed.surfaceForms ?? [];
+      this.surfaceFormsBuilt = precomputed.surfaceForms !== undefined;
       this.compactIndexBuilt = true;
-      this.broadRecallIndexesBuilt = true;
-      this.wholeTokenIndexBuilt = true;
-      this.phoneticIndexesBuilt = true;
-      this.prefixCatalogBuilt = true;
-      this.hangulCompletionIndexBuilt = true;
+      const broadRecallHydrated =
+        precomputed.wholeTokenIndex !== undefined
+        && precomputed.phoneticIndex !== undefined
+        && precomputed.doubleMetaphoneIndex !== undefined
+        && precomputed.prefixCatalog !== undefined
+        && precomputed.hangulCompletionRecords !== undefined;
+      this.broadRecallIndexesBuilt = broadRecallHydrated;
+      this.wholeTokenIndexBuilt = broadRecallHydrated;
+      this.phoneticIndexesBuilt = broadRecallHydrated;
+      this.prefixCatalogBuilt = broadRecallHydrated;
+      this.hangulCompletionIndexBuilt = broadRecallHydrated;
       return;
     }
 
@@ -493,6 +604,7 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
       }
     }
     this.surfaceForms = surfaceForms;
+    this.surfaceFormsBuilt = true;
     this.compactIndexBuilt = true;
     this.broadRecallIndexesBuilt = false;
     this.wholeTokenIndexBuilt = false;
@@ -502,6 +614,19 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
   }
 
   getSurfaceForms(): readonly string[] {
+    if (!this.surfaceFormsBuilt) {
+      const surfaceForms: string[] = [];
+      const seenSurfaceForms = new Set<string>();
+      for (const alias of this.aliases) {
+        if (seenSurfaceForms.has(alias.value)) {
+          continue;
+        }
+        seenSurfaceForms.add(alias.value);
+        surfaceForms.push(alias.value);
+      }
+      this.surfaceForms = surfaceForms;
+      this.surfaceFormsBuilt = true;
+    }
     return this.surfaceForms;
   }
 
@@ -723,7 +848,7 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
       // precision via DM without dropping the legacy recall path.
       const hasPhoneticSkeletonMatch = phoneticSet.has(phoneticValue);
       const hasPhoneticDoubleMetaphoneMatch =
-        this.aliasHasDoubleMetaphoneOverlap(alias.aliasId, queryDmKeys);
+        this.aliasHasDoubleMetaphoneOverlap(alias, queryDmKeys);
       const strategy: AliasStrategy | null =
         transliteratedSet.has(alias.normalizedValue) || transliteratedSet.has(compactValue)
           ? 'transliterated_exact'
@@ -860,7 +985,7 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
         matches.set(`${alias.aliasId}\u0000${record.jamoKey}`, {
           alias,
           jamoKey: record.jamoKey,
-          syllableBoundaryOffsets: new Set(record.syllableBoundaryOffsets),
+          syllableBoundaryOffsets: new Set(record.syllableBoundaryOffsets ?? []),
         });
       }
     }
@@ -895,13 +1020,13 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
   }
 
   private aliasHasDoubleMetaphoneOverlap(
-    aliasId: string,
+    alias: IndexedAliasRecord,
     queryDmKeys: ReadonlySet<string>,
   ): boolean {
     if (queryDmKeys.size === 0) {
       return false;
     }
-    const hydrated = this.doubleMetaphoneKeysByAliasId.get(aliasId);
+    const hydrated = this.doubleMetaphoneKeysByAliasId.get(alias.aliasId);
     if (hydrated !== undefined) {
       for (const key of queryDmKeys) {
         if (hydrated.has(key)) {
@@ -910,11 +1035,12 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
       }
       return false;
     }
-    const raw = this.artifactDoubleMetaphoneKeysByAliasId?.[aliasId];
-    if (raw === undefined || raw.length === 0) {
-      return false;
-    }
-    for (const key of raw) {
+    const raw = this.artifactDoubleMetaphoneKeysByAliasId?.[alias.aliasId];
+    const aliasDmKeys = raw === undefined
+      ? doubleMetaphoneKeys(alias.normalizedValue)
+      : new Set(raw);
+    this.doubleMetaphoneKeysByAliasId.set(alias.aliasId, aliasDmKeys);
+    for (const key of aliasDmKeys) {
       if (queryDmKeys.has(key)) {
         return true;
       }
@@ -959,10 +1085,28 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
     this.compactIndexBuilt = true;
   }
 
+  private ensureDeferredBroadRecallArtifactHydrated(): void {
+    if (this.deferredBroadRecallArtifact === undefined) {
+      return;
+    }
+    const artifact = parseTrustedLookupAliasBroadRecallRuntimeArtifact(
+      this.deferredBroadRecallArtifact.raw,
+      this.deferredBroadRecallArtifact.filePath,
+    );
+    this.artifactWholeTokenIndex = artifact.wholeTokenIndex;
+    this.artifactPhoneticIndex = artifact.phoneticIndex;
+    this.artifactDoubleMetaphoneIndex = artifact.doubleMetaphoneIndex;
+    this.artifactDoubleMetaphoneKeysByAliasId = artifact.doubleMetaphoneKeysByAliasId;
+    this.artifactPrefixCatalog = artifact.prefixCatalog;
+    this.artifactHangulCompletionRecords = artifact.hangulCompletionRecords;
+    this.deferredBroadRecallArtifact = undefined;
+  }
+
   private ensureBroadRecallIndexes(): void {
     if (this.broadRecallIndexesBuilt) {
       return;
     }
+    this.ensureDeferredBroadRecallArtifactHydrated();
 
     this.ensureWholeTokenIndex();
     this.ensurePhoneticRecallIndexes();
@@ -972,6 +1116,13 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
 
   private ensureWholeTokenIndex(): void {
     if (this.wholeTokenIndexBuilt) {
+      return;
+    }
+    this.ensureDeferredBroadRecallArtifactHydrated();
+    if (this.artifactWholeTokenIndex !== undefined) {
+      this.wholeTokenIndexBuilt = true;
+      this.broadRecallIndexesBuilt =
+        this.phoneticIndexesBuilt && this.prefixCatalogBuilt && this.hangulCompletionIndexBuilt;
       return;
     }
 
@@ -987,6 +1138,16 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
 
   private ensurePhoneticRecallIndexes(): void {
     if (this.phoneticIndexesBuilt) {
+      return;
+    }
+    this.ensureDeferredBroadRecallArtifactHydrated();
+    if (
+      this.artifactPhoneticIndex !== undefined
+      && this.artifactDoubleMetaphoneIndex !== undefined
+    ) {
+      this.phoneticIndexesBuilt = true;
+      this.broadRecallIndexesBuilt =
+        this.wholeTokenIndexBuilt && this.prefixCatalogBuilt && this.hangulCompletionIndexBuilt;
       return;
     }
 
@@ -1009,6 +1170,13 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
 
   private ensurePrefixCatalog(): void {
     if (this.prefixCatalogBuilt) {
+      return;
+    }
+    this.ensureDeferredBroadRecallArtifactHydrated();
+    if (this.artifactPrefixCatalog !== undefined) {
+      this.prefixCatalogBuilt = true;
+      this.broadRecallIndexesBuilt =
+        this.wholeTokenIndexBuilt && this.phoneticIndexesBuilt && this.hangulCompletionIndexBuilt;
       return;
     }
 
@@ -1040,6 +1208,13 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
 
   private ensureHangulCompletionIndex(): void {
     if (this.hangulCompletionIndexBuilt) {
+      return;
+    }
+    this.ensureDeferredBroadRecallArtifactHydrated();
+    if (this.artifactHangulCompletionRecords !== undefined) {
+      this.hangulCompletionIndexBuilt = true;
+      this.broadRecallIndexesBuilt =
+        this.wholeTokenIndexBuilt && this.phoneticIndexesBuilt && this.prefixCatalogBuilt;
       return;
     }
 

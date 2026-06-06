@@ -46,6 +46,21 @@ describe('buildLookupV2ManualTargetFamilyReviewPacketRows', () => {
         uniqueOwners: new Map([['calon segur', 'wine-ce-calon-segur']]),
         collidingOwners: new Map(),
         entityLabels: new Map([['wine-ce-calon-segur', 'Calon Segur 2010']]),
+        uniqueOwnerWitnesses: new Map([
+          ['calon segur', [
+            {
+              entityId: 'wine-ce-calon-segur',
+              witnessSurface: 'Calon Segur 2010',
+              witnessSource: 'canonical_label',
+            },
+            {
+              entityId: 'wine-ce-calon-segur',
+              witnessSurface: 'Calon Segur',
+              witnessSource: 'aliases_noisy_recall',
+            },
+          ]],
+        ]),
+        collidingOwnerWitnesses: new Map(),
       },
     });
 
@@ -56,6 +71,7 @@ describe('buildLookupV2ManualTargetFamilyReviewPacketRows', () => {
         benchmarkGoldHintVariants: ['calon segur', 'Calon Segur'],
         proposalStatus: 'needs_target_review',
         reviewTarget: 'lookup_manual_target_resolution_v1',
+        scopeRisk: 'family_only',
         locales: ['ko'],
         surfaces: ['칼롱 세귀르', '칼롱세귀르'],
         holeClasses: ['realworld_compact_alias', 'realworld_korean_orthography'],
@@ -66,6 +82,18 @@ describe('buildLookupV2ManualTargetFamilyReviewPacketRows', () => {
         runtimeEvidenceStatus: 'candidate_unique_owner',
         runtimeEvidenceEntityId: 'wine-ce-calon-segur',
         runtimeEvidenceEntityLabel: 'Calon Segur 2010',
+        runtimeEvidenceWitnesses: [
+          {
+            entityId: 'wine-ce-calon-segur',
+            witnessSurface: 'Calon Segur 2010',
+            witnessSource: 'canonical_label',
+          },
+          {
+            entityId: 'wine-ce-calon-segur',
+            witnessSurface: 'Calon Segur',
+            witnessSource: 'aliases_noisy_recall',
+          },
+        ],
         proposedAt: '2026-06-06T01:00:00.000Z',
       },
     ]);

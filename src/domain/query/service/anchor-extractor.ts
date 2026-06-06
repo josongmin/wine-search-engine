@@ -434,9 +434,15 @@ export class AnchorExtractor {
         ) {
           continue;
         }
+        const surfaceOnlyAtomicSpan =
+          span.tokenCount === 1
+          && (
+            surfaceOnlyAtomicSpans.has(span.text)
+            || queryTokenCount > 1
+          );
         addSpanQuery(
           span.text,
-          span.tokenCount === 1 && surfaceOnlyAtomicSpans.has(span.text)
+          surfaceOnlyAtomicSpan
             ? 'surface_only'
             : undefined,
         );

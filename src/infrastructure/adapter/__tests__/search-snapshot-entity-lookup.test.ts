@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { SEARCH_SNAPSHOT_SCHEMA_VERSION } from '../../../domain/shared/constants/search-snapshot.js';
 import { createEntityId } from '../../../domain/shared/types/index.js';
 import { SearchSnapshotEntityLookup } from '../search-snapshot-entity-lookup.js';
 import { LOOKUP_ENTITY_PROJECTION_SCHEMA_VERSION } from '../../../domain/shared/types/search-snapshot-lookup-runtime.js';
@@ -53,7 +54,7 @@ async function writeSnapshotArtifacts(): Promise<{
   await fs.writeFile(
     manifestPath,
     `${JSON.stringify({
-      schemaVersion: 'search_snapshot.v3',
+      schemaVersion: SEARCH_SNAPSHOT_SCHEMA_VERSION,
       artifacts: { lookupEntityProjectionJson: projectionPath },
     }, null, 2)}\n`,
     'utf8',
@@ -143,16 +144,16 @@ describe('SearchSnapshotEntityLookup', () => {
       'utf8',
     );
     await fs.writeFile(
-      manifestPath,
-      `${JSON.stringify({
-        schemaVersion: 'search_snapshot.v3',
+    manifestPath,
+    `${JSON.stringify({
+        schemaVersion: SEARCH_SNAPSHOT_SCHEMA_VERSION,
         artifacts: { lookupEntityProjectionJson: projectionPath },
       }, null, 2)}\n`,
       'utf8',
     );
 
     await expect(SearchSnapshotEntityLookup.loadFromManifest(manifestPath)).rejects.toThrow(
-      /Malformed lookup entity projection artifact/,
+      /Malformed trusted lookup entity projection artifact/,
     );
   });
 });

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { approveLookupV2ReviewedAuthorityExactSafeProposalPacket } from '../../../scripts/eval/approve-lookup-v2-reviewed-authority-exact-safe-proposal-packet.js';
 
 describe('approveLookupV2ReviewedAuthorityExactSafeProposalPacket', () => {
-  it('auto-approves only reviewed authority sources', () => {
+  it('auto-approves only registry-final exact authority sources', () => {
     const rows = approveLookupV2ReviewedAuthorityExactSafeProposalPacket({
       packetRows: [
         {

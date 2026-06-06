@@ -4,7 +4,7 @@ import { parseArgs } from 'node:util';
 import type { LookupExactSafeFamilyReviewPacketRow } from './export-lookup-v2-exact-safe-family-review-packet.js';
 
 export interface LookupExactSafeFamilyReviewDecisionRow {
-  readonly entityId: string;
+  readonly reviewScopeKey: string;
   readonly decision: 'approve' | 'reject';
   readonly reviewedBy: string;
   readonly decisionReason: string;
@@ -17,7 +17,7 @@ function isLookupExactSafeFamilyReviewPacketRow(value: unknown): value is Lookup
   }
   const row = value as Record<string, unknown>;
   return (
-    typeof row['entityId'] === 'string'
+    typeof row['reviewScopeKey'] === 'string'
     && typeof row['proposalStatus'] === 'string'
     && typeof row['reviewTarget'] === 'string'
     && Array.isArray(row['surfaces'])
@@ -39,7 +39,7 @@ function isDecisionRow(value: unknown): value is LookupExactSafeFamilyReviewDeci
   }
   const row = value as Record<string, unknown>;
   return (
-    typeof row['entityId'] === 'string'
+    typeof row['reviewScopeKey'] === 'string'
     && (row['decision'] === 'approve' || row['decision'] === 'reject')
     && typeof row['reviewedBy'] === 'string'
     && typeof row['decisionReason'] === 'string'
@@ -60,41 +60,41 @@ export function applyLookupV2ExactSafeFamilyReviewDecisions(args: {
   readonly packetRows: readonly LookupExactSafeFamilyReviewPacketRow[];
   readonly decisionRows: readonly LookupExactSafeFamilyReviewDecisionRow[];
 }): readonly LookupExactSafeFamilyReviewPacketRow[] {
-  const packetByEntityId = new Map<string, LookupExactSafeFamilyReviewPacketRow>();
+  const packetByReviewScopeKey = new Map<string, LookupExactSafeFamilyReviewPacketRow>();
   for (const row of args.packetRows) {
-    if (packetByEntityId.has(row.entityId)) {
-      throw new Error(`duplicate exact-safe family review packet row for entityId=${row.entityId}`);
+    if (packetByReviewScopeKey.has(row.reviewScopeKey)) {
+      throw new Error(`duplicate exact-safe family review packet row for reviewScopeKey=${row.reviewScopeKey}`);
     }
-    packetByEntityId.set(row.entityId, row);
+    packetByReviewScopeKey.set(row.reviewScopeKey, row);
   }
 
-  const decisionByEntityId = new Map<string, LookupExactSafeFamilyReviewDecisionRow>();
+  const decisionByReviewScopeKey = new Map<string, LookupExactSafeFamilyReviewDecisionRow>();
   for (const row of args.decisionRows) {
     if (row.reviewedBy.trim().length === 0) {
-      throw new Error(`exact-safe family review decision missing reviewedBy for entityId=${row.entityId}`);
+      throw new Error(`exact-safe family review decision missing reviewedBy for reviewScopeKey=${row.reviewScopeKey}`);
     }
     if (row.decisionReason.trim().length === 0) {
-      throw new Error(`exact-safe family review decision missing decisionReason for entityId=${row.entityId}`);
+      throw new Error(`exact-safe family review decision missing decisionReason for reviewScopeKey=${row.reviewScopeKey}`);
     }
     if (Number.isNaN(Date.parse(row.reviewedAt))) {
-      throw new Error(`exact-safe family review decision has invalid reviewedAt for entityId=${row.entityId}`);
+      throw new Error(`exact-safe family review decision has invalid reviewedAt for reviewScopeKey=${row.reviewScopeKey}`);
     }
-    if (decisionByEntityId.has(row.entityId)) {
-      throw new Error(`duplicate exact-safe family review decision for entityId=${row.entityId}`);
+    if (decisionByReviewScopeKey.has(row.reviewScopeKey)) {
+      throw new Error(`duplicate exact-safe family review decision for reviewScopeKey=${row.reviewScopeKey}`);
     }
-    if (!packetByEntityId.has(row.entityId)) {
-      throw new Error(`exact-safe family review decision references unknown entityId=${row.entityId}`);
+    if (!packetByReviewScopeKey.has(row.reviewScopeKey)) {
+      throw new Error(`exact-safe family review decision references unknown reviewScopeKey=${row.reviewScopeKey}`);
     }
-    decisionByEntityId.set(row.entityId, row);
+    decisionByReviewScopeKey.set(row.reviewScopeKey, row);
   }
 
   return args.packetRows.map((row) => {
-    const decision = decisionByEntityId.get(row.entityId);
+    const decision = decisionByReviewScopeKey.get(row.reviewScopeKey);
     if (decision === undefined) {
       return row;
     }
     if (row.proposalStatus !== 'needs_review') {
-      throw new Error(`cannot re-review exact-safe family packet row with status=${row.proposalStatus} for entityId=${row.entityId}`);
+      throw new Error(`cannot re-review exact-safe family packet row with status=${row.proposalStatus} for reviewScopeKey=${row.reviewScopeKey}`);
     }
     return {
       ...row,

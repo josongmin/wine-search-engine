@@ -1,0 +1,108 @@
+{
+  "inputArtifact": "/tmp/lookup-v2-coverage-korean-realworld-stretch-entity-no-policy.json",
+  "generatedAt": "2026-06-06T10:21:35.765Z",
+  "outputPaths": {
+    "draft": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl",
+    "exactSafePacket": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl",
+    "reviewedAuthorityApprovedExactSafePacket": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-reviewed-authority-exact-safe-proposals-approved.jsonl",
+    "exactSafeFamilyReviewPacket": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-exact-safe-family-review-packet.jsonl",
+    "exactSafeFamilySuggestions": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-exact-safe-family-suggestions.jsonl",
+    "exactSafeFamilySuggestedDecisions": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-exact-safe-family.suggested-decisions.jsonl",
+    "policyReviewPacket": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-policy-review-packet.jsonl",
+    "policyFamilyReviewPacket": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-policy-family-review-packet.jsonl",
+    "policyFamilySuggestions": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-policy-family-suggestions.jsonl",
+    "policyFamilySuggestedDecisions": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-policy-family.suggested-decisions.jsonl",
+    "manualTargetFamilyReviewPacket": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-manual-target-family-review-packet.jsonl",
+    "manualTargetFamilySuggestions": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-manual-target-family-suggestions.jsonl",
+    "manualTargetFamilySuggestedDecisions": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-manual-target-family.suggested-decisions.jsonl",
+    "manualTargetBatchDir": "data/lookup-v2/drafts/manual-target-batches",
+    "summary": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-write-plane-summary.json"
+  },
+  "draft": {
+    "rows": 243,
+    "autoTargetable": 12,
+    "policyReview": 10,
+    "manualTarget": 221
+  },
+  "exactSafe": {
+    "packetRows": 12,
+    "approvedRows": 0,
+    "pendingRows": 12,
+    "bySource": {
+      "family_target_registry": 12
+    },
+    "familyReviewRows": 11,
+    "familySuggestions": {
+      "suggestApprove": 0,
+      "manualReview": 11
+    }
+  },
+  "policy": {
+    "reviewRows": 10,
+    "familyReviewRows": 3,
+    "suggestions": {
+      "keepPolicyConflict": 3,
+      "manualReview": 0
+    }
+  },
+  "manualTarget": {
+    "batchIndex": {
+      "sourceDraftPath": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl",
+      "generatedAt": "2026-06-06T10:21:35.765Z",
+      "totalRows": 221,
+      "batches": [
+        {
+          "holeClass": "realworld_brand_suffix",
+          "rowCount": 28,
+          "outputPath": "data/lookup-v2/drafts/manual-target-batches/realworld-brand-suffix.jsonl"
+        },
+        {
+          "holeClass": "realworld_compact_alias",
+          "rowCount": 28,
+          "outputPath": "data/lookup-v2/drafts/manual-target-batches/realworld-compact-alias.jsonl"
+        },
+        {
+          "holeClass": "realworld_exact_vintage",
+          "rowCount": 39,
+          "outputPath": "data/lookup-v2/drafts/manual-target-batches/realworld-exact-vintage.jsonl"
+        },
+        {
+          "holeClass": "realworld_gap_napa_icon",
+          "rowCount": 1,
+          "outputPath": "data/lookup-v2/drafts/manual-target-batches/realworld-gap-napa-icon.jsonl"
+        },
+        {
+          "holeClass": "realworld_korean_orthography",
+          "rowCount": 29,
+          "outputPath": "data/lookup-v2/drafts/manual-target-batches/realworld-korean-orthography.jsonl"
+        },
+        {
+          "holeClass": "realworld_mixed_script_alias",
+          "rowCount": 28,
+          "outputPath": "data/lookup-v2/drafts/manual-target-batches/realworld-mixed-script-alias.jsonl"
+        },
+        {
+          "holeClass": "realworld_producer_prefixed",
+          "rowCount": 26,
+          "outputPath": "data/lookup-v2/drafts/manual-target-batches/realworld-producer-prefixed.jsonl"
+        },
+        {
+          "holeClass": "realworld_spaced_alias",
+          "rowCount": 16,
+          "outputPath": "data/lookup-v2/drafts/manual-target-batches/realworld-spaced-alias.jsonl"
+        },
+        {
+          "holeClass": "realworld_vintage_suffix",
+          "rowCount": 26,
+          "outputPath": "data/lookup-v2/drafts/manual-target-batches/realworld-vintage-suffix.jsonl"
+        }
+      ]
+    },
+    "familyReviewRows": 32,
+    "suggestions": {
+      "candidateUniqueOwner": 6,
+      "collisionCandidates": 14,
+      "missingRuntimeOwner": 12
+    }
+  }
+}

@@ -478,9 +478,17 @@ describe('AnchorExtractor', () => {
 
       expect(anchors).toHaveLength(1);
       expect(anchors[0]?.surfaceForm).toBe('오푸스원');
-      expect(batchLookup).toHaveBeenCalledTimes(2);
-      expect(batchLookup.mock.calls[0]?.[1]).toEqual({ scope: 'surface' });
-      expect(batchLookup.mock.calls[1]?.[1]).toEqual({ scope: 'span' });
+      expect(batchLookup).toHaveBeenCalledTimes(3);
+      expect(batchLookup.mock.calls.map((call) => call[1])).toEqual(
+        expect.arrayContaining([
+          { scope: 'surface' },
+          { scope: 'span' },
+          {
+            scope: 'span',
+            recallMode: 'surface_only',
+          },
+        ]),
+      );
       expect(singleLookup).not.toHaveBeenCalled();
     });
 

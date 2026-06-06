@@ -60,7 +60,7 @@ import type { FamilyGraphPort, FamilySibling } from '../../../domain/resolver/v2
 
 export interface MultiChannelRetrievalDeps {
   readonly aliasMatcher: AliasMatcher;
-  readonly entityLookup: EntityDocumentLookupPort;
+  readonly entityLookup?: EntityDocumentLookupPort | undefined;
   readonly resolverProjectionLookup?: LookupResolverProjectionPort | undefined;
   /**
    * T-ELV2-06 Half B: producer family graph. When wired, the engine walks each
@@ -249,9 +249,12 @@ export class MultiChannelRetrievalEngine implements LookupCandidateRetrievalPort
     }
 
     stageTimer?.start('retrieval.hydration');
+    if (this.deps.resolverProjectionLookup === undefined && this.deps.entityLookup === undefined) {
+      throw new Error('MultiChannelRetrievalEngine requires resolverProjectionLookup or entityLookup');
+    }
     const docs = this.deps.resolverProjectionLookup !== undefined
       ? await this.deps.resolverProjectionLookup.getResolverProjections(ranked.map((e) => e.id))
-      : await this.deps.entityLookup.getDocuments(ranked.map((e) => e.id));
+      : await this.deps.entityLookup!.getDocuments(ranked.map((e) => e.id));
     stageTimer?.end('retrieval.hydration');
 
     const candidates: LookupCandidate[] = ranked.map((entry) => {

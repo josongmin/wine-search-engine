@@ -6,7 +6,7 @@ import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import { SEARCH_SNAPSHOT_SCHEMA_VERSION } from '../../domain/shared/constants/search-snapshot.js';
 import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
 import {
-  parseLookupExactSafeRuntimeArtifact,
+  parseTrustedLookupExactSafeRuntimeArtifact,
 } from '../../domain/shared/types/search-snapshot-lookup-runtime.js';
 import type {
   LookupExactSafeMatch,
@@ -40,7 +40,7 @@ export class SearchSnapshotExactSafeRegistry implements LookupExactSafeRegistryP
     const manifestRaw = await fs.readFile(manifestPath, 'utf8');
     const artifactPath = parseExactSafeRuntimePath(manifestRaw, manifestPath);
     const artifactRaw = await fs.readFile(artifactPath, 'utf8');
-    const artifact = parseLookupExactSafeRuntimeArtifact(artifactRaw, artifactPath);
+    const artifact = parseTrustedLookupExactSafeRuntimeArtifact(artifactRaw, artifactPath);
     bootstrapLogger.info(
       {
         manifestPath,

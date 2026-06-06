@@ -91,6 +91,29 @@ describe('QueryAnalyzerService — deterministic pipeline', () => {
     expect(llm.analyzeMock).not.toHaveBeenCalled();
   }, 10_000);
 
+  it('anchor + constraint recommendation query stays discovery-style, not anchored_similarity', async () => {
+    const result = await analyze('부르고뉴 피노누아 추천');
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    expect(result.analysis.callerInterpretation).toEqual({
+      authority: 'caller',
+      intent: 'mixed_query',
+      queryClass: 'semantic_preference',
+    });
+    expect(result.analysis.expectedMultiStep).toBe(false);
+  });
+
+  it('explicit similarity query projects to anchored_similarity', async () => {
+    const result = await analyze('Opus One이랑 비슷한데 더 싼 거');
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    expect(result.analysis.callerInterpretation).toEqual({
+      authority: 'caller',
+      intent: 'mixed_query',
+      queryClass: 'anchored_similarity',
+    });
+  });
+
   it('Exact entity with vintage — anchors include the entity, vintage captured', async () => {
     const result = await analyze('Opus One 2018');
     expect(result.kind).toBe('ok');

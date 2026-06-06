@@ -233,6 +233,7 @@ export interface LoadedSearchSnapshotRuntimeState {
   readonly manifestPath: string;
   readonly nlMappingsRuntimePath: string;
   readonly lookupAliasRuntimePath: string;
+  readonly lookupAliasBroadRecallRuntimePath?: string;
   readonly lookupExactSafeRuntimePath: string;
   readonly lookupResolverProjectionPath: string;
   readonly lookupEntityProjectionPath: string;
@@ -250,6 +251,7 @@ export interface LoadedSearchSnapshotRuntimeState {
     readonly entities: number;
     readonly aliases: number;
     readonly lookupAliasRuntimeAliases: number;
+    readonly lookupAliasBroadRecallRuntimeEntries?: number;
     readonly lookupExactSafeRuntimeEntries: number;
     readonly lookupResolverProjectionDocuments: number;
     readonly lookupEntityProjectionDocuments: number;
@@ -263,6 +265,7 @@ export interface LoadedSearchSnapshotRuntimeState {
     readonly entities: string;
     readonly aliases: string;
     readonly lookupAliasRuntime: string;
+    readonly lookupAliasBroadRecallRuntime?: string;
     readonly lookupExactSafeRuntime: string;
     readonly lookupResolverProjection: string;
     readonly lookupEntityProjection: string;
@@ -329,6 +332,7 @@ type RuntimeStateShape = {
   readonly manifestPath?: unknown;
   readonly nlMappingsRuntimePath?: unknown;
   readonly lookupAliasRuntimePath?: unknown;
+  readonly lookupAliasBroadRecallRuntimePath?: unknown;
   readonly lookupExactSafeRuntimePath?: unknown;
   readonly lookupResolverProjectionPath?: unknown;
   readonly lookupEntityProjectionPath?: unknown;
@@ -372,6 +376,7 @@ type RuntimeStateShape = {
     readonly entities?: unknown;
     readonly aliases?: unknown;
     readonly lookupAliasRuntimeAliases?: unknown;
+    readonly lookupAliasBroadRecallRuntimeEntries?: unknown;
     readonly lookupExactSafeRuntimeEntries?: unknown;
     readonly lookupResolverProjectionDocuments?: unknown;
     readonly lookupEntityProjectionDocuments?: unknown;
@@ -385,6 +390,7 @@ type RuntimeStateShape = {
     readonly entities?: unknown;
     readonly aliases?: unknown;
     readonly lookupAliasRuntime?: unknown;
+    readonly lookupAliasBroadRecallRuntime?: unknown;
     readonly lookupExactSafeRuntime?: unknown;
     readonly lookupResolverProjection?: unknown;
     readonly lookupEntityProjection?: unknown;
@@ -557,6 +563,7 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
   if (typeof parsed.manifestPath !== 'string' || parsed.manifestPath.length === 0) malformedReasons.push('manifestPath');
   if (typeof parsed.nlMappingsRuntimePath !== 'string' || parsed.nlMappingsRuntimePath.length === 0) malformedReasons.push('nlMappingsRuntimePath');
   if (typeof parsed.lookupAliasRuntimePath !== 'string' || parsed.lookupAliasRuntimePath.length === 0) malformedReasons.push('lookupAliasRuntimePath');
+  if (parsed.lookupAliasBroadRecallRuntimePath !== undefined && (typeof parsed.lookupAliasBroadRecallRuntimePath !== 'string' || parsed.lookupAliasBroadRecallRuntimePath.length === 0)) malformedReasons.push('lookupAliasBroadRecallRuntimePath');
   if (typeof parsed.lookupExactSafeRuntimePath !== 'string' || parsed.lookupExactSafeRuntimePath.length === 0) malformedReasons.push('lookupExactSafeRuntimePath');
   if (typeof parsed.lookupResolverProjectionPath !== 'string' || parsed.lookupResolverProjectionPath.length === 0) malformedReasons.push('lookupResolverProjectionPath');
   if (typeof parsed.lookupEntityProjectionPath !== 'string' || parsed.lookupEntityProjectionPath.length === 0) malformedReasons.push('lookupEntityProjectionPath');
@@ -569,6 +576,7 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
     if (!isFiniteCount(counts.entities)) malformedReasons.push('counts.entities');
     if (!isFiniteCount(counts.aliases)) malformedReasons.push('counts.aliases');
     if (!isFiniteCount(counts.lookupAliasRuntimeAliases)) malformedReasons.push('counts.lookupAliasRuntimeAliases');
+    if (counts.lookupAliasBroadRecallRuntimeEntries !== undefined && !isFiniteCount(counts.lookupAliasBroadRecallRuntimeEntries)) malformedReasons.push('counts.lookupAliasBroadRecallRuntimeEntries');
     if (!isFiniteCount(counts.lookupExactSafeRuntimeEntries)) malformedReasons.push('counts.lookupExactSafeRuntimeEntries');
     if (!isFiniteCount(counts.lookupResolverProjectionDocuments)) malformedReasons.push('counts.lookupResolverProjectionDocuments');
     if (!isFiniteCount(counts.lookupEntityProjectionDocuments)) malformedReasons.push('counts.lookupEntityProjectionDocuments');
@@ -583,6 +591,7 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
     if (typeof hashes.entities !== 'string' || hashes.entities.length === 0) malformedReasons.push('hashes.entities');
     if (typeof hashes.aliases !== 'string' || hashes.aliases.length === 0) malformedReasons.push('hashes.aliases');
     if (typeof hashes.lookupAliasRuntime !== 'string' || hashes.lookupAliasRuntime.length === 0) malformedReasons.push('hashes.lookupAliasRuntime');
+    if (hashes.lookupAliasBroadRecallRuntime !== undefined && (typeof hashes.lookupAliasBroadRecallRuntime !== 'string' || hashes.lookupAliasBroadRecallRuntime.length === 0)) malformedReasons.push('hashes.lookupAliasBroadRecallRuntime');
     if (typeof hashes.lookupExactSafeRuntime !== 'string' || hashes.lookupExactSafeRuntime.length === 0) malformedReasons.push('hashes.lookupExactSafeRuntime');
     if (typeof hashes.lookupResolverProjection !== 'string' || hashes.lookupResolverProjection.length === 0) malformedReasons.push('hashes.lookupResolverProjection');
     if (typeof hashes.lookupEntityProjection !== 'string' || hashes.lookupEntityProjection.length === 0) malformedReasons.push('hashes.lookupEntityProjection');
@@ -605,6 +614,9 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
   const validatedManifestPath = parsed.manifestPath as string;
   const validatedNlMappingsRuntimePath = parsed.nlMappingsRuntimePath as string;
   const validatedLookupAliasRuntimePath = parsed.lookupAliasRuntimePath as string;
+  const validatedLookupAliasBroadRecallRuntimePath = typeof parsed.lookupAliasBroadRecallRuntimePath === 'string'
+    ? parsed.lookupAliasBroadRecallRuntimePath
+    : undefined;
   const validatedLookupExactSafeRuntimePath = parsed.lookupExactSafeRuntimePath as string;
   const validatedLookupResolverProjectionPath = parsed.lookupResolverProjectionPath as string;
   const validatedLookupEntityProjectionPath = parsed.lookupEntityProjectionPath as string;
@@ -634,6 +646,9 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
     manifestPath: validatedManifestPath,
     nlMappingsRuntimePath: validatedNlMappingsRuntimePath,
     lookupAliasRuntimePath: validatedLookupAliasRuntimePath,
+    ...(validatedLookupAliasBroadRecallRuntimePath !== undefined
+      ? { lookupAliasBroadRecallRuntimePath: validatedLookupAliasBroadRecallRuntimePath }
+      : {}),
     lookupExactSafeRuntimePath: validatedLookupExactSafeRuntimePath,
     lookupResolverProjectionPath: validatedLookupResolverProjectionPath,
     lookupEntityProjectionPath: validatedLookupEntityProjectionPath,
@@ -645,6 +660,9 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
       entities: validatedCounts.entities,
       aliases: validatedCounts.aliases,
       lookupAliasRuntimeAliases: validatedCounts.lookupAliasRuntimeAliases,
+      ...(validatedCounts.lookupAliasBroadRecallRuntimeEntries !== undefined
+        ? { lookupAliasBroadRecallRuntimeEntries: validatedCounts.lookupAliasBroadRecallRuntimeEntries }
+        : {}),
       lookupExactSafeRuntimeEntries: validatedCounts.lookupExactSafeRuntimeEntries,
       lookupResolverProjectionDocuments: validatedCounts.lookupResolverProjectionDocuments,
       lookupEntityProjectionDocuments: validatedCounts.lookupEntityProjectionDocuments,
@@ -658,6 +676,9 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
       entities: validatedHashes.entities,
       aliases: validatedHashes.aliases,
       lookupAliasRuntime: validatedHashes.lookupAliasRuntime,
+      ...(validatedHashes.lookupAliasBroadRecallRuntime !== undefined
+        ? { lookupAliasBroadRecallRuntime: validatedHashes.lookupAliasBroadRecallRuntime }
+        : {}),
       lookupExactSafeRuntime: validatedHashes.lookupExactSafeRuntime,
       lookupResolverProjection: validatedHashes.lookupResolverProjection,
       lookupEntityProjection: validatedHashes.lookupEntityProjection,

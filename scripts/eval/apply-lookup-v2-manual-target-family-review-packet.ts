@@ -10,6 +10,11 @@ import { loadLookupExactSafeRegistry } from '../etl/lookup-exact-safe-registry.j
 import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
 import type { LookupV2CurationDraftRow } from './export-lookup-v2-curation-drafts.js';
 import type { LookupV2ManualTargetFamilyReviewPacketRow } from './export-lookup-v2-manual-target-family-review-packet.js';
+import {
+  DEFAULT_LOOKUP_V2_FAMILY_TARGET_REGISTRY_PATH,
+  loadLookupV2FamilyTargetRegistrySync,
+  type LookupV2FamilyTargetRegistryRow,
+} from './lookup-v2-family-target-registry.js';
 
 interface ManualTargetFamilyApplyResult {
   readonly exactSafePacketRows: readonly LookupExactSafeProposalPacketRow[];
@@ -61,20 +66,26 @@ function parsePacketJsonl<T>(
     .filter(predicate);
 }
 
-function buildExactSafePacketSourceEvidence(row: LookupV2CurationDraftRow, family: LookupV2ManualTargetFamilyReviewPacketRow, packetPath: string): string {
-  const packetName = path.basename(packetPath);
-  const reviewer = family.reviewedBy !== undefined ? ` reviewedBy=${family.reviewedBy}` : '';
-  const decision = family.decisionReason !== undefined ? ` decision=${family.decisionReason}` : '';
-  return `${row.sourceEvidence} [manual_target_family_packet=${packetName} benchmark_gold_hint=${family.benchmarkGoldHint}${reviewer}${decision}]`;
+function buildExactSafePacketSourceEvidence(
+  row: LookupV2CurationDraftRow,
+  registryRow: LookupV2FamilyTargetRegistryRow,
+  registryPath: string,
+): string {
+  const registryName = path.basename(registryPath);
+  return `${row.sourceEvidence} [family_target_registry=${registryName} benchmark_gold_hint=${registryRow.benchmarkGoldHint} reviewedBy=${registryRow.reviewedBy} decision=${registryRow.decisionReason}]`;
 }
 
 export function applyLookupV2ManualTargetFamilyReviewPacket(args: {
   readonly familyRows: readonly LookupV2ManualTargetFamilyReviewPacketRow[];
   readonly draftRows: readonly LookupV2CurationDraftRow[];
-  readonly packetPath: string;
+  readonly familyTargetRegistryRows: readonly LookupV2FamilyTargetRegistryRow[];
+  readonly familyTargetRegistryPath: string;
   readonly existingRegistryRows?: readonly Awaited<ReturnType<typeof loadLookupExactSafeRegistry>>;
 }): ManualTargetFamilyApplyResult {
   const familyByHint = new Map<string, LookupV2ManualTargetFamilyReviewPacketRow>();
+  const familyTargetRegistryByHint = new Map(
+    args.familyTargetRegistryRows.map((row) => [normalizeForMatch(row.benchmarkGoldHint), row] as const),
+  );
   let targetAssignedFamilies = 0;
   let rejectedFamilies = 0;
   let pendingFamilies = 0;
@@ -89,19 +100,24 @@ export function applyLookupV2ManualTargetFamilyReviewPacket(args: {
       if (row.targetEntityId === undefined || row.targetEntityId.trim().length === 0) {
         throw new Error(`target_assigned manual-target family row is missing targetEntityId for hint=${JSON.stringify(row.benchmarkGoldHint)}`);
       }
-      if (row.reviewedAt === undefined || Number.isNaN(Date.parse(row.reviewedAt))) {
-        throw new Error(`target_assigned manual-target family row is missing reviewedAt for hint=${JSON.stringify(row.benchmarkGoldHint)}`);
+      const registryRow = familyTargetRegistryByHint.get(key);
+      if (registryRow === undefined) {
+        throw new Error(`target_assigned manual-target family row has no family-target registry row for hint=${JSON.stringify(row.benchmarkGoldHint)}`);
       }
-      if (row.reviewedBy === undefined || row.reviewedBy.trim().length === 0) {
-        throw new Error(`target_assigned manual-target family row is missing reviewedBy for hint=${JSON.stringify(row.benchmarkGoldHint)}`);
-      }
-      if (row.decisionReason === undefined || row.decisionReason.trim().length === 0) {
-        throw new Error(`target_assigned manual-target family row is missing decisionReason for hint=${JSON.stringify(row.benchmarkGoldHint)}`);
+      if (registryRow.decisionStatus !== 'approved' || registryRow.entityId !== row.targetEntityId) {
+        throw new Error(`target_assigned manual-target family row does not match reviewed family-target registry for hint=${JSON.stringify(row.benchmarkGoldHint)}`);
       }
       targetAssignedFamilies += 1;
       continue;
     }
     if (row.proposalStatus === 'rejected') {
+      const registryRow = familyTargetRegistryByHint.get(key);
+      if (registryRow === undefined) {
+        throw new Error(`rejected manual-target family row has no family-target registry row for hint=${JSON.stringify(row.benchmarkGoldHint)}`);
+      }
+      if (registryRow.decisionStatus !== 'rejected') {
+        throw new Error(`rejected manual-target family row does not match reviewed family-target registry for hint=${JSON.stringify(row.benchmarkGoldHint)}`);
+      }
       rejectedFamilies += 1;
       continue;
     }
@@ -116,24 +132,29 @@ export function applyLookupV2ManualTargetFamilyReviewPacket(args: {
     if (row.benchmarkGoldHint === undefined || row.benchmarkGoldHint.trim().length === 0) {
       throw new Error(`manual_target draft row is missing benchmarkGoldHint for surface=${JSON.stringify(row.surface)}`);
     }
-    const family = familyByHint.get(normalizeForMatch(row.benchmarkGoldHint));
+    const normalizedHint = normalizeForMatch(row.benchmarkGoldHint);
+    const family = familyByHint.get(normalizedHint);
     if (family === undefined) {
       throw new Error(`manual_target draft row has no family review row for hint=${JSON.stringify(row.benchmarkGoldHint)}`);
     }
-    if (family.proposalStatus !== 'target_assigned') {
+    const registryRow = familyTargetRegistryByHint.get(normalizedHint);
+    if (family.proposalStatus === 'target_assigned' && registryRow === undefined) {
+      throw new Error(`manual_target draft row has target_assigned family without reviewed family-target registry for hint=${JSON.stringify(row.benchmarkGoldHint)}`);
+    }
+    if (registryRow?.decisionStatus !== 'approved' || registryRow.entityId === undefined) {
       continue;
     }
     candidateRows.push({
       surface: row.surface,
-      entityId: family.targetEntityId!,
+      entityId: registryRow.entityId,
       locale: row.locale,
       suggestedAliasType: row.suggestedAliasType,
       holeClass: row.holeClass,
       benchmarkGoldHint: row.benchmarkGoldHint,
-      benchmarkGoldEntityIdSource: 'manual_family_review_target',
+      benchmarkGoldEntityIdSource: 'family_target_registry',
       sourceArtifact: row.sourceArtifact,
-      sourceEvidence: buildExactSafePacketSourceEvidence(row, family, args.packetPath),
-      proposedAt: family.reviewedAt!,
+      sourceEvidence: buildExactSafePacketSourceEvidence(row, registryRow, args.familyTargetRegistryPath),
+      proposedAt: registryRow.reviewedAt,
     });
   }
 
@@ -158,6 +179,7 @@ async function main(): Promise<void> {
     options: {
       families: { type: 'string', default: '/tmp/lookup-v2-korean-realworld-stretch-manual-target-family-review-reviewed.jsonl' },
       draft: { type: 'string', default: 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl' },
+      familyRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_FAMILY_TARGET_REGISTRY_PATH },
       registry: { type: 'string', default: undefined },
       output: { type: 'string', default: '/tmp/lookup-v2-korean-realworld-stretch-manual-target-approved-exact-safe-packet.jsonl' },
     },
@@ -165,14 +187,17 @@ async function main(): Promise<void> {
 
   const familiesPath = values.families ?? '/tmp/lookup-v2-korean-realworld-stretch-manual-target-family-review-reviewed.jsonl';
   const draftPath = values.draft ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl';
+  const familyRegistryPath = values.familyRegistry ?? DEFAULT_LOOKUP_V2_FAMILY_TARGET_REGISTRY_PATH;
   const outputPath = values.output ?? '/tmp/lookup-v2-korean-realworld-stretch-manual-target-approved-exact-safe-packet.jsonl';
   const familyRows = parsePacketJsonl(familiesPath, isLookupV2ManualTargetFamilyReviewPacketRow);
   const draftRows = parsePacketJsonl(draftPath, isLookupV2CurationDraftRow);
+  const familyTargetRegistryRows = loadLookupV2FamilyTargetRegistrySync(familyRegistryPath);
   const existingRegistryRows = await loadLookupExactSafeRegistry(values.registry);
   const result = applyLookupV2ManualTargetFamilyReviewPacket({
     familyRows,
     draftRows,
-    packetPath: familiesPath,
+    familyTargetRegistryRows,
+    familyTargetRegistryPath: familyRegistryPath,
     existingRegistryRows,
   });
 

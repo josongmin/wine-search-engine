@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { SEARCH_SNAPSHOT_SCHEMA_VERSION } from '../../../domain/shared/constants/search-snapshot.js';
 import { SearchSnapshotAmbiguityDictionary } from '../search-snapshot-ambiguity-dictionary.js';
 import { LOOKUP_AMBIGUITY_RUNTIME_SCHEMA_VERSION } from '../../../domain/shared/types/search-snapshot-lookup-runtime.js';
 
@@ -32,6 +33,12 @@ async function writeAmbiguityArtifacts(): Promise<{
           severity: 'medium',
           entityIds: ['opus-one-2018', 'opus-one-2019'],
         },
+        '그레인지': {
+          normalizedForm: '그레인지',
+          types: ['short_form', 'entity'],
+          severity: 'high',
+          entityIds: ['w-penfolds-grange-2017', 'w-penfolds-bin-389-2018'],
+        },
       },
     }, null, 2)}\n`,
     'utf8',
@@ -39,7 +46,7 @@ async function writeAmbiguityArtifacts(): Promise<{
   await fs.writeFile(
     manifestPath,
     `${JSON.stringify({
-      schemaVersion: 'search_snapshot.v3',
+      schemaVersion: SEARCH_SNAPSHOT_SCHEMA_VERSION,
       artifacts: { lookupAmbiguityRuntimeJson: artifactPath },
     }, null, 2)}\n`,
     'utf8',
@@ -67,12 +74,32 @@ describe('SearchSnapshotAmbiguityDictionary', () => {
       severity: 'medium',
       entityIds: ['opus-one-2018', 'opus-one-2019'],
     });
+    await expect(dictionary.isKnownAmbiguous('  OPUS   ONE  ')).resolves.toBe(true);
+    await expect(dictionary.getAmbiguityInfo('그레인지')).resolves.toEqual({
+      types: ['short_form', 'entity'],
+      severity: 'high',
+      entityIds: ['w-penfolds-grange-2017', 'w-penfolds-bin-389-2018'],
+    });
     await expect(dictionary.getAmbiguityInfoBatch(['missing', '샤또'])).resolves.toEqual(
       new Map([
         ['샤또', {
           types: ['producer_family_collision'],
           severity: 'high',
           entityIds: ['chateau-haut-brion', 'chateau-lafite-rothschild'],
+        }],
+      ]),
+    );
+    await expect(dictionary.getAmbiguityInfoBatch(['  OPUS   ONE  ', '그레인지'])).resolves.toEqual(
+      new Map([
+        ['  OPUS   ONE  ', {
+          types: ['multi_vintage'],
+          severity: 'medium',
+          entityIds: ['opus-one-2018', 'opus-one-2019'],
+        }],
+        ['그레인지', {
+          types: ['short_form', 'entity'],
+          severity: 'high',
+          entityIds: ['w-penfolds-grange-2017', 'w-penfolds-bin-389-2018'],
         }],
       ]),
     );
@@ -85,7 +112,7 @@ describe('SearchSnapshotAmbiguityDictionary', () => {
     await fs.writeFile(
       manifestPath,
       `${JSON.stringify({
-        schemaVersion: 'search_snapshot.v3',
+        schemaVersion: SEARCH_SNAPSHOT_SCHEMA_VERSION,
         artifacts: {},
       }, null, 2)}\n`,
       'utf8',

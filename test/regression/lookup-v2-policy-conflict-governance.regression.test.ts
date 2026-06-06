@@ -51,13 +51,13 @@ describe('lookup-v2 policy-conflict governance', () => {
     expect(coreAmbiguitySurfaces).toEqual(registrySurfaces);
   });
 
-  it('ensures each policy-conflict surface is resolved in famous fixture and ambiguous in stretch fixture', () => {
+  it('ensures each policy-conflict surface stays ambiguity-owned across famous/stretch fixtures', () => {
     for (const surface of registrySurfaces) {
       const famous = famousRows.find((row) => row.query === surface);
       const stretch = stretchRows.find((row) => row.query === surface);
 
       if (famous !== undefined) {
-        expect(famous.expected_status).toBe('resolved');
+        expect(famous.expected_status).toBe('ambiguous');
       }
       expect(stretch?.expected_status).toBe('ambiguous');
     }

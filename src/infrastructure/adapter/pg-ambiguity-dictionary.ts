@@ -1,4 +1,5 @@
 import type { Pool, QueryResultRow } from 'pg';
+import { normalizeForMatch } from '../../domain/alias/service/normalize.js';
 import type {
   AmbiguityDictionary,
   AmbiguityInfo,
@@ -56,11 +57,13 @@ export class PgAmbiguityDictionary implements AmbiguityDictionary {
   async isKnownAmbiguous(surfaceForm: string, signal?: AbortSignal): Promise<boolean> {
     const snap = await this.resolveActiveSnapshotOrNull();
     if (snap === null) return false;
+    const normalizedForm = normalizeForMatch(surfaceForm);
+    if (normalizedForm.length === 0) return false;
     const result = await this.queryAmbiguity(
       `SELECT EXISTS(
         SELECT 1 FROM ambiguity_registry WHERE normalized_form = $1 AND search_snapshot_id = $2
       ) AS exists`,
-      [surfaceForm, snap.activeSnapshotId],
+      [normalizedForm, snap.activeSnapshotId],
       signal,
     );
     const row0 = result.rows[0];
@@ -71,9 +74,11 @@ export class PgAmbiguityDictionary implements AmbiguityDictionary {
   async getAmbiguityInfo(surfaceForm: string, signal?: AbortSignal): Promise<AmbiguityInfo | null> {
     const snap = await this.resolveActiveSnapshotOrNull();
     if (snap === null) return null;
+    const normalizedForm = normalizeForMatch(surfaceForm);
+    if (normalizedForm.length === 0) return null;
     const result = await this.queryAmbiguity(
       `SELECT * FROM ambiguity_registry WHERE normalized_form = $1 AND search_snapshot_id = $2`,
-      [surfaceForm, snap.activeSnapshotId],
+      [normalizedForm, snap.activeSnapshotId],
       signal,
     );
     const row = result.rows[0];
@@ -97,10 +102,24 @@ export class PgAmbiguityDictionary implements AmbiguityDictionary {
       return new Map();
     }
 
-    // Dedupe at the SQL boundary so the substrate sees no redundant entries.
-    // Use Set to preserve uniqueness; surface_form casing is preserved verbatim
-    // (caller is responsible for normalisation, matching the singular path).
-    const distinctForms = [...new Set(surfaceForms)];
+    const originalFormsByNormalized = new Map<string, string[]>();
+    for (const surfaceForm of surfaceForms) {
+      const normalized = normalizeForMatch(surfaceForm);
+      if (normalized.length === 0) {
+        continue;
+      }
+      const originals = originalFormsByNormalized.get(normalized);
+      if (originals !== undefined) {
+        originals.push(surfaceForm);
+        continue;
+      }
+      originalFormsByNormalized.set(normalized, [surfaceForm]);
+    }
+    if (originalFormsByNormalized.size === 0) {
+      return new Map();
+    }
+
+    const distinctForms = [...originalFormsByNormalized.keys()];
     const result = await this.queryAmbiguity(
       `SELECT normalized_form, ambiguity_types, severity
        FROM ambiguity_registry
@@ -115,7 +134,13 @@ export class PgAmbiguityDictionary implements AmbiguityDictionary {
       if (typeof formRaw !== 'string') continue;
       const info = parseAmbiguityRow(row);
       if (info !== null) {
-        out.set(formRaw, info);
+        const originals = originalFormsByNormalized.get(formRaw);
+        if (originals === undefined) {
+          continue;
+        }
+        for (const surfaceForm of originals) {
+          out.set(surfaceForm, info);
+        }
       }
     }
     return out;

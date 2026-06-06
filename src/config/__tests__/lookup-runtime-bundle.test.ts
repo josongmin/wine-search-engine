@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearLookupRuntimeBundleCacheForTests, loadLookupRuntimeBundle } from '../lookup-runtime-bundle.js';
 import { SEARCH_SNAPSHOT_SCHEMA_VERSION } from '../../domain/shared/constants/search-snapshot.js';
 
-function buildManifest(manifestPath: string): string {
+function buildManifest(manifestPath: string, options?: { readonly splitBroadRecallArtifact?: boolean }): string {
   const base = manifestPath.replace(/\/manifest\.json$/, '');
   return JSON.stringify({
     schemaVersion: SEARCH_SNAPSHOT_SCHEMA_VERSION,
@@ -13,6 +13,9 @@ function buildManifest(manifestPath: string): string {
     },
     artifacts: {
       lookupAliasRuntimeJson: `${base}/lookup-alias-runtime.json`,
+      ...(options?.splitBroadRecallArtifact === true
+        ? { lookupAliasBroadRecallRuntimeJson: `${base}/lookup-alias-broad-recall-runtime.json` }
+        : {}),
       lookupExactSafeRuntimeJson: `${base}/lookup-exact-safe-runtime.json`,
       lookupResolverProjectionJson: `${base}/lookup-resolver-projection.json`,
       lookupEntityProjectionJson: `${base}/lookup-entity-projection.json`,
@@ -22,36 +25,72 @@ function buildManifest(manifestPath: string): string {
   });
 }
 
-function buildArtifactMap(manifestPath: string): ReadonlyMap<string, string> {
+function buildArtifactMap(
+  manifestPath: string,
+  options?: { readonly splitBroadRecallArtifact?: boolean },
+): ReadonlyMap<string, string> {
   const base = manifestPath.replace(/\/manifest\.json$/, '');
+  const aliasRuntime = options?.splitBroadRecallArtifact === true
+    ? {
+        schemaVersion: 'lookup_alias_runtime_core.v1',
+        snapshotId: 'search-snapshot:v1:test',
+        generatedAt: '2026-06-05T00:00:00.000Z',
+        aliasRegistryHash: 'alias-hash',
+        aliases: [
+          {
+            aliasId: 'alias-1',
+            entityId: 'entity-1',
+            value: 'Opus One',
+            normalizedValue: 'opus one',
+            sourceTrust: 1,
+            confidencePrior: 0.99,
+            aliasType: 'canonical',
+          },
+        ],
+        exactIndex: { 'opus one': [0] },
+        compactIndex: { opusone: [0] },
+      }
+    : {
+        schemaVersion: 'lookup_alias_runtime.v1',
+        snapshotId: 'search-snapshot:v1:test',
+        generatedAt: '2026-06-05T00:00:00.000Z',
+        aliasRegistryHash: 'alias-hash',
+        aliases: [
+          {
+            aliasId: 'alias-1',
+            entityId: 'entity-1',
+            value: 'Opus One',
+            normalizedValue: 'opus one',
+            sourceTrust: 1,
+            confidencePrior: 0.99,
+            aliasType: 'canonical',
+          },
+        ],
+        surfaceForms: ['Opus One'],
+        exactIndex: { 'opus one': [0] },
+        compactIndex: { opusone: [0] },
+        wholeTokenIndex: { opus: [0], one: [0] },
+        phoneticIndex: {},
+        doubleMetaphoneIndex: {},
+        doubleMetaphoneKeysByAliasId: { 'alias-1': [] },
+        prefixCatalog: [],
+        hangulCompletionRecords: [],
+      };
   return new Map<string, string>([
-    [manifestPath, buildManifest(manifestPath)],
-    [`${base}/lookup-alias-runtime.json`, JSON.stringify({
-      schemaVersion: 'lookup_alias_runtime.v1',
-      snapshotId: 'search-snapshot:v1:test',
-      generatedAt: '2026-06-05T00:00:00.000Z',
-      aliasRegistryHash: 'alias-hash',
-      aliases: [
-        {
-          aliasId: 'alias-1',
-          entityId: 'entity-1',
-          value: 'Opus One',
-          normalizedValue: 'opus one',
-          sourceTrust: 1,
-          confidencePrior: 0.99,
-          aliasType: 'canonical',
-        },
-      ],
-      surfaceForms: ['Opus One'],
-      exactIndex: { 'opus one': [0] },
-      compactIndex: { opusone: [0] },
-      wholeTokenIndex: { opus: [0], one: [0] },
-      phoneticIndex: {},
-      doubleMetaphoneIndex: {},
-      doubleMetaphoneKeysByAliasId: { 'alias-1': [] },
-      prefixCatalog: [],
-      hangulCompletionRecords: [],
-    })],
+    [manifestPath, buildManifest(manifestPath, options)],
+    [`${base}/lookup-alias-runtime.json`, JSON.stringify(aliasRuntime)],
+    ...(options?.splitBroadRecallArtifact === true
+      ? [[`${base}/lookup-alias-broad-recall-runtime.json`, JSON.stringify({
+          schemaVersion: 'lookup_alias_broad_recall_runtime.v1',
+          snapshotId: 'search-snapshot:v1:test',
+          generatedAt: '2026-06-05T00:00:00.000Z',
+          aliasRegistryHash: 'alias-hash',
+          wholeTokenIndex: { opus: [0], one: [0] },
+          phoneticIndex: {},
+          doubleMetaphoneIndex: {},
+          prefixCatalog: [],
+        })] as const]
+      : []),
     [`${base}/lookup-exact-safe-runtime.json`, JSON.stringify({
       schemaVersion: 'lookup_exact_safe_runtime.v1',
       snapshotId: 'search-snapshot:v1:test',
@@ -82,6 +121,11 @@ function buildArtifactMap(manifestPath: string): ReadonlyMap<string, string> {
           canonicalLabel: 'Opus One',
           aliasesIdentitySafe: ['Opus One'],
           identitySafeKeys: ['opus one'],
+          producer: 'Opus One Winery',
+          attributeHints: {
+            producer: 'Opus One Winery',
+            region: 'Napa Valley',
+          },
         },
       ],
     })],
@@ -100,9 +144,9 @@ function buildArtifactMap(manifestPath: string): ReadonlyMap<string, string> {
           producer: 'Opus One Winery',
           region: 'Napa Valley',
           grapes: [],
-          searchTextKo: '',
+          searchTextKo: '오푸스 원',
           searchTextEn: 'Opus One',
-          semanticSummary: '',
+          semanticSummary: 'summary',
           pairing: [],
           availability: true,
           popularityScore: 1,
@@ -152,7 +196,9 @@ describe('lookup runtime bundle cache', () => {
     expect(first).toBe(second);
     expect(readFileSpy).toHaveBeenCalledTimes(6);
     expect(first.aliasMatcher.getRegistryVersion()?.snapshotId).toBe('search-snapshot:v1:test');
-    expect(await first.entityLookup.getDocument('entity-1' as never)).not.toBeNull();
+    expect(
+      (await first.resolverProjectionLookup.getResolverProjections(['entity-1' as never])).get('entity-1' as never),
+    ).toBeDefined();
   });
 
   it('fails closed when the same cache key is rebound to a different manifest path', async () => {
@@ -174,20 +220,9 @@ describe('lookup runtime bundle cache', () => {
     ).rejects.toThrow(/reused with different manifestPath/);
   });
 
-  it('derives resolver certificates and attribute hints from entity and exact-safe runtimes even when entity overlay fields are absent', async () => {
+  it('overlays exact-safe certificates onto resolver projections while preserving resolver attribute hints', async () => {
     const manifestPath = '/tmp/runtime-a/manifest.json';
-    const artifactMap = new Map(buildArtifactMap(manifestPath));
-    const entityProjectionPath = '/tmp/runtime-a/lookup-entity-projection.json';
-    const raw = artifactMap.get(entityProjectionPath);
-    if (raw === undefined) {
-      throw new Error('missing test entity projection artifact');
-    }
-    const parsed = JSON.parse(raw) as { documents: Array<Record<string, unknown>> };
-    for (const doc of parsed.documents) {
-      delete doc['identitySafeKeys'];
-    }
-    artifactMap.set(entityProjectionPath, JSON.stringify(parsed));
-
+    const artifactMap = buildArtifactMap(manifestPath);
     const readFileSpy = vi.spyOn(fs, 'readFile').mockImplementation(async (pathLike) => {
       const key = String(pathLike);
       const value = artifactMap.get(key);
@@ -217,6 +252,30 @@ describe('lookup runtime bundle cache', () => {
       region: 'Napa Valley',
     });
     expect(readFileSpy).toHaveBeenCalledTimes(6);
+  });
+
+  it('fully hydrates broad-recall sidecars at bundle load so request-path matchers stay warm', async () => {
+    const manifestPath = '/tmp/runtime-sidecar/manifest.json';
+    const artifactMap = buildArtifactMap(manifestPath, { splitBroadRecallArtifact: true });
+    vi.spyOn(fs, 'readFile').mockImplementation(async (pathLike) => {
+      const key = String(pathLike);
+      const value = artifactMap.get(key);
+      if (value === undefined) {
+        throw new Error(`unexpected read: ${key}`);
+      }
+      return value as never;
+    });
+
+    const bundle = await loadLookupRuntimeBundle('search-snapshot:v1:sidecar', manifestPath);
+
+    expect(bundle.aliasMatcher.isFullyHydratedRuntimeArtifact()).toBe(true);
+    expect(bundle.aliasMatcher.getBuildStateSnapshot()).toMatchObject({
+      broadRecallIndexesBuilt: true,
+      wholeTokenIndexBuilt: true,
+      phoneticIndexesBuilt: true,
+      prefixCatalogBuilt: true,
+      hangulCompletionIndexBuilt: true,
+    });
   });
 
   it('clears the cache entry after a failed load so a retry can succeed', async () => {

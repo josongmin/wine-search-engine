@@ -3,6 +3,12 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import type { LookupExactSafeProposalPacketRow } from './export-lookup-v2-exact-safe-proposal-packet.js';
 import type { LookupV2PolicyReviewPacketRow } from './export-lookup-v2-policy-review-packet.js';
+import {
+  buildLookupV2PolicyFamilyDecisionKey,
+  DEFAULT_LOOKUP_V2_POLICY_FAMILY_DECISION_REGISTRY_PATH,
+  loadLookupV2PolicyFamilyDecisionMapSync,
+  type LookupV2PolicyFamilyDecisionRegistryRow,
+} from './lookup-v2-policy-family-decision-registry.js';
 
 interface PolicyReviewApplyResult {
   readonly exactSafePacketRows: readonly LookupExactSafeProposalPacketRow[];
@@ -41,17 +47,19 @@ function parsePacketJsonl(filePath: string): readonly LookupV2PolicyReviewPacket
     .filter(isLookupV2PolicyReviewPacketRow);
 }
 
-function buildExactSafePacketSourceEvidence(row: LookupV2PolicyReviewPacketRow, packetPath: string): string {
-  const packetName = path.basename(packetPath);
-  const policySurface = row.policyConflictSurface;
-  const reviewer = row.reviewedBy !== undefined ? ` reviewedBy=${row.reviewedBy}` : '';
-  const decision = row.decisionReason !== undefined ? ` decision=${row.decisionReason}` : '';
-  return `${row.sourceEvidence} [policy_packet=${packetName} policy_surface=${policySurface}${reviewer}${decision}]`;
+function buildExactSafePacketSourceEvidence(
+  row: LookupV2PolicyReviewPacketRow,
+  registryRow: LookupV2PolicyFamilyDecisionRegistryRow,
+  registryPath: string,
+): string {
+  const registryName = path.basename(registryPath);
+  return `${row.sourceEvidence} [policy_family_decision_registry=${registryName} policy_surface=${row.policyConflictSurface} reviewedBy=${registryRow.reviewedBy} decision=${registryRow.decisionReason}]`;
 }
 
 export function applyLookupV2PolicyReviewPacket(args: {
   readonly packetRows: readonly LookupV2PolicyReviewPacketRow[];
-  readonly packetPath: string;
+  readonly policyFamilyDecisionMap: ReadonlyMap<string, LookupV2PolicyFamilyDecisionRegistryRow>;
+  readonly policyFamilyDecisionRegistryPath: string;
 }): PolicyReviewApplyResult {
   const exactSafePacketRows: LookupExactSafeProposalPacketRow[] = [];
   let approvedExactSafeRows = 0;
@@ -69,10 +77,28 @@ export function applyLookupV2PolicyReviewPacket(args: {
       continue;
     }
     if (row.proposalStatus === 'kept_policy_conflict') {
+      if (row.benchmarkGoldEntityId === undefined) {
+        throw new Error(`kept policy-review row is missing benchmarkGoldEntityId for surface=${JSON.stringify(row.surface)}`);
+      }
+      const registryDecision = args.policyFamilyDecisionMap.get(
+        buildLookupV2PolicyFamilyDecisionKey(row.policyConflictSurface, row.benchmarkGoldEntityId),
+      );
+      if (registryDecision?.decision !== 'keep_policy_conflict') {
+        throw new Error(`kept policy-review row does not match reviewed policy-family registry for surface=${JSON.stringify(row.surface)}`);
+      }
       keptPolicyConflictRows += 1;
       continue;
     }
     if (row.proposalStatus === 'needs_target') {
+      if (row.benchmarkGoldEntityId === undefined) {
+        throw new Error(`needs_target policy-review row is missing benchmarkGoldEntityId for surface=${JSON.stringify(row.surface)}`);
+      }
+      const registryDecision = args.policyFamilyDecisionMap.get(
+        buildLookupV2PolicyFamilyDecisionKey(row.policyConflictSurface, row.benchmarkGoldEntityId),
+      );
+      if (registryDecision?.decision !== 'needs_target') {
+        throw new Error(`needs_target policy-review row does not match reviewed policy-family registry for surface=${JSON.stringify(row.surface)}`);
+      }
       needsTargetRows += 1;
       continue;
     }
@@ -83,6 +109,12 @@ export function applyLookupV2PolicyReviewPacket(args: {
     }
     if (row.benchmarkGoldEntityIdSource === undefined) {
       throw new Error(`approved policy-review row is missing benchmarkGoldEntityIdSource for surface=${JSON.stringify(row.surface)}`);
+    }
+    const registryDecision = args.policyFamilyDecisionMap.get(
+      buildLookupV2PolicyFamilyDecisionKey(row.policyConflictSurface, row.benchmarkGoldEntityId),
+    );
+    if (registryDecision?.decision !== 'promote_exact_safe') {
+      throw new Error(`approved policy-review row does not match reviewed policy-family registry for surface=${JSON.stringify(row.surface)}`);
     }
     if (row.reviewedAt === undefined || Number.isNaN(Date.parse(row.reviewedAt))) {
       throw new Error(`approved policy-review row is missing reviewedAt for surface=${JSON.stringify(row.surface)}`);
@@ -107,13 +139,17 @@ export function applyLookupV2PolicyReviewPacket(args: {
       suggestedAliasType: row.suggestedAliasType,
       holeClass: row.holeClass,
       benchmarkGoldHint: row.benchmarkGoldHint,
-      benchmarkGoldEntityIdSource: row.benchmarkGoldEntityIdSource,
+      benchmarkGoldEntityIdSource: 'policy_family_decision_registry',
       sourceArtifact: row.sourceArtifact,
-      sourceEvidence: buildExactSafePacketSourceEvidence(row, args.packetPath),
+      sourceEvidence: buildExactSafePacketSourceEvidence(
+        row,
+        registryDecision,
+        args.policyFamilyDecisionRegistryPath,
+      ),
       proposedAt: row.proposedAt,
-      reviewedAt: row.reviewedAt,
-      reviewedBy: row.reviewedBy,
-      decisionReason: row.decisionReason,
+      reviewedAt: registryDecision.reviewedAt,
+      reviewedBy: registryDecision.reviewedBy,
+      decisionReason: registryDecision.decisionReason,
     });
   }
 
@@ -139,17 +175,21 @@ async function main(): Promise<void> {
     args: process.argv.slice(2).filter((arg) => arg !== '--'),
     options: {
       input: { type: 'string', default: '/tmp/lookup-v2-korean-realworld-stretch-policy-review-reviewed.jsonl' },
+      registry: { type: 'string', default: DEFAULT_LOOKUP_V2_POLICY_FAMILY_DECISION_REGISTRY_PATH },
       output: { type: 'string', default: '/tmp/lookup-v2-korean-realworld-stretch-policy-review-approved-exact-safe-packet.jsonl' },
     },
     allowPositionals: false,
   });
 
   const inputPath = values.input ?? '/tmp/lookup-v2-korean-realworld-stretch-policy-review-reviewed.jsonl';
+  const registryPath = values.registry ?? DEFAULT_LOOKUP_V2_POLICY_FAMILY_DECISION_REGISTRY_PATH;
   const outputPath = values.output ?? '/tmp/lookup-v2-korean-realworld-stretch-policy-review-approved-exact-safe-packet.jsonl';
   const packetRows = parsePacketJsonl(inputPath);
+  const policyFamilyDecisionMap = loadLookupV2PolicyFamilyDecisionMapSync(registryPath);
   const result = applyLookupV2PolicyReviewPacket({
     packetRows,
-    packetPath: inputPath,
+    policyFamilyDecisionMap,
+    policyFamilyDecisionRegistryPath: registryPath,
   });
 
   writeFileSync(outputPath, serializePacketRows(result.exactSafePacketRows), 'utf8');

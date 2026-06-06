@@ -68,6 +68,41 @@ function buildLookupAliasRuntimeArtifact(overrides?: {
   return artifact;
 }
 
+function buildLookupAliasRuntimeCoreArtifact(overrides?: {
+  readonly value?: string;
+  readonly normalizedValue?: string;
+  readonly aliasType?: string;
+}) {
+  const legacy = buildLookupAliasRuntimeArtifact(overrides);
+  return {
+    schemaVersion: 'lookup_alias_runtime_core.v1',
+    snapshotId: legacy.snapshotId,
+    generatedAt: legacy.generatedAt,
+    aliasRegistryHash: legacy.aliasRegistryHash,
+    aliases: legacy.aliases,
+    exactIndex: legacy.exactIndex,
+    compactIndex: legacy.compactIndex,
+  } as const;
+}
+
+function buildLookupAliasBroadRecallRuntimeArtifact(overrides?: {
+  readonly value?: string;
+  readonly normalizedValue?: string;
+  readonly aliasType?: string;
+}) {
+  const legacy = buildLookupAliasRuntimeArtifact(overrides);
+  return {
+    schemaVersion: 'lookup_alias_broad_recall_runtime.v1',
+    snapshotId: legacy.snapshotId,
+    generatedAt: legacy.generatedAt,
+    aliasRegistryHash: legacy.aliasRegistryHash,
+    wholeTokenIndex: legacy.wholeTokenIndex,
+    phoneticIndex: legacy.phoneticIndex,
+    doubleMetaphoneIndex: legacy.doubleMetaphoneIndex,
+    prefixCatalog: legacy.prefixCatalog,
+  } as const;
+}
+
 describe('SearchSnapshotAliasMatcher', () => {
   it('loads exact alias substrate from PostgreSQL snapshot rows', async () => {
     const queries: string[] = [];
@@ -749,5 +784,42 @@ describe('SearchSnapshotAliasMatcher', () => {
       expect.stringMatching(/^compact#/),
       expect.stringMatching(/^broad_recall#/),
     ]));
+  });
+
+  it('defers broad-recall sidecar hydration for core runtime artifacts until broad recall is needed', async () => {
+    const matcher = SearchSnapshotAliasMatcher.fromRuntimeArtifact(
+      buildLookupAliasRuntimeCoreArtifact(),
+      undefined,
+      {
+        raw: JSON.stringify(buildLookupAliasBroadRecallRuntimeArtifact()),
+        filePath: '/tmp/lookup-alias-broad-recall-runtime.json',
+      },
+    );
+
+    expect(matcher.getBuildStateSnapshot()).toMatchObject({
+      artifactHydrated: true,
+      compactIndexBuilt: true,
+      broadRecallIndexesBuilt: false,
+    });
+
+    await expect(matcher.findMatches('opus one')).resolves.toMatchObject([
+      expect.objectContaining({
+        surfaceForm: 'Opus One',
+        lookupStrategy: 'exact',
+      }),
+    ]);
+    expect(matcher.getBuildStateSnapshot().broadRecallIndexesBuilt).toBe(false);
+
+    await expect(matcher.findMatches('opus')).resolves.toMatchObject([
+      expect.objectContaining({
+        surfaceForm: 'Opus One',
+      }),
+    ]);
+    await expect(matcher.findMatches('오푸')).resolves.toMatchObject([
+      expect.objectContaining({
+        surfaceForm: 'Opus One',
+      }),
+    ]);
+    expect(matcher.getSurfaceForms()).toEqual(['Opus One']);
   });
 });

@@ -28,6 +28,16 @@ describe('applyLookupV2PolicyFamilyReviewPacket', () => {
           decisionReason: 'accept authority',
         },
       ],
+      policyFamilyDecisionMap: new Map([
+        ['라뚜르::wine-ce-latour', {
+          policyConflictSurface: '라뚜르',
+          entityId: 'wine-ce-latour',
+          decision: 'promote_exact_safe',
+          reviewedBy: 'registry',
+          reviewedAt: '2026-06-06T01:00:00.000Z',
+          decisionReason: 'approved in registry',
+        }],
+      ]),
       rowPacketRows: [
         {
           surface: '라뚜르 2009',
@@ -74,14 +84,14 @@ describe('applyLookupV2PolicyFamilyReviewPacket', () => {
       expect.objectContaining({
         surface: '라뚜르 2009',
         proposalStatus: 'approved_exact_safe',
-        reviewedBy: 'op',
-        decisionReason: 'accept authority',
+        reviewedBy: 'registry',
+        decisionReason: 'approved in registry',
       }),
       expect.objectContaining({
         surface: '샤또 라뚜르',
         proposalStatus: 'approved_exact_safe',
-        reviewedBy: 'op',
-        decisionReason: 'accept authority',
+        reviewedBy: 'registry',
+        decisionReason: 'approved in registry',
       }),
     ]);
   });
@@ -89,6 +99,7 @@ describe('applyLookupV2PolicyFamilyReviewPacket', () => {
   it('fails closed when a row has no family review owner', () => {
     expect(() => applyLookupV2PolicyFamilyReviewPacket({
       familyRows: [],
+      policyFamilyDecisionMap: new Map(),
       rowPacketRows: [
         {
           surface: '라뚜르 2009',

@@ -100,6 +100,116 @@ const UNICODE_C0_HIGH_START = 0x0e;
 const UNICODE_C0_HIGH_END = 0x1f;
 const UNICODE_DELETE = 0x7f;
 
+const HAS_ASCII_ALPHA_REGEX = /[A-Za-z]/;
+const HAS_HANGUL_REGEX = /\p{Script=Hangul}/u;
+const HAS_SQL_MARKER_REGEX = /(?:;|--|\/\*|\$|=)/;
+const HAS_COMMAND_MARKER_REGEX = /(?:`|\$\(|&&|;|\|)/;
+
+const SYSTEM_PROMPT_ASCII_PATTERNS = [
+  /(?<!\p{L})(?<!\p{N})ignore\s+(?:the\s+)?(?:previous|all|above|prior|system|my|your|these|those|everything|earlier|safety|now)(?!\p{L})(?!\p{N})/iu,
+  /(?<!\p{L})(?<!\p{N})ignore\s+(?:the\s+)?(?:instructions|rules|guidelines|policy|policies|constraints|restrictions|prompts?|directives)(?!\p{L})(?!\p{N})/iu,
+  /(?<!\p{L})(?<!\p{N})you\s+are\s+now\s+/iu,
+  /(?<!\p{L})(?<!\p{N})act\s+as\s+(?:a\s+)?(?:root|admin|unrestricted|DAN|superuser|god|evil|hacker|different\s+(?:ai|system|model)|my\s+(?:assistant|tool)|an?\s+(?:ai|assistant)\s+without)/iu,
+  /(?<!\p{L})(?<!\p{N})(?:roleplay\s+as|pretend\s+(?:to\s+be|you\s+are?))\s+/iu,
+  /(?<!\p{L})(?<!\p{N})become\s+(?:a\s+)?(?:root|admin|unrestricted|DAN|superuser|god|evil|hacker|different\s+(?:ai|system|model))(?!\p{L})(?!\p{N})/iu,
+  /(?<!\p{L})(?<!\p{N})(?:system|assistant|admin)\s+mode(?!l)(?!\p{L})(?!\p{N})/iu,
+  /^\s*(?:system|admin)\s*[:>]/iu,
+  /(?<!operating\s)(?<!\p{L})(?<!\p{N})(?:system|admin)\s+override(?!\p{L})(?!\p{N})/iu,
+  /(?<!\p{L})(?<!\p{N})you\s+(?:must|should|will)\s+(?:now|immediately)(?!\p{L})(?!\p{N})/iu,
+  /\[[A-Z][A-Z_]{3,}:\s/,
+  /<<SYS>>|<\|im_start\|>/,
+] as const;
+
+const SYSTEM_PROMPT_KOREAN_PATTERNS = [
+  /(?:^|[^\p{L}\p{N}])(?:이전(?:의)?|위(?:의)?|지금까지의|모든)?\s*(?:지시\s*사항|지시|명령|규칙)\s*(?:을|를|은|는)?\s*(?:모두\s*)?무시/u,
+  /(?:^|[^\p{L}\p{N}])시스템\s*(?:프롬프트|메시지|지시(?:사항)?)\s*(?:을|를|은|는)?\s*(?:보여|출력|알려|공개|말해)/u,
+  /(?:^|[^\p{L}\p{N}])(?:너의|당신의)\s*(?:시스템\s*)?(?:지시(?:\s*사항)?|프롬프트|명령)\s*(?:을|를|은|는)?\s*(?:말해|알려|보여|출력|공개)/u,
+  /(?:^|[^\p{L}\p{N}])(?:너는|당신은|넌)\s*이제\s*(?:관리자|admin|루트|root|시스템|개발자|디버그|debug)/iu,
+  /(?:^|[^\p{L}\p{N}])(?:관리자|개발자|디버그|debug)\s*모드\s*(?:로|를|을)?\s*(?:전환|변경|진입|들어가|들어가서)/iu,
+] as const;
+
+const JAILBREAK_PATTERNS = [
+  /(?<!\p{L})(?<!\p{N})(?:dev|debug|hack|god|hero|devil)\s+mode(?!\p{L})(?!\p{N})/iu,
+  /(?<!\p{L})(?<!\p{N})do\s+not\s+(?:block|refuse|deny|reject)(?!\p{L})(?!\p{N})/iu,
+  /(?<!\p{L})(?<!\p{N})do\s+not\s+filter\s+(?:my|this|these|any|all|your|user|queries?|requests?|messages?|inputs?|harmful|unsafe|adult)(?!\p{L})(?!\p{N})/iu,
+  /(?<!\p{L})(?<!\p{N})generate\s+harmful(?!\p{L})(?!\p{N})/iu,
+  /(?<!\p{L})(?<!\p{N})unrestricted\s+(?:mode|access|content)(?!\p{L})(?!\p{N})/iu,
+  /(?<!\p{L})(?<!\p{N})dan\s+mode(?!\p{L})(?!\p{N})/iu,
+  /(?<!\p{L})(?<!\p{N})(?:jailbreak|bypass|circumvent)(?!\p{L})(?!\p{N})/iu,
+  /(?<!\p{L})(?<!\p{N})forget\s+(?:everything|all|prior|previous|your)(?!\p{L})(?!\p{N})/iu,
+  /(?<!\p{L})(?<!\p{N})disregard\s+(?:prior|previous|your)(?!\p{L})(?!\p{N})/iu,
+  /(?<!\p{L})(?<!\p{N})disregard\s+(?:all|any|every)\s+(?:\S+\s+)?(?:rules?|instructions?|guidelines?|training|programming|restrictions?|filters?|constraints?)(?!\p{L})(?!\p{N})/iu,
+  /(?<!\p{L})(?<!\p{N})new\s+(?:instructions?|prompts?|system\s+prompt|directives?)(?!\p{L})(?!\p{N})/iu,
+  /(?<!\p{L})(?<!\p{N})new\s+(?:rules?|guidelines?)\s+(?:for\s+(?:you|the\s+(?:ai|model|system|assistant))|to\s+follow)(?!\p{L})(?!\p{N})/iu,
+  /(?<!\p{L})(?<!\p{N})override\s+(?:system\s+prompt|your\s+(?:instructions?|rules?|guidelines?|training|programming))(?!\p{L})(?!\p{N})/iu,
+  /(?<!\p{L})(?<!\p{N})clear\s+(?:memory|history|your\s+(?:memory|context|training))(?!\p{L})(?!\p{N})/iu,
+  /(?<!(?:a|the)\s)(?<!\p{L})(?<!\p{N})clear\s+context(?!\p{L})(?!\p{N})/iu,
+  /(?<!\p{L})(?<!\p{N})from\s+now\s+on(?:\s+you\s+(?:will|must|should|are))?(?!\p{L})(?!\p{N})/iu,
+  /(?<!\p{L})(?<!\p{N})you\s+have\s+(?:no\s+restrictions?|been\s+freed|no\s+limits?|no\s+rules?)(?!\p{L})(?!\p{N})/iu,
+  /(?<!\p{L})(?<!\p{N})as\s+(?:an?\s+)?(?:(?:large\s+)?language\s+model|ai|llm)(?:\s+without\s+(?:restrictions?|filters?|limits?|safety)|,?\s+(?:ignore|bypass|disregard))(?!\p{L})(?!\p{N})/iu,
+  /(?<!\p{L})(?<!\p{N})your\s+(?:original|previous|prior|real|true|actual)\s+instructions?(?!\p{L})(?!\p{N})/iu,
+] as const;
+
+const SQL_INJECTION_PATTERNS = [
+  /;\s*(?:drop|delete|update|insert|select|create)/i,
+  /(?<!\p{L})(?<!\p{N})union\s+select(?!\p{L})(?!\p{N})/iu,
+  /(?<!\p{L})(?<!\p{N})or\s+1\s*=\s*1(?!\p{L})(?!\p{N})/iu,
+  /(?<!\p{L})(?<!\p{N})exec(?:ute)?\s*\(/iu,
+  /(?<!\p{L})(?<!\p{N})(?:db|database)\s+schema(?!\p{L})(?!\p{N})/iu,
+  /--\s*$/,
+  /\/\*[\s\S]{0,1000}?\*\//,
+  /(?<!\p{L})(?<!\p{N})select\s+(?:\*|[\w.,\s()]{1,60}?)\s+from(?!\p{L})(?!\p{N})/iu,
+  /(?<!\p{L})(?<!\p{N})(?:insert\s+into|update\s+\w+\s+set|delete\s+from|drop\s+(?:table|database|schema|index)|truncate\s+table|alter\s+(?:table|database)|create\s+(?:table|database|index|user))(?!\p{L})(?!\p{N})/iu,
+  /\$where(?!\p{L})(?!\p{N})/iu,
+  /\$(?:ne|gt|gte|lt|lte|in|nin|regex|exists)(?!\p{L})(?!\p{N})/iu,
+] as const;
+
+const SCRIPT_INJECTION_PATTERNS = [
+  /<script/i,
+  /javascript:/i,
+  /on(?:click|load|error|mouseover)=/i,
+  /<iframe/i,
+  /<img\s+src=/i,
+  /data:text\/html/i,
+  /<svg[\s\S]*?on/i,
+] as const;
+
+const COMMAND_INJECTION_PATTERNS = [
+  /(?<!\p{L})(?<!\p{N})\/bin\/(?:sh|bash|zsh)(?!\p{L})(?!\p{N})/iu,
+  /(?<!\p{L})(?<!\p{N})(?:cmd\.exe|powershell)(?!\p{L})(?!\p{N})/iu,
+  /(?<!\p{L})(?<!\p{N})bash\s+-(?!-)[\s\S]|(?<!\p{L})(?<!\p{N})bash\s+;/iu,
+  /(?<!\p{L})(?<!\p{N})(?:exec|system|eval|spawn)\s*\(/iu,
+  /`[^`]*`/,
+  /\$\([^)]*\)/,
+  /(?=.*&&)(?=.*;)/,
+  /\|\s*\w+\s*(?:&&|;)/,
+] as const;
+
+const PII_SHARED_PATTERNS = [
+  /(?:다른\s*사용자|other\s*user|다른\s*고객|other\s*customer)/iu,
+  /(?:개인\s*정보|personal\s*(?:info|data))\s*(?:보여|알려|줘|목록|조회|show|list|get|dump)/iu,
+] as const;
+
+const PII_ASCII_PATTERNS = [
+  /(?<!\p{L})(?<!\p{N})(?:show|list|dump|get|give)\s+(?:me\s+)?(?:all\s+)?(?:users?|customers?|accounts?|emails?|passwords?)(?!\p{L})(?!\p{N})/iu,
+  /(?:api\s*key|secret\s*key|access\s*token)(?!\p{L})(?!\p{N})/iu,
+] as const;
+
+const UNICODE_TRICK_PATTERNS = [
+  /[\u200B-\u200D\uFEFF]/,
+  /[\u202A-\u202E]/,
+  /[\u2066-\u2069]/,
+  /[\uFFF0-\uFFFF]/,
+  /[\u{E0000}-\u{E007F}]/u,
+] as const;
+
+interface QuerySanitizerScanFeatures {
+  readonly hasAsciiAlpha: boolean;
+  readonly hasHangul: boolean;
+  readonly hasSqlMarker: boolean;
+  readonly hasCommandMarker: boolean;
+}
+
 /**
  * Static pattern-based prompt injection detection for wine search queries.
  *
@@ -121,233 +231,13 @@ const UNICODE_DELETE = 0x7f;
 export class QuerySanitizer {
   /** Injection pattern groups tested in order of specificity. */
   private static readonly INJECTION_PATTERNS = {
-    // System prompt / instruction hijacking
-    system_prompt: [
-      // Unicode-aware boundaries: two separate lookbehinds (?<!\p{L})(?<!\p{N}) are
-      // required because a single combined (?<!\p{L})(?<!\p{N}) only blocks when BOTH
-      // a letter AND digit precede — "시스템ignore" would slip through.
-      // Separate lookbehinds block when EITHER a letter OR digit precedes.
-      // "ignore X" injection patterns. "ignore the price range" / "ignore the tannin level"
-      // are legitimate wine preference phrasings — to avoid false positives, bare "the" is
-      // NOT a match trigger. Instead we fire on:
-      //   (a) unambiguous AI-directive adverbs/pronouns (previous, all, prior, system, my,
-      //       your, these, those, everything, earlier, safety, now), or
-      //   (b) "ignore [the] <AI-directive noun>" — optional "the" before a hard injection noun.
-      // "ignore the instructions" and "IGNORE THE PREVIOUS INSTRUCTIONS" are both caught:
-      //   - "IGNORE THE PREVIOUS" → fires on (a): `previous`
-      //   - "ignore the instructions" → fires on (b): optional-the + `instructions`
-      // Optional "the" before the directive target — catches both:
-      //   "ignore previous instructions" and "IGNORE THE PREVIOUS INSTRUCTIONS"
-      /(?<!\p{L})(?<!\p{N})ignore\s+(?:the\s+)?(?:previous|all|above|prior|system|my|your|these|those|everything|earlier|safety|now)(?!\p{L})(?!\p{N})/iu,
-      /(?<!\p{L})(?<!\p{N})ignore\s+(?:the\s+)?(?:instructions|rules|guidelines|policy|policies|constraints|restrictions|prompts?|directives)(?!\p{L})(?!\p{N})/iu,
-      // "you are now X", "act as X", "roleplay as X" — persona injection.
-      // "you are looking for" and "wines become more complex" are false positives
-      // for the bare forms, so require explicit escalation context:
-      //   - "you are now" (temporal escalation)
-      //   - "act as" (role-play directive) — narrow enough
-      //   - "pretend" without qualification is too broad; require "to be" following
-      //   - "roleplay as" — specific enough
-      //   - "become" requires an explicit dangerous role/persona
-      /(?<!\p{L})(?<!\p{N})you\s+are\s+now\s+/iu,
-      /(?<!\p{L})(?<!\p{N})act\s+as\s+(?:a\s+)?(?:root|admin|unrestricted|DAN|superuser|god|evil|hacker|different\s+(?:ai|system|model)|my\s+(?:assistant|tool)|an?\s+(?:ai|assistant)\s+without)/iu,
-      /(?<!\p{L})(?<!\p{N})(?:roleplay\s+as|pretend\s+(?:to\s+be|you\s+are?))\s+/iu,
-      /(?<!\p{L})(?<!\p{N})become\s+(?:a\s+)?(?:root|admin|unrestricted|DAN|superuser|god|evil|hacker|different\s+(?:ai|system|model))(?!\p{L})(?!\p{N})/iu,
-      // Unicode-boundary form to prevent false positives like "assistant model" or
-      // "system model for wine scoring" — the bare /mode/i matched the first 4 chars
-      // of "model", blocking legitimate AI-assistant-model references.
-      /(?<!\p{L})(?<!\p{N})(?:system|assistant|admin)\s+mode(?!l)(?!\p{L})(?!\p{N})/iu,
-      /^\s*(?:system|admin)\s*[:>]/iu,
-      // "system override" / "admin override" — fires at ANY position in the string,
-      // not just at start or after [.!?\r\n]. The original two-pattern approach had a
-      // bypass: "please admin override the instructions" (no leading punctuation) and
-      // "OK, admin override" (, not in [.!?\r\n]) both slipped through.
-      // False-positive guard: "operating system override" uses "system" as a compound noun
-      // (operating system), not a directive — exclude via negative lookbehind for "operating ".
-      /(?<!operating\s)(?<!\p{L})(?<!\p{N})(?:system|admin)\s+override(?!\p{L})(?!\p{N})/iu,
-      /(?<!\p{L})(?<!\p{N})you\s+(?:must|should|will)\s+(?:now|immediately)(?!\p{L})(?!\p{N})/iu,
-      // Indirect prompt injection via bracketed directives embedded in user content.
-      // Detects [SYSTEM: , [INST: , [ASSISTANT: etc. — these are LLM prompt-format
-      // markers that attackers embed inside quoted reviews or user-supplied text.
-      // False-positive guard: "시스템 향이 나요" (system aroma) is NOT blocked because
-      // it lacks the bracket+uppercase+colon+space pattern. Only matches when all four
-      // structural elements are present: "[", uppercase letters (4+), ":", space.
-      /\[[A-Z][A-Z_]{3,}:\s/,
-      // LLM prompt injection markers from Llama/Alpaca/Vicuna prompt formats.
-      // <<SYS>> and <|im_start|> are unambiguous LLM-format tokens with no legitimate
-      // use in wine queries.
-      /<<SYS>>|<\|im_start\|>/,
-      // ── Korean instruction-hijack patterns (S4, defense-in-depth) ─────────
-      //
-      // Korean equivalents of the English "ignore previous instructions" /
-      // "show system prompt" / "you are now X" family. All patterns use the
-      // CLAUDE.md rule 8/24 Unicode-aware approach: NO `\b`; `/u` flag set
-      // explicitly; left boundary `(?:^|[^\p{L}\p{N}])` so the pattern does
-      // not fire inside larger Korean words (false-positive guard, rule 23).
-      //
-      // 무시 / "ignore" family — require an explicit "지시 / 명령 / 규칙" object so
-      // unrelated 무시 usage ("그건 무시해도 돼" referring to a wine review)
-      // does not trigger. The "지시 / 명령 / 규칙" object combined with 무시 is
-      // unambiguous Korean injection language. "이전 / 위 / 지금까지의 / 모든"
-      // qualifiers strengthen the signal but are not required — bare
-      // "지시 무시" / "명령 무시" is already injection-flavored enough.
-      /(?:^|[^\p{L}\p{N}])(?:이전(?:의)?|위(?:의)?|지금까지의|모든)?\s*(?:지시\s*사항|지시|명령|규칙)\s*(?:을|를|은|는)?\s*(?:모두\s*)?무시/u,
-      // 시스템 프롬프트 / 시스템 메시지 — extraction attempts ("보여줘 / 출력해 /
-      // 알려줘 / 공개해"). Korean particles before the verb optional.
-      /(?:^|[^\p{L}\p{N}])시스템\s*(?:프롬프트|메시지|지시(?:사항)?)\s*(?:을|를|은|는)?\s*(?:보여|출력|알려|공개|말해)/u,
-      // 너의/당신의 (시스템) 지시 — request the assistant to reveal its
-      // instructions. Requires the request verb (말해/알려/보여/출력/공개) to
-      // avoid blocking innocuous "너의 추천 알려줘".
-      /(?:^|[^\p{L}\p{N}])(?:너의|당신의)\s*(?:시스템\s*)?(?:지시(?:\s*사항)?|프롬프트|명령)\s*(?:을|를|은|는)?\s*(?:말해|알려|보여|출력|공개)/u,
-      // Role hijack — "너는/당신은 이제 (관리자|admin|루트|root|시스템)".
-      // FP guard (rule 23): "관리자가 추천한 와인" is NOT blocked because it
-      // lacks the "너는/당신은 이제" preamble. Pattern requires the role-claim
-      // structure, not bare 관리자.
-      /(?:^|[^\p{L}\p{N}])(?:너는|당신은|넌)\s*이제\s*(?:관리자|admin|루트|root|시스템|개발자|디버그|debug)/iu,
-      // (관리자|개발자|디버그) 모드 (전환|변경|진입). Specific operational verbs
-      // narrow the false-positive surface — "관리자 모드를 좋아한다" requires
-      // an action verb to be considered injection.
-      /(?:^|[^\p{L}\p{N}])(?:관리자|개발자|디버그|debug)\s*모드\s*(?:로|를|을)?\s*(?:전환|변경|진입|들어가|들어가서)/iu,
-    ],
-
-    // Jailbreak / adversarial prompts
-    jailbreak: [
-      /(?<!\p{L})(?<!\p{N})(?:dev|debug|hack|god|hero|devil)\s+mode(?!\p{L})(?!\p{N})/iu,
-      // "do not filter/block/refuse" in an AI-control context is a jailbreak signal.
-      // False-positive guard: "do not filter results for allergens" is a legitimate
-      // user preference. We block when:
-      //   (a) any of block/refuse/deny/reject appear (more unambiguous than "filter"), OR
-      //   (b) "filter" is followed by an AI-directive object (my/any/harmful/user/queries)
-      // "do not filter results/wines/for ..." is excluded.
-      /(?<!\p{L})(?<!\p{N})do\s+not\s+(?:block|refuse|deny|reject)(?!\p{L})(?!\p{N})/iu,
-      /(?<!\p{L})(?<!\p{N})do\s+not\s+filter\s+(?:my|this|these|any|all|your|user|queries?|requests?|messages?|inputs?|harmful|unsafe|adult)(?!\p{L})(?!\p{N})/iu,
-      /(?<!\p{L})(?<!\p{N})generate\s+harmful(?!\p{L})(?!\p{N})/iu,
-      /(?<!\p{L})(?<!\p{N})unrestricted\s+(?:mode|access|content)(?!\p{L})(?!\p{N})/iu,
-      /(?<!\p{L})(?<!\p{N})dan\s+mode(?!\p{L})(?!\p{N})/iu,
-      /(?<!\p{L})(?<!\p{N})(?:jailbreak|bypass|circumvent)(?!\p{L})(?!\p{N})/iu,
-      // Classic jailbreak phrases: "forget everything", "disregard all rules", etc.
-      // Removed "any" from forget — "forget any tannin-heavy wines" is a legitimate user
-      // preference phrasing (comment above already states: avoid broad pronouns).
-      /(?<!\p{L})(?<!\p{N})forget\s+(?:everything|all|prior|previous|your)(?!\p{L})(?!\p{N})/iu,
-      // "disregard X" — injection patterns. "disregard any wine over 100" and
-      // "disregard all the tannin-heavy options" are legitimate preference phrasings.
-      // We fire on:
-      //   (a) unambiguous AI-directive pronouns (prior, previous, your), or
-      //   (b) any/all/every + optional modifier word(s) + hard injection noun.
-      // "disregard all previous instructions" → (a) catches `previous`
-      // "disregard any safety rules" → (b) catches `any [safety] rules`
-      /(?<!\p{L})(?<!\p{N})disregard\s+(?:prior|previous|your)(?!\p{L})(?!\p{N})/iu,
-      /(?<!\p{L})(?<!\p{N})disregard\s+(?:all|any|every)\s+(?:\S+\s+)?(?:rules?|instructions?|guidelines?|training|programming|restrictions?|filters?|constraints?)(?!\p{L})(?!\p{N})/iu,
-      // "new instructions/prompts/system prompt/directives" — injection vector.
-      // Removed bare "rules?" and "guidelines?" — too common in wine-domain discourse
-      // ("new rules for Bordeaux classification", "new guidelines for organic certification").
-      // They only fire when paired with an AI-directive object below.
-      /(?<!\p{L})(?<!\p{N})new\s+(?:instructions?|prompts?|system\s+prompt|directives?)(?!\p{L})(?!\p{N})/iu,
-      /(?<!\p{L})(?<!\p{N})new\s+(?:rules?|guidelines?)\s+(?:for\s+(?:you|the\s+(?:ai|model|system|assistant))|to\s+follow)(?!\p{L})(?!\p{N})/iu,
-      // "override system prompt" / "override your instructions"
-      /(?<!\p{L})(?<!\p{N})override\s+(?:system\s+prompt|your\s+(?:instructions?|rules?|guidelines?|training|programming))(?!\p{L})(?!\p{N})/iu,
-      // "clear memory/context/history" — session reset injection.
-      // "a clear context" and "wines with a clear context" are legitimate descriptions, but
-      // "clear context" as an imperative (no determiner before it) is an injection signal.
-      // Guard: only fire when "clear context" is NOT preceded by "a " or "the " (article guard).
-      /(?<!\p{L})(?<!\p{N})clear\s+(?:memory|history|your\s+(?:memory|context|training))(?!\p{L})(?!\p{N})/iu,
-      /(?<!(?:a|the)\s)(?<!\p{L})(?<!\p{N})clear\s+context(?!\p{L})(?!\p{N})/iu,
-      // "from now on you will" — future instruction binding / persistent injection
-      /(?<!\p{L})(?<!\p{N})from\s+now\s+on(?:\s+you\s+(?:will|must|should|are))?(?!\p{L})(?!\p{N})/iu,
-      // "you have no restrictions" / "you have been freed" — capability assertion injection
-      /(?<!\p{L})(?<!\p{N})you\s+have\s+(?:no\s+restrictions?|been\s+freed|no\s+limits?|no\s+rules?)(?!\p{L})(?!\p{N})/iu,
-      // "as a language model" / "as an AI" in imperative context — persona bypass preamble
-      // False-positive guard: require "ignore" or "bypass" or "without restrictions" after
-      // to avoid blocking "as an AI-assisted sommelier, I recommend..."
-      /(?<!\p{L})(?<!\p{N})as\s+(?:an?\s+)?(?:(?:large\s+)?language\s+model|ai|llm)(?:\s+without\s+(?:restrictions?|filters?|limits?|safety)|,?\s+(?:ignore|bypass|disregard))(?!\p{L})(?!\p{N})/iu,
-      // "your original/previous/real instructions" — reference injection
-      /(?<!\p{L})(?<!\p{N})your\s+(?:original|previous|prior|real|true|actual)\s+instructions?(?!\p{L})(?!\p{N})/iu,
-    ],
-
-    // SQL injection
-    sql_injection: [
-      /;\s*(?:drop|delete|update|insert|select|create)/i,
-      /(?<!\p{L})(?<!\p{N})union\s+select(?!\p{L})(?!\p{N})/iu,
-      /(?<!\p{L})(?<!\p{N})or\s+1\s*=\s*1(?!\p{L})(?!\p{N})/iu,
-      /(?<!\p{L})(?<!\p{N})exec(?:ute)?\s*\(/iu,
-      /(?<!\p{L})(?<!\p{N})(?:db|database)\s+schema(?!\p{L})(?!\p{N})/iu,
-      /--\s*$/,                          // SQL comment at end
-      /\/\*[\s\S]{0,1000}?\*\//,          // Block comment (cross-line, bounded to prevent ReDoS)
-      // Bare DML/DDL statements — `select wines from Bordeaux` is natural
-      // language, but `SELECT * FROM`, `SELECT col FROM`, and explicit
-      // DML/DDL keywords are not. Match SELECT...FROM with column-style
-      // payload (`*`, identifiers with dots/commas, count(...)) within a
-      // 60-char window and a hard FROM clause to keep false positives low.
-      /(?<!\p{L})(?<!\p{N})select\s+(?:\*|[\w.,\s()]{1,60}?)\s+from(?!\p{L})(?!\p{N})/iu,
-      /(?<!\p{L})(?<!\p{N})(?:insert\s+into|update\s+\w+\s+set|delete\s+from|drop\s+(?:table|database|schema|index)|truncate\s+table|alter\s+(?:table|database)|create\s+(?:table|database|index|user))(?!\p{L})(?!\p{N})/iu,
-      // NoSQL operator injection (MongoDB-style). Pattern matches both bare
-      // (`$where:`) and JSON-quoted (`"$where":`) forms — wine queries should
-      // never contain MongoDB operators.
-      /\$where(?!\p{L})(?!\p{N})/iu,
-      /\$(?:ne|gt|gte|lt|lte|in|nin|regex|exists)(?!\p{L})(?!\p{N})/iu,
-    ],
-
-    // Script injection / XSS
-    script_injection: [
-      /<script/i,
-      /javascript:/i,
-      /on(?:click|load|error|mouseover)=/i,
-      /<iframe/i,
-      /<img\s+src=/i,
-      /data:text\/html/i,
-      /<svg[\s\S]*?on/i,
-    ],
-
-    // Command injection
-    // Note on false-positive risk: shell names (bash, sh, …) and exec() calls are
-    // unlikely in legitimate wine queries and are high-confidence injection signals.
-    // Backticks and $(...) are unambiguous.  For chaining, we remain conservative:
-    // a single pipe or semicolon can appear in English text, so we only block when
-    // both ; and && are present together, or when a pipe is followed by && or ;
-    // (clear chaining intent).  Previously these patterns existed in the array but
-    // were never evaluated (dead code) — only backticks/$(…)  and "; && together"
-    // were checked via inline code in Layer 1g.
-    command_injection: [
-      // Shell paths are high-confidence injection signals. "bash your palate" would
-      // be a false positive for plain "bash" — require a shell-invocation context:
-      // a preceding space/start AND either ";" or file-path slashes following, OR
-      // the full path form (/bin/sh). Plain "bash" as an English adjective is excluded.
-      /(?<!\p{L})(?<!\p{N})\/bin\/(?:sh|bash|zsh)(?!\p{L})(?!\p{N})/iu,
-      /(?<!\p{L})(?<!\p{N})(?:cmd\.exe|powershell)(?!\p{L})(?!\p{N})/iu,
-      // "bash -c", "bash ;" are shell invocations; "bash your palate" and "bash --login"
-      // (double-dash long options in legitimate CLI docs) are not.
-      // Match "bash -X" (single dash, any non-dash char including newlines) OR "bash ;".
-      // Negative lookahead (?!-) rejects "--" (double-dash long option prefix).
-      // [\s\S] instead of . to match newline-separated args ("bash -\nc 'cmd'").
-      /(?<!\p{L})(?<!\p{N})bash\s+-(?!-)[\s\S]|(?<!\p{L})(?<!\p{N})bash\s+;/iu,
-      /(?<!\p{L})(?<!\p{N})(?:exec|system|eval|spawn)\s*\(/iu,
-      /`[^`]*`/,                        // Backticks
-      /\$\([^)]*\)/,                    // Command substitution
-      /(?=.*&&)(?=.*;)/,                // Both && and ; present (command chaining)
-      /\|\s*\w+\s*(?:&&|;)/,           // Pipe followed by chaining operator
-    ],
-
-    // PII / cross-tenant data extraction.
-    // Patterns are intentionally specific to avoid false positives:
-    // - "다른 와인" (other wine) must NOT trigger; only "다른 사용자/고객" triggers
-    // - "database schema" alone triggers; "wine database" does not (moved to sql_injection)
-    // - "create table" with SQL payload triggers (already in sql_injection); standalone removed
-    pii_extraction: [
-      /(?:다른\s*사용자|other\s*user|다른\s*고객|other\s*customer)/iu,
-      /(?:개인\s*정보|personal\s*(?:info|data))\s*(?:보여|알려|줘|목록|조회|show|list|get|dump)/iu,
-      /(?<!\p{L})(?<!\p{N})(?:show|list|dump|get|give)\s+(?:me\s+)?(?:all\s+)?(?:users?|customers?|accounts?|emails?|passwords?)(?!\p{L})(?!\p{N})/iu,
-      /(?:api\s*key|secret\s*key|access\s*token)(?!\p{L})(?!\p{N})/iu,
-    ],
-
-    // Unicode / encoding tricks (checked AFTER NFKC normalization)
-    // NOTE: Soft hyphen (U+00AD) is checked on rawQuery BEFORE normalization,
-    // because NFKC removes U+00AD — a post-normalize regex would be dead code.
-    unicode_tricks: [
-      /[\u200B-\u200D\uFEFF]/,          // Zero-width chars + BOM/ZWNBSP
-      /[\u202A-\u202E]/,                // Bidirectional text (LRE/RLE/PDF/LRO/RLO)
-      /[\u2066-\u2069]/,                // Directional isolates (LRI/RLI/FSI/PDI) — modern bidi attacks
-      /[\uFFF0-\uFFFF]/,                // Noncharacters
-      /[\u{E0000}-\u{E007F}]/u,         // Tag characters — invisible LLM-prompt-injection PoC vector
-    ],
+    system_prompt: [...SYSTEM_PROMPT_ASCII_PATTERNS, ...SYSTEM_PROMPT_KOREAN_PATTERNS],
+    jailbreak: [...JAILBREAK_PATTERNS],
+    sql_injection: [...SQL_INJECTION_PATTERNS],
+    script_injection: [...SCRIPT_INJECTION_PATTERNS],
+    command_injection: [...COMMAND_INJECTION_PATTERNS],
+    pii_extraction: [...PII_SHARED_PATTERNS, ...PII_ASCII_PATTERNS],
+    unicode_tricks: [...UNICODE_TRICK_PATTERNS],
   } as const;
 
   /**
@@ -407,6 +297,7 @@ export class QuerySanitizer {
     // Applied AFTER empty check (normalize doesn't affect emptiness) but
     // BEFORE length check (normalized form may differ in length).
     const normalizedQuery = applyNormalization(rawQuery);
+    const scanFeatures = QuerySanitizer.computeScanFeatures(normalizedQuery);
 
     // Layer 1a: Length check (fast, simple DoS prevention)
     if (normalizedQuery.length > MAX_QUERY_LENGTH) {
@@ -426,7 +317,10 @@ export class QuerySanitizer {
     }
 
     // Layer 1c: System prompt / instruction hijacking (highest confidence false positives)
-    const systemMatch = this.matchPatterns(normalizedQuery, 'system_prompt');
+    const systemMatch = this.matchPatternLists(normalizedQuery, [
+      ...(scanFeatures.hasAsciiAlpha ? [SYSTEM_PROMPT_ASCII_PATTERNS] : []),
+      ...(scanFeatures.hasHangul ? [SYSTEM_PROMPT_KOREAN_PATTERNS] : []),
+    ]);
     if (systemMatch !== undefined) {
       return {
         safe: false,
@@ -435,7 +329,9 @@ export class QuerySanitizer {
     }
 
     // Layer 1d: Jailbreak attempts (medium confidence)
-    const jailbreakMatch = this.matchPatterns(normalizedQuery, 'jailbreak');
+    const jailbreakMatch = scanFeatures.hasAsciiAlpha
+      ? this.matchPatternList(normalizedQuery, JAILBREAK_PATTERNS)
+      : undefined;
     if (jailbreakMatch !== undefined) {
       return {
         safe: false,
@@ -444,7 +340,9 @@ export class QuerySanitizer {
     }
 
     // Layer 1e: Script / XSS injection (very specific, no false positives) - CHECK BEFORE SQL!
-    const scriptMatch = this.matchPatterns(normalizedQuery, 'script_injection');
+    const scriptMatch = scanFeatures.hasAsciiAlpha
+      ? this.matchPatternList(normalizedQuery, SCRIPT_INJECTION_PATTERNS)
+      : undefined;
     if (scriptMatch !== undefined) {
       return {
         safe: false,
@@ -453,7 +351,9 @@ export class QuerySanitizer {
     }
 
     // Layer 1f: SQL injection (high confidence, domain-specific)
-    const sqlMatch = this.matchPatterns(normalizedQuery, 'sql_injection');
+    const sqlMatch = scanFeatures.hasAsciiAlpha || scanFeatures.hasSqlMarker
+      ? this.matchPatternList(normalizedQuery, SQL_INJECTION_PATTERNS)
+      : undefined;
     if (sqlMatch !== undefined) {
       return {
         safe: false,
@@ -462,7 +362,10 @@ export class QuerySanitizer {
     }
 
     // Layer 1g: PII / cross-tenant data extraction
-    const piiMatch = this.matchPatterns(normalizedQuery, 'pii_extraction');
+    const piiMatch = this.matchPatternLists(normalizedQuery, [
+      ...(scanFeatures.hasAsciiAlpha || scanFeatures.hasHangul ? [PII_SHARED_PATTERNS] : []),
+      ...(scanFeatures.hasAsciiAlpha ? [PII_ASCII_PATTERNS] : []),
+    ]);
     if (piiMatch !== undefined) {
       return {
         safe: false,
@@ -475,7 +378,9 @@ export class QuerySanitizer {
     // substitution, chaining) are checked in one place.  The previous inline checks only
     // covered backticks and "both ; and && present", leaving shell names, exec(), and
     // command substitution completely undetected (dead code in INJECTION_PATTERNS).
-    const commandMatch = this.matchPatterns(normalizedQuery, 'command_injection');
+    const commandMatch = scanFeatures.hasAsciiAlpha || scanFeatures.hasCommandMarker
+      ? this.matchPatternList(normalizedQuery, COMMAND_INJECTION_PATTERNS)
+      : undefined;
     if (commandMatch !== undefined) {
       return {
         safe: false,
@@ -491,6 +396,15 @@ export class QuerySanitizer {
     };
   }
 
+  private static computeScanFeatures(query: string): QuerySanitizerScanFeatures {
+    return {
+      hasAsciiAlpha: HAS_ASCII_ALPHA_REGEX.test(query),
+      hasHangul: HAS_HANGUL_REGEX.test(query),
+      hasSqlMarker: HAS_SQL_MARKER_REGEX.test(query),
+      hasCommandMarker: HAS_COMMAND_MARKER_REGEX.test(query),
+    };
+  }
+
   /**
    * Returns true if any pattern in the category matches the query, undefined otherwise.
    * Never returns false — undefined means "no match found" (analogous to Array.find).
@@ -503,6 +417,31 @@ export class QuerySanitizer {
     for (const pattern of patterns) {
       if (pattern.test(query)) {
         return true;
+      }
+    }
+    return undefined;
+  }
+
+  private matchPatternList(
+    query: string,
+    patterns: readonly RegExp[],
+  ): true | undefined {
+    for (const pattern of patterns) {
+      if (pattern.test(query)) {
+        return true;
+      }
+    }
+    return undefined;
+  }
+
+  private matchPatternLists(
+    query: string,
+    patternLists: readonly (readonly RegExp[])[],
+  ): true | undefined {
+    for (const patternList of patternLists) {
+      const match = this.matchPatternList(query, patternList);
+      if (match !== undefined) {
+        return match;
       }
     }
     return undefined;

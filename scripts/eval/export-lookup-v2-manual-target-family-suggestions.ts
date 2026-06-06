@@ -2,18 +2,24 @@ import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
-import { loadLookupV2RuntimeSurfaceOwnerEvidenceSync } from './lookup-v2-runtime-surface-owner-evidence.js';
+import {
+  loadLookupV2RuntimeSurfaceOwnerEvidenceSync,
+  type LookupV2RuntimeSurfaceOwnerWitness,
+} from './lookup-v2-runtime-surface-owner-evidence.js';
 import type { LookupV2ManualTargetFamilyReviewDecisionRow } from './review-lookup-v2-manual-target-family-review-packet.js';
 import type { LookupV2ManualTargetFamilyReviewPacketRow } from './export-lookup-v2-manual-target-family-review-packet.js';
 
 export interface LookupV2ManualTargetFamilySuggestionRow {
   readonly benchmarkGoldHint: string;
   readonly normalizedBenchmarkGoldHint: string;
+  readonly scopeRisk: LookupV2ManualTargetFamilyReviewPacketRow['scopeRisk'];
   readonly suggestionStatus: 'candidate_unique_owner' | 'collision_candidates' | 'missing_runtime_owner';
   readonly recommendedEntityId?: string | undefined;
   readonly recommendedEntityLabel?: string | undefined;
+  readonly recommendedWitnesses?: readonly LookupV2RuntimeSurfaceOwnerWitness[] | undefined;
   readonly candidateEntityIds?: readonly string[] | undefined;
   readonly candidateEntityLabels?: readonly string[] | undefined;
+  readonly candidateWitnesses?: readonly LookupV2RuntimeSurfaceOwnerWitness[] | undefined;
   readonly sourceEvidence: 'runtime_unique_surface_owner' | 'runtime_colliding_surface_owner' | 'runtime_owner_missing';
 }
 
@@ -48,31 +54,42 @@ export function buildLookupV2ManualTargetFamilySuggestions(
     const normalizedHint = normalizeForMatch(row.benchmarkGoldHint);
     const uniqueOwner = evidence.uniqueOwners.get(normalizedHint);
     if (uniqueOwner !== undefined) {
+      const uniqueOwnerWitnesses = evidence.uniqueOwnerWitnesses.get(normalizedHint);
       return {
         benchmarkGoldHint: row.benchmarkGoldHint,
         normalizedBenchmarkGoldHint: row.normalizedBenchmarkGoldHint,
+        scopeRisk: row.scopeRisk,
         suggestionStatus: 'candidate_unique_owner',
         recommendedEntityId: uniqueOwner,
         ...(evidence.entityLabels.get(uniqueOwner) !== undefined
           ? { recommendedEntityLabel: evidence.entityLabels.get(uniqueOwner)! }
           : {}),
+        ...(uniqueOwnerWitnesses !== undefined && uniqueOwnerWitnesses.length > 0
+          ? { recommendedWitnesses: uniqueOwnerWitnesses }
+          : {}),
         sourceEvidence: 'runtime_unique_surface_owner',
       };
     }
     const collidingOwners = evidence.collidingOwners.get(normalizedHint);
+    const collidingOwnerWitnesses = evidence.collidingOwnerWitnesses.get(normalizedHint);
     if (collidingOwners !== undefined) {
       return {
         benchmarkGoldHint: row.benchmarkGoldHint,
         normalizedBenchmarkGoldHint: row.normalizedBenchmarkGoldHint,
+        scopeRisk: row.scopeRisk,
         suggestionStatus: 'collision_candidates',
         candidateEntityIds: collidingOwners,
         candidateEntityLabels: collidingOwners.map((entityId) => evidence.entityLabels.get(entityId) ?? entityId),
+        ...(collidingOwnerWitnesses !== undefined && collidingOwnerWitnesses.length > 0
+          ? { candidateWitnesses: collidingOwnerWitnesses }
+          : {}),
         sourceEvidence: 'runtime_colliding_surface_owner',
       };
     }
     return {
       benchmarkGoldHint: row.benchmarkGoldHint,
       normalizedBenchmarkGoldHint: row.normalizedBenchmarkGoldHint,
+      scopeRisk: row.scopeRisk,
       suggestionStatus: 'missing_runtime_owner',
       sourceEvidence: 'runtime_owner_missing',
     };

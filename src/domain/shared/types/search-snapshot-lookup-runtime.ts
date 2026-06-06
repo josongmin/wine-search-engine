@@ -22,6 +22,8 @@ interface LookupRuntimeSourceRecordRef {
 }
 
 export const LOOKUP_ALIAS_RUNTIME_SCHEMA_VERSION = 'lookup_alias_runtime.v1' as const;
+export const LOOKUP_ALIAS_CORE_RUNTIME_SCHEMA_VERSION = 'lookup_alias_runtime_core.v1' as const;
+export const LOOKUP_ALIAS_BROAD_RECALL_RUNTIME_SCHEMA_VERSION = 'lookup_alias_broad_recall_runtime.v1' as const;
 export const LOOKUP_RESOLVER_PROJECTION_SCHEMA_VERSION = 'lookup_resolver_projection.v1' as const;
 export const LOOKUP_ENTITY_PROJECTION_SCHEMA_VERSION = 'lookup_entity_projection.v1' as const;
 export const LOOKUP_AMBIGUITY_RUNTIME_SCHEMA_VERSION = 'lookup_ambiguity_runtime.v1' as const;
@@ -46,7 +48,7 @@ export interface LookupAliasRuntimePrefixEntry {
 export interface LookupAliasRuntimeHangulCompletionEntry {
   readonly aliasIndex: number;
   readonly jamoKey: string;
-  readonly syllableBoundaryOffsets: readonly number[];
+  readonly syllableBoundaryOffsets?: readonly number[] | undefined;
 }
 
 export interface LookupAliasRuntimeArtifact {
@@ -61,9 +63,33 @@ export interface LookupAliasRuntimeArtifact {
   readonly wholeTokenIndex: Readonly<Record<string, readonly number[]>>;
   readonly phoneticIndex: Readonly<Record<string, readonly number[]>>;
   readonly doubleMetaphoneIndex: Readonly<Record<string, readonly number[]>>;
-  readonly doubleMetaphoneKeysByAliasId: Readonly<Record<string, readonly string[]>>;
+  readonly doubleMetaphoneKeysByAliasId?: Readonly<Record<string, readonly string[]>> | undefined;
   readonly prefixCatalog: readonly LookupAliasRuntimePrefixEntry[];
   readonly hangulCompletionRecords: readonly LookupAliasRuntimeHangulCompletionEntry[];
+}
+
+export interface LookupAliasRuntimeCoreArtifact {
+  readonly schemaVersion: typeof LOOKUP_ALIAS_CORE_RUNTIME_SCHEMA_VERSION;
+  readonly snapshotId: string;
+  readonly generatedAt: string;
+  readonly aliasRegistryHash: string;
+  readonly aliases: readonly LookupAliasRuntimeRow[];
+  readonly surfaceForms?: readonly string[] | undefined;
+  readonly exactIndex: Readonly<Record<string, readonly number[]>>;
+  readonly compactIndex: Readonly<Record<string, readonly number[]>>;
+}
+
+export interface LookupAliasBroadRecallRuntimeArtifact {
+  readonly schemaVersion: typeof LOOKUP_ALIAS_BROAD_RECALL_RUNTIME_SCHEMA_VERSION;
+  readonly snapshotId: string;
+  readonly generatedAt: string;
+  readonly aliasRegistryHash: string;
+  readonly wholeTokenIndex: Readonly<Record<string, readonly number[]>>;
+  readonly phoneticIndex: Readonly<Record<string, readonly number[]>>;
+  readonly doubleMetaphoneIndex: Readonly<Record<string, readonly number[]>>;
+  readonly doubleMetaphoneKeysByAliasId?: Readonly<Record<string, readonly string[]>> | undefined;
+  readonly prefixCatalog: readonly LookupAliasRuntimePrefixEntry[];
+  readonly hangulCompletionRecords?: readonly LookupAliasRuntimeHangulCompletionEntry[] | undefined;
 }
 
 export interface LookupEntityProjectionDocument {
@@ -72,6 +98,7 @@ export interface LookupEntityProjectionDocument {
   readonly canonicalLabel: string;
   readonly aliasesIdentitySafe: readonly string[];
   readonly identitySafeKeys?: readonly string[] | undefined;
+  readonly familyCoreKeys?: readonly string[] | undefined;
   readonly identityCertificates?: readonly LookupIdentityCertificate[] | undefined;
   readonly aliasesNoisyRecall: readonly string[];
   readonly producer: string;
@@ -195,7 +222,7 @@ const LookupAliasRuntimePrefixEntrySchema = z.object({
 const LookupAliasRuntimeHangulCompletionEntrySchema = z.object({
   aliasIndex: z.number().int().nonnegative(),
   jamoKey: z.string().min(1),
-  syllableBoundaryOffsets: NonNegativeIntArraySchema,
+  syllableBoundaryOffsets: NonNegativeIntArraySchema.optional(),
 }).strict();
 
 const LookupResolverProjectionHintValueSchema = z.union([
@@ -233,9 +260,33 @@ export const LookupAliasRuntimeArtifactSchema = z.object({
   wholeTokenIndex: AliasIndexSchema,
   phoneticIndex: AliasIndexSchema,
   doubleMetaphoneIndex: AliasIndexSchema,
-  doubleMetaphoneKeysByAliasId: z.record(z.string().min(1), z.array(z.string().min(1))),
+  doubleMetaphoneKeysByAliasId: z.record(z.string().min(1), z.array(z.string().min(1))).optional(),
   prefixCatalog: z.array(LookupAliasRuntimePrefixEntrySchema),
   hangulCompletionRecords: z.array(LookupAliasRuntimeHangulCompletionEntrySchema),
+}).strict();
+
+export const LookupAliasRuntimeCoreArtifactSchema = z.object({
+  schemaVersion: z.literal(LOOKUP_ALIAS_CORE_RUNTIME_SCHEMA_VERSION),
+  snapshotId: z.string().min(1),
+  generatedAt: z.string().min(1),
+  aliasRegistryHash: z.string().min(1),
+  aliases: z.array(LookupAliasRuntimeRowSchema),
+  surfaceForms: z.array(z.string().min(1)).optional(),
+  exactIndex: AliasIndexSchema,
+  compactIndex: AliasIndexSchema,
+}).strict();
+
+export const LookupAliasBroadRecallRuntimeArtifactSchema = z.object({
+  schemaVersion: z.literal(LOOKUP_ALIAS_BROAD_RECALL_RUNTIME_SCHEMA_VERSION),
+  snapshotId: z.string().min(1),
+  generatedAt: z.string().min(1),
+  aliasRegistryHash: z.string().min(1),
+  wholeTokenIndex: AliasIndexSchema,
+  phoneticIndex: AliasIndexSchema,
+  doubleMetaphoneIndex: AliasIndexSchema,
+  doubleMetaphoneKeysByAliasId: z.record(z.string().min(1), z.array(z.string().min(1))).optional(),
+  prefixCatalog: z.array(LookupAliasRuntimePrefixEntrySchema),
+  hangulCompletionRecords: z.array(LookupAliasRuntimeHangulCompletionEntrySchema).optional(),
 }).strict();
 
 const LookupResolverProjectionDocumentSchema = z.object({
@@ -256,6 +307,7 @@ const LookupEntityProjectionDocumentSchema = z.object({
   canonicalLabel: z.string().min(1),
   aliasesIdentitySafe: z.array(z.string()),
   identitySafeKeys: z.array(z.string().min(1)).optional(),
+  familyCoreKeys: z.array(z.string().min(1)).optional(),
   identityCertificates: z.array(LookupIdentityCertificateSchema).optional(),
   aliasesNoisyRecall: z.array(z.string()),
   producer: z.string(),
@@ -341,6 +393,32 @@ export function parseLookupAliasRuntimeArtifact(
   }
 }
 
+export function parseLookupAliasRuntimeCoreArtifact(
+  raw: string,
+  filePath: string,
+): LookupAliasRuntimeCoreArtifact {
+  try {
+    return LookupAliasRuntimeCoreArtifactSchema.parse(JSON.parse(raw));
+  } catch (error) {
+    throw new Error(
+      `Malformed lookup alias runtime core artifact at ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+export function parseLookupAliasBroadRecallRuntimeArtifact(
+  raw: string,
+  filePath: string,
+): LookupAliasBroadRecallRuntimeArtifact {
+  try {
+    return LookupAliasBroadRecallRuntimeArtifactSchema.parse(JSON.parse(raw));
+  } catch (error) {
+    throw new Error(
+      `Malformed lookup alias broad-recall runtime artifact at ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
 function isRuntimeArtifactRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -351,31 +429,112 @@ function isRuntimeArtifactStringRecord(
   return isRuntimeArtifactRecord(value);
 }
 
-export function parseTrustedLookupAliasRuntimeArtifact(
+function requireNonEmptyString(
+  value: unknown,
+  field: string,
+): asserts value is string {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new Error(`${field} is required`);
+  }
+}
+
+function requireString(
+  value: unknown,
+  field: string,
+): asserts value is string {
+  if (typeof value !== 'string') {
+    throw new Error(`${field} must be a string`);
+  }
+}
+
+function requireBoolean(
+  value: unknown,
+  field: string,
+): asserts value is boolean {
+  if (typeof value !== 'boolean') {
+    throw new Error(`${field} must be a boolean`);
+  }
+}
+
+function requireFiniteNumber(
+  value: unknown,
+  field: string,
+): asserts value is number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new Error(`${field} must be a finite number`);
+  }
+}
+
+function requireArray(
+  value: unknown,
+  field: string,
+): asserts value is readonly unknown[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`${field} must be an array`);
+  }
+}
+
+function requireOptionalArray(
+  value: unknown,
+  field: string,
+): void {
+  if (value !== undefined && !Array.isArray(value)) {
+    throw new Error(`${field} must be an array when present`);
+  }
+}
+
+function requireOptionalRecord(
+  value: unknown,
+  field: string,
+): void {
+  if (value !== undefined && !isRuntimeArtifactRecord(value)) {
+    throw new Error(`${field} must be an object when present`);
+  }
+}
+
+function parseTrustedArtifactRoot(
   raw: string,
   filePath: string,
-): LookupAliasRuntimeArtifact {
+  {
+    schemaVersion,
+    errorPrefix,
+  }: {
+    readonly schemaVersion: string;
+    readonly errorPrefix: string;
+  },
+): Record<string, unknown> {
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (!isRuntimeArtifactRecord(parsed)) {
       throw new Error('root is not an object');
     }
-    if (parsed.schemaVersion !== LOOKUP_ALIAS_RUNTIME_SCHEMA_VERSION) {
-      throw new Error(`schemaVersion must be ${LOOKUP_ALIAS_RUNTIME_SCHEMA_VERSION}`);
+    if (parsed.schemaVersion !== schemaVersion) {
+      throw new Error(`schemaVersion must be ${schemaVersion}`);
     }
-    if (typeof parsed.snapshotId !== 'string' || parsed.snapshotId.length === 0) {
-      throw new Error('snapshotId is required');
-    }
-    if (typeof parsed.generatedAt !== 'string' || parsed.generatedAt.length === 0) {
-      throw new Error('generatedAt is required');
-    }
-    if (typeof parsed.aliasRegistryHash !== 'string' || parsed.aliasRegistryHash.length === 0) {
-      throw new Error('aliasRegistryHash is required');
-    }
+    requireNonEmptyString(parsed.snapshotId, 'snapshotId');
+    requireNonEmptyString(parsed.generatedAt, 'generatedAt');
+    return parsed;
+  } catch (error) {
+    throw new Error(
+      `${errorPrefix} at ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+export function parseTrustedLookupAliasRuntimeArtifact(
+  raw: string,
+  filePath: string,
+): LookupAliasRuntimeArtifact {
+  try {
+    const parsed = parseTrustedArtifactRoot(raw, filePath, {
+      schemaVersion: LOOKUP_ALIAS_RUNTIME_SCHEMA_VERSION,
+      errorPrefix: 'Malformed trusted lookup alias runtime artifact',
+    });
+    requireNonEmptyString(parsed.aliasRegistryHash, 'aliasRegistryHash');
     if (!Array.isArray(parsed.aliases)) {
       throw new Error('aliases must be an array');
     }
-    if (!Array.isArray(parsed.surfaceForms)) {
+    if (parsed.surfaceForms !== undefined && !Array.isArray(parsed.surfaceForms)) {
       throw new Error('surfaceForms must be an array');
     }
     if (!isRuntimeArtifactStringRecord(parsed.exactIndex)) {
@@ -393,19 +552,85 @@ export function parseTrustedLookupAliasRuntimeArtifact(
     if (!isRuntimeArtifactStringRecord(parsed.doubleMetaphoneIndex)) {
       throw new Error('doubleMetaphoneIndex must be an object');
     }
-    if (!isRuntimeArtifactStringRecord(parsed.doubleMetaphoneKeysByAliasId)) {
+    if (parsed.doubleMetaphoneKeysByAliasId !== undefined && !isRuntimeArtifactStringRecord(parsed.doubleMetaphoneKeysByAliasId)) {
       throw new Error('doubleMetaphoneKeysByAliasId must be an object');
     }
     if (!Array.isArray(parsed.prefixCatalog)) {
       throw new Error('prefixCatalog must be an array');
     }
-    if (!Array.isArray(parsed.hangulCompletionRecords)) {
+    if (parsed.hangulCompletionRecords !== undefined && !Array.isArray(parsed.hangulCompletionRecords)) {
       throw new Error('hangulCompletionRecords must be an array');
     }
     return parsed as unknown as LookupAliasRuntimeArtifact;
   } catch (error) {
     throw new Error(
       `Malformed trusted lookup alias runtime artifact at ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+export function parseTrustedLookupAliasRuntimeCoreArtifact(
+  raw: string,
+  filePath: string,
+): LookupAliasRuntimeCoreArtifact {
+  try {
+    const parsed = parseTrustedArtifactRoot(raw, filePath, {
+      schemaVersion: LOOKUP_ALIAS_CORE_RUNTIME_SCHEMA_VERSION,
+      errorPrefix: 'Malformed trusted lookup alias runtime core artifact',
+    });
+    requireNonEmptyString(parsed.aliasRegistryHash, 'aliasRegistryHash');
+    if (!Array.isArray(parsed.aliases)) {
+      throw new Error('aliases must be an array');
+    }
+    if (parsed.surfaceForms !== undefined && !Array.isArray(parsed.surfaceForms)) {
+      throw new Error('surfaceForms must be an array');
+    }
+    if (!isRuntimeArtifactStringRecord(parsed.exactIndex)) {
+      throw new Error('exactIndex must be an object');
+    }
+    if (!isRuntimeArtifactStringRecord(parsed.compactIndex)) {
+      throw new Error('compactIndex must be an object');
+    }
+    return parsed as unknown as LookupAliasRuntimeCoreArtifact;
+  } catch (error) {
+    throw new Error(
+      `Malformed trusted lookup alias runtime core artifact at ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+export function parseTrustedLookupAliasBroadRecallRuntimeArtifact(
+  raw: string,
+  filePath: string,
+): LookupAliasBroadRecallRuntimeArtifact {
+  try {
+    const parsed = parseTrustedArtifactRoot(raw, filePath, {
+      schemaVersion: LOOKUP_ALIAS_BROAD_RECALL_RUNTIME_SCHEMA_VERSION,
+      errorPrefix: 'Malformed trusted lookup alias broad-recall runtime artifact',
+    });
+    requireNonEmptyString(parsed.aliasRegistryHash, 'aliasRegistryHash');
+    if (!isRuntimeArtifactStringRecord(parsed.wholeTokenIndex)) {
+      throw new Error('wholeTokenIndex must be an object');
+    }
+    if (!isRuntimeArtifactStringRecord(parsed.phoneticIndex)) {
+      throw new Error('phoneticIndex must be an object');
+    }
+    if (!isRuntimeArtifactStringRecord(parsed.doubleMetaphoneIndex)) {
+      throw new Error('doubleMetaphoneIndex must be an object');
+    }
+    if (parsed.doubleMetaphoneKeysByAliasId !== undefined && !isRuntimeArtifactStringRecord(parsed.doubleMetaphoneKeysByAliasId)) {
+      throw new Error('doubleMetaphoneKeysByAliasId must be an object');
+    }
+    if (!Array.isArray(parsed.prefixCatalog)) {
+      throw new Error('prefixCatalog must be an array');
+    }
+    if (parsed.hangulCompletionRecords !== undefined && !Array.isArray(parsed.hangulCompletionRecords)) {
+      throw new Error('hangulCompletionRecords must be an array');
+    }
+    return parsed as unknown as LookupAliasBroadRecallRuntimeArtifact;
+  } catch (error) {
+    throw new Error(
+      `Malformed trusted lookup alias broad-recall runtime artifact at ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }
@@ -423,6 +648,48 @@ export function parseLookupEntityProjectionArtifact(
   }
 }
 
+export function parseTrustedLookupEntityProjectionArtifact(
+  raw: string,
+  filePath: string,
+): LookupEntityProjectionArtifact {
+  try {
+    const parsed = parseTrustedArtifactRoot(raw, filePath, {
+      schemaVersion: LOOKUP_ENTITY_PROJECTION_SCHEMA_VERSION,
+      errorPrefix: 'Malformed trusted lookup entity projection artifact',
+    });
+    requireArray(parsed.documents, 'documents');
+    for (const [index, doc] of parsed.documents.entries()) {
+      if (!isRuntimeArtifactRecord(doc)) {
+        throw new Error(`documents[${index}] must be an object`);
+      }
+      requireNonEmptyString(doc.entityId, `documents[${index}].entityId`);
+      requireNonEmptyString(doc.entityType, `documents[${index}].entityType`);
+      requireNonEmptyString(doc.canonicalLabel, `documents[${index}].canonicalLabel`);
+      requireArray(doc.aliasesIdentitySafe, `documents[${index}].aliasesIdentitySafe`);
+      requireOptionalArray(doc.identitySafeKeys, `documents[${index}].identitySafeKeys`);
+      requireOptionalArray(doc.familyCoreKeys, `documents[${index}].familyCoreKeys`);
+      requireOptionalArray(doc.identityCertificates, `documents[${index}].identityCertificates`);
+      requireArray(doc.aliasesNoisyRecall, `documents[${index}].aliasesNoisyRecall`);
+      requireString(doc.producer, `documents[${index}].producer`);
+      requireOptionalRecord(doc.attributeHints, `documents[${index}].attributeHints`);
+      requireOptionalArray(doc.sourceRecordRefs, `documents[${index}].sourceRecordRefs`);
+      requireString(doc.region, `documents[${index}].region`);
+      requireArray(doc.grapes, `documents[${index}].grapes`);
+      requireString(doc.searchTextKo, `documents[${index}].searchTextKo`);
+      requireString(doc.searchTextEn, `documents[${index}].searchTextEn`);
+      requireString(doc.semanticSummary, `documents[${index}].semanticSummary`);
+      requireArray(doc.pairing, `documents[${index}].pairing`);
+      requireBoolean(doc.availability, `documents[${index}].availability`);
+      requireFiniteNumber(doc.popularityScore, `documents[${index}].popularityScore`);
+    }
+    return parsed as unknown as LookupEntityProjectionArtifact;
+  } catch (error) {
+    throw new Error(
+      `Malformed trusted lookup entity projection artifact at ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
 export function parseLookupResolverProjectionArtifact(
   raw: string,
   filePath: string,
@@ -432,6 +699,40 @@ export function parseLookupResolverProjectionArtifact(
   } catch (error) {
     throw new Error(
       `Malformed lookup resolver projection artifact at ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+export function parseTrustedLookupResolverProjectionArtifact(
+  raw: string,
+  filePath: string,
+): LookupResolverProjectionArtifact {
+  try {
+    const parsed = parseTrustedArtifactRoot(raw, filePath, {
+      schemaVersion: LOOKUP_RESOLVER_PROJECTION_SCHEMA_VERSION,
+      errorPrefix: 'Malformed trusted lookup resolver projection artifact',
+    });
+    requireArray(parsed.documents, 'documents');
+    for (const [index, doc] of parsed.documents.entries()) {
+      if (!isRuntimeArtifactRecord(doc)) {
+        throw new Error(`documents[${index}] must be an object`);
+      }
+      requireNonEmptyString(doc.entityId, `documents[${index}].entityId`);
+      requireNonEmptyString(doc.entityType, `documents[${index}].entityType`);
+      requireNonEmptyString(doc.canonicalLabel, `documents[${index}].canonicalLabel`);
+      requireArray(doc.aliasesIdentitySafe, `documents[${index}].aliasesIdentitySafe`);
+      requireArray(doc.identitySafeKeys, `documents[${index}].identitySafeKeys`);
+      requireOptionalArray(doc.identityCertificates, `documents[${index}].identityCertificates`);
+      if (doc.producer !== undefined) {
+        requireString(doc.producer, `documents[${index}].producer`);
+      }
+      requireOptionalRecord(doc.attributeHints, `documents[${index}].attributeHints`);
+      requireOptionalArray(doc.sourceRecordRefs, `documents[${index}].sourceRecordRefs`);
+    }
+    return parsed as unknown as LookupResolverProjectionArtifact;
+  } catch (error) {
+    throw new Error(
+      `Malformed trusted lookup resolver projection artifact at ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }
@@ -449,6 +750,37 @@ export function parseLookupAmbiguityRuntimeArtifact(
   }
 }
 
+export function parseTrustedLookupAmbiguityRuntimeArtifact(
+  raw: string,
+  filePath: string,
+): LookupAmbiguityRuntimeArtifact {
+  try {
+    const parsed = parseTrustedArtifactRoot(raw, filePath, {
+      schemaVersion: LOOKUP_AMBIGUITY_RUNTIME_SCHEMA_VERSION,
+      errorPrefix: 'Malformed trusted lookup ambiguity runtime artifact',
+    });
+    if (!isRuntimeArtifactStringRecord(parsed.entries)) {
+      throw new Error('entries must be an object');
+    }
+    for (const [normalizedForm, entry] of Object.entries(parsed.entries)) {
+      if (!isRuntimeArtifactRecord(entry)) {
+        throw new Error(`entries.${normalizedForm} must be an object`);
+      }
+      requireNonEmptyString(entry.normalizedForm, `entries.${normalizedForm}.normalizedForm`);
+      requireArray(entry.types, `entries.${normalizedForm}.types`);
+      if (entry.severity !== 'low' && entry.severity !== 'medium' && entry.severity !== 'high') {
+        throw new Error(`entries.${normalizedForm}.severity is invalid`);
+      }
+      requireOptionalArray(entry.entityIds, `entries.${normalizedForm}.entityIds`);
+    }
+    return parsed as unknown as LookupAmbiguityRuntimeArtifact;
+  } catch (error) {
+    throw new Error(
+      `Malformed trusted lookup ambiguity runtime artifact at ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
 export function parseLookupConceptRedirectRuntimeArtifact(
   raw: string,
   filePath: string,
@@ -458,6 +790,42 @@ export function parseLookupConceptRedirectRuntimeArtifact(
   } catch (error) {
     throw new Error(
       `Malformed lookup concept redirect runtime artifact at ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+export function parseTrustedLookupConceptRedirectRuntimeArtifact(
+  raw: string,
+  filePath: string,
+): LookupConceptRedirectRuntimeArtifact {
+  try {
+    const parsed = parseTrustedArtifactRoot(raw, filePath, {
+      schemaVersion: LOOKUP_CONCEPT_REDIRECT_RUNTIME_SCHEMA_VERSION,
+      errorPrefix: 'Malformed trusted lookup concept redirect runtime artifact',
+    });
+    if (!isRuntimeArtifactStringRecord(parsed.entries)) {
+      throw new Error('entries must be an object');
+    }
+    for (const [normalizedForm, entry] of Object.entries(parsed.entries)) {
+      if (!isRuntimeArtifactRecord(entry)) {
+        throw new Error(`entries.${normalizedForm} must be an object`);
+      }
+      requireNonEmptyString(entry.normalizedForm, `entries.${normalizedForm}.normalizedForm`);
+      if (entry.locale !== 'ko' && entry.locale !== 'global') {
+        throw new Error(`entries.${normalizedForm}.locale is invalid`);
+      }
+      if (!['grape', 'region', 'style', 'recommendation', 'pairing', 'generic'].includes(String(entry.conceptClass))) {
+        throw new Error(`entries.${normalizedForm}.conceptClass is invalid`);
+      }
+      if (!['concept_query', 'generic_non_entity_query'].includes(String(entry.redirectReason))) {
+        throw new Error(`entries.${normalizedForm}.redirectReason is invalid`);
+      }
+      requireNonEmptyString(entry.sourceEvidence, `entries.${normalizedForm}.sourceEvidence`);
+    }
+    return parsed as unknown as LookupConceptRedirectRuntimeArtifact;
+  } catch (error) {
+    throw new Error(
+      `Malformed trusted lookup concept redirect runtime artifact at ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }
@@ -475,6 +843,66 @@ export function parseLookupExactSafeRuntimeArtifact(
   }
 }
 
+function validateTrustedLookupExactSafeEntry(
+  entry: unknown,
+  field: string,
+  filePath: string,
+): void {
+  if (!isRuntimeArtifactRecord(entry)) {
+    throw new Error(`Malformed trusted lookup exact-safe runtime artifact at ${filePath}: ${field} must be an object`);
+  }
+  requireNonEmptyString(entry.entityId, `${field}.entityId`);
+  if (entry.locale !== 'ko' && entry.locale !== 'global') {
+    throw new Error(`Malformed trusted lookup exact-safe runtime artifact at ${filePath}: ${field}.locale is invalid`);
+  }
+  if (!isRuntimeArtifactRecord(entry.certificate)) {
+    throw new Error(`Malformed trusted lookup exact-safe runtime artifact at ${filePath}: ${field}.certificate must be an object`);
+  }
+  const certificate = entry.certificate;
+  if (certificate.kind !== 'exact_safe' && certificate.kind !== 'compact_exact_safe') {
+    throw new Error(`Malformed trusted lookup exact-safe runtime artifact at ${filePath}: ${field}.certificate.kind is invalid`);
+  }
+  requireNonEmptyString(certificate.normalizedSurface, `${field}.certificate.normalizedSurface`);
+  if (certificate.compactSurface !== undefined) {
+    requireNonEmptyString(certificate.compactSurface, `${field}.certificate.compactSurface`);
+  }
+  if (!['curated', 'catalog', 'translation'].includes(String(certificate.sourceTier))) {
+    throw new Error(`Malformed trusted lookup exact-safe runtime artifact at ${filePath}: ${field}.certificate.sourceTier is invalid`);
+  }
+  if (certificate.singleton !== true || certificate.collisionFree !== true) {
+    throw new Error(`Malformed trusted lookup exact-safe runtime artifact at ${filePath}: ${field}.certificate singleton/collisionFree must be true`);
+  }
+}
+
+export function parseTrustedLookupExactSafeRuntimeArtifact(
+  raw: string,
+  filePath: string,
+): LookupExactSafeRuntimeArtifact {
+  try {
+    const parsed = parseTrustedArtifactRoot(raw, filePath, {
+      schemaVersion: LOOKUP_EXACT_SAFE_RUNTIME_SCHEMA_VERSION,
+      errorPrefix: 'Malformed trusted lookup exact-safe runtime artifact',
+    });
+    if (!isRuntimeArtifactStringRecord(parsed.exactEntries)) {
+      throw new Error('exactEntries must be an object');
+    }
+    if (!isRuntimeArtifactStringRecord(parsed.compactEntries)) {
+      throw new Error('compactEntries must be an object');
+    }
+    for (const [surface, entry] of Object.entries(parsed.exactEntries)) {
+      validateTrustedLookupExactSafeEntry(entry, `exactEntries.${surface}`, filePath);
+    }
+    for (const [surface, entry] of Object.entries(parsed.compactEntries)) {
+      validateTrustedLookupExactSafeEntry(entry, `compactEntries.${surface}`, filePath);
+    }
+    return parsed as unknown as LookupExactSafeRuntimeArtifact;
+  } catch (error) {
+    throw new Error(
+      `Malformed trusted lookup exact-safe runtime artifact at ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
 export function buildLookupAliasRuntimeArtifactHash(
   artifact: LookupAliasRuntimeArtifact,
 ): string {
@@ -488,9 +916,43 @@ export function buildLookupAliasRuntimeArtifactHash(
     wholeTokenIndex: artifact.wholeTokenIndex,
     phoneticIndex: artifact.phoneticIndex,
     doubleMetaphoneIndex: artifact.doubleMetaphoneIndex,
-    doubleMetaphoneKeysByAliasId: artifact.doubleMetaphoneKeysByAliasId,
+    ...(artifact.doubleMetaphoneKeysByAliasId !== undefined
+      ? { doubleMetaphoneKeysByAliasId: artifact.doubleMetaphoneKeysByAliasId }
+      : {}),
     prefixCatalog: artifact.prefixCatalog,
     hangulCompletionRecords: artifact.hangulCompletionRecords,
+  });
+}
+
+export function buildLookupAliasRuntimeCoreArtifactHash(
+  artifact: LookupAliasRuntimeCoreArtifact,
+): string {
+  return hashStableJson({
+    schemaVersion: artifact.schemaVersion,
+    aliasRegistryHash: artifact.aliasRegistryHash,
+    aliases: artifact.aliases,
+    ...(artifact.surfaceForms !== undefined ? { surfaceForms: artifact.surfaceForms } : {}),
+    exactIndex: artifact.exactIndex,
+    compactIndex: artifact.compactIndex,
+  });
+}
+
+export function buildLookupAliasBroadRecallRuntimeArtifactHash(
+  artifact: LookupAliasBroadRecallRuntimeArtifact,
+): string {
+  return hashStableJson({
+    schemaVersion: artifact.schemaVersion,
+    aliasRegistryHash: artifact.aliasRegistryHash,
+    wholeTokenIndex: artifact.wholeTokenIndex,
+    phoneticIndex: artifact.phoneticIndex,
+    doubleMetaphoneIndex: artifact.doubleMetaphoneIndex,
+    ...(artifact.doubleMetaphoneKeysByAliasId !== undefined
+      ? { doubleMetaphoneKeysByAliasId: artifact.doubleMetaphoneKeysByAliasId }
+      : {}),
+    prefixCatalog: artifact.prefixCatalog,
+    ...(artifact.hangulCompletionRecords !== undefined
+      ? { hangulCompletionRecords: artifact.hangulCompletionRecords }
+      : {}),
   });
 }
 

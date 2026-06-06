@@ -14,6 +14,7 @@ import { HttpLearnedMatcherAdapter } from '../infrastructure/adapter/http-learne
 import { SearchSnapshotAliasMatcher } from '../infrastructure/adapter/search-snapshot-alias-matcher.js';
 import { SnapshotScopedSearchIndex } from '../infrastructure/adapter/snapshot-scoped-search-index.js';
 import { CachedAliasMatcher } from '../infrastructure/adapter/cached-alias-matcher.js';
+import { MemoizedCalibrationStore } from '../infrastructure/adapter/memoized-calibration-store.js';
 import { LazyFuzzyMatcher } from '../infrastructure/adapter/lazy-fuzzy-matcher.js';
 import { UnavailableFastFailSearchIndex } from '../infrastructure/adapter/unavailable-fast-fail-search-index.js';
 import { VespaClient } from '../infrastructure/vespa/vespa-client.js';
@@ -242,7 +243,9 @@ export async function buildCoreAdapterServices(
     blockingPort: pool
       ? new PgBlockingAdapter(pool, runtimeHandles.searchSnapshotId)
       : new StubBlockingPort(),
-    calibrationStore: pool ? new PgCalibrationStore(pool) : new StubCalibrationStore(),
+    calibrationStore: pool
+      ? new MemoizedCalibrationStore(new PgCalibrationStore(pool))
+      : new StubCalibrationStore(),
     ambiguityDict: new FallbackAmbiguityDictionary(
       pool
         ? new PgAmbiguityDictionary(pool, runtimeHandles.searchSnapshotId)

@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
+import { buildNormalizedQueryViews } from '../../src/domain/query/service/query-normalizer.js';
 import type {
   LookupAmbiguityRuntimeEntry,
   LookupConceptRedirectRuntimeEntry,
@@ -234,13 +235,61 @@ export async function loadLookupConceptRedirectRegistry(
 export function buildLookupAmbiguityRegistryEntries(
   rows: readonly LookupAmbiguityRegistryRow[],
 ): readonly LookupAmbiguityRuntimeEntry[] {
-  return rows
-    .map((row) => ({
-      normalizedForm: normalizeForMatch(row.surface),
-      types: [...row.ambiguityTypes],
-      severity: row.severity,
-    }))
-    .sort((left, right) => left.normalizedForm.localeCompare(right.normalizedForm));
+  const severityRank: Record<LookupAmbiguityRuntimeEntry['severity'], number> = {
+    low: 1,
+    medium: 2,
+    high: 3,
+  };
+  const entries = new Map<string, LookupAmbiguityRuntimeEntry>();
+
+  for (const row of rows) {
+    const views = buildNormalizedQueryViews(row.surface);
+    const normalizedForms = new Set<string>();
+    for (const surface of [
+      row.surface,
+      views.raw,
+      views.strict,
+      views.accentless,
+      views.collapsedWhitespace,
+      views.punctuationStripped,
+      views.vintageCanonicalized,
+      views.vintageStripped,
+      views.transliterated,
+    ]) {
+      if (typeof surface !== 'string' || surface.trim().length === 0) {
+        continue;
+      }
+      const normalizedForm = normalizeForMatch(surface);
+      if (normalizedForm.length > 0) {
+        normalizedForms.add(normalizedForm);
+      }
+    }
+
+    if (normalizedForms.size === 0) {
+      throw new Error(`lookup ambiguity registry row "${row.surface}" expands to no runtime keys`);
+    }
+
+    for (const normalizedForm of normalizedForms) {
+      const existing = entries.get(normalizedForm);
+      if (existing === undefined) {
+        entries.set(normalizedForm, {
+          normalizedForm,
+          types: [...row.ambiguityTypes],
+          severity: row.severity,
+        });
+        continue;
+      }
+      entries.set(normalizedForm, {
+        normalizedForm,
+        types: [...new Set([...existing.types, ...row.ambiguityTypes])].sort(),
+        severity: severityRank[row.severity] > severityRank[existing.severity]
+          ? row.severity
+          : existing.severity,
+      });
+    }
+  }
+
+  return [...entries.values()].sort((left, right) => left.normalizedForm.localeCompare(right.normalizedForm));
 }
 
 export function buildLookupConceptRedirectRegistryEntries(

@@ -1,0 +1,346 @@
+{
+  "inputArtifact": "/tmp/lookup-v2-coverage-korean-realworld-stretch-entity-no-policy.json",
+  "generatedAt": "2026-06-06T06:26:15.059Z",
+  "workDir": "data/lookup-v2/drafts",
+  "outputSummaryPath": "data/lookup-v2/drafts/lookup-v2-stretch-reviewed-registry-overlay-pol-roger-append-summary.json",
+  "baselineOutputDir": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-baseline",
+  "overlayOutputDir": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-current",
+  "baseline": {
+    "inputArtifact": "/tmp/lookup-v2-coverage-korean-realworld-stretch-entity-no-policy.json",
+    "generatedAt": "2026-06-06T06:26:15.059Z",
+    "outputPaths": {
+      "draft": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-baseline/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl",
+      "exactSafePacket": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-baseline/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl",
+      "reviewedAuthorityApprovedExactSafePacket": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-baseline/lookup-v2-korean-realworld-stretch-reviewed-authority-exact-safe-proposals-approved.jsonl",
+      "exactSafeFamilyReviewPacket": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-baseline/lookup-v2-korean-realworld-stretch-exact-safe-family-review-packet.jsonl",
+      "exactSafeFamilySuggestions": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-baseline/lookup-v2-korean-realworld-stretch-exact-safe-family-suggestions.jsonl",
+      "exactSafeFamilySuggestedDecisions": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-baseline/lookup-v2-korean-realworld-stretch-exact-safe-family.suggested-decisions.jsonl",
+      "policyReviewPacket": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-baseline/lookup-v2-korean-realworld-stretch-policy-review-packet.jsonl",
+      "policyFamilyReviewPacket": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-baseline/lookup-v2-korean-realworld-stretch-policy-family-review-packet.jsonl",
+      "policyFamilySuggestions": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-baseline/lookup-v2-korean-realworld-stretch-policy-family-suggestions.jsonl",
+      "policyFamilySuggestedDecisions": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-baseline/lookup-v2-korean-realworld-stretch-policy-family.suggested-decisions.jsonl",
+      "manualTargetFamilyReviewPacket": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-baseline/lookup-v2-korean-realworld-stretch-manual-target-family-review-packet.jsonl",
+      "manualTargetFamilySuggestions": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-baseline/lookup-v2-korean-realworld-stretch-manual-target-family-suggestions.jsonl",
+      "manualTargetFamilySuggestedDecisions": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-baseline/lookup-v2-korean-realworld-stretch-manual-target-family.suggested-decisions.jsonl",
+      "manualTargetBatchDir": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-baseline/manual-target-batches",
+      "summary": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-baseline/lookup-v2-korean-realworld-stretch-write-plane-summary.json"
+    },
+    "draft": {
+      "rows": 249,
+      "autoTargetable": 21,
+      "policyReview": 0,
+      "manualTarget": 228
+    },
+    "exactSafe": {
+      "packetRows": 1,
+      "approvedRows": 0,
+      "pendingRows": 1,
+      "bySource": {
+        "family_target_registry": 1
+      },
+      "familyReviewRows": 1,
+      "familySuggestions": {
+        "suggestApprove": 0,
+        "manualReview": 1
+      }
+    },
+    "policy": {
+      "reviewRows": 0,
+      "familyReviewRows": 0,
+      "suggestions": {
+        "keepPolicyConflict": 0,
+        "manualReview": 0
+      }
+    },
+    "manualTarget": {
+      "batchIndex": {
+        "sourceDraftPath": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-baseline/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl",
+        "generatedAt": "2026-06-06T06:26:15.059Z",
+        "totalRows": 228,
+        "batches": [
+          {
+            "holeClass": "realworld_brand_suffix",
+            "rowCount": 29,
+            "outputPath": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-baseline/manual-target-batches/realworld-brand-suffix.jsonl"
+          },
+          {
+            "holeClass": "realworld_category_suffix_gap",
+            "rowCount": 1,
+            "outputPath": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-baseline/manual-target-batches/realworld-category-suffix-gap.jsonl"
+          },
+          {
+            "holeClass": "realworld_compact_alias",
+            "rowCount": 29,
+            "outputPath": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-baseline/manual-target-batches/realworld-compact-alias.jsonl"
+          },
+          {
+            "holeClass": "realworld_exact_vintage",
+            "rowCount": 39,
+            "outputPath": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-baseline/manual-target-batches/realworld-exact-vintage.jsonl"
+          },
+          {
+            "holeClass": "realworld_gap_napa_icon",
+            "rowCount": 1,
+            "outputPath": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-baseline/manual-target-batches/realworld-gap-napa-icon.jsonl"
+          },
+          {
+            "holeClass": "realworld_korean_orthography",
+            "rowCount": 29,
+            "outputPath": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-baseline/manual-target-batches/realworld-korean-orthography.jsonl"
+          },
+          {
+            "holeClass": "realworld_mixed_script_alias",
+            "rowCount": 29,
+            "outputPath": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-baseline/manual-target-batches/realworld-mixed-script-alias.jsonl"
+          },
+          {
+            "holeClass": "realworld_producer_prefixed",
+            "rowCount": 27,
+            "outputPath": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-baseline/manual-target-batches/realworld-producer-prefixed.jsonl"
+          },
+          {
+            "holeClass": "realworld_spaced_alias",
+            "rowCount": 17,
+            "outputPath": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-baseline/manual-target-batches/realworld-spaced-alias.jsonl"
+          },
+          {
+            "holeClass": "realworld_vintage_suffix",
+            "rowCount": 27,
+            "outputPath": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-baseline/manual-target-batches/realworld-vintage-suffix.jsonl"
+          }
+        ]
+      },
+      "familyReviewRows": 34,
+      "suggestions": {
+        "candidateUniqueOwner": 4,
+        "collisionCandidates": 8,
+        "missingRuntimeOwner": 22
+      }
+    }
+  },
+  "overlay": {
+    "inputArtifact": "/tmp/lookup-v2-coverage-korean-realworld-stretch-entity-no-policy.json",
+    "generatedAt": "2026-06-06T06:26:15.059Z",
+    "outputPaths": {
+      "draft": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-current/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl",
+      "exactSafePacket": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-current/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl",
+      "reviewedAuthorityApprovedExactSafePacket": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-current/lookup-v2-korean-realworld-stretch-reviewed-authority-exact-safe-proposals-approved.jsonl",
+      "exactSafeFamilyReviewPacket": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-current/lookup-v2-korean-realworld-stretch-exact-safe-family-review-packet.jsonl",
+      "exactSafeFamilySuggestions": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-current/lookup-v2-korean-realworld-stretch-exact-safe-family-suggestions.jsonl",
+      "exactSafeFamilySuggestedDecisions": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-current/lookup-v2-korean-realworld-stretch-exact-safe-family.suggested-decisions.jsonl",
+      "policyReviewPacket": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-current/lookup-v2-korean-realworld-stretch-policy-review-packet.jsonl",
+      "policyFamilyReviewPacket": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-current/lookup-v2-korean-realworld-stretch-policy-family-review-packet.jsonl",
+      "policyFamilySuggestions": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-current/lookup-v2-korean-realworld-stretch-policy-family-suggestions.jsonl",
+      "policyFamilySuggestedDecisions": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-current/lookup-v2-korean-realworld-stretch-policy-family.suggested-decisions.jsonl",
+      "manualTargetFamilyReviewPacket": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-current/lookup-v2-korean-realworld-stretch-manual-target-family-review-packet.jsonl",
+      "manualTargetFamilySuggestions": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-current/lookup-v2-korean-realworld-stretch-manual-target-family-suggestions.jsonl",
+      "manualTargetFamilySuggestedDecisions": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-current/lookup-v2-korean-realworld-stretch-manual-target-family.suggested-decisions.jsonl",
+      "manualTargetBatchDir": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-current/manual-target-batches",
+      "summary": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-current/lookup-v2-korean-realworld-stretch-write-plane-summary.json"
+    },
+    "draft": {
+      "rows": 249,
+      "autoTargetable": 27,
+      "policyReview": 0,
+      "manualTarget": 222
+    },
+    "exactSafe": {
+      "packetRows": 7,
+      "approvedRows": 0,
+      "pendingRows": 7,
+      "bySource": {
+        "family_target_registry": 7
+      },
+      "familyReviewRows": 7,
+      "familySuggestions": {
+        "suggestApprove": 0,
+        "manualReview": 7
+      }
+    },
+    "policy": {
+      "reviewRows": 0,
+      "familyReviewRows": 0,
+      "suggestions": {
+        "keepPolicyConflict": 0,
+        "manualReview": 0
+      }
+    },
+    "manualTarget": {
+      "batchIndex": {
+        "sourceDraftPath": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-current/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl",
+        "generatedAt": "2026-06-06T06:26:15.059Z",
+        "totalRows": 222,
+        "batches": [
+          {
+            "holeClass": "realworld_brand_suffix",
+            "rowCount": 28,
+            "outputPath": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-current/manual-target-batches/realworld-brand-suffix.jsonl"
+          },
+          {
+            "holeClass": "realworld_category_suffix_gap",
+            "rowCount": 1,
+            "outputPath": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-current/manual-target-batches/realworld-category-suffix-gap.jsonl"
+          },
+          {
+            "holeClass": "realworld_compact_alias",
+            "rowCount": 28,
+            "outputPath": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-current/manual-target-batches/realworld-compact-alias.jsonl"
+          },
+          {
+            "holeClass": "realworld_exact_vintage",
+            "rowCount": 39,
+            "outputPath": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-current/manual-target-batches/realworld-exact-vintage.jsonl"
+          },
+          {
+            "holeClass": "realworld_gap_napa_icon",
+            "rowCount": 1,
+            "outputPath": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-current/manual-target-batches/realworld-gap-napa-icon.jsonl"
+          },
+          {
+            "holeClass": "realworld_korean_orthography",
+            "rowCount": 29,
+            "outputPath": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-current/manual-target-batches/realworld-korean-orthography.jsonl"
+          },
+          {
+            "holeClass": "realworld_mixed_script_alias",
+            "rowCount": 28,
+            "outputPath": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-current/manual-target-batches/realworld-mixed-script-alias.jsonl"
+          },
+          {
+            "holeClass": "realworld_producer_prefixed",
+            "rowCount": 26,
+            "outputPath": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-current/manual-target-batches/realworld-producer-prefixed.jsonl"
+          },
+          {
+            "holeClass": "realworld_spaced_alias",
+            "rowCount": 16,
+            "outputPath": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-current/manual-target-batches/realworld-spaced-alias.jsonl"
+          },
+          {
+            "holeClass": "realworld_vintage_suffix",
+            "rowCount": 26,
+            "outputPath": "data/lookup-v2/drafts/reviewed-overlay-pol-roger-current/manual-target-batches/realworld-vintage-suffix.jsonl"
+          }
+        ]
+      },
+      "familyReviewRows": 33,
+      "suggestions": {
+        "candidateUniqueOwner": 3,
+        "collisionCandidates": 8,
+        "missingRuntimeOwner": 22
+      }
+    }
+  },
+  "familyTargetRegistryApply": {
+    "mergedRows": [
+      {
+        "benchmarkGoldHint": "cheval blanc",
+        "normalizedBenchmarkGoldHint": "cheval blanc",
+        "entityId": "wine-ce-01541d3849e675b6f9725f13889d4ebafd55515f322a587672d99352b391449e",
+        "decisionStatus": "approved",
+        "reviewedBy": "codex",
+        "reviewedAt": "2026-06-06T15:20:00.000Z",
+        "decisionReason": "fixture exact gold uniquely anchors the cheval blanc family hint to the primary Cheval Blanc entity despite sibling runtime collisions",
+        "evidenceClass": "manual_target_family_review"
+      },
+      {
+        "benchmarkGoldHint": "opus one",
+        "normalizedBenchmarkGoldHint": "opus one",
+        "entityId": "opus-one-2018",
+        "decisionStatus": "approved",
+        "reviewedBy": "codex",
+        "reviewedAt": "2026-06-06T15:20:00.000Z",
+        "decisionReason": "fixture exact gold uniquely anchors the opus one family hint to the reviewed Opus One 2018 entity",
+        "evidenceClass": "manual_target_family_review"
+      },
+      {
+        "benchmarkGoldHint": "petrus",
+        "normalizedBenchmarkGoldHint": "petrus",
+        "entityId": "wine-ce-156223aa9aac66ffa459cb8d7485445a919c310eee6b6b7eeda9477663175ab5",
+        "decisionStatus": "approved",
+        "reviewedBy": "codex",
+        "reviewedAt": "2026-06-06T00:00:00.000Z",
+        "decisionReason": "fixture exact gold provides a unique reviewed target for the petrus family hint",
+        "evidenceClass": "fixture_exact"
+      },
+      {
+        "benchmarkGoldHint": "pol roger",
+        "normalizedBenchmarkGoldHint": "pol roger",
+        "entityId": "wine-ce-359d80e914f3afc22ca4d246846e5e4a865e8e433e573e413cbe1cdb9462c791",
+        "decisionStatus": "approved",
+        "reviewedBy": "codex",
+        "reviewedAt": "2026-06-06T16:30:00.000Z",
+        "decisionReason": "active runtime exposes a unique Pol Roger owner and the canonical producer plus identity-safe alias both match the benchmark family hint exactly; target SoT only, not exact-safe auto-promotion",
+        "evidenceClass": "manual_target_family_review"
+      }
+    ],
+    "pendingRows": 0,
+    "approvedRows": 0,
+    "rejectedRows": 0,
+    "registryInsertedRows": 0,
+    "registrySkippedExistingRows": 0,
+    "registryConflictRows": 0
+  },
+  "policyFamilyDecisionRegistryApply": {
+    "mergedRows": [
+      {
+        "policyConflictSurface": "라뚜르",
+        "entityId": "wine-ce-ecff2ce36910240d9c0a7b46dfbe578fcf4fffd2d995ab9d2fc3c3ef06ec8f96",
+        "decision": "promote_exact_safe",
+        "reviewedBy": "codex",
+        "reviewedAt": "2026-06-06T00:00:00.000Z",
+        "decisionReason": "approved stretch closeout default: promote exact-safe for the full reviewed latour family"
+      },
+      {
+        "policyConflictSurface": "그랜지",
+        "entityId": "wine-ce-ae3675d0f1a45cc578ba15452d8b0a4af984beaaa20087665e714fd72c03e344",
+        "decision": "promote_exact_safe",
+        "reviewedBy": "codex",
+        "reviewedAt": "2026-06-06T00:00:00.000Z",
+        "decisionReason": "approved stretch closeout default: promote exact-safe for the full reviewed grange family"
+      },
+      {
+        "policyConflictSurface": "베가 시실리아",
+        "entityId": "wine-ce-0cf11be6a33dbbc907d31b65c3378baa13f3b51d3dd12bf894a28f61370e8581",
+        "decision": "promote_exact_safe",
+        "reviewedBy": "codex",
+        "reviewedAt": "2026-06-06T00:00:00.000Z",
+        "decisionReason": "approved stretch closeout default: promote exact-safe for the full reviewed vega sicilia family"
+      },
+      {
+        "policyConflictSurface": "무통",
+        "entityId": "wine-ce-7ad85be72e30da173b87702175d8423ebfad6b8834d0b6ff794d2d4a62573e0e",
+        "decision": "promote_exact_safe",
+        "reviewedBy": "codex",
+        "reviewedAt": "2026-06-06T00:00:00.000Z",
+        "decisionReason": "approved stretch closeout default: promote exact-safe for the full reviewed mouton family"
+      }
+    ],
+    "pendingRows": 0,
+    "approvedRows": 0,
+    "rejectedRows": 0,
+    "registryInsertedRows": 0,
+    "registrySkippedExistingRows": 0,
+    "registryConflictRows": 0
+  },
+  "deltas": {
+    "draftAutoTargetable": 6,
+    "draftPolicyReview": 0,
+    "draftManualTarget": -6,
+    "exactSafePacketRows": 6,
+    "reviewedAuthorityApprovedRows": 0,
+    "policyReviewRows": 0,
+    "policyFamilyReviewRows": 0,
+    "manualTargetFamilyReviewRows": -1
+  },
+  "invariants": {
+    "autoTargetableNonDecreasing": true,
+    "policyReviewNonIncreasing": true,
+    "manualTargetNonIncreasing": true,
+    "exactSafePacketNonDecreasing": true,
+    "reviewedAuthorityApprovedNonDecreasing": true,
+    "policyPacketNonIncreasing": true,
+    "policyFamilyPacketNonIncreasing": true,
+    "manualTargetFamilyPacketNonIncreasing": true
+  }
+}

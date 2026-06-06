@@ -1,6 +1,7 @@
 import type { QueryIntent as SearchQueryIntent } from '@domain/query/model/query-intent.js';
 import type { QueryClass } from '@domain/shared/types/query-class.js';
 import { stripExactEntityLookupSuffix } from '@domain/query/service/exact-entity-metadata-signals.js';
+import { RelativeQueryExtractor } from '@domain/query/service/relative-query-extractor.js';
 import { buildNormalizedQueryViews } from '@domain/query/service/query-normalizer.js';
 import { isShortEntityLikeSurface } from '@domain/query/service/short-entity-surface.js';
 import { stripVintageYearsBounded } from '@domain/shared/utils/vintage.js';
@@ -8,11 +9,14 @@ import { normalizeHangulLexical } from '@shared/utils/hangul.js';
 import type { WineSearchAnalysis, WineSearchCallerInterpretation } from './wine-search-schemas.js';
 import { getCanonicalConstraintTierBundle } from './wine-search-schemas.js';
 
+const RELATIVE_QUERY_EXTRACTOR = new RelativeQueryExtractor();
+
 interface ProjectionFacts {
   readonly hasHardConstraints: boolean;
   readonly hasAnySoftConstraints: boolean;
   readonly hasAnyAnchor: boolean;
   readonly hasEntityLikeLookupSignal: boolean;
+  readonly hasSimilaritySignal: boolean;
 }
 
 function buildProjectionFacts(analysis: WineSearchAnalysis): ProjectionFacts {
@@ -55,6 +59,11 @@ function buildProjectionFacts(analysis: WineSearchAnalysis): ProjectionFacts {
       && hasShortEntitySurfaceSignal;
   }
 
+  const normalizedSurface = buildNormalizedQueryViews(
+    normalizeHangulLexical(analysis.preservedSurface.trim().normalize('NFKC')),
+  ).collapsedWhitespace;
+  const relativeQuery = RELATIVE_QUERY_EXTRACTOR.extract(normalizedSurface);
+
   return {
     hasHardConstraints,
     hasAnySoftConstraints,
@@ -63,6 +72,7 @@ function buildProjectionFacts(analysis: WineSearchAnalysis): ProjectionFacts {
       analysis.contract.hasEntityMetadataSignal
       || hasAnchorDrivenShortEntitySignal
       || hasVintageEntityFallbackSignal,
+    hasSimilaritySignal: relativeQuery?.isSimilarityQuery === true,
   };
 }
 
@@ -74,6 +84,7 @@ function resolveProjectedIntent(
     hasAnySoftConstraints,
     hasAnyAnchor,
     hasEntityLikeLookupSignal,
+    hasSimilaritySignal,
   } = buildProjectionFacts(analysis);
 
   switch (analysis.intent) {
@@ -87,6 +98,9 @@ function resolveProjectedIntent(
       if (hasEntityLikeLookupSignal) {
         return 'entity_exact';
       }
+      if (hasSimilaritySignal && hasAnyAnchor) {
+        return 'mixed_query';
+      }
       if (hasAnyAnchor && (hasHardConstraints || hasAnySoftConstraints)) {
         return 'mixed_query';
       }
@@ -98,6 +112,9 @@ function resolveProjectedIntent(
       }
       return 'semantic_discovery';
     case 'unknown':
+      if (hasSimilaritySignal && hasAnyAnchor) {
+        return 'mixed_query';
+      }
       if (hasAnyAnchor && (hasHardConstraints || hasAnySoftConstraints)) {
         return 'mixed_query';
       }
@@ -120,6 +137,7 @@ function resolveProjectedQueryClass(
     hasAnySoftConstraints,
     hasAnyAnchor,
     hasEntityLikeLookupSignal,
+    hasSimilaritySignal,
   } = buildProjectionFacts(analysis);
 
   switch (analysis.intent) {
@@ -133,8 +151,11 @@ function resolveProjectedQueryClass(
       if (hasEntityLikeLookupSignal) {
         return 'short_entity';
       }
-      if (hasAnyAnchor && (hasHardConstraints || hasAnySoftConstraints)) {
+      if (hasSimilaritySignal && hasAnyAnchor) {
         return 'anchored_similarity';
+      }
+      if (hasAnyAnchor && (hasHardConstraints || hasAnySoftConstraints)) {
+        return 'semantic_preference';
       }
       if (hasAnyAnchor) {
         return 'semantic_preference';
@@ -147,8 +168,11 @@ function resolveProjectedQueryClass(
       }
       return 'unknown';
     case 'unknown':
-      if (hasAnyAnchor && (hasHardConstraints || hasAnySoftConstraints)) {
+      if (hasSimilaritySignal && hasAnyAnchor) {
         return 'anchored_similarity';
+      }
+      if (hasAnyAnchor && (hasHardConstraints || hasAnySoftConstraints)) {
+        return 'semantic_preference';
       }
       if (hasHardConstraints) {
         return 'pure_constraint';

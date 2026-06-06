@@ -52,8 +52,12 @@ import type { SnapshotVersions } from '../../../../src/application/search/search
 import { VespaClient } from '../../../../src/infrastructure/vespa/vespa-client.js';
 import { VespaSearchIndex } from '../../../../src/infrastructure/vespa/vespa-search-index.js';
 import { HttpLearnedMatcherAdapter } from '../../../../src/infrastructure/adapter/http-learned-matcher.js';
-import { HttpEmbeddingService } from '../../../../src/infrastructure/vespa/embedding-service.js';
-import { HttpCrossEncoderReranker } from '../../../../src/infrastructure/vespa/reranker.js';
+import type { EmbeddingServicePort } from '../../../../src/domain/retrieval/port/embedding-service.port.js';
+import type {
+  RerankerPort,
+  RerankCandidate,
+  RerankResult,
+} from '../../../../src/domain/ranking/port/reranker.port.js';
 import { PgAliasMatcher } from '../../../../src/infrastructure/adapter/pg-alias-matcher.js';
 import { PgAmbiguityDictionary } from '../../../../src/infrastructure/adapter/pg-ambiguity-dictionary.js';
 import { PgBlockingAdapter } from '../../../../src/infrastructure/adapter/pg-blocking-adapter.js';
@@ -124,12 +128,71 @@ async function seedDefaultThresholdProfile(pool: Pool): Promise<void> {
   );
 }
 
+/**
+ * Counting embedding service for the Vespa e2e lane.
+ *
+ * Produces deterministic in-memory hash vectors (real Vespa sparse+dense
+ * retrieval still runs against the live index) and records how many times the
+ * dense channel asked for an embedding, so tests can assert the dense path was
+ * exercised. Replaces the removed `HttpEmbeddingService`
+ * (`src/infrastructure/vespa/embedding-service.ts`, deleted in c4fba804 on
+ * 2026-04-13) — production embeddings moved to `OpenAiEmbeddingService` and no
+ * longer flow over an internal HTTP ML service.
+ */
+class CountingEmbeddingService implements EmbeddingServicePort {
+  private readonly inner = new InMemoryEmbeddingService();
+  embedCalls = 0;
+
+  async embed(text: string): Promise<readonly number[]> {
+    this.embedCalls += 1;
+    return this.inner.embed(text);
+  }
+
+  async embedBatch(texts: readonly string[]): Promise<readonly (readonly number[])[]> {
+    this.embedCalls += texts.length;
+    return this.inner.embedBatch(texts);
+  }
+}
+
+/**
+ * Deterministic, no-network stub reranker for the Vespa e2e lane.
+ *
+ * Preserves candidate order with descending scores and records invocation
+ * count so tests can assert the rerank step was wired in. Replaces the removed
+ * `HttpCrossEncoderReranker` (`src/infrastructure/vespa/reranker.ts`, deleted in
+ * 094fb76b on 2026-04-11) — cross-encoder rerank moved to `CohereReranker` /
+ * `CachedReranker` (external APIs) in production, so the e2e uses a stub to keep
+ * the rerank wiring under test without an external call.
+ */
+class StubReranker implements RerankerPort {
+  readonly modelId = 'vespa-e2e-stub-reranker';
+  rerankCalls = 0;
+
+  async rerank(
+    _query: string,
+    candidates: readonly RerankCandidate[],
+    limit: number,
+  ): Promise<readonly RerankResult[]> {
+    this.rerankCalls += 1;
+    const denominator = candidates.length > 0 ? candidates.length : 1;
+    return candidates.slice(0, limit).map((candidate, index) => ({
+      entityId: candidate.entityId,
+      score: 1 - index / denominator,
+      rank: index + 1,
+    }));
+  }
+}
+
 export interface VespaTestContainerParts {
   readonly container: Container;
   readonly vespaClient: VespaClient;
   readonly vespaSearchIndex: VespaSearchIndex;
   readonly vespaUrl: string;
   readonly usesPgBackedLookup: boolean;
+  /** Number of dense-channel embedding requests served so far. */
+  embeddingInvocations(): number;
+  /** Number of rerank invocations served so far. */
+  rerankInvocations(): number;
   seedAlias(surfaceForm: string, entityId: EntityId, confidence: number): Promise<void>;
   seedBlockingEntities(entityIds: readonly EntityId[]): Promise<void>;
   seedAmbiguity(
@@ -178,12 +241,10 @@ export async function createVespaTestContainer(
   );
   const blockingAdapter = pool ? new PgBlockingAdapter(pool) : new InMemoryBlockingAdapter();
   const calibrationStore = pool ? new PgCalibrationStore(pool) : new InMemoryCalibrationStore();
-  const embeddingService = options.mlServiceBaseUrl !== undefined
-    ? new HttpEmbeddingService({
-        url: options.mlServiceBaseUrl,
-        model: 'vespa-e2e-test',
-      })
-    : new InMemoryEmbeddingService();
+  // Embeddings no longer flow over an HTTP ML service (HttpEmbeddingService was
+  // removed in c4fba804). Use a deterministic counting wrapper; real Vespa
+  // sparse+dense retrieval still runs against the live index.
+  const embeddingService = new CountingEmbeddingService();
   const thresholdStore = pool ? new PgThresholdStore(pool) : new InMemoryThresholdStore();
   const aliasMatcher = pool ? new PgAliasMatcher(pool) : new InMemoryAliasMatcher();
   const anchorResolver = new InMemoryAnchorResolver();
@@ -245,17 +306,12 @@ export async function createVespaTestContainer(
   const signalComputer = new SignalComputer();
   const scoreAggregator = new ScoreAggregator();
   const evidenceMapper = new EvidenceMapper();
+  // Cross-encoder rerank moved to CohereReranker/CachedReranker (external APIs);
+  // the removed HttpCrossEncoderReranker no longer exists. Use a deterministic
+  // no-network stub so the rerank wiring stays under test.
+  const reranker = new StubReranker();
   const ranker = new Ranker(signalComputer, scoreAggregator, evidenceMapper, {
-    ...(options.mlServiceBaseUrl !== undefined
-      ? {
-          reranker: new HttpCrossEncoderReranker({
-            url: options.mlServiceBaseUrl,
-            ...(options.mlServiceHttpTimeoutMs !== undefined
-              ? { httpTimeoutMs: options.mlServiceHttpTimeoutMs }
-              : {}),
-          }),
-        }
-      : {}),
+    reranker,
     ...(options.rerankThreshold !== undefined
       ? { rerankThreshold: options.rerankThreshold }
       : {}),
@@ -379,6 +435,8 @@ export async function createVespaTestContainer(
     vespaSearchIndex,
     vespaUrl,
     usesPgBackedLookup: pool !== null,
+    embeddingInvocations: () => embeddingService.embedCalls,
+    rerankInvocations: () => reranker.rerankCalls,
     async seedAlias(surfaceForm, entityId, confidence) {
       if (pool === null) {
         (aliasMatcher as InMemoryAliasMatcher).addAlias(surfaceForm, entityId, confidence);

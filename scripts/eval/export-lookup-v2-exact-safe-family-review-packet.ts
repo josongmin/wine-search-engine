@@ -4,16 +4,17 @@ import { parseArgs } from 'node:util';
 import type { LookupExactSafeProposalPacketRow } from './export-lookup-v2-exact-safe-proposal-packet.js';
 
 export interface LookupExactSafeFamilyReviewPacketRow {
+  readonly reviewScopeKey: string;
   readonly entityId: string;
   readonly locale: 'ko' | 'global';
   readonly candidatePromotionClass: LookupExactSafeProposalPacketRow['candidatePromotionClass'];
   readonly benchmarkGoldEntityIdSources: readonly LookupExactSafeProposalPacketRow['benchmarkGoldEntityIdSource'][];
   readonly proposalStatus: LookupExactSafeProposalPacketRow['proposalStatus'];
   readonly reviewTarget: LookupExactSafeProposalPacketRow['reviewTarget'];
+  readonly scopeHoleClass: LookupExactSafeProposalPacketRow['holeClass'];
+  readonly scopeSuggestedAliasType: LookupExactSafeProposalPacketRow['suggestedAliasType'];
   readonly surfaces: readonly string[];
   readonly benchmarkGoldHints: readonly string[];
-  readonly holeClasses: readonly string[];
-  readonly suggestedAliasTypes: readonly LookupExactSafeProposalPacketRow['suggestedAliasType'][];
   readonly rowCount: number;
   readonly sourceArtifacts: readonly string[];
   readonly sourceEvidenceSamples: readonly string[];
@@ -57,6 +58,14 @@ function sortUnique(values: readonly string[]): readonly string[] {
   return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
 
+export function buildLookupV2ExactSafeReviewScopeKey(args: {
+  readonly entityId: string;
+  readonly holeClass: LookupExactSafeProposalPacketRow['holeClass'];
+  readonly suggestedAliasType: LookupExactSafeProposalPacketRow['suggestedAliasType'];
+}): string {
+  return `${args.entityId}::${args.suggestedAliasType}::${args.holeClass}`;
+}
+
 export function buildLookupV2ExactSafeFamilyReviewPacketRows(args: {
   readonly packetRows: readonly LookupExactSafeProposalPacketRow[];
 }): readonly LookupExactSafeFamilyReviewPacketRow[] {
@@ -66,24 +75,31 @@ export function buildLookupV2ExactSafeFamilyReviewPacketRows(args: {
     if (row.proposalStatus !== 'needs_review') {
       throw new Error(`exact-safe family review packet expects pending row status, got=${row.proposalStatus} surface=${JSON.stringify(row.surface)}`);
     }
-    const existing = groups.get(row.entityId);
+    const groupKey = buildLookupV2ExactSafeReviewScopeKey({
+      entityId: row.entityId,
+      holeClass: row.holeClass,
+      suggestedAliasType: row.suggestedAliasType,
+    });
+    const existing = groups.get(groupKey);
     if (existing === undefined) {
-      groups.set(row.entityId, [row]);
+      groups.set(groupKey, [row]);
       continue;
     }
     existing.push(row);
   }
 
   return [...groups.entries()]
-    .map(([entityId, rows]) => {
+    .map(([reviewScopeKey, rows]) => {
       const exemplar = rows[0]!;
       for (const row of rows) {
         if (
           row.locale !== exemplar.locale
           || row.candidatePromotionClass !== exemplar.candidatePromotionClass
           || row.reviewTarget !== exemplar.reviewTarget
+          || row.holeClass !== exemplar.holeClass
+          || row.suggestedAliasType !== exemplar.suggestedAliasType
         ) {
-          throw new Error(`exact-safe family review packet invariant mismatch for entityId=${entityId}`);
+          throw new Error(`exact-safe family review packet invariant mismatch for reviewScopeKey=${reviewScopeKey}`);
         }
       }
       const proposedAt = [...rows]
@@ -91,27 +107,28 @@ export function buildLookupV2ExactSafeFamilyReviewPacketRows(args: {
         .sort((left, right) => left.localeCompare(right))
         .at(-1) ?? exemplar.proposedAt;
       return {
-        entityId,
+        reviewScopeKey,
+        entityId: exemplar.entityId,
         locale: exemplar.locale,
         candidatePromotionClass: exemplar.candidatePromotionClass,
         benchmarkGoldEntityIdSources: sortUnique(rows.map((row) => row.benchmarkGoldEntityIdSource)) as readonly LookupExactSafeProposalPacketRow['benchmarkGoldEntityIdSource'][],
         proposalStatus: 'needs_review',
         reviewTarget: exemplar.reviewTarget,
+        scopeHoleClass: exemplar.holeClass,
+        scopeSuggestedAliasType: exemplar.suggestedAliasType,
         surfaces: sortUnique(rows.map((row) => row.surface)),
         benchmarkGoldHints: sortUnique(
           rows
             .map((row) => row.benchmarkGoldHint)
             .filter((value): value is string => value !== undefined),
         ),
-        holeClasses: sortUnique(rows.map((row) => row.holeClass)),
-        suggestedAliasTypes: sortUnique(rows.map((row) => row.suggestedAliasType)) as readonly LookupExactSafeProposalPacketRow['suggestedAliasType'][],
         rowCount: rows.length,
         sourceArtifacts: sortUnique(rows.map((row) => row.sourceArtifact)),
         sourceEvidenceSamples: sortUnique(rows.map((row) => row.sourceEvidence)),
         proposedAt,
       };
     })
-    .sort((left, right) => left.entityId.localeCompare(right.entityId));
+    .sort((left, right) => left.reviewScopeKey.localeCompare(right.reviewScopeKey));
 }
 
 function main(): void {

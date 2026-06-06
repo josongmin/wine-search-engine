@@ -79,6 +79,9 @@ function synthesizeRuntimeStateFromManifest(args: {
     manifestPath: args.manifestPath,
     nlMappingsRuntimePath: args.activeNlMappingsPath,
     lookupAliasRuntimePath: args.manifest.artifacts.lookupAliasRuntimeJson,
+    ...(args.manifest.artifacts.lookupAliasBroadRecallRuntimeJson !== undefined
+      ? { lookupAliasBroadRecallRuntimePath: args.manifest.artifacts.lookupAliasBroadRecallRuntimeJson }
+      : {}),
     lookupExactSafeRuntimePath: args.manifest.artifacts.lookupExactSafeRuntimeJson,
     lookupResolverProjectionPath: args.manifest.artifacts.lookupResolverProjectionJson,
     lookupEntityProjectionPath: args.manifest.artifacts.lookupEntityProjectionJson,
@@ -90,6 +93,9 @@ function synthesizeRuntimeStateFromManifest(args: {
       entities: args.manifest.counts.entities,
       aliases: args.manifest.counts.aliases,
       lookupAliasRuntimeAliases: args.manifest.counts.lookupAliasRuntimeAliases,
+      ...(args.manifest.counts.lookupAliasBroadRecallRuntimeEntries !== undefined
+        ? { lookupAliasBroadRecallRuntimeEntries: args.manifest.counts.lookupAliasBroadRecallRuntimeEntries }
+        : {}),
       lookupExactSafeRuntimeEntries: args.manifest.counts.lookupExactSafeRuntimeEntries,
       lookupResolverProjectionDocuments: args.manifest.counts.lookupResolverProjectionDocuments,
       lookupEntityProjectionDocuments: args.manifest.counts.lookupEntityProjectionDocuments,
@@ -103,6 +109,9 @@ function synthesizeRuntimeStateFromManifest(args: {
       entities: args.manifest.hashes.entities,
       aliases: args.manifest.hashes.aliases,
       lookupAliasRuntime: args.manifest.hashes.lookupAliasRuntime,
+      ...(args.manifest.hashes.lookupAliasBroadRecallRuntime !== undefined
+        ? { lookupAliasBroadRecallRuntime: args.manifest.hashes.lookupAliasBroadRecallRuntime }
+        : {}),
       lookupExactSafeRuntime: args.manifest.hashes.lookupExactSafeRuntime,
       lookupResolverProjection: args.manifest.hashes.lookupResolverProjection,
       lookupEntityProjection: args.manifest.hashes.lookupEntityProjection,

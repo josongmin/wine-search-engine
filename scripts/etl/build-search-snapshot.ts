@@ -58,7 +58,7 @@ import {
   canonicalizeEntitySnapshotRecords,
 } from '../../src/domain/shared/utils/search-snapshot-canonicalization.js';
 import {
-  buildLookupAliasRuntimeArtifact,
+  buildLookupAliasRuntimeArtifacts,
   buildLookupAmbiguityRuntimeArtifact,
   buildLookupConceptRedirectRuntimeArtifact,
   buildLookupExactSafeRuntimeArtifact,
@@ -66,13 +66,19 @@ import {
   buildLookupEntityProjectionArtifact,
 } from './build-lookup-runtime-pack.js';
 import {
-  buildLookupAliasRuntimeArtifactHash,
+  buildLookupAliasBroadRecallRuntimeArtifactHash,
+  buildLookupAliasRuntimeCoreArtifactHash,
   buildLookupAmbiguityRuntimeArtifactHash,
   buildLookupConceptRedirectRuntimeArtifactHash,
   buildLookupExactSafeRuntimeArtifactHash,
   buildLookupResolverProjectionArtifactHash,
   buildLookupEntityProjectionArtifactHash,
 } from '../../src/domain/shared/types/search-snapshot-lookup-runtime.js';
+import {
+  buildLookupRuntimeBundleCachePayload,
+  writeLookupRuntimeBundleCache,
+} from '../../src/config/lookup-runtime-bundle-cache.js';
+import { createCanonicalEntityId } from '../../src/domain/shared/types/index.js';
 import {
   CORE_KOREAN_ICON_AMBIGUITY_CASES,
   CORE_KOREAN_ICON_QUERY_CASES,
@@ -90,6 +96,9 @@ import {
   loadLookupAmbiguityRegistry,
   loadLookupConceptRedirectRegistry,
 } from './lookup-authority-registries.js';
+import { assertLookupAuthorityBoundaryConsistency } from './lookup-authority-boundaries.js';
+import { loadLookupPolicyConflictRegistrySync } from '../eval/lookup-v2-policy-conflict-registry.js';
+import { loadLookupV2PolicyFamilyDecisionRegistrySync } from '../eval/lookup-v2-policy-family-decision-registry.js';
 
 export const DEFAULT_INPUT = ETL_ARTIFACT_FILES.trackc;
 export const DEFAULT_OUTPUT_DIR = ETL_ARTIFACT_FILES.searchSnapshotsDir;
@@ -1413,9 +1422,17 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
   const lookupExactSafeRegistry = await loadLookupExactSafeRegistry();
   const lookupAmbiguityRegistry = await loadLookupAmbiguityRegistry();
   const lookupConceptRedirectRegistry = await loadLookupConceptRedirectRegistry();
+  const lookupPolicyConflictRegistry = loadLookupPolicyConflictRegistrySync();
+  const lookupPolicyFamilyDecisionRegistry = loadLookupV2PolicyFamilyDecisionRegistrySync();
   assertLookupExactSafeRegistryCompatibleWithBaseAliases({
     baseAliases: resolvedAliases,
     registryRows: lookupExactSafeRegistry,
+  });
+  assertLookupAuthorityBoundaryConsistency({
+    exactSafeRows: lookupExactSafeRegistry,
+    ambiguityRows: lookupAmbiguityRegistry,
+    policyConflictRows: lookupPolicyConflictRegistry,
+    policyFamilyDecisionRows: lookupPolicyFamilyDecisionRegistry,
   });
   const lookupRuntimeOverlayAliases = buildLookupRuntimeOverlayAliases(
     lookupExactSafeRegistry,
@@ -1426,7 +1443,10 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     snapshotEntityIds,
   );
 
-  const lookupAliasRuntimeArtifact = buildLookupAliasRuntimeArtifact({
+  const {
+    coreArtifact: lookupAliasRuntimeArtifact,
+    broadRecallArtifact: lookupAliasBroadRecallRuntimeArtifact,
+  } = buildLookupAliasRuntimeArtifacts({
     snapshotId: '',
     generatedAt,
     aliasRegistryHash: aliasArtifactHash,
@@ -1474,7 +1494,8 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     vespaFeed: hashText(''),
     entities: entityArtifactHash,
     aliases: aliasArtifactHash,
-    lookupAliasRuntime: buildLookupAliasRuntimeArtifactHash(lookupAliasRuntimeArtifact),
+    lookupAliasRuntime: buildLookupAliasRuntimeCoreArtifactHash(lookupAliasRuntimeArtifact),
+    lookupAliasBroadRecallRuntime: buildLookupAliasBroadRecallRuntimeArtifactHash(lookupAliasBroadRecallRuntimeArtifact),
     lookupExactSafeRuntime: buildLookupExactSafeRuntimeArtifactHash(lookupExactSafeRuntimeArtifact),
     lookupResolverProjection: buildLookupResolverProjectionArtifactHash(lookupResolverProjectionArtifact),
     lookupEntityProjection: buildLookupEntityProjectionArtifactHash(lookupEntityProjectionArtifact),
@@ -1489,6 +1510,11 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
   const snapshotRoot = path.join(args.outputDir, snapshotId);
   const finalizedLookupAliasRuntimeArtifact = {
     ...lookupAliasRuntimeArtifact,
+    snapshotId,
+    aliasRegistryHash: hashes.aliases,
+  };
+  const finalizedLookupAliasBroadRecallRuntimeArtifact = {
+    ...lookupAliasBroadRecallRuntimeArtifact,
     snapshotId,
     aliasRegistryHash: hashes.aliases,
   };
@@ -1513,6 +1539,7 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     snapshotId,
   };
   const lookupAliasRuntimeJson = `${stableJsonStringify(finalizedLookupAliasRuntimeArtifact)}\n`;
+  const lookupAliasBroadRecallRuntimeJson = `${stableJsonStringify(finalizedLookupAliasBroadRecallRuntimeArtifact)}\n`;
   const lookupExactSafeRuntimeJson = `${stableJsonStringify(finalizedLookupExactSafeRuntimeArtifact)}\n`;
   const lookupResolverProjectionJson = `${stableJsonStringify(finalizedLookupResolverProjectionArtifact)}\n`;
   const lookupEntityProjectionJson = `${stableJsonStringify(finalizedLookupEntityProjectionArtifact)}\n`;
@@ -1539,6 +1566,7 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
       entitiesNdjson: path.join(snapshotRoot, 'entities.ndjson'),
       aliasesNdjson: path.join(snapshotRoot, 'aliases.ndjson'),
       lookupAliasRuntimeJson: path.join(snapshotRoot, 'lookup-alias-runtime.json'),
+      lookupAliasBroadRecallRuntimeJson: path.join(snapshotRoot, 'lookup-alias-broad-recall-runtime.json'),
       lookupExactSafeRuntimeJson: path.join(snapshotRoot, 'lookup-exact-safe-runtime.json'),
       lookupResolverProjectionJson: path.join(snapshotRoot, 'lookup-resolver-projection.json'),
       lookupEntityProjectionJson: path.join(snapshotRoot, 'lookup-entity-projection.json'),
@@ -1554,6 +1582,13 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
       entities: entityArtifact.length,
       aliases: resolvedAliases.length,
       lookupAliasRuntimeAliases: finalizedLookupAliasRuntimeArtifact.aliases.length,
+      lookupAliasBroadRecallRuntimeEntries:
+        Object.keys(finalizedLookupAliasBroadRecallRuntimeArtifact.wholeTokenIndex).length
+        + Object.keys(finalizedLookupAliasBroadRecallRuntimeArtifact.phoneticIndex).length
+        + Object.keys(finalizedLookupAliasBroadRecallRuntimeArtifact.doubleMetaphoneIndex).length
+        + Object.keys(finalizedLookupAliasBroadRecallRuntimeArtifact.doubleMetaphoneKeysByAliasId ?? {}).length
+        + finalizedLookupAliasBroadRecallRuntimeArtifact.prefixCatalog.length
+        + (finalizedLookupAliasBroadRecallRuntimeArtifact.hangulCompletionRecords?.length ?? 0),
       lookupExactSafeRuntimeEntries:
         Object.keys(finalizedLookupExactSafeRuntimeArtifact.exactEntries).length
         + Object.keys(finalizedLookupExactSafeRuntimeArtifact.compactEntries).length,
@@ -1586,6 +1621,7 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     atomicWriteFile(manifest.artifacts.entitiesNdjson, entitiesNdjson),
     atomicWriteFile(manifest.artifacts.aliasesNdjson, aliasesNdjson),
     atomicWriteFile(manifest.artifacts.lookupAliasRuntimeJson, lookupAliasRuntimeJson),
+    atomicWriteFile(manifest.artifacts.lookupAliasBroadRecallRuntimeJson, lookupAliasBroadRecallRuntimeJson),
     atomicWriteFile(manifest.artifacts.lookupExactSafeRuntimeJson, lookupExactSafeRuntimeJson),
     atomicWriteFile(manifest.artifacts.lookupResolverProjectionJson, lookupResolverProjectionJson),
     atomicWriteFile(manifest.artifacts.lookupEntityProjectionJson, lookupEntityProjectionJson),
@@ -1596,6 +1632,67 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     atomicWriteFile(manifest.artifacts.metadataJson, `${JSON.stringify(metadata, null, 2)}\n`),
     atomicWriteFile(path.join(snapshotRoot, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`),
   ]);
+
+  await writeLookupRuntimeBundleCache(
+    buildLookupRuntimeBundleCachePayload({
+      snapshotId,
+      aliasContentHash: hashes.aliases,
+      manifestPath: path.join(snapshotRoot, 'manifest.json'),
+      artifactPaths: {
+        lookupAliasRuntimeJson: manifest.artifacts.lookupAliasRuntimeJson,
+        lookupAliasBroadRecallRuntimeJson: manifest.artifacts.lookupAliasBroadRecallRuntimeJson,
+        lookupExactSafeRuntimeJson: manifest.artifacts.lookupExactSafeRuntimeJson,
+        lookupResolverProjectionJson: manifest.artifacts.lookupResolverProjectionJson,
+        lookupAmbiguityRuntimeJson: manifest.artifacts.lookupAmbiguityRuntimeJson,
+        lookupConceptRedirectRuntimeJson: manifest.artifacts.lookupConceptRedirectRuntimeJson,
+      },
+      aliasRuntimeArtifact: finalizedLookupAliasRuntimeArtifact,
+      aliasBroadRecallRuntimeArtifact: finalizedLookupAliasBroadRecallRuntimeArtifact,
+      exactEntries: Object.entries(finalizedLookupExactSafeRuntimeArtifact.exactEntries).map(([surface, entry]) => [
+        surface,
+        {
+          entityId: createCanonicalEntityId(entry.entityId),
+          locale: entry.locale,
+          kind: entry.certificate.kind,
+          normalizedSurface: entry.certificate.normalizedSurface,
+          ...(entry.certificate.compactSurface !== undefined
+            ? { compactSurface: entry.certificate.compactSurface }
+            : {}),
+        },
+      ] as const),
+      compactEntries: Object.entries(finalizedLookupExactSafeRuntimeArtifact.compactEntries).map(([surface, entry]) => [
+        surface,
+        {
+          entityId: createCanonicalEntityId(entry.entityId),
+          locale: entry.locale,
+          kind: entry.certificate.kind,
+          normalizedSurface: entry.certificate.normalizedSurface,
+          ...(entry.certificate.compactSurface !== undefined
+            ? { compactSurface: entry.certificate.compactSurface }
+            : {}),
+        },
+      ] as const),
+      resolverProjectionDocuments: finalizedLookupResolverProjectionArtifact.documents.map((doc) => [
+        doc.entityId,
+        {
+          ...doc,
+          entityId: createCanonicalEntityId(doc.entityId),
+        },
+      ] as const),
+      ambiguityEntries: Object.entries(finalizedLookupAmbiguityRuntimeArtifact.entries).map(([normalizedForm, entry]) => [
+        normalizedForm,
+        {
+          types: [...entry.types],
+          severity: entry.severity,
+          ...(entry.entityIds !== undefined ? { entityIds: [...entry.entityIds] } : {}),
+        },
+      ] as const),
+      conceptRedirectEntries: Object.entries(finalizedLookupConceptRedirectRuntimeArtifact.entries).map(([normalizedForm, entry]) => [
+        normalizedForm,
+        entry,
+      ] as const),
+    }),
+  );
 
   return {
     manifest,

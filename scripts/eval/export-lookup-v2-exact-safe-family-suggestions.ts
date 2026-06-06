@@ -5,7 +5,10 @@ import type { LookupExactSafeFamilyReviewDecisionRow } from './review-lookup-v2-
 import type { LookupExactSafeFamilyReviewPacketRow } from './export-lookup-v2-exact-safe-family-review-packet.js';
 
 export interface LookupV2ExactSafeFamilySuggestionRow {
+  readonly reviewScopeKey: string;
   readonly entityId: string;
+  readonly scopeHoleClass: LookupExactSafeFamilyReviewPacketRow['scopeHoleClass'];
+  readonly scopeSuggestedAliasType: LookupExactSafeFamilyReviewPacketRow['scopeSuggestedAliasType'];
   readonly suggestionStatus: 'suggest_approve' | 'manual_review';
   readonly rationale: string;
 }
@@ -43,20 +46,26 @@ export function buildLookupV2ExactSafeFamilySuggestions(
 ): readonly LookupV2ExactSafeFamilySuggestionRow[] {
   return packetRows.map((row) => {
     const allSourcesStrong = row.benchmarkGoldEntityIdSources.every((source) => source === 'fixture_exact');
-    const allHoleClassesPromotionSafe = row.holeClasses.every((holeClass) => NORMALIZATION_ONLY_HOLE_CLASSES.has(holeClass));
-    if (allSourcesStrong && allHoleClassesPromotionSafe) {
+    const promotionSafeHoleClass = NORMALIZATION_ONLY_HOLE_CLASSES.has(row.scopeHoleClass);
+    if (allSourcesStrong && promotionSafeHoleClass) {
       return {
+        reviewScopeKey: row.reviewScopeKey,
         entityId: row.entityId,
+        scopeHoleClass: row.scopeHoleClass,
+        scopeSuggestedAliasType: row.scopeSuggestedAliasType,
         suggestionStatus: 'suggest_approve',
-        rationale: `promotion-safe exact-safe family: sources=${row.benchmarkGoldEntityIdSources.join(', ')} hole_classes=${row.holeClasses.join(', ')}`,
+        rationale: `promotion-safe exact-safe scope: sources=${row.benchmarkGoldEntityIdSources.join(', ')} hole_class=${row.scopeHoleClass} alias_type=${row.scopeSuggestedAliasType}`,
       };
     }
     return {
+      reviewScopeKey: row.reviewScopeKey,
       entityId: row.entityId,
+      scopeHoleClass: row.scopeHoleClass,
+      scopeSuggestedAliasType: row.scopeSuggestedAliasType,
       suggestionStatus: 'manual_review',
-      rationale: `requires manual review because source_strength=${row.benchmarkGoldEntityIdSources.join(', ')} hole_classes=${row.holeClasses.join(', ')}`,
+      rationale: `requires manual review because source_strength=${row.benchmarkGoldEntityIdSources.join(', ')} hole_class=${row.scopeHoleClass} alias_type=${row.scopeSuggestedAliasType}`,
     };
-  }).sort((l, r) => l.entityId.localeCompare(r.entityId));
+  }).sort((l, r) => l.reviewScopeKey.localeCompare(r.reviewScopeKey));
 }
 
 export function buildLookupV2ExactSafeSuggestedDecisionRows(
@@ -65,7 +74,7 @@ export function buildLookupV2ExactSafeSuggestedDecisionRows(
   return suggestionRows
     .filter((row) => row.suggestionStatus === 'suggest_approve')
     .map((row) => ({
-      entityId: row.entityId,
+      reviewScopeKey: row.reviewScopeKey,
       decision: 'approve' as const,
       reviewedBy: 'codex:suggested',
       decisionReason: row.rationale,

@@ -21,13 +21,17 @@ import {
 import { SEARCH_SNAPSHOT_STATE_VERSION } from '../../src/domain/shared/constants/search-snapshot.js';
 import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 import {
+  buildLookupAliasBroadRecallRuntimeArtifactHash,
   buildLookupAliasRuntimeArtifactHash,
+  buildLookupAliasRuntimeCoreArtifactHash,
   buildLookupAmbiguityRuntimeArtifactHash,
   buildLookupConceptRedirectRuntimeArtifactHash,
   buildLookupExactSafeRuntimeArtifactHash,
   buildLookupResolverProjectionArtifactHash,
   buildLookupEntityProjectionArtifactHash,
+  parseLookupAliasBroadRecallRuntimeArtifact,
   parseLookupAliasRuntimeArtifact,
+  parseLookupAliasRuntimeCoreArtifact,
   parseLookupAmbiguityRuntimeArtifact,
   parseLookupConceptRedirectRuntimeArtifact,
   parseLookupExactSafeRuntimeArtifact,
@@ -537,6 +541,7 @@ async function assertLookupRuntimeArtifactsReady(
 ): Promise<void> {
   const [
     aliasRuntimeRaw,
+    aliasBroadRecallRuntimeRaw,
     exactSafeRuntimeRaw,
     resolverProjectionRaw,
     entityProjectionRaw,
@@ -544,16 +549,31 @@ async function assertLookupRuntimeArtifactsReady(
     conceptRedirectRuntimeRaw,
   ] = await Promise.all([
     fs.readFile(manifest.artifacts.lookupAliasRuntimeJson, 'utf8'),
+    manifest.artifacts.lookupAliasBroadRecallRuntimeJson === undefined
+      ? Promise.resolve(undefined)
+      : fs.readFile(manifest.artifacts.lookupAliasBroadRecallRuntimeJson, 'utf8'),
     fs.readFile(manifest.artifacts.lookupExactSafeRuntimeJson, 'utf8'),
     fs.readFile(manifest.artifacts.lookupResolverProjectionJson, 'utf8'),
     fs.readFile(manifest.artifacts.lookupEntityProjectionJson, 'utf8'),
     fs.readFile(manifest.artifacts.lookupAmbiguityRuntimeJson, 'utf8'),
     fs.readFile(manifest.artifacts.lookupConceptRedirectRuntimeJson, 'utf8'),
   ]);
-  const aliasRuntime = parseLookupAliasRuntimeArtifact(
-    aliasRuntimeRaw,
-    manifest.artifacts.lookupAliasRuntimeJson,
-  );
+  const aliasRuntime = manifest.artifacts.lookupAliasBroadRecallRuntimeJson === undefined
+    ? parseLookupAliasRuntimeArtifact(
+      aliasRuntimeRaw,
+      manifest.artifacts.lookupAliasRuntimeJson,
+    )
+    : parseLookupAliasRuntimeCoreArtifact(
+      aliasRuntimeRaw,
+      manifest.artifacts.lookupAliasRuntimeJson,
+    );
+  const aliasBroadRecallRuntime =
+    manifest.artifacts.lookupAliasBroadRecallRuntimeJson === undefined || aliasBroadRecallRuntimeRaw === undefined
+      ? undefined
+      : parseLookupAliasBroadRecallRuntimeArtifact(
+        aliasBroadRecallRuntimeRaw,
+        manifest.artifacts.lookupAliasBroadRecallRuntimeJson,
+      );
   const exactSafeRuntime = parseLookupExactSafeRuntimeArtifact(
     exactSafeRuntimeRaw,
     manifest.artifacts.lookupExactSafeRuntimeJson,
@@ -579,6 +599,23 @@ async function assertLookupRuntimeArtifactsReady(
     throw new Error(
       `Lookup alias runtime count mismatch: manifest=${manifest.counts.lookupAliasRuntimeAliases} artifact=${aliasRuntime.aliases.length}`,
     );
+  }
+  if (
+    aliasBroadRecallRuntime !== undefined
+    && manifest.counts.lookupAliasBroadRecallRuntimeEntries !== undefined
+  ) {
+    const aliasBroadRecallRuntimeEntryCount =
+      Object.keys(aliasBroadRecallRuntime.wholeTokenIndex).length
+      + Object.keys(aliasBroadRecallRuntime.phoneticIndex).length
+      + Object.keys(aliasBroadRecallRuntime.doubleMetaphoneIndex).length
+      + Object.keys(aliasBroadRecallRuntime.doubleMetaphoneKeysByAliasId ?? {}).length
+      + aliasBroadRecallRuntime.prefixCatalog.length
+      + (aliasBroadRecallRuntime.hangulCompletionRecords?.length ?? 0);
+    if (aliasBroadRecallRuntimeEntryCount !== manifest.counts.lookupAliasBroadRecallRuntimeEntries) {
+      throw new Error(
+        `Lookup alias broad-recall runtime count mismatch: manifest=${manifest.counts.lookupAliasBroadRecallRuntimeEntries} artifact=${aliasBroadRecallRuntimeEntryCount}`,
+      );
+    }
   }
   const exactSafeRuntimeEntryCount =
     Object.keys(exactSafeRuntime.exactEntries).length
@@ -609,11 +646,24 @@ async function assertLookupRuntimeArtifactsReady(
     );
   }
 
-  const aliasRuntimeHash = buildLookupAliasRuntimeArtifactHash(aliasRuntime);
+  const aliasRuntimeHash = manifest.artifacts.lookupAliasBroadRecallRuntimeJson === undefined
+    ? buildLookupAliasRuntimeArtifactHash(aliasRuntime)
+    : buildLookupAliasRuntimeCoreArtifactHash(aliasRuntime);
   if (aliasRuntimeHash !== manifest.hashes.lookupAliasRuntime) {
     throw new Error(
       `Lookup alias runtime hash mismatch: manifest=${manifest.hashes.lookupAliasRuntime} artifact=${aliasRuntimeHash}`,
     );
+  }
+  if (
+    aliasBroadRecallRuntime !== undefined
+    && manifest.hashes.lookupAliasBroadRecallRuntime !== undefined
+  ) {
+    const aliasBroadRecallRuntimeHash = buildLookupAliasBroadRecallRuntimeArtifactHash(aliasBroadRecallRuntime);
+    if (aliasBroadRecallRuntimeHash !== manifest.hashes.lookupAliasBroadRecallRuntime) {
+      throw new Error(
+        `Lookup alias broad-recall runtime hash mismatch: manifest=${manifest.hashes.lookupAliasBroadRecallRuntime} artifact=${aliasBroadRecallRuntimeHash}`,
+      );
+    }
   }
   const exactSafeRuntimeHash = buildLookupExactSafeRuntimeArtifactHash(exactSafeRuntime);
   if (exactSafeRuntimeHash !== manifest.hashes.lookupExactSafeRuntime) {
@@ -692,6 +742,9 @@ function buildArtifactOnlyRuntimeState(args: {
     manifestPath: args.manifestPath,
     nlMappingsRuntimePath: args.runtimeNlMappingsPath,
     lookupAliasRuntimePath: args.manifest.artifacts.lookupAliasRuntimeJson,
+    ...(args.manifest.artifacts.lookupAliasBroadRecallRuntimeJson !== undefined
+      ? { lookupAliasBroadRecallRuntimePath: args.manifest.artifacts.lookupAliasBroadRecallRuntimeJson }
+      : {}),
     lookupExactSafeRuntimePath: args.manifest.artifacts.lookupExactSafeRuntimeJson,
     lookupResolverProjectionPath: args.manifest.artifacts.lookupResolverProjectionJson,
     lookupEntityProjectionPath: args.manifest.artifacts.lookupEntityProjectionJson,
@@ -703,6 +756,9 @@ function buildArtifactOnlyRuntimeState(args: {
       entities: args.manifest.counts.entities,
       aliases: args.manifest.counts.aliases,
       lookupAliasRuntimeAliases: args.manifest.counts.lookupAliasRuntimeAliases,
+      ...(args.manifest.counts.lookupAliasBroadRecallRuntimeEntries !== undefined
+        ? { lookupAliasBroadRecallRuntimeEntries: args.manifest.counts.lookupAliasBroadRecallRuntimeEntries }
+        : {}),
       lookupExactSafeRuntimeEntries: args.manifest.counts.lookupExactSafeRuntimeEntries,
       lookupResolverProjectionDocuments: args.manifest.counts.lookupResolverProjectionDocuments,
       lookupEntityProjectionDocuments: args.manifest.counts.lookupEntityProjectionDocuments,
@@ -716,6 +772,9 @@ function buildArtifactOnlyRuntimeState(args: {
       entities: args.manifest.hashes.entities,
       aliases: args.manifest.hashes.aliases,
       lookupAliasRuntime: args.manifest.hashes.lookupAliasRuntime,
+      ...(args.manifest.hashes.lookupAliasBroadRecallRuntime !== undefined
+        ? { lookupAliasBroadRecallRuntime: args.manifest.hashes.lookupAliasBroadRecallRuntime }
+        : {}),
       lookupExactSafeRuntime: args.manifest.hashes.lookupExactSafeRuntime,
       lookupResolverProjection: args.manifest.hashes.lookupResolverProjection,
       lookupEntityProjection: args.manifest.hashes.lookupEntityProjection,

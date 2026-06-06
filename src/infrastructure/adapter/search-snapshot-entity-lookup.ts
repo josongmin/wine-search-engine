@@ -9,7 +9,7 @@ import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
 import { SEARCH_SNAPSHOT_SCHEMA_VERSION } from '../../domain/shared/constants/search-snapshot.js';
 import {
-  parseLookupEntityProjectionArtifact,
+  parseTrustedLookupEntityProjectionArtifact,
 } from '../../domain/shared/types/search-snapshot-lookup-runtime.js';
 
 const SnapshotManifestSchema = z.object({
@@ -35,17 +35,16 @@ function parseLookupEntityProjection(
   raw: string,
   projectionPath: string,
 ): ReadonlyMap<CanonicalEntityId, RetrievalDocument> {
-  const artifact = parseLookupEntityProjectionArtifact(raw, projectionPath);
+  const artifact = parseTrustedLookupEntityProjectionArtifact(raw, projectionPath);
   const docs = new Map<CanonicalEntityId, RetrievalDocument>();
   for (const doc of artifact.documents) {
     const entityId = createCanonicalEntityId(doc.entityId);
     if (docs.has(entityId)) {
       throw new Error(`duplicate entity_id ${doc.entityId}`);
     }
-    docs.set(entityId, {
-      ...(doc as unknown as Omit<RetrievalDocument, 'entityId'>),
-      entityId,
-    });
+    const runtimeDoc = doc as unknown as RetrievalDocument;
+    (runtimeDoc as { entityId: CanonicalEntityId }).entityId = entityId;
+    docs.set(entityId, runtimeDoc);
   }
   return docs;
 }

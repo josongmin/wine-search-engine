@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import { SEARCH_SNAPSHOT_SCHEMA_VERSION } from '../../domain/shared/constants/search-snapshot.js';
 import {
-  parseLookupConceptRedirectRuntimeArtifact,
+  parseTrustedLookupConceptRedirectRuntimeArtifact,
 } from '../../domain/shared/types/search-snapshot-lookup-runtime.js';
 import type {
   LookupConceptRedirectInfo,
@@ -33,16 +33,9 @@ function parseConceptRedirectRuntime(
   raw: string,
   artifactPath: string,
 ): ReadonlyMap<string, LookupConceptRedirectInfo> {
-  const artifact = parseLookupConceptRedirectRuntimeArtifact(raw, artifactPath);
+  const artifact = parseTrustedLookupConceptRedirectRuntimeArtifact(raw, artifactPath);
   return new Map(
-    Object.entries(artifact.entries).map(([normalizedForm, entry]) => [
-      normalizedForm,
-      {
-        conceptClass: entry.conceptClass,
-        redirectReason: entry.redirectReason,
-        sourceEvidence: entry.sourceEvidence,
-      },
-    ]),
+    Object.entries(artifact.entries).map(([normalizedForm, entry]) => [normalizedForm, entry as LookupConceptRedirectInfo]),
   );
 }
 

@@ -1,9 +1,10 @@
 import fs from 'node:fs/promises';
 import { z } from 'zod';
+import { normalizeForMatch } from '../../domain/alias/service/normalize.js';
 import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import { SEARCH_SNAPSHOT_SCHEMA_VERSION } from '../../domain/shared/constants/search-snapshot.js';
 import {
-  parseLookupAmbiguityRuntimeArtifact,
+  parseTrustedLookupAmbiguityRuntimeArtifact,
 } from '../../domain/shared/types/search-snapshot-lookup-runtime.js';
 import type {
   AmbiguityDictionary,
@@ -33,7 +34,7 @@ function parseAmbiguityRuntime(
   raw: string,
   artifactPath: string,
 ): ReadonlyMap<string, AmbiguityInfo> {
-  const artifact = parseLookupAmbiguityRuntimeArtifact(raw, artifactPath);
+  const artifact = parseTrustedLookupAmbiguityRuntimeArtifact(raw, artifactPath);
   return new Map(
     Object.entries(artifact.entries).map(([normalizedForm, entry]) => [
       normalizedForm,
@@ -68,20 +69,36 @@ export class SearchSnapshotAmbiguityDictionary implements AmbiguityDictionary {
   constructor(private readonly entries: ReadonlyMap<string, AmbiguityInfo>) {}
 
   async isKnownAmbiguous(surfaceForm: string): Promise<boolean> {
-    return this.entries.has(surfaceForm);
+    return this.entries.has(normalizeForMatch(surfaceForm));
   }
 
   async getAmbiguityInfo(surfaceForm: string): Promise<AmbiguityInfo | null> {
-    return this.entries.get(surfaceForm) ?? null;
+    return this.entries.get(normalizeForMatch(surfaceForm)) ?? null;
   }
 
   async getAmbiguityInfoBatch(
     surfaceForms: readonly string[],
   ): Promise<ReadonlyMap<string, AmbiguityInfo>> {
     const out = new Map<string, AmbiguityInfo>();
-    for (const surfaceForm of new Set(surfaceForms)) {
-      const info = this.entries.get(surfaceForm);
-      if (info !== undefined) {
+    const originalFormsByNormalized = new Map<string, string[]>();
+    for (const surfaceForm of surfaceForms) {
+      const normalized = normalizeForMatch(surfaceForm);
+      if (normalized.length === 0) {
+        continue;
+      }
+      const originals = originalFormsByNormalized.get(normalized);
+      if (originals !== undefined) {
+        originals.push(surfaceForm);
+        continue;
+      }
+      originalFormsByNormalized.set(normalized, [surfaceForm]);
+    }
+    for (const [normalized, originals] of originalFormsByNormalized) {
+      const info = this.entries.get(normalized);
+      if (info === undefined) {
+        continue;
+      }
+      for (const surfaceForm of originals) {
         out.set(surfaceForm, info);
       }
     }

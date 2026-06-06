@@ -1,0 +1,142 @@
+You are generating JSONL benchmark candidates for a Korean-heavy wine entity-lookup stretch corpus.
+
+Current corpus facts:
+- existing_rows=746
+- existing_entity_rows=596
+- existing_discovery_rows=150
+- existing_status_counts={"resolved":310,"ambiguous":140,"failed":146,"redirect_discovery":150}
+- dominant_classes=realworld_exact_vintage=59, realworld_korean_orthography=39, realworld_brand_suffix=37, realworld_compact_alias=35, realworld_mixed_script_alias=35, realworld_vintage_suffix=35, realworld_producer_prefixed=32, realworld_adversarial_no_match=27, realworld_appellation_collision=24, realworld_broad_icon_collision=24, realworld_common_noun_collision=24, realworld_short_form_collision=24, realworld_spaced_alias=24, realworld_fake_chateau_label=22, realworld_fake_napa_reserve=22, realworld_family_collision=22, realworld_frenchish_korean_gap=22, realworld_near_miss_ambiguous=22, realworld_fake_champagne_label=20, realworld_grape_recommendation=20
+
+Goal:
+- produce exactly 500 NEW rows
+- do NOT include qid
+- output JSONL only
+- do NOT repeat any existing query verbatim
+- keep this corpus entity-lookup focused; discovery rows are allowed but should stay explicit redirect_discovery, not fake resolved rows
+
+Required output schema:
+{"query":"...","expected_status":"resolved|ambiguous|failed|redirect_discovery","expected_entity_hint":"... optional only for resolved","accepted_statuses":["... optional"],"class":"...","note":"..."}
+
+Hard rules:
+1. resolved rows MUST include expected_entity_hint
+2. non-resolved rows MUST NOT include expected_entity_hint or expected_entity_id
+3. keep note short and concrete
+4. no markdown, no prose, no numbering, JSONL only
+5. no duplicate queries inside the output
+6. queries must look like Korean real search input, not catalog labels
+7. bias toward hard Korean long-tail behavior:
+   - producer/family variants
+   - compact Hangul spellings
+   - mixed-script queries
+   - producer-prefixed forms
+   - vintage suffix forms
+   - fake-but-plausible no-match labels
+   - short-form policy collisions
+8. do NOT output generic discovery slop unless expected_status=redirect_discovery
+
+Target distribution:
+- resolved=200
+- ambiguous=100
+- redirect_discovery=100
+- failed=100
+
+Preferred class families:
+- resolved:
+  - realworld_exact_vintage
+  - realworld_korean_orthography
+  - realworld_spaced_alias
+  - realworld_brand_suffix
+  - realworld_producer_prefixed
+  - realworld_compact_alias
+  - realworld_vintage_suffix
+  - realworld_mixed_script_alias
+- ambiguous:
+  - realworld_short_form_collision
+  - realworld_broad_icon_collision
+  - realworld_common_noun_collision
+  - realworld_appellation_collision
+  - realworld_family_collision
+  - realworld_near_miss_ambiguous
+- redirect_discovery:
+  - realworld_grape_recommendation
+  - realworld_region_grape
+  - realworld_style_recommendation
+  - realworld_pairing_recommendation
+  - realworld_occasion_recommendation
+  - realworld_gift_recommendation
+  - realworld_price_band_recommendation
+  - realworld_generic_discovery
+- failed:
+  - realworld_adversarial_no_match
+  - realworld_collapsed_typo_gap
+  - realworld_frenchish_korean_gap
+  - realworld_fake_chateau_label
+  - realworld_fake_napa_reserve
+  - realworld_fake_champagne_label
+  - realworld_under_specified_failure
+
+Already-covered resolved examples to avoid repeating:
+- 오푸스원 2018
+- 오푸스 원 2018
+- 오퍼스원 18
+- 샤또 마고 2015
+- 샤토 라피트 로쉴드
+- 라피트 로칠드
+- 라피트로쉴드
+- 샤또 무통 로쉴드
+- 무똥로쉴드
+- 오브리앙
+- 샤또 오브리옹
+- 페트뤼스
+- 샤또 페트뤼스
+- 슈발 블랑
+- 로마네 꽁띠
+- 도멘드라로마네콩티
+
+Already-covered ambiguous examples to avoid repeating:
+- 가야
+- 디켐
+- 라뚜르
+- 그랜지
+- 살롱
+- 르로아
+- 모엣
+- 베가 시실리아
+- 펜폴즈
+- 안티노리
+- 기갈 꼬뜨 로띠
+- 피숑
+
+Already-covered redirect_discovery examples to avoid repeating:
+- 바롤로 와인
+- 부르고뉴 피노누아
+- 나파 까쇼
+- 소고기 와인 추천
+- 집들이 와인 추천
+- 샴페인 선물 추천
+- 기념일 샴페인 추천
+- 피노 누아 추천
+- 까베네 추천
+- 드라이한 화이트 추천
+- 까베르네 소비뇽 추천
+- 피노 누아 입문용 추천
+
+Already-covered failed examples to avoid repeating:
+- 오푸스투 2018
+- 샤또 오로라 2021
+- 도멘 실루엣 부르고뉴
+- 실버레이크 나파 까베르네
+- 골든돔 샴페인 브뤼
+- 문라이트 소노마 샤도네이
+- 샤또 김치 2020
+- 도멘 떡볶이
+- 무지개 유니콘 리저브
+- 슈퍼 드래곤 와인 2021
+- 갤럭시 노바 까베르네
+- 다이아몬드 폭풍 와인
+
+Important:
+- Do not output qid
+- Do not output expected_entity_id
+- If uncertain, prefer ambiguous or failed over resolved
+- Keep responses realistic for Korean users who type messy wine searches

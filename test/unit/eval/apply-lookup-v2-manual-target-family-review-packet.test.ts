@@ -78,7 +78,19 @@ describe('applyLookupV2ManualTargetFamilyReviewPacket', () => {
           reviewedAt: '2026-06-06T00:00:00.000Z',
         },
       ],
-      packetPath: '/tmp/manual-family-reviewed.jsonl',
+      familyTargetRegistryRows: [
+        {
+          benchmarkGoldHint: 'calon segur',
+          normalizedBenchmarkGoldHint: 'calonsegur',
+          entityId: 'wine-ce-calon-segur',
+          decisionStatus: 'approved',
+          reviewedBy: 'op',
+          reviewedAt: '2026-06-06T01:00:00.000Z',
+          decisionReason: 'single iconic target family',
+          evidenceClass: 'manual_target_family_review',
+        },
+      ],
+      familyTargetRegistryPath: '/tmp/lookup-family-target-registry-merged.jsonl',
       existingRegistryRows: [],
     });
 
@@ -89,12 +101,12 @@ describe('applyLookupV2ManualTargetFamilyReviewPacket', () => {
       expect.objectContaining({
         surface: '칼롱 세귀르',
         entityId: 'wine-ce-calon-segur',
-        benchmarkGoldEntityIdSource: 'manual_family_review_target',
+        benchmarkGoldEntityIdSource: 'family_target_registry',
       }),
       expect.objectContaining({
         surface: '칼롱세귀르',
         entityId: 'wine-ce-calon-segur',
-        benchmarkGoldEntityIdSource: 'manual_family_review_target',
+        benchmarkGoldEntityIdSource: 'family_target_registry',
       }),
     ]);
   });

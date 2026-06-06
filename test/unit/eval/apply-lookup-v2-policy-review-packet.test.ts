@@ -4,7 +4,25 @@ import { applyLookupV2PolicyReviewPacket } from '../../../scripts/eval/apply-loo
 describe('applyLookupV2PolicyReviewPacket', () => {
   it('projects approved policy-review rows into approved exact-safe packet rows', () => {
     const result = applyLookupV2PolicyReviewPacket({
-      packetPath: 'data/lookup-v2/drafts/policy-review.jsonl',
+      policyFamilyDecisionRegistryPath: 'data/lookup-v2/lookup-policy-family-decision-registry-v1.jsonl',
+      policyFamilyDecisionMap: new Map([
+        ['라뚜르::wine-ce-latour', {
+          policyConflictSurface: '라뚜르',
+          entityId: 'wine-ce-latour',
+          decision: 'promote_exact_safe',
+          reviewedBy: 'registry',
+          reviewedAt: '2026-06-06T01:00:00.000Z',
+          decisionReason: 'approved in registry',
+        }],
+        ['그랜지::wine-ce-grange', {
+          policyConflictSurface: '그랜지',
+          entityId: 'wine-ce-grange',
+          decision: 'keep_policy_conflict',
+          reviewedBy: 'registry',
+          reviewedAt: '2026-06-06T01:00:00.000Z',
+          decisionReason: 'kept in registry',
+        }],
+      ]),
       packetRows: [
         {
           surface: '라뚜르 2009',
@@ -14,7 +32,7 @@ describe('applyLookupV2PolicyReviewPacket', () => {
           observedStatus: 'ambiguous',
           benchmarkGoldHint: 'latour',
           benchmarkGoldEntityId: 'wine-ce-latour',
-          benchmarkGoldEntityIdSource: 'hint_resolution',
+          benchmarkGoldEntityIdSource: 'policy_registry_authority',
           policyConflictSurface: '라뚜르',
           policyConflictType: 'short_form_collision',
           authorityStatus: 'resolved',
@@ -36,7 +54,7 @@ describe('applyLookupV2PolicyReviewPacket', () => {
           observedStatus: 'ambiguous',
           benchmarkGoldHint: 'grange',
           benchmarkGoldEntityId: 'wine-ce-grange',
-          benchmarkGoldEntityIdSource: 'hint_resolution',
+          benchmarkGoldEntityIdSource: 'policy_registry_authority',
           policyConflictSurface: '그랜지',
           policyConflictType: 'short_form_collision',
           authorityStatus: 'resolved',
@@ -63,15 +81,26 @@ describe('applyLookupV2PolicyReviewPacket', () => {
         entityId: 'wine-ce-latour',
         proposalStatus: 'approved',
         reviewTarget: 'lookup_exact_safe_registry_v1',
-        reviewedBy: 'op',
-        decisionReason: 'vintage-specific singleton',
+        benchmarkGoldEntityIdSource: 'policy_family_decision_registry',
+        reviewedBy: 'registry',
+        decisionReason: 'approved in registry',
       }),
     ]);
   });
 
   it('counts pending and needs-target rows without emitting exact-safe packet rows', () => {
     const result = applyLookupV2PolicyReviewPacket({
-      packetPath: 'data/lookup-v2/drafts/policy-review.jsonl',
+      policyFamilyDecisionRegistryPath: 'data/lookup-v2/lookup-policy-family-decision-registry-v1.jsonl',
+      policyFamilyDecisionMap: new Map([
+        ['베가 시실리아::wine-ce-vega', {
+          policyConflictSurface: '베가 시실리아',
+          entityId: 'wine-ce-vega',
+          decision: 'needs_target',
+          reviewedBy: 'registry',
+          reviewedAt: '2026-06-06T01:00:00.000Z',
+          decisionReason: 'needs target in registry',
+        }],
+      ]),
       packetRows: [
         {
           surface: 'Vega Sicilia 우니꼬',
@@ -80,6 +109,8 @@ describe('applyLookupV2PolicyReviewPacket', () => {
           holeClass: 'realworld_mixed_script_alias',
           observedStatus: 'failed',
           benchmarkGoldHint: 'vega sicilia unico',
+          benchmarkGoldEntityId: 'wine-ce-vega',
+          benchmarkGoldEntityIdSource: 'policy_registry_authority',
           policyConflictSurface: '베가 시실리아',
           policyConflictType: 'broad_icon_collision',
           authorityStatus: 'resolved',
@@ -120,7 +151,8 @@ describe('applyLookupV2PolicyReviewPacket', () => {
 
   it('fails closed when approved rows are missing entity or review metadata', () => {
     expect(() => applyLookupV2PolicyReviewPacket({
-      packetPath: 'data/lookup-v2/drafts/policy-review.jsonl',
+      policyFamilyDecisionRegistryPath: 'data/lookup-v2/lookup-policy-family-decision-registry-v1.jsonl',
+      policyFamilyDecisionMap: new Map(),
       packetRows: [
         {
           surface: '라뚜르 2009',
@@ -146,7 +178,17 @@ describe('applyLookupV2PolicyReviewPacket', () => {
     })).toThrow(/missing benchmarkGoldEntityId/);
 
     expect(() => applyLookupV2PolicyReviewPacket({
-      packetPath: 'data/lookup-v2/drafts/policy-review.jsonl',
+      policyFamilyDecisionRegistryPath: 'data/lookup-v2/lookup-policy-family-decision-registry-v1.jsonl',
+      policyFamilyDecisionMap: new Map([
+        ['라뚜르::wine-ce-latour', {
+          policyConflictSurface: '라뚜르',
+          entityId: 'wine-ce-latour',
+          decision: 'promote_exact_safe',
+          reviewedBy: 'registry',
+          reviewedAt: '2026-06-06T01:00:00.000Z',
+          decisionReason: 'approved in registry',
+        }],
+      ]),
       packetRows: [
         {
           surface: '라뚜르 2009',

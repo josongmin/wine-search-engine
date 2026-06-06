@@ -140,6 +140,14 @@ describe('QuerySanitizer', () => {
       });
     });
 
+    it('rejects symbol-only SQL block comments without requiring ASCII letters', () => {
+      const result = sanitizer.sanitize('/* */');
+      expect(result.safe).toBe(false);
+      if (!result.safe) {
+        expect(result.reason).toBe('SQL_INJECTION');
+      }
+    });
+
     // False-positive guards: natural-language wine queries that contain
     // English words 'select' or 'from' but are NOT SQL.
     const falsePositiveCheck = [
@@ -218,6 +226,14 @@ describe('QuerySanitizer', () => {
         expect(result.reason).toBe('COMMAND_INJECTION');
       }
     });
+
+    it('rejects symbol-only command substitution without requiring ASCII letters', () => {
+      const result = sanitizer.sanitize('$(123)');
+      expect(result.safe).toBe(false);
+      if (!result.safe) {
+        expect(result.reason).toBe('COMMAND_INJECTION');
+      }
+    });
   });
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -258,6 +274,8 @@ describe('QuerySanitizer', () => {
       'how does oak aging affect flavor?',
       'recommend wines for beef',
       'wines by producer Château Lafite',
+      '오푸스원 2018',
+      '라피트로쉴드',
       'Italian wines from Tuscany region',
       'white wines with fruity notes',
       '2010 vintage Cabernet Sauvignon',
