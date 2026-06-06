@@ -27,7 +27,7 @@ import type {
   EntityResolverPort,
   LookupResolverProjectionPort,
 } from '../port/search-pipeline-deps.port.js';
-import type { CanonicalEntityId } from '../../../domain/shared/types/index.js';
+import { createCanonicalEntityId, type CanonicalEntityId } from '../../../domain/shared/types/index.js';
 import type { ResolverInput } from '../../../domain/resolver/service/resolver.js';
 import type { EntityResolveResult } from '../../../domain/resolver/model/resolve-result.js';
 import type { NormalizedQueryViews } from '../../../domain/query/model/query-views.js';
@@ -71,6 +71,7 @@ import type { RequestExecutionContext } from '../../../domain/shared/request-exe
 import { PolicyBlockedError } from '../../../domain/shared/error/policy-blocked.js';
 import type { LookupPlannerPort } from './lookup-planner.port.js';
 import type { LookupQueryPlan } from './lookup-query-plan.js';
+import type { LookupSemanticScopeRegistryPort } from '../../../domain/resolver/v2/lookup-semantic-scope.js';
 import type {
   EntityLookupV2Command,
   EntityLookupV2Result,
@@ -98,6 +99,7 @@ import {
 const LOOKUP_V2_MAX_CLARIFICATION_OPTIONS = 8;
 const PERSISTED_AMBIGUITY_SURFACE_REASON_CODE = 'persisted_ambiguity_surface';
 const RECALL_ONLY_NO_MATCH_REASON_CODE = 'recall_only_no_match';
+const REVIEWED_FAMILY_COLLISION_REASON_CODE = 'reviewed_family_collision_requires_clarification';
 const NON_IDENTITY_STRATEGY_MARKER = /fuzzy|ngram|trigram|edit|prefix|inexact|lexical|phonetic|fallback/u;
 
 export interface EntityLookupV2UseCaseDeps {
@@ -106,6 +108,7 @@ export interface EntityLookupV2UseCaseDeps {
   readonly entityResolver: EntityResolverPort;
   readonly entityLookup?: EntityDocumentLookupPort | undefined;
   readonly resolverProjectionLookup?: LookupResolverProjectionPort | undefined;
+  readonly semanticScopeRegistry?: LookupSemanticScopeRegistryPort | undefined;
   /**
    * T-ELV2-04: independent timed multi-channel retrieval. When present, the
    * response's per-channel coverage + per-candidate channel provenance come
@@ -266,6 +269,7 @@ export class EntityLookupV2UseCase {
         plan,
         retrieval,
         exactSafeSingletonWitness?.entityId,
+        command.locale,
         options,
       );
       throwIfAborted(options?.abortSignal, 'Entity lookup V2 aborted');
@@ -420,6 +424,7 @@ export class EntityLookupV2UseCase {
     plan: LookupQueryPlan,
     retrieval: LookupRetrievalResult | undefined,
     exactSafeWitnessEntityId: CanonicalEntityId | undefined,
+    locale: string | undefined,
     options?: RequestExecutionContext,
   ): Promise<EntityResolveResult> {
     // Seed the resolver pool from EVERY recall source not already covered by an
@@ -436,6 +441,25 @@ export class EntityLookupV2UseCase {
       );
     const anchorCovered = new Set(effectiveAnchors.flatMap((a) => a.candidateEntityIds.map(String)));
     const seeds = new Map<string, CanonicalEntityId>();
+    if (this.deps.semanticScopeRegistry !== undefined) {
+      for (const match of this.deps.semanticScopeRegistry.findMatches({
+        query: plan.rawQuery,
+        views: plan.normalizedQueryViews ?? buildNormalizedQueryViews(plan.rawQuery),
+        locale: locale !== undefined && locale.toLowerCase().startsWith('ko') ? 'ko' : 'global',
+      })) {
+        if (
+          exactSafeWitnessEntityId !== undefined
+          && String(match.entityId) !== String(exactSafeWitnessEntityId)
+        ) {
+          continue;
+        }
+        const entityId = createCanonicalEntityId(match.entityId);
+        const key = String(entityId);
+        if (!anchorCovered.has(key)) {
+          seeds.set(key, entityId);
+        }
+      }
+    }
     if (retrieval !== undefined) {
       for (const candidate of retrieval.candidates) {
         const key = String(candidate.entityId);
@@ -644,9 +668,20 @@ export class EntityLookupV2UseCase {
       effectiveDecisionReasonCode = PERSISTED_AMBIGUITY_SURFACE_REASON_CODE;
     }
     if (
+      forcedStatus === undefined
+      && persistedAmbiguity === undefined
+      && hasReviewedFamilyCollisionClarificationEvidence(allCandidates)
+      && !hasAnyIdentityBearingEvidence(result, plan)
+      && (status === 'failed' || status === 'ambiguous')
+    ) {
+      status = 'ambiguous';
+      effectiveDecisionReasonCode = REVIEWED_FAMILY_COLLISION_REASON_CODE;
+    }
+    if (
       status === 'ambiguous'
       && forcedStatus === undefined
       && persistedAmbiguity === undefined
+      && effectiveDecisionReasonCode !== REVIEWED_FAMILY_COLLISION_REASON_CODE
       && (
         hasOnlyRecallOnlyCandidateEvidence(allCandidates)
         || !hasAnyIdentityBearingEvidence(result, plan)
@@ -767,10 +802,23 @@ function buildScoredCandidates(
   /** Persisted ambiguity-cluster membership signal per entity (0 when unknown). */
   clusterMembership: (entityId: string) => number = () => 0,
 ): readonly LookupScoredCandidate[] {
-  const hitsByEntity = new Map<string, { hits: readonly LookupChannelHit[]; entityType: string }>();
+  const hitsByEntity = new Map<string, {
+    readonly hits: readonly LookupChannelHit[];
+    readonly entityType: string;
+    readonly scopeFeatureHints?: {
+      readonly lineGraphProximity?: number | undefined;
+      readonly vintageGraphProximity?: number | undefined;
+      readonly scopeQualifierAgreement?: number | undefined;
+      readonly scopeAxisAgreement?: number | undefined;
+    } | undefined;
+  }>();
   if (retrieval !== undefined) {
     for (const rc of retrieval.candidates) {
-      hitsByEntity.set(String(rc.entityId), { hits: rc.channelHits, entityType: rc.entityType });
+      hitsByEntity.set(String(rc.entityId), {
+        hits: rc.channelHits,
+        entityType: rc.entityType,
+        ...(rc.scopeFeatureHints !== undefined ? { scopeFeatureHints: rc.scopeFeatureHints } : {}),
+      });
     }
   }
   return result.candidates.map((c) => {
@@ -782,7 +830,12 @@ function buildScoredCandidates(
       entityType: engine?.entityType ?? 'unknown',
       calibratedScore: c.calibratedScore,
       rank: c.rank,
-      features: extractLookupFeatures(channelHits, c.calibratedScore, clusterMembership(String(c.entityId))),
+      features: extractLookupFeatures(
+        channelHits,
+        c.calibratedScore,
+        clusterMembership(String(c.entityId)),
+        engine?.scopeFeatureHints,
+      ),
       channelHits,
     };
   });
@@ -853,6 +906,34 @@ function hasOnlyRecallOnlyCandidateEvidence(
       const grade = classifyResolveEvidenceGrade(candidate.channelHits);
       return grade === 'recall_only' || grade === 'none';
     });
+}
+
+function hasReviewedFamilyCollisionClarificationEvidence(
+  candidates: readonly LookupV2CandidateView[],
+): boolean {
+  if (candidates.length < 2) {
+    return false;
+  }
+  const matchedAliases = new Set<string>();
+  for (const candidate of candidates) {
+    const reviewedFamilyHits = candidate.channelHits.filter((hit) =>
+      hit.channel === 'dense'
+      && hit.matchedView === 'reviewed_family_recall'
+      && typeof hit.matchedAlias === 'string'
+      && hit.matchedAlias.trim().length > 0,
+    );
+    if (reviewedFamilyHits.length === 0) {
+      return false;
+    }
+    for (const hit of reviewedFamilyHits) {
+      const matchedAlias = hit.matchedAlias;
+      if (matchedAlias === undefined) {
+        return false;
+      }
+      matchedAliases.add(matchedAlias.trim().toLowerCase());
+    }
+  }
+  return matchedAliases.size === 1;
 }
 
 function hasAnyIdentityBearingEvidence(

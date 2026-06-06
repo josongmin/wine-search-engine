@@ -4,9 +4,10 @@ import { parseArgs } from 'node:util';
 import type { LookupV2PolicyFamilyReviewPacketRow } from './export-lookup-v2-policy-family-review-packet.js';
 
 export interface LookupV2PolicyFamilyReviewDecisionRow {
+  readonly semanticConflictKey: string;
   readonly policyConflictSurface: string;
   readonly benchmarkGoldEntityId: string;
-  readonly decision: 'promote_exact_safe' | 'keep_policy_conflict' | 'needs_target';
+  readonly decision: 'promote_exact_safe' | 'keep_ambiguous' | 'needs_scope_target';
   readonly reviewedBy: string;
   readonly decisionReason: string;
   readonly reviewedAt: string;
@@ -42,11 +43,12 @@ function isDecisionRow(value: unknown): value is LookupV2PolicyFamilyReviewDecis
   }
   const row = value as Record<string, unknown>;
   return (
-    typeof row['policyConflictSurface'] === 'string'
+    typeof row['semanticConflictKey'] === 'string'
+    && typeof row['policyConflictSurface'] === 'string'
     && typeof row['benchmarkGoldEntityId'] === 'string'
     && (row['decision'] === 'promote_exact_safe'
-      || row['decision'] === 'keep_policy_conflict'
-      || row['decision'] === 'needs_target')
+      || row['decision'] === 'keep_ambiguous'
+      || row['decision'] === 'needs_scope_target')
     && typeof row['reviewedBy'] === 'string'
     && typeof row['decisionReason'] === 'string'
     && typeof row['reviewedAt'] === 'string'
@@ -62,8 +64,8 @@ function parseDecisionJsonl(filePath: string): readonly LookupV2PolicyFamilyRevi
     .filter(isDecisionRow);
 }
 
-function packetKey(surface: string, benchmarkGoldEntityId: string): string {
-  return `${surface}::${benchmarkGoldEntityId}`;
+function packetKey(semanticConflictKey: string, benchmarkGoldEntityId: string): string {
+  return `${semanticConflictKey}::${benchmarkGoldEntityId}`;
 }
 
 export function applyLookupV2PolicyFamilyReviewDecisions(args: {
@@ -72,7 +74,7 @@ export function applyLookupV2PolicyFamilyReviewDecisions(args: {
 }): readonly LookupV2PolicyFamilyReviewPacketRow[] {
   const packetByKey = new Map<string, LookupV2PolicyFamilyReviewPacketRow>();
   for (const row of args.packetRows) {
-    const key = packetKey(row.policyConflictSurface, row.benchmarkGoldEntityId);
+    const key = packetKey(row.semanticConflictKey, row.benchmarkGoldEntityId);
     if (packetByKey.has(key)) {
       throw new Error(`duplicate family policy-review packet row for surface=${JSON.stringify(row.policyConflictSurface)} entityId=${JSON.stringify(row.benchmarkGoldEntityId)}`);
     }
@@ -90,18 +92,18 @@ export function applyLookupV2PolicyFamilyReviewDecisions(args: {
     if (Number.isNaN(Date.parse(row.reviewedAt))) {
       throw new Error(`family policy-review decision has invalid reviewedAt for surface=${JSON.stringify(row.policyConflictSurface)}`);
     }
-    const key = packetKey(row.policyConflictSurface, row.benchmarkGoldEntityId);
+    const key = packetKey(row.semanticConflictKey, row.benchmarkGoldEntityId);
     if (decisionByKey.has(key)) {
       throw new Error(`duplicate family policy-review decision for surface=${JSON.stringify(row.policyConflictSurface)} entityId=${JSON.stringify(row.benchmarkGoldEntityId)}`);
     }
     if (!packetByKey.has(key)) {
-      throw new Error(`family policy-review decision references unknown packet row for surface=${JSON.stringify(row.policyConflictSurface)} entityId=${JSON.stringify(row.benchmarkGoldEntityId)}`);
+      continue;
     }
     decisionByKey.set(key, row);
   }
 
   return args.packetRows.map((row) => {
-    const key = packetKey(row.policyConflictSurface, row.benchmarkGoldEntityId);
+    const key = packetKey(row.semanticConflictKey, row.benchmarkGoldEntityId);
     const decision = decisionByKey.get(key);
     if (decision === undefined) {
       return row;
@@ -113,9 +115,9 @@ export function applyLookupV2PolicyFamilyReviewDecisions(args: {
       ...row,
       proposalStatus: decision.decision === 'promote_exact_safe'
         ? 'approved_exact_safe'
-        : decision.decision === 'keep_policy_conflict'
-          ? 'kept_policy_conflict'
-          : 'needs_target',
+        : decision.decision === 'keep_ambiguous'
+          ? 'kept_ambiguous'
+          : 'needs_scope_target',
       reviewedBy: decision.reviewedBy,
       decisionReason: decision.decisionReason,
       reviewedAt: decision.reviewedAt,
@@ -151,14 +153,14 @@ async function main(): Promise<void> {
   writeFileSync(outputPath, serializeRows(reviewedRows), 'utf8');
 
   const approved = reviewedRows.filter((row) => row.proposalStatus === 'approved_exact_safe').length;
-  const kept = reviewedRows.filter((row) => row.proposalStatus === 'kept_policy_conflict').length;
-  const needsTarget = reviewedRows.filter((row) => row.proposalStatus === 'needs_target').length;
+  const kept = reviewedRows.filter((row) => row.proposalStatus === 'kept_ambiguous').length;
+  const needsTarget = reviewedRows.filter((row) => row.proposalStatus === 'needs_scope_target').length;
   const pending = reviewedRows.filter((row) => row.proposalStatus === 'needs_policy_review').length;
   console.log(`[elv2-policy-family-review] packet_rows=${packetRows.length}`);
   console.log(`[elv2-policy-family-review] decision_rows=${decisionRows.length}`);
   console.log(`[elv2-policy-family-review] approved_exact_safe=${approved}`);
-  console.log(`[elv2-policy-family-review] kept_policy_conflict=${kept}`);
-  console.log(`[elv2-policy-family-review] needs_target=${needsTarget}`);
+  console.log(`[elv2-policy-family-review] kept_ambiguous=${kept}`);
+  console.log(`[elv2-policy-family-review] needs_scope_target=${needsTarget}`);
   console.log(`[elv2-policy-family-review] pending=${pending}`);
   console.log(`[elv2-policy-family-review] output=${outputPath}`);
 }

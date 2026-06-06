@@ -8,11 +8,14 @@ describe('manual-target family suggestions', () => {
   it('builds assign/collision/missing suggestions from runtime owner evidence', () => {
     const packetRows = [
       {
+        reviewScopeKey: 'calon segur::translation::realworld_korean_orthography',
         benchmarkGoldHint: 'calon segur',
         normalizedBenchmarkGoldHint: 'calon segur',
         benchmarkGoldHintVariants: ['calon segur'],
         proposalStatus: 'needs_target_review',
         reviewTarget: 'lookup_manual_target_resolution_v1',
+        scopeHoleClass: 'realworld_korean_orthography',
+        scopeSuggestedAliasType: 'translation',
         scopeRisk: 'family_only',
         locales: ['ko'],
         surfaces: ['칼롱 세귀르'],
@@ -24,11 +27,14 @@ describe('manual-target family suggestions', () => {
         proposedAt: '2026-06-06T00:00:00.000Z',
       },
       {
+        reviewScopeKey: 'angelus::translation::realworld_korean_orthography',
         benchmarkGoldHint: 'angelus',
         normalizedBenchmarkGoldHint: 'angelus',
         benchmarkGoldHintVariants: ['angelus'],
         proposalStatus: 'needs_target_review',
         reviewTarget: 'lookup_manual_target_resolution_v1',
+        scopeHoleClass: 'realworld_korean_orthography',
+        scopeSuggestedAliasType: 'translation',
         scopeRisk: 'family_only',
         locales: ['ko'],
         surfaces: ['앙젤루스'],
@@ -40,11 +46,14 @@ describe('manual-target family suggestions', () => {
         proposedAt: '2026-06-06T00:00:00.000Z',
       },
       {
+        reviewScopeKey: 'salon::canonical::realworld_exact_vintage',
         benchmarkGoldHint: 'salon',
         normalizedBenchmarkGoldHint: 'salon',
         benchmarkGoldHintVariants: ['salon'],
         proposalStatus: 'needs_target_review',
         reviewTarget: 'lookup_manual_target_resolution_v1',
+        scopeHoleClass: 'realworld_exact_vintage',
+        scopeSuggestedAliasType: 'canonical',
         scopeRisk: 'mixed_vintage_family',
         locales: ['ko'],
         surfaces: ['살롱 2012'],
@@ -64,6 +73,21 @@ describe('manual-target family suggestions', () => {
         ['wine-a', 'Calon Segur 2010'],
         ['wine-b', 'Angelus 2012'],
         ['wine-c', 'Angelus 2015'],
+      ]),
+      entityProducers: new Map([
+        ['wine-a', 'Chateau Calon-Segur'],
+        ['wine-b', 'Chateau Angelus'],
+        ['wine-c', 'Chateau Angelus'],
+      ]),
+      entityRegions: new Map([
+        ['wine-a', 'France'],
+        ['wine-b', 'France'],
+        ['wine-c', 'France'],
+      ]),
+      entityAppellations: new Map([
+        ['wine-a', 'Saint-Estephe'],
+        ['wine-b', 'Saint-Emilion'],
+        ['wine-c', 'Saint-Emilion'],
       ]),
       uniqueOwnerWitnesses: new Map([
         ['calon segur', [
@@ -92,8 +116,11 @@ describe('manual-target family suggestions', () => {
 
     expect(suggestions).toEqual([
       {
+        reviewScopeKey: 'angelus::translation::realworld_korean_orthography',
         benchmarkGoldHint: 'angelus',
         normalizedBenchmarkGoldHint: 'angelus',
+        scopeHoleClass: 'realworld_korean_orthography',
+        scopeSuggestedAliasType: 'translation',
         scopeRisk: 'family_only',
         suggestionStatus: 'collision_candidates',
         candidateEntityIds: ['wine-b', 'wine-c'],
@@ -113,8 +140,11 @@ describe('manual-target family suggestions', () => {
         sourceEvidence: 'runtime_colliding_surface_owner',
       },
       {
+        reviewScopeKey: 'calon segur::translation::realworld_korean_orthography',
         benchmarkGoldHint: 'calon segur',
         normalizedBenchmarkGoldHint: 'calon segur',
+        scopeHoleClass: 'realworld_korean_orthography',
+        scopeSuggestedAliasType: 'translation',
         scopeRisk: 'family_only',
         suggestionStatus: 'candidate_unique_owner',
         recommendedEntityId: 'wine-a',
@@ -129,8 +159,11 @@ describe('manual-target family suggestions', () => {
         sourceEvidence: 'runtime_unique_surface_owner',
       },
       {
+        reviewScopeKey: 'salon::canonical::realworld_exact_vintage',
         benchmarkGoldHint: 'salon',
         normalizedBenchmarkGoldHint: 'salon',
+        scopeHoleClass: 'realworld_exact_vintage',
+        scopeSuggestedAliasType: 'canonical',
         scopeRisk: 'mixed_vintage_family',
         suggestionStatus: 'missing_runtime_owner',
         sourceEvidence: 'runtime_owner_missing',

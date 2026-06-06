@@ -5,9 +5,10 @@ import type { LookupV2PolicyFamilyReviewDecisionRow } from './review-lookup-v2-p
 import type { LookupV2PolicyFamilyReviewPacketRow } from './export-lookup-v2-policy-family-review-packet.js';
 
 export interface LookupV2PolicyFamilySuggestionRow {
+  readonly semanticConflictKey: string;
   readonly policyConflictSurface: string;
   readonly benchmarkGoldEntityId: string;
-  readonly suggestionStatus: 'suggest_keep_policy_conflict' | 'manual_review';
+  readonly suggestionStatus: 'suggest_keep_ambiguous' | 'manual_review';
   readonly rationale: string;
 }
 
@@ -49,13 +50,15 @@ export function buildLookupV2PolicyFamilySuggestions(
     );
     if (isFailClosedBroadConflict) {
       return {
+        semanticConflictKey: row.semanticConflictKey,
         policyConflictSurface: row.policyConflictSurface,
         benchmarkGoldEntityId: row.benchmarkGoldEntityId,
-        suggestionStatus: 'suggest_keep_policy_conflict',
+        suggestionStatus: 'suggest_keep_ambiguous',
         rationale: `fail-closed broad conflict: type=${row.policyConflictType} authority=${row.authorityStatus} stretch=${row.stretchExpectedStatus}`,
       };
     }
     return {
+      semanticConflictKey: row.semanticConflictKey,
       policyConflictSurface: row.policyConflictSurface,
       benchmarkGoldEntityId: row.benchmarkGoldEntityId,
       suggestionStatus: 'manual_review',
@@ -71,11 +74,12 @@ export function buildLookupV2PolicyFamilySuggestedDecisionRows(
   suggestionRows: readonly LookupV2PolicyFamilySuggestionRow[],
 ): readonly LookupV2PolicyFamilyReviewDecisionRow[] {
   return suggestionRows
-    .filter((row) => row.suggestionStatus === 'suggest_keep_policy_conflict')
+    .filter((row) => row.suggestionStatus === 'suggest_keep_ambiguous')
     .map((row) => ({
+      semanticConflictKey: row.semanticConflictKey,
       policyConflictSurface: row.policyConflictSurface,
       benchmarkGoldEntityId: row.benchmarkGoldEntityId,
-      decision: 'keep_policy_conflict' as const,
+      decision: 'keep_ambiguous' as const,
       reviewedBy: 'codex:suggested',
       decisionReason: row.rationale,
       reviewedAt: new Date().toISOString(),
@@ -104,7 +108,7 @@ function main(): void {
   writeFileSync(decisionsOutputPath, decisionRows.map((row) => JSON.stringify(row)).join('\n') + (decisionRows.length > 0 ? '\n' : ''), 'utf8');
 
   console.log(`[elv2-policy-family-suggestions] input_rows=${packetRows.length}`);
-  console.log(`[elv2-policy-family-suggestions] suggest_keep_policy_conflict=${suggestionRows.filter((row) => row.suggestionStatus === 'suggest_keep_policy_conflict').length}`);
+  console.log(`[elv2-policy-family-suggestions] suggest_keep_ambiguous=${suggestionRows.filter((row) => row.suggestionStatus === 'suggest_keep_ambiguous').length}`);
   console.log(`[elv2-policy-family-suggestions] manual_review=${suggestionRows.filter((row) => row.suggestionStatus === 'manual_review').length}`);
   console.log(`[elv2-policy-family-suggestions] output=${outputPath}`);
   console.log(`[elv2-policy-family-suggestions] decisions_output=${decisionsOutputPath}`);

@@ -13,11 +13,13 @@ describe('shouldDowngradeForVintageMismatch', () => {
   it('downgrades when the query vintage differs from the candidate vintage (the cutover blocker)', () => {
     expect(shouldDowngradeForVintageMismatch('오퍼스원 2019', 'Opus One 2018')).toBe(true);
     expect(shouldDowngradeForVintageMismatch('Opus One 2019', 'Opus One 2018')).toBe(true);
+    expect(shouldDowngradeForVintageMismatch('오퍼스 원 19', 'Opus One 2018')).toBe(true);
   });
 
   it('does NOT downgrade when the vintages match', () => {
     expect(shouldDowngradeForVintageMismatch('Opus One 2018', 'Opus One 2018')).toBe(false);
     expect(shouldDowngradeForVintageMismatch('오퍼스원 2018', 'Opus One 2018')).toBe(false);
+    expect(shouldDowngradeForVintageMismatch('오퍼스 원 18', 'Opus One 2018')).toBe(false);
   });
 
   it('does NOT downgrade when the query has no explicit vintage', () => {

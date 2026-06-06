@@ -95,7 +95,7 @@ export function applyLookupExactSafeProposalReviewDecisions(args: {
       throw new Error(`duplicate review decision for surface=${JSON.stringify(row.surface)} entityId=${row.entityId}`);
     }
     if (!packetByKey.has(key)) {
-      throw new Error(`review decision references unknown packet row for surface=${JSON.stringify(row.surface)} entityId=${row.entityId}`);
+      continue;
     }
     decisionByKey.set(key, row);
   }

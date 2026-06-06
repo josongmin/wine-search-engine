@@ -3,7 +3,10 @@ import { z } from 'zod';
 import { SearchSnapshotAliasMatcher } from '../infrastructure/adapter/search-snapshot-alias-matcher.js';
 import { SearchSnapshotAmbiguityDictionary } from '../infrastructure/adapter/search-snapshot-ambiguity-dictionary.js';
 import { SearchSnapshotConceptRedirectRegistry } from '../infrastructure/adapter/search-snapshot-concept-redirect-registry.js';
+import { SearchSnapshotEntityScopeGraph } from '../infrastructure/adapter/search-snapshot-entity-scope-graph.js';
 import { SearchSnapshotExactSafeRegistry } from '../infrastructure/adapter/search-snapshot-exact-safe-registry.js';
+import { SearchSnapshotReviewedFamilyRecallRegistry } from '../infrastructure/adapter/search-snapshot-reviewed-family-recall.js';
+import { SearchSnapshotSemanticScopeRegistry } from '../infrastructure/adapter/search-snapshot-semantic-scope-registry.js';
 import { SearchSnapshotResolverProjectionLookup } from '../infrastructure/adapter/search-snapshot-resolver-projection-lookup.js';
 import { buildAliasRegistryVersion } from '../domain/alias/model/alias-registry-version.js';
 import { SEARCH_SNAPSHOT_SCHEMA_VERSION } from '../domain/shared/constants/search-snapshot.js';
@@ -13,9 +16,22 @@ import {
   parseTrustedLookupAliasRuntimeCoreArtifact,
   parseTrustedLookupAmbiguityRuntimeArtifact,
   parseTrustedLookupConceptRedirectRuntimeArtifact,
+  parseTrustedLookupEntityProjectionArtifact,
   parseTrustedLookupExactSafeRuntimeArtifact,
   parseTrustedLookupResolverProjectionArtifact,
 } from '../domain/shared/types/search-snapshot-lookup-runtime.js';
+import {
+  buildLookupSemanticDescriptorMapFromProjectionDocuments,
+  type LookupSemanticEntityDescriptor,
+} from '../domain/resolver/v2/lookup-semantic-scope.js';
+import {
+  parseTrustedLookupReviewedFamilyRecallRuntimeArtifact,
+  parseTrustedLookupScopeGraphRuntimeArtifact,
+  parseTrustedLookupSemanticScopeRuntimeArtifact,
+  type LookupReviewedFamilyRecallRuntimeEntry,
+  type LookupScopeGraphRuntimeEdge,
+  type LookupSemanticScopeRuntimeEntry,
+} from '../domain/shared/types/search-snapshot-lookup-semantic-runtime.js';
 import { createCanonicalEntityId } from '../domain/shared/types/index.js';
 import type {
   LookupResolverProjection,
@@ -41,6 +57,9 @@ const LookupRuntimeBundleManifestSchema = z.object({
     lookupExactSafeRuntimeJson: z.string().min(1),
     lookupResolverProjectionJson: z.string().min(1),
     lookupEntityProjectionJson: z.string().min(1),
+    lookupSemanticScopeRuntimeJson: z.string().min(1),
+    lookupReviewedFamilyRecallRuntimeJson: z.string().min(1),
+    lookupScopeGraphRuntimeJson: z.string().min(1),
     lookupAmbiguityRuntimeJson: z.string().min(1),
     lookupConceptRedirectRuntimeJson: z.string().min(1),
   }).passthrough(),
@@ -195,6 +214,9 @@ export interface LookupRuntimeBundle {
   readonly manifestPath: string;
   readonly aliasMatcher: SearchSnapshotAliasMatcher;
   readonly resolverProjectionLookup: LookupResolverProjectionPort;
+  readonly semanticScopeRegistry: SearchSnapshotSemanticScopeRegistry;
+  readonly reviewedFamilyRecallRegistry: SearchSnapshotReviewedFamilyRecallRegistry;
+  readonly entityScopeGraph: SearchSnapshotEntityScopeGraph;
   readonly ambiguityDictionary: SearchSnapshotAmbiguityDictionary;
   readonly conceptRedirectRegistry: SearchSnapshotConceptRedirectRegistry;
   readonly exactSafeRegistry: SearchSnapshotExactSafeRegistry;
@@ -213,6 +235,9 @@ function buildArtifactPaths(
       : {}),
     lookupExactSafeRuntimeJson: manifest.artifacts.lookupExactSafeRuntimeJson,
     lookupResolverProjectionJson: manifest.artifacts.lookupResolverProjectionJson,
+    lookupSemanticScopeRuntimeJson: manifest.artifacts.lookupSemanticScopeRuntimeJson,
+    lookupReviewedFamilyRecallRuntimeJson: manifest.artifacts.lookupReviewedFamilyRecallRuntimeJson,
+    lookupScopeGraphRuntimeJson: manifest.artifacts.lookupScopeGraphRuntimeJson,
     lookupAmbiguityRuntimeJson: manifest.artifacts.lookupAmbiguityRuntimeJson,
     lookupConceptRedirectRuntimeJson: manifest.artifacts.lookupConceptRedirectRuntimeJson,
   };
@@ -237,6 +262,30 @@ function buildResolverProjectionDocuments(
   projections: ReadonlyMap<CanonicalEntityId, LookupResolverProjection>,
 ): readonly (readonly [string, LookupResolverProjection])[] {
   return [...projections.entries()].map(([entityId, projection]) => [entityId, projection] as const);
+}
+
+function buildSemanticDescriptorEntries(
+  descriptors: ReadonlyMap<string, LookupSemanticEntityDescriptor>,
+): readonly (readonly [string, LookupSemanticEntityDescriptor])[] {
+  return [...descriptors.entries()].sort(([left], [right]) => left.localeCompare(right));
+}
+
+function buildSemanticScopeEntries(
+  entries: Readonly<Record<string, LookupSemanticScopeRuntimeEntry>>,
+): readonly (readonly [string, LookupSemanticScopeRuntimeEntry])[] {
+  return Object.entries(entries).sort(([left], [right]) => left.localeCompare(right));
+}
+
+function buildScopeGraphAdjacency(
+  adjacency: Readonly<Record<string, readonly LookupScopeGraphRuntimeEdge[]>>,
+): readonly (readonly [string, readonly LookupScopeGraphRuntimeEdge[]])[] {
+  return Object.entries(adjacency).sort(([left], [right]) => left.localeCompare(right));
+}
+
+function buildReviewedFamilyRecallEntries(
+  entries: Readonly<Record<string, LookupReviewedFamilyRecallRuntimeEntry>>,
+): readonly (readonly [string, LookupReviewedFamilyRecallRuntimeEntry])[] {
+  return Object.entries(entries).sort(([left], [right]) => left.localeCompare(right));
 }
 
 function materializeLookupRuntimeBundleFromPayload(
@@ -265,11 +314,25 @@ function materializeLookupRuntimeBundleFromPayload(
     resolverProjection.set(canonicalEntityId, projection);
   }
 
+  const semanticScopeRegistry = new SearchSnapshotSemanticScopeRegistry(
+    payload.semanticScopeEntries.map(([, entry]) => entry),
+  );
+  const reviewedFamilyRecallRegistry = new SearchSnapshotReviewedFamilyRecallRegistry(
+    payload.reviewedFamilyRecallEntries.map(([, entry]) => entry),
+  );
+  const semanticDescriptors = new Map(payload.semanticDescriptors);
+
   return {
     cacheKey,
     manifestPath,
     aliasMatcher,
     resolverProjectionLookup: new SearchSnapshotResolverProjectionLookup(resolverProjection),
+    semanticScopeRegistry,
+    reviewedFamilyRecallRegistry,
+    entityScopeGraph: new SearchSnapshotEntityScopeGraph(
+      new Map(payload.scopeGraphAdjacency),
+      semanticDescriptors,
+    ),
     ambiguityDictionary: new SearchSnapshotAmbiguityDictionary(new Map(payload.ambiguityEntries)),
     conceptRedirectRegistry: new SearchSnapshotConceptRedirectRegistry(new Map(payload.conceptRedirectEntries)),
     exactSafeRegistry: new SearchSnapshotExactSafeRegistry(
@@ -289,6 +352,10 @@ async function loadLookupRuntimeBundleFromArtifacts(
     aliasBroadRecallRuntimeRaw,
     exactSafeRuntimeRaw,
     resolverProjectionRaw,
+    entityProjectionRaw,
+    semanticScopeRuntimeRaw,
+    reviewedFamilyRecallRuntimeRaw,
+    scopeGraphRuntimeRaw,
     ambiguityRuntimeRaw,
     conceptRedirectRuntimeRaw,
   ] = await Promise.all([
@@ -298,6 +365,10 @@ async function loadLookupRuntimeBundleFromArtifacts(
       : fs.readFile(manifest.artifacts.lookupAliasBroadRecallRuntimeJson, 'utf8'),
     fs.readFile(manifest.artifacts.lookupExactSafeRuntimeJson, 'utf8'),
     fs.readFile(manifest.artifacts.lookupResolverProjectionJson, 'utf8'),
+    fs.readFile(manifest.artifacts.lookupEntityProjectionJson, 'utf8'),
+    fs.readFile(manifest.artifacts.lookupSemanticScopeRuntimeJson, 'utf8'),
+    fs.readFile(manifest.artifacts.lookupReviewedFamilyRecallRuntimeJson, 'utf8'),
+    fs.readFile(manifest.artifacts.lookupScopeGraphRuntimeJson, 'utf8'),
     fs.readFile(manifest.artifacts.lookupAmbiguityRuntimeJson, 'utf8'),
     fs.readFile(manifest.artifacts.lookupConceptRedirectRuntimeJson, 'utf8'),
   ]);
@@ -327,6 +398,25 @@ async function loadLookupRuntimeBundleFromArtifacts(
     manifest.artifacts.lookupResolverProjectionJson,
     exactSafeMaps.certificatesByEntity,
   );
+  const entityProjectionArtifact = parseTrustedLookupEntityProjectionArtifact(
+    entityProjectionRaw,
+    manifest.artifacts.lookupEntityProjectionJson,
+  );
+  const semanticScopeRuntimeArtifact = parseTrustedLookupSemanticScopeRuntimeArtifact(
+    semanticScopeRuntimeRaw,
+    manifest.artifacts.lookupSemanticScopeRuntimeJson,
+  );
+  const reviewedFamilyRecallRuntimeArtifact = parseTrustedLookupReviewedFamilyRecallRuntimeArtifact(
+    reviewedFamilyRecallRuntimeRaw,
+    manifest.artifacts.lookupReviewedFamilyRecallRuntimeJson,
+  );
+  const scopeGraphRuntimeArtifact = parseTrustedLookupScopeGraphRuntimeArtifact(
+    scopeGraphRuntimeRaw,
+    manifest.artifacts.lookupScopeGraphRuntimeJson,
+  );
+  const semanticDescriptorMap = buildLookupSemanticDescriptorMapFromProjectionDocuments(
+    entityProjectionArtifact.documents,
+  );
   const ambiguityEntries = buildAmbiguityMap(
     ambiguityRuntimeRaw,
     manifest.artifacts.lookupAmbiguityRuntimeJson,
@@ -347,6 +437,10 @@ async function loadLookupRuntimeBundleFromArtifacts(
       : {}),
     ...buildExactSafeEntryLists(exactSafeMaps),
     resolverProjectionDocuments: buildResolverProjectionDocuments(resolverProjection),
+    semanticDescriptors: buildSemanticDescriptorEntries(semanticDescriptorMap),
+    semanticScopeEntries: buildSemanticScopeEntries(semanticScopeRuntimeArtifact.entries),
+    reviewedFamilyRecallEntries: buildReviewedFamilyRecallEntries(reviewedFamilyRecallRuntimeArtifact.entries),
+    scopeGraphAdjacency: buildScopeGraphAdjacency(scopeGraphRuntimeArtifact.adjacency),
     ambiguityEntries: [...ambiguityEntries.entries()],
     conceptRedirectEntries: [...conceptRedirectEntries.entries()],
   });
@@ -401,6 +495,10 @@ export async function backfillLookupRuntimeBundleCacheFromManifest(
     aliasBroadRecallRuntimeRaw,
     exactSafeRuntimeRaw,
     resolverProjectionRaw,
+    entityProjectionRaw,
+    semanticScopeRuntimeRaw,
+    reviewedFamilyRecallRuntimeRaw,
+    scopeGraphRuntimeRaw,
     ambiguityRuntimeRaw,
     conceptRedirectRuntimeRaw,
   ] = await Promise.all([
@@ -410,6 +508,10 @@ export async function backfillLookupRuntimeBundleCacheFromManifest(
       : fs.readFile(manifest.artifacts.lookupAliasBroadRecallRuntimeJson, 'utf8'),
     fs.readFile(manifest.artifacts.lookupExactSafeRuntimeJson, 'utf8'),
     fs.readFile(manifest.artifacts.lookupResolverProjectionJson, 'utf8'),
+    fs.readFile(manifest.artifacts.lookupEntityProjectionJson, 'utf8'),
+    fs.readFile(manifest.artifacts.lookupSemanticScopeRuntimeJson, 'utf8'),
+    fs.readFile(manifest.artifacts.lookupReviewedFamilyRecallRuntimeJson, 'utf8'),
+    fs.readFile(manifest.artifacts.lookupScopeGraphRuntimeJson, 'utf8'),
     fs.readFile(manifest.artifacts.lookupAmbiguityRuntimeJson, 'utf8'),
     fs.readFile(manifest.artifacts.lookupConceptRedirectRuntimeJson, 'utf8'),
   ]);
@@ -438,6 +540,25 @@ export async function backfillLookupRuntimeBundleCacheFromManifest(
     manifest.artifacts.lookupResolverProjectionJson,
     exactSafeMaps.certificatesByEntity,
   );
+  const entityProjectionArtifact = parseTrustedLookupEntityProjectionArtifact(
+    entityProjectionRaw,
+    manifest.artifacts.lookupEntityProjectionJson,
+  );
+  const semanticScopeRuntimeArtifact = parseTrustedLookupSemanticScopeRuntimeArtifact(
+    semanticScopeRuntimeRaw,
+    manifest.artifacts.lookupSemanticScopeRuntimeJson,
+  );
+  const reviewedFamilyRecallRuntimeArtifact = parseTrustedLookupReviewedFamilyRecallRuntimeArtifact(
+    reviewedFamilyRecallRuntimeRaw,
+    manifest.artifacts.lookupReviewedFamilyRecallRuntimeJson,
+  );
+  const scopeGraphRuntimeArtifact = parseTrustedLookupScopeGraphRuntimeArtifact(
+    scopeGraphRuntimeRaw,
+    manifest.artifacts.lookupScopeGraphRuntimeJson,
+  );
+  const semanticDescriptorMap = buildLookupSemanticDescriptorMapFromProjectionDocuments(
+    entityProjectionArtifact.documents,
+  );
   const ambiguityEntries = buildAmbiguityMap(
     ambiguityRuntimeRaw,
     manifest.artifacts.lookupAmbiguityRuntimeJson,
@@ -458,7 +579,11 @@ export async function backfillLookupRuntimeBundleCacheFromManifest(
         ? { aliasBroadRecallRuntimeArtifact }
         : {}),
       ...buildExactSafeEntryLists(exactSafeMaps),
-      resolverProjectionDocuments: buildResolverProjectionDocuments(resolverProjection),
+    resolverProjectionDocuments: buildResolverProjectionDocuments(resolverProjection),
+    semanticDescriptors: buildSemanticDescriptorEntries(semanticDescriptorMap),
+    semanticScopeEntries: buildSemanticScopeEntries(semanticScopeRuntimeArtifact.entries),
+    reviewedFamilyRecallEntries: buildReviewedFamilyRecallEntries(reviewedFamilyRecallRuntimeArtifact.entries),
+    scopeGraphAdjacency: buildScopeGraphAdjacency(scopeGraphRuntimeArtifact.adjacency),
       ambiguityEntries: [...ambiguityEntries.entries()],
       conceptRedirectEntries: [...conceptRedirectEntries.entries()],
     }),

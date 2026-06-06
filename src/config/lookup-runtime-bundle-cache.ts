@@ -7,11 +7,17 @@ import type {
   LookupConceptRedirectInfo,
   LookupExactSafeMatch,
 } from '../domain/resolver/v2/lookup-v2-types.js';
+import type { LookupSemanticEntityDescriptor } from '../domain/resolver/v2/lookup-semantic-scope.js';
 import type {
   LookupAliasBroadRecallRuntimeArtifact,
   LookupAliasRuntimeArtifact,
   LookupAliasRuntimeCoreArtifact,
 } from '../domain/shared/types/search-snapshot-lookup-runtime.js';
+import type {
+  LookupReviewedFamilyRecallRuntimeEntry,
+  LookupScopeGraphRuntimeEdge,
+  LookupSemanticScopeRuntimeEntry,
+} from '../domain/shared/types/search-snapshot-lookup-semantic-runtime.js';
 
 const LOOKUP_RUNTIME_BUNDLE_CACHE_SCHEMA_VERSION = 'lookup_runtime_bundle_cache.v1' as const;
 
@@ -20,6 +26,9 @@ export interface LookupRuntimeBundleCacheArtifactPaths {
   readonly lookupAliasBroadRecallRuntimeJson?: string;
   readonly lookupExactSafeRuntimeJson: string;
   readonly lookupResolverProjectionJson: string;
+  readonly lookupSemanticScopeRuntimeJson: string;
+  readonly lookupReviewedFamilyRecallRuntimeJson: string;
+  readonly lookupScopeGraphRuntimeJson: string;
   readonly lookupAmbiguityRuntimeJson: string;
   readonly lookupConceptRedirectRuntimeJson: string;
 }
@@ -40,6 +49,10 @@ export interface LookupRuntimeBundleCachePayload {
   readonly exactEntries: readonly (readonly [string, LookupExactSafeMatch])[];
   readonly compactEntries: readonly (readonly [string, LookupExactSafeMatch])[];
   readonly resolverProjectionDocuments: readonly (readonly [string, LookupResolverProjection])[];
+  readonly semanticDescriptors: readonly (readonly [string, LookupSemanticEntityDescriptor])[];
+  readonly semanticScopeEntries: readonly (readonly [string, LookupSemanticScopeRuntimeEntry])[];
+  readonly reviewedFamilyRecallEntries: readonly (readonly [string, LookupReviewedFamilyRecallRuntimeEntry])[];
+  readonly scopeGraphAdjacency: readonly (readonly [string, readonly LookupScopeGraphRuntimeEdge[]])[];
   readonly ambiguityEntries: readonly (readonly [string, AmbiguityInfo])[];
   readonly conceptRedirectEntries: readonly (readonly [string, LookupConceptRedirectInfo])[];
 }
@@ -68,6 +81,10 @@ export function buildLookupRuntimeBundleCachePayload(args: {
   readonly exactEntries: readonly (readonly [string, LookupExactSafeMatch])[];
   readonly compactEntries: readonly (readonly [string, LookupExactSafeMatch])[];
   readonly resolverProjectionDocuments: readonly (readonly [string, LookupResolverProjection])[];
+  readonly semanticDescriptors?: readonly (readonly [string, LookupSemanticEntityDescriptor])[];
+  readonly semanticScopeEntries?: readonly (readonly [string, LookupSemanticScopeRuntimeEntry])[];
+  readonly reviewedFamilyRecallEntries?: readonly (readonly [string, LookupReviewedFamilyRecallRuntimeEntry])[];
+  readonly scopeGraphAdjacency?: readonly (readonly [string, readonly LookupScopeGraphRuntimeEdge[]])[];
   readonly ambiguityEntries: readonly (readonly [string, AmbiguityInfo])[];
   readonly conceptRedirectEntries: readonly (readonly [string, LookupConceptRedirectInfo])[];
 }): LookupRuntimeBundleCachePayload {
@@ -84,6 +101,10 @@ export function buildLookupRuntimeBundleCachePayload(args: {
     exactEntries: args.exactEntries,
     compactEntries: args.compactEntries,
     resolverProjectionDocuments: args.resolverProjectionDocuments,
+    semanticDescriptors: args.semanticDescriptors ?? [],
+    semanticScopeEntries: args.semanticScopeEntries ?? [],
+    reviewedFamilyRecallEntries: args.reviewedFamilyRecallEntries ?? [],
+    scopeGraphAdjacency: args.scopeGraphAdjacency ?? [],
     ambiguityEntries: args.ambiguityEntries,
     conceptRedirectEntries: args.conceptRedirectEntries,
   };
@@ -126,6 +147,10 @@ export async function writeLookupRuntimeBundleCache(
       exactEntries: payload.exactEntries.length,
       compactEntries: payload.compactEntries.length,
       resolverProjectionDocuments: payload.resolverProjectionDocuments.length,
+      semanticDescriptors: payload.semanticDescriptors.length,
+      semanticScopeEntries: payload.semanticScopeEntries.length,
+      reviewedFamilyRecallEntries: payload.reviewedFamilyRecallEntries.length,
+      scopeGraphAdjacency: payload.scopeGraphAdjacency.length,
       ambiguityEntries: payload.ambiguityEntries.length,
       conceptRedirectEntries: payload.conceptRedirectEntries.length,
     },
@@ -177,6 +202,18 @@ function validateLookupRuntimeBundleCachePayload(
   }
   if (!Array.isArray(payload.resolverProjectionDocuments)) {
     throw new Error('cache resolverProjectionDocuments is not an array');
+  }
+  if (!Array.isArray(payload.semanticDescriptors)) {
+    throw new Error('cache semanticDescriptors is not an array');
+  }
+  if (!Array.isArray(payload.semanticScopeEntries)) {
+    throw new Error('cache semanticScopeEntries is not an array');
+  }
+  if (!Array.isArray(payload.reviewedFamilyRecallEntries)) {
+    throw new Error('cache reviewedFamilyRecallEntries is not an array');
+  }
+  if (!Array.isArray(payload.scopeGraphAdjacency)) {
+    throw new Error('cache scopeGraphAdjacency is not an array');
   }
   if (!Array.isArray(payload.ambiguityEntries)) {
     throw new Error('cache ambiguityEntries is not an array');

@@ -41,6 +41,7 @@ describe('buildLookupV2CurationDraftRows', () => {
       '2026-06-05T00:00:00.000Z',
       new Map([['mouton', 'wine-ce-7ad85be72e30da173b87702175d8423ebfad6b8834d0b6ff794d2d4a62573e0e']]),
       new Map(),
+      new Map(),
       new Map([
         ['mouton', {
           surface: '무통',
@@ -106,6 +107,7 @@ describe('buildLookupV2CurationDraftRows', () => {
       '2026-06-05T00:00:00.000Z',
       new Map([['latour', 'wine-ce-latour']]),
       new Map(),
+      new Map(),
       new Map([
         ['latour', {
           surface: '라뚜르',
@@ -145,6 +147,7 @@ describe('buildLookupV2CurationDraftRows', () => {
       ],
       '/tmp/sample-coverage.json',
       '2026-06-05T00:00:00.000Z',
+      new Map(),
       new Map(),
       new Map(),
       new Map([
@@ -188,9 +191,12 @@ describe('buildLookupV2CurationDraftRows', () => {
       '2026-06-05T00:00:00.000Z',
       new Map(),
       new Map([
-        ['petrus', {
+        ['petrus::canonical::realworld_korean_orthography', {
+          reviewScopeKey: 'petrus::canonical::realworld_korean_orthography',
           benchmarkGoldHint: 'petrus',
           normalizedBenchmarkGoldHint: 'petrus',
+          scopeHoleClass: 'realworld_korean_orthography',
+          scopeSuggestedAliasType: 'canonical',
           entityId: 'wine-ce-petrus',
           decisionStatus: 'approved',
           reviewedBy: 'codex',
@@ -199,6 +205,7 @@ describe('buildLookupV2CurationDraftRows', () => {
           evidenceClass: 'fixture_exact',
         }],
       ]),
+      new Map(),
       new Map(),
       new Map(),
     );
@@ -226,6 +233,7 @@ describe('buildLookupV2CurationDraftRows', () => {
       '/tmp/sample-coverage.json',
       '2026-06-05T00:00:00.000Z',
       new Map([['latour', 'wine-ce-latour']]),
+      new Map(),
       new Map(),
       new Map([
         ['latour', {
@@ -278,6 +286,7 @@ describe('buildLookupV2CurationDraftRows', () => {
       new Map(),
       new Map(),
       new Map(),
+      new Map(),
     );
 
     expect(row).toEqual(expect.objectContaining({
@@ -287,5 +296,187 @@ describe('buildLookupV2CurationDraftRows', () => {
       triageBucket: 'manual_target',
     }));
     expect(row).not.toHaveProperty('benchmarkGoldEntityId');
+  });
+
+  it('routes reviewed rejected family-target scopes out of the blind manual_target queue', () => {
+    const [row] = buildLookupV2CurationDraftRows(
+      [
+        {
+          surfaceForm: '샤또 오존',
+          holeClass: 'realworld_producer_prefixed',
+          observedStatus: 'failed',
+          suggestedAliasType: 'canonical',
+          status: 'needs_target',
+          benchmarkGoldHint: 'ausone',
+          reason: 'Hot-entity coverage hole',
+        },
+      ],
+      '/tmp/sample-coverage.json',
+      '2026-06-06T00:00:00.000Z',
+      new Map(),
+      new Map(),
+      new Map([
+        ['ausone::canonical::realworld_producer_prefixed', {
+          reviewScopeKey: 'ausone::canonical::realworld_producer_prefixed',
+          benchmarkGoldHint: 'ausone',
+          normalizedBenchmarkGoldHint: 'ausone',
+          scopeHoleClass: 'realworld_producer_prefixed',
+          scopeSuggestedAliasType: 'canonical',
+          decisionStatus: 'rejected',
+          reviewedBy: 'codex',
+          reviewedAt: '2026-06-06T00:00:00.000Z',
+          decisionReason: 'active catalog only exposes Chapelle d’Ausone; generic Ausone family cannot be safely targeted',
+          evidenceClass: 'manual_target_family_review',
+        }],
+      ]),
+      new Map(),
+      new Map(),
+    );
+
+    expect(row).toEqual(expect.objectContaining({
+      benchmarkGoldHint: 'ausone',
+      triageBucket: 'reviewed_rejected',
+    }));
+    expect(row).not.toHaveProperty('benchmarkGoldEntityId');
+  });
+
+  it('routes reviewed catalog-support absent families into catalog_absent instead of manual_target', () => {
+    const [row] = buildLookupV2CurationDraftRows(
+      [
+        {
+          surfaceForm: '살롱 샴페인',
+          holeClass: 'realworld_brand_suffix',
+          observedStatus: 'failed',
+          suggestedAliasType: 'canonical',
+          status: 'needs_target',
+          benchmarkGoldHint: 'salon',
+          reason: 'Hot-entity coverage hole',
+        },
+      ],
+      '/tmp/sample-coverage.json',
+      '2026-06-07T00:00:00.000Z',
+      new Map(),
+      new Map(),
+      new Map(),
+      new Map(),
+      new Map(),
+      new Map([
+        ['salon', {
+          benchmarkGoldHint: 'salon',
+          normalizedBenchmarkGoldHint: 'salon',
+          supportStatus: 'active_catalog_absent',
+          reviewedBy: 'codex',
+          reviewedAt: '2026-06-07T00:00:00.000Z',
+          decisionReason: 'active catalog lacks reviewed Salon witness surface',
+          evidenceClass: 'catalog_support_review',
+        }],
+      ]),
+    );
+
+    expect(row).toEqual(expect.objectContaining({
+      benchmarkGoldHint: 'salon',
+      triageBucket: 'catalog_absent',
+      supportStatus: 'active_catalog_absent',
+    }));
+    expect(row).not.toHaveProperty('benchmarkGoldEntityId');
+  });
+
+  it('routes reviewed family collisions into reviewed_collision instead of manual_target', () => {
+    const [row] = buildLookupV2CurationDraftRows(
+      [
+        {
+          surfaceForm: '실버 오크 카베르네',
+          holeClass: 'realworld_brand_suffix',
+          observedStatus: 'failed',
+          suggestedAliasType: 'canonical',
+          status: 'needs_target',
+          benchmarkGoldHint: 'silver oak',
+          reason: 'Hot-entity coverage hole',
+        },
+      ],
+      '/tmp/sample-coverage.json',
+      '2026-06-07T00:00:00.000Z',
+      new Map(),
+      new Map(),
+      new Map(),
+      new Map(),
+      new Map(),
+      new Map(),
+      new Map([
+        ['silver oak', {
+          benchmarkGoldHint: 'silver oak',
+          normalizedBenchmarkGoldHint: 'silver oak',
+          collisionStatus: 'active_entity_collision',
+          reviewedBy: 'codex',
+          reviewedAt: '2026-06-07T00:00:00.000Z',
+          decisionReason: 'active runtime exposes Napa and Alexander Valley owners',
+          evidenceClass: 'collision_support_review',
+        }],
+      ]),
+    );
+
+    expect(row).toEqual(expect.objectContaining({
+      benchmarkGoldHint: 'silver oak',
+      triageBucket: 'reviewed_collision',
+      collisionStatus: 'active_entity_collision',
+    }));
+    expect(row).not.toHaveProperty('benchmarkGoldEntityId');
+  });
+
+  it('allows scope-reviewed family targets inside reviewed_collision families', () => {
+    const [row] = buildLookupV2CurationDraftRows(
+      [
+        {
+          surfaceForm: '실버 오크 17',
+          holeClass: 'realworld_vintage_suffix',
+          observedStatus: 'failed',
+          suggestedAliasType: 'canonical',
+          status: 'needs_target',
+          benchmarkGoldHint: 'silver oak',
+          reason: 'Hot-entity coverage hole',
+        },
+      ],
+      '/tmp/sample-coverage.json',
+      '2026-06-07T00:00:00.000Z',
+      new Map(),
+      new Map([
+        ['silver oak::canonical::realworld_vintage_suffix', {
+          reviewScopeKey: 'silver oak::canonical::realworld_vintage_suffix',
+          benchmarkGoldHint: 'silver oak',
+          normalizedBenchmarkGoldHint: 'silver oak',
+          scopeHoleClass: 'realworld_vintage_suffix',
+          scopeSuggestedAliasType: 'canonical',
+          entityId: 'wine-ce-silver-oak-av',
+          decisionStatus: 'approved',
+          reviewedBy: 'codex',
+          reviewedAt: '2026-06-07T00:00:00.000Z',
+          decisionReason: 'reviewed collision scope target',
+          evidenceClass: 'reviewed_collision_family_review',
+        }],
+      ]),
+      new Map(),
+      new Map(),
+      new Map(),
+      new Map(),
+      new Map([
+        ['silver oak', {
+          benchmarkGoldHint: 'silver oak',
+          normalizedBenchmarkGoldHint: 'silver oak',
+          collisionStatus: 'active_entity_collision',
+          reviewedBy: 'codex',
+          reviewedAt: '2026-06-07T00:00:00.000Z',
+          decisionReason: 'active runtime exposes Napa and Alexander Valley owners',
+          evidenceClass: 'collision_support_review',
+        }],
+      ]),
+    );
+
+    expect(row).toEqual(expect.objectContaining({
+      benchmarkGoldHint: 'silver oak',
+      benchmarkGoldEntityId: 'wine-ce-silver-oak-av',
+      benchmarkGoldEntityIdSource: 'family_target_registry',
+      triageBucket: 'auto_targetable',
+      collisionStatus: 'active_entity_collision',
+    }));
   });
 });

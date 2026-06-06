@@ -46,7 +46,7 @@ export function buildLookupV2ManualTargetBatches(
 ): ReadonlyMap<string, readonly LookupV2CurationDraftRow[]> {
   const byClass = new Map<string, LookupV2CurationDraftRow[]>();
   for (const row of draftRows) {
-    if (row.triageBucket !== 'manual_target') {
+    if (row.triageBucket !== 'scope_target_review') {
       continue;
     }
     const next = byClass.get(row.holeClass) ?? [];

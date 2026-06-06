@@ -4,7 +4,8 @@ import type { LookupExactSafeProposalPacketRow } from './export-lookup-v2-exact-
 
 const REVIEWED_AUTHORITY_SOURCES = new Set([
   'fixture_exact',
-  'policy_family_decision_registry',
+  'semantic_scope_target_registry',
+  'semantic_policy_registry',
 ] satisfies readonly LookupExactSafeProposalPacketRow['benchmarkGoldEntityIdSource'][]);
 
 function isLookupExactSafeProposalPacketRow(value: unknown): value is LookupExactSafeProposalPacketRow {

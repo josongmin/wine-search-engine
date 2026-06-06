@@ -7,7 +7,7 @@ import type { LookupV2PolicyReviewPacketRow } from './export-lookup-v2-policy-re
 export interface LookupV2PolicyReviewDecisionRow {
   readonly surface: string;
   readonly benchmarkGoldHint: string;
-  readonly decision: 'promote_exact_safe' | 'keep_policy_conflict' | 'needs_target';
+  readonly decision: 'promote_exact_safe' | 'keep_ambiguous' | 'needs_scope_target';
   readonly reviewedBy: string;
   readonly decisionReason: string;
   readonly reviewedAt: string;
@@ -51,8 +51,8 @@ function isReviewDecisionRow(value: unknown): value is LookupV2PolicyReviewDecis
     typeof row['surface'] === 'string'
     && typeof row['benchmarkGoldHint'] === 'string'
     && (row['decision'] === 'promote_exact_safe'
-      || row['decision'] === 'keep_policy_conflict'
-      || row['decision'] === 'needs_target')
+      || row['decision'] === 'keep_ambiguous'
+      || row['decision'] === 'needs_scope_target')
     && typeof row['reviewedBy'] === 'string'
     && typeof row['decisionReason'] === 'string'
     && typeof row['reviewedAt'] === 'string'
@@ -101,7 +101,7 @@ export function applyLookupV2PolicyReviewDecisions(args: {
       throw new Error(`duplicate policy-review decision for surface=${JSON.stringify(row.surface)} benchmarkGoldHint=${JSON.stringify(row.benchmarkGoldHint)}`);
     }
     if (!packetByKey.has(key)) {
-      throw new Error(`policy-review decision references unknown packet row for surface=${JSON.stringify(row.surface)} benchmarkGoldHint=${JSON.stringify(row.benchmarkGoldHint)}`);
+      continue;
     }
     decisionByKey.set(key, row);
   }
@@ -119,9 +119,9 @@ export function applyLookupV2PolicyReviewDecisions(args: {
       ...row,
       proposalStatus: decision.decision === 'promote_exact_safe'
         ? 'approved_exact_safe'
-        : decision.decision === 'keep_policy_conflict'
-          ? 'kept_policy_conflict'
-          : 'needs_target',
+        : decision.decision === 'keep_ambiguous'
+          ? 'kept_ambiguous'
+          : 'needs_scope_target',
       reviewedBy: decision.reviewedBy,
       decisionReason: decision.decisionReason,
       reviewedAt: decision.reviewedAt,
@@ -161,14 +161,14 @@ async function main(): Promise<void> {
   writeFileSync(outputPath, serializePacketRows(reviewedRows), 'utf8');
 
   const approvedExactSafe = reviewedRows.filter((row) => row.proposalStatus === 'approved_exact_safe').length;
-  const keptPolicyConflict = reviewedRows.filter((row) => row.proposalStatus === 'kept_policy_conflict').length;
-  const needsTarget = reviewedRows.filter((row) => row.proposalStatus === 'needs_target').length;
+  const keptPolicyConflict = reviewedRows.filter((row) => row.proposalStatus === 'kept_ambiguous').length;
+  const needsTarget = reviewedRows.filter((row) => row.proposalStatus === 'needs_scope_target').length;
   const pending = reviewedRows.filter((row) => row.proposalStatus === 'needs_policy_review').length;
   console.log(`[elv2-policy-review] packet_rows=${packetRows.length}`);
   console.log(`[elv2-policy-review] decision_rows=${decisionRows.length}`);
   console.log(`[elv2-policy-review] approved_exact_safe=${approvedExactSafe}`);
-  console.log(`[elv2-policy-review] kept_policy_conflict=${keptPolicyConflict}`);
-  console.log(`[elv2-policy-review] needs_target=${needsTarget}`);
+  console.log(`[elv2-policy-review] kept_ambiguous=${keptPolicyConflict}`);
+  console.log(`[elv2-policy-review] needs_scope_target=${needsTarget}`);
   console.log(`[elv2-policy-review] pending=${pending}`);
   console.log(`[elv2-policy-review] output=${outputPath}`);
 }

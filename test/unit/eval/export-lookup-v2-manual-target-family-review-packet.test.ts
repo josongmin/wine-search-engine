@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { buildLookupV2ManualTargetFamilyReviewPacketRows } from '../../../scripts/eval/export-lookup-v2-manual-target-family-review-packet.js';
 
 describe('buildLookupV2ManualTargetFamilyReviewPacketRows', () => {
-  it('groups manual_target rows by normalized benchmark gold hint', () => {
+  it('groups scope_target_review rows by semantic scope key', () => {
     const rows = buildLookupV2ManualTargetFamilyReviewPacketRows({
       draftRows: [
         {
@@ -12,7 +12,11 @@ describe('buildLookupV2ManualTargetFamilyReviewPacketRows', () => {
           holeClass: 'realworld_korean_orthography',
           observedStatus: 'failed',
           benchmarkGoldHint: 'calon segur',
-          triageBucket: 'manual_target',
+          semanticScopeKey: 'family::calon segur::::::::::bare::ko',
+          scopeAxis: 'family',
+          familyKey: 'calon segur',
+          surfaceFormKind: 'bare',
+          triageBucket: 'scope_target_review',
           sourceArtifact: '/tmp/a.json',
           sourceEvidence: 'coverage hole A',
           reviewedAt: '2026-06-06T00:00:00.000Z',
@@ -24,7 +28,11 @@ describe('buildLookupV2ManualTargetFamilyReviewPacketRows', () => {
           holeClass: 'realworld_compact_alias',
           observedStatus: 'failed',
           benchmarkGoldHint: 'Calon Segur',
-          triageBucket: 'manual_target',
+          semanticScopeKey: 'family::calon segur::::::::::compact::ko',
+          scopeAxis: 'family',
+          familyKey: 'calon segur',
+          surfaceFormKind: 'compact',
+          triageBucket: 'scope_target_review',
           sourceArtifact: '/tmp/b.json',
           sourceEvidence: 'coverage hole B',
           reviewedAt: '2026-06-06T01:00:00.000Z',
@@ -36,7 +44,11 @@ describe('buildLookupV2ManualTargetFamilyReviewPacketRows', () => {
           holeClass: 'realworld_producer_prefixed',
           observedStatus: 'failed',
           benchmarkGoldHint: 'latour',
-          triageBucket: 'policy_review',
+          semanticScopeKey: 'family::latour::::::::::bare::ko',
+          scopeAxis: 'family',
+          familyKey: 'latour',
+          surfaceFormKind: 'bare',
+          triageBucket: 'scope_policy_review',
           sourceArtifact: '/tmp/c.json',
           sourceEvidence: 'coverage hole C',
           reviewedAt: '2026-06-06T02:00:00.000Z',
@@ -46,6 +58,9 @@ describe('buildLookupV2ManualTargetFamilyReviewPacketRows', () => {
         uniqueOwners: new Map([['calon segur', 'wine-ce-calon-segur']]),
         collidingOwners: new Map(),
         entityLabels: new Map([['wine-ce-calon-segur', 'Calon Segur 2010']]),
+        entityProducers: new Map([['wine-ce-calon-segur', 'Chateau Calon-Segur']]),
+        entityRegions: new Map([['wine-ce-calon-segur', 'France']]),
+        entityAppellations: new Map([['wine-ce-calon-segur', 'Saint-Estephe']]),
         uniqueOwnerWitnesses: new Map([
           ['calon segur', [
             {
@@ -66,19 +81,66 @@ describe('buildLookupV2ManualTargetFamilyReviewPacketRows', () => {
 
     expect(rows).toEqual([
       {
+        semanticScopeKey: 'family::calon segur::::::::::bare::ko',
+        scopeAxis: 'family',
+        familyKey: 'calon segur',
+        surfaceFormKind: 'bare',
+        reviewScopeKey: 'family::calon segur::::::::::bare::ko',
+        legacyReviewScopeKeys: ['calon segur::translation::realworld_korean_orthography'],
         benchmarkGoldHint: 'calon segur',
         normalizedBenchmarkGoldHint: 'calon segur',
-        benchmarkGoldHintVariants: ['calon segur', 'Calon Segur'],
+        benchmarkGoldHintVariants: ['calon segur'],
         proposalStatus: 'needs_target_review',
         reviewTarget: 'lookup_manual_target_resolution_v1',
+        scopeHoleClass: 'realworld_korean_orthography',
+        scopeSuggestedAliasType: 'translation',
         scopeRisk: 'family_only',
         locales: ['ko'],
-        surfaces: ['칼롱 세귀르', '칼롱세귀르'],
-        holeClasses: ['realworld_compact_alias', 'realworld_korean_orthography'],
-        suggestedAliasTypes: ['canonical', 'translation'],
-        rowCount: 2,
-        sourceArtifacts: ['/tmp/a.json', '/tmp/b.json'],
-        sourceEvidenceSamples: ['coverage hole A', 'coverage hole B'],
+        surfaces: ['칼롱 세귀르'],
+        holeClasses: ['realworld_korean_orthography'],
+        suggestedAliasTypes: ['translation'],
+        rowCount: 1,
+        sourceArtifacts: ['/tmp/a.json'],
+        sourceEvidenceSamples: ['coverage hole A'],
+        runtimeEvidenceStatus: 'candidate_unique_owner',
+        runtimeEvidenceEntityId: 'wine-ce-calon-segur',
+        runtimeEvidenceEntityLabel: 'Calon Segur 2010',
+        runtimeEvidenceWitnesses: [
+          {
+            entityId: 'wine-ce-calon-segur',
+            witnessSurface: 'Calon Segur 2010',
+            witnessSource: 'canonical_label',
+          },
+          {
+            entityId: 'wine-ce-calon-segur',
+            witnessSurface: 'Calon Segur',
+            witnessSource: 'aliases_noisy_recall',
+          },
+        ],
+        proposedAt: '2026-06-06T00:00:00.000Z',
+      },
+      {
+        semanticScopeKey: 'family::calon segur::::::::::compact::ko',
+        scopeAxis: 'family',
+        familyKey: 'calon segur',
+        surfaceFormKind: 'compact',
+        reviewScopeKey: 'family::calon segur::::::::::compact::ko',
+        legacyReviewScopeKeys: ['calon segur::canonical::realworld_compact_alias'],
+        benchmarkGoldHint: 'Calon Segur',
+        normalizedBenchmarkGoldHint: 'calon segur',
+        benchmarkGoldHintVariants: ['Calon Segur'],
+        proposalStatus: 'needs_target_review',
+        reviewTarget: 'lookup_manual_target_resolution_v1',
+        scopeHoleClass: 'realworld_compact_alias',
+        scopeSuggestedAliasType: 'canonical',
+        scopeRisk: 'family_only',
+        locales: ['ko'],
+        surfaces: ['칼롱세귀르'],
+        holeClasses: ['realworld_compact_alias'],
+        suggestedAliasTypes: ['canonical'],
+        rowCount: 1,
+        sourceArtifacts: ['/tmp/b.json'],
+        sourceEvidenceSamples: ['coverage hole B'],
         runtimeEvidenceStatus: 'candidate_unique_owner',
         runtimeEvidenceEntityId: 'wine-ce-calon-segur',
         runtimeEvidenceEntityLabel: 'Calon Segur 2010',
@@ -96,6 +158,72 @@ describe('buildLookupV2ManualTargetFamilyReviewPacketRows', () => {
         ],
         proposedAt: '2026-06-06T01:00:00.000Z',
       },
+    ]);
+  });
+
+  it('collapses mixed fixture classes that share one semantic scope into one review row', () => {
+    const rows = buildLookupV2ManualTargetFamilyReviewPacketRows({
+      draftRows: [
+        {
+          surface: '슈발 블랑 2010',
+          locale: 'ko',
+          suggestedAliasType: 'canonical',
+          holeClass: 'realworld_exact_vintage',
+          observedStatus: 'ambiguous',
+          benchmarkGoldHint: 'cheval blanc',
+          semanticScopeKey: 'family::cheval blanc::::::::::bare::ko',
+          scopeAxis: 'family',
+          familyKey: 'cheval blanc',
+          surfaceFormKind: 'bare',
+          triageBucket: 'scope_target_review',
+          sourceArtifact: '/tmp/coverage.json',
+          sourceEvidence: 'exact vintage gap',
+          reviewedAt: '2026-06-07T00:00:00.000Z',
+        },
+        {
+          surface: '슈발블랑 2015',
+          locale: 'ko',
+          suggestedAliasType: 'canonical',
+          holeClass: 'realworld_spaced_alias',
+          observedStatus: 'ambiguous',
+          benchmarkGoldHint: 'cheval blanc',
+          semanticScopeKey: 'family::cheval blanc::::::::::bare::ko',
+          scopeAxis: 'family',
+          familyKey: 'cheval blanc',
+          surfaceFormKind: 'bare',
+          triageBucket: 'scope_target_review',
+          sourceArtifact: '/tmp/coverage.json',
+          sourceEvidence: 'spaced alias gap',
+          reviewedAt: '2026-06-07T00:01:00.000Z',
+        },
+      ],
+      runtimeOwnerEvidence: {
+        uniqueOwners: new Map(),
+        collidingOwners: new Map(),
+        uniqueOwnerWitnesses: new Map(),
+        collidingOwnerWitnesses: new Map(),
+        entityLabels: new Map(),
+        entityProducers: new Map(),
+        entityRegions: new Map(),
+        entityAppellations: new Map(),
+      },
+    });
+
+    expect(rows).toEqual([
+      expect.objectContaining({
+        semanticScopeKey: 'family::cheval blanc::::::::::bare::ko',
+        reviewScopeKey: 'family::cheval blanc::::::::::bare::ko',
+        legacyReviewScopeKeys: [
+          'cheval blanc::canonical::realworld_exact_vintage',
+          'cheval blanc::canonical::realworld_spaced_alias',
+        ],
+        scopeHoleClass: 'realworld_exact_vintage',
+        scopeSuggestedAliasType: 'canonical',
+        holeClasses: ['realworld_exact_vintage', 'realworld_spaced_alias'],
+        suggestedAliasTypes: ['canonical'],
+        surfaces: ['슈발 블랑 2010', '슈발블랑 2015'],
+        rowCount: 2,
+      }),
     ]);
   });
 });

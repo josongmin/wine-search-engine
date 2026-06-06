@@ -2,15 +2,15 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import type { LookupV2PolicyFamilyReviewPacketRow } from './export-lookup-v2-policy-family-review-packet.js';
 import {
-  buildLookupV2PolicyFamilyDecisionKey,
-  DEFAULT_LOOKUP_V2_POLICY_FAMILY_DECISION_REGISTRY_PATH,
-  loadLookupV2PolicyFamilyDecisionRegistrySync,
-  serializeLookupV2PolicyFamilyDecisionRegistryRows,
-  type LookupV2PolicyFamilyDecisionRegistryRow,
-} from './lookup-v2-policy-family-decision-registry.js';
+  buildLookupV2SemanticPolicyRegistryKey,
+  DEFAULT_LOOKUP_V2_SEMANTIC_POLICY_REGISTRY_PATH,
+  loadLookupV2SemanticPolicyRegistrySync,
+  serializeLookupV2SemanticPolicyRegistryRows,
+  type LookupV2SemanticPolicyRegistryRow,
+} from './lookup-v2-semantic-policy-registry.js';
 
 interface PolicyFamilyDecisionRegistryApplyResult {
-  readonly mergedRows: readonly LookupV2PolicyFamilyDecisionRegistryRow[];
+  readonly mergedRows: readonly LookupV2SemanticPolicyRegistryRow[];
   readonly pendingRows: number;
   readonly approvedRows: number;
   readonly rejectedRows: number;
@@ -25,7 +25,7 @@ function isLookupV2PolicyFamilyReviewPacketRow(value: unknown): value is LookupV
   }
   const row = value as Record<string, unknown>;
   return (
-    typeof row['policyConflictSurface'] === 'string'
+    (typeof row['semanticConflictKey'] === 'string' || typeof row['policyConflictSurface'] === 'string')
     && typeof row['benchmarkGoldEntityId'] === 'string'
     && typeof row['proposalStatus'] === 'string'
     && typeof row['reviewTarget'] === 'string'
@@ -43,7 +43,7 @@ function parsePacketJsonl(filePath: string): readonly LookupV2PolicyFamilyReview
 
 function buildRegistryRow(
   row: LookupV2PolicyFamilyReviewPacketRow,
-): LookupV2PolicyFamilyDecisionRegistryRow {
+): LookupV2SemanticPolicyRegistryRow {
   if (row.reviewedAt === undefined || Number.isNaN(Date.parse(row.reviewedAt))) {
     throw new Error(`policy-family reviewed row is missing reviewedAt for surface=${JSON.stringify(row.policyConflictSurface)}`);
   }
@@ -55,11 +55,12 @@ function buildRegistryRow(
   }
   const decision = row.proposalStatus === 'approved_exact_safe'
     ? 'promote_exact_safe'
-    : row.proposalStatus === 'kept_policy_conflict'
-      ? 'keep_policy_conflict'
-      : 'needs_target';
+    : row.proposalStatus === 'kept_ambiguous'
+      ? 'keep_ambiguous'
+      : 'needs_scope_target';
   return {
-    policyConflictSurface: row.policyConflictSurface,
+    semanticConflictKey: row.semanticConflictKey ?? row.policyConflictSurface,
+    conflictClass: row.policyConflictType,
     entityId: row.benchmarkGoldEntityId,
     decision,
     reviewedBy: row.reviewedBy,
@@ -69,11 +70,11 @@ function buildRegistryRow(
 }
 
 function sameRegistryRow(
-  left: LookupV2PolicyFamilyDecisionRegistryRow,
-  right: LookupV2PolicyFamilyDecisionRegistryRow,
+  left: LookupV2SemanticPolicyRegistryRow,
+  right: LookupV2SemanticPolicyRegistryRow,
 ): boolean {
   return (
-    left.policyConflictSurface === right.policyConflictSurface
+    left.semanticConflictKey === right.semanticConflictKey
     && left.entityId === right.entityId
     && left.decision === right.decision
   );
@@ -81,12 +82,12 @@ function sameRegistryRow(
 
 export function applyLookupV2PolicyFamilyDecisionRegistry(args: {
   readonly familyRows: readonly LookupV2PolicyFamilyReviewPacketRow[];
-  readonly existingRegistryRows: readonly LookupV2PolicyFamilyDecisionRegistryRow[];
+  readonly existingRegistryRows: readonly LookupV2SemanticPolicyRegistryRow[];
 }): PolicyFamilyDecisionRegistryApplyResult {
   const mergedRows = args.existingRegistryRows.slice();
   const existingByKey = new Map(
     args.existingRegistryRows.map((row) => [
-      buildLookupV2PolicyFamilyDecisionKey(row.policyConflictSurface, row.entityId),
+      buildLookupV2SemanticPolicyRegistryKey(row.semanticConflictKey, row.entityId),
       row,
     ] as const),
   );
@@ -104,7 +105,7 @@ export function applyLookupV2PolicyFamilyDecisionRegistry(args: {
     }
     approvedRows += 1;
     const registryRow = buildRegistryRow(row);
-    const key = buildLookupV2PolicyFamilyDecisionKey(registryRow.policyConflictSurface, registryRow.entityId);
+    const key = buildLookupV2SemanticPolicyRegistryKey(registryRow.semanticConflictKey, registryRow.entityId);
     const existing = existingByKey.get(key);
     if (existing !== undefined) {
       if (sameRegistryRow(existing, registryRow)) {
@@ -135,17 +136,17 @@ async function main(): Promise<void> {
     args: process.argv.slice(2).filter((arg) => arg !== '--'),
     options: {
       input: { type: 'string', default: '/tmp/lookup-v2-korean-realworld-stretch-policy-family-review-reviewed.jsonl' },
-      registry: { type: 'string', default: DEFAULT_LOOKUP_V2_POLICY_FAMILY_DECISION_REGISTRY_PATH },
-      output: { type: 'string', default: '/tmp/lookup-policy-family-decision-registry-merged.jsonl' },
+      registry: { type: 'string', default: DEFAULT_LOOKUP_V2_SEMANTIC_POLICY_REGISTRY_PATH },
+      output: { type: 'string', default: '/tmp/lookup-semantic-policy-registry-merged.jsonl' },
       write: { type: 'boolean', default: false },
     },
   });
 
   const inputPath = values.input ?? '/tmp/lookup-v2-korean-realworld-stretch-policy-family-review-reviewed.jsonl';
-  const registryPath = values.registry ?? DEFAULT_LOOKUP_V2_POLICY_FAMILY_DECISION_REGISTRY_PATH;
-  const outputPath = values.output ?? '/tmp/lookup-policy-family-decision-registry-merged.jsonl';
+  const registryPath = values.registry ?? DEFAULT_LOOKUP_V2_SEMANTIC_POLICY_REGISTRY_PATH;
+  const outputPath = values.output ?? '/tmp/lookup-semantic-policy-registry-merged.jsonl';
   const familyRows = parsePacketJsonl(inputPath);
-  const existingRegistryRows = loadLookupV2PolicyFamilyDecisionRegistrySync(registryPath);
+  const existingRegistryRows = loadLookupV2SemanticPolicyRegistrySync(registryPath);
   const result = applyLookupV2PolicyFamilyDecisionRegistry({
     familyRows,
     existingRegistryRows,
@@ -155,7 +156,7 @@ async function main(): Promise<void> {
   if (values.write && result.registryConflictRows > 0) {
     throw new Error(`policy-family decision registry apply refused to write with registry_conflict_rows=${result.registryConflictRows}`);
   }
-  writeFileSync(targetPath, serializeLookupV2PolicyFamilyDecisionRegistryRows(result.mergedRows), 'utf8');
+  writeFileSync(targetPath, serializeLookupV2SemanticPolicyRegistryRows(result.mergedRows), 'utf8');
 
   console.log(`[elv2-policy-family-decision-registry-apply] pending_rows=${result.pendingRows}`);
   console.log(`[elv2-policy-family-decision-registry-apply] approved_rows=${result.approvedRows}`);

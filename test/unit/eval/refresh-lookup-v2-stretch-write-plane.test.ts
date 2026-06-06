@@ -48,6 +48,15 @@ describe('refreshLookupV2StretchWritePlaneArtifacts', () => {
         benchmarkGoldHint: 'silver oak',
         reason: 'coverage hole silver oak',
       },
+      {
+        surfaceForm: '살롱 샴페인',
+        holeClass: 'realworld_brand_suffix',
+        observedStatus: 'failed',
+        suggestedAliasType: 'canonical',
+        status: 'needs_target',
+        benchmarkGoldHint: 'salon',
+        reason: 'coverage hole salon',
+      },
     ];
 
     const summary = await refreshLookupV2StretchWritePlaneArtifacts({
@@ -60,9 +69,14 @@ describe('refreshLookupV2StretchWritePlaneArtifacts', () => {
         ['latour', 'wine-ce-latour-hint-only'],
       ]),
       familyTargetApprovedMap: new Map([
-        ['petrus', {
+        ['family::petrus::::::::::compact::ko', {
+          semanticScopeKey: 'family::petrus::::::::::compact::ko',
           benchmarkGoldHint: 'petrus',
           normalizedBenchmarkGoldHint: 'petrus',
+          scopeAxis: 'family',
+          familyKey: 'petrus',
+          surfaceFormKind: 'compact',
+          locale: 'ko',
           entityId: 'wine-ce-petrus',
           decisionStatus: 'approved',
           reviewedBy: 'registry',
@@ -85,8 +99,9 @@ describe('refreshLookupV2StretchWritePlaneArtifacts', () => {
         }],
       ]),
       policyFamilyDecisionMap: new Map([
-        ['라뚜르::wine-ce-latour', {
-          policyConflictSurface: '라뚜르',
+        ['line::latour::::::::2009::qualified::ko::wine-ce-latour', {
+          semanticConflictKey: 'line::latour::::::::2009::qualified::ko',
+          conflictClass: 'short_form_collision',
           entityId: 'wine-ce-latour',
           decision: 'promote_exact_safe',
           reviewedBy: 'registry',
@@ -94,41 +109,112 @@ describe('refreshLookupV2StretchWritePlaneArtifacts', () => {
           decisionReason: 'approved latour family decision',
         }],
       ]),
+      familySupportRegistryMap: new Map([
+        ['salon', {
+          benchmarkGoldHint: 'salon',
+          normalizedBenchmarkGoldHint: 'salon',
+          supportStatus: 'active_catalog_absent',
+          reviewedBy: 'registry',
+          reviewedAt: '2026-06-06T01:40:00.000Z',
+          decisionReason: 'active catalog lacks reviewed Salon family support',
+          evidenceClass: 'catalog_support_review',
+        }],
+      ]),
+      familyCollisionRegistryMap: new Map([
+        ['silver oak', {
+          benchmarkGoldHint: 'silver oak',
+          normalizedBenchmarkGoldHint: 'silver oak',
+          collisionStatus: 'active_entity_collision',
+          reviewedBy: 'registry',
+          reviewedAt: '2026-06-06T01:45:00.000Z',
+          decisionReason: 'active runtime exposes multiple reviewed Silver Oak owners',
+          evidenceClass: 'collision_support_review',
+        }],
+      ]),
       exactSafeRegistryRows: [],
+      exactSafeScopeRegistryMap: new Map([
+        ['wine-ce-petrus::translation::realworld_frenchish_korean_gap', {
+          reviewScopeKey: 'wine-ce-petrus::translation::realworld_frenchish_korean_gap',
+          entityId: 'wine-ce-petrus',
+          scopeHoleClass: 'realworld_frenchish_korean_gap',
+          scopeSuggestedAliasType: 'translation',
+          decisionStatus: 'rejected',
+          reviewedBy: 'registry',
+          reviewedAt: '2026-06-06T02:30:00.000Z',
+          decisionReason: 'reviewed exact-safe reject',
+          evidenceClass: 'exact_safe_family_review',
+        }],
+      ]),
       runtimeOwnerEvidence: {
-        uniqueOwners: new Map([[normalizeForMatch('silver oak'), 'wine-ce-silver-oak']]),
-        collidingOwners: new Map(),
+        uniqueOwners: new Map(),
+        collidingOwners: new Map([[normalizeForMatch('silver oak'), ['wine-ce-silver-oak-av', 'wine-ce-silver-oak-nv']]]),
+        entityProducers: new Map([
+          ['wine-ce-silver-oak-av', 'Silver Oak'],
+          ['wine-ce-silver-oak-nv', 'Silver Oak'],
+        ]),
+        entityRegions: new Map([
+          ['wine-ce-silver-oak-av', 'United States'],
+          ['wine-ce-silver-oak-nv', 'United States'],
+        ]),
+        entityAppellations: new Map([
+          ['wine-ce-silver-oak-av', 'Alexander Valley'],
+          ['wine-ce-silver-oak-nv', 'Napa Valley'],
+        ]),
         uniqueOwnerWitnesses: new Map(),
-        collidingOwnerWitnesses: new Map(),
-        entityLabels: new Map([['wine-ce-silver-oak', 'Silver Oak Cabernet Sauvignon']]),
+        collidingOwnerWitnesses: new Map([[normalizeForMatch('silver oak'), [
+          { entityId: 'wine-ce-silver-oak-av', witnessSurface: 'Silver Oak', witnessSource: 'producer' },
+          { entityId: 'wine-ce-silver-oak-nv', witnessSurface: 'Silver Oak', witnessSource: 'producer' },
+        ]]]),
+        entityLabels: new Map([
+          ['wine-ce-silver-oak-av', 'Silver Oak Alexander Valley Cabernet Sauvignon'],
+          ['wine-ce-silver-oak-nv', 'Silver Oak Napa Valley Cabernet Sauvignon'],
+        ]),
       },
     });
 
     expect(summary.draft).toEqual({
-      rows: 3,
+      rows: 4,
       autoTargetable: 2,
-      policyReview: 0,
-      manualTarget: 1,
+      scopePolicyReview: 0,
+      reviewedRejected: 0,
+      catalogAbsent: 1,
+      reviewedScopeCollision: 1,
+      scopeTargetReview: 0,
     });
     expect(summary.exactSafe.packetRows).toBe(2);
     expect(summary.exactSafe.bySource).toEqual({
-      family_target_registry: 1,
-      policy_family_decision_registry: 1,
+      semantic_policy_registry: 1,
+      semantic_scope_target_registry: 1,
     });
-    expect(summary.exactSafe.approvedRows).toBe(1);
-    expect(summary.exactSafe.pendingRows).toBe(1);
+    expect(summary.exactSafe.reviewedAuthorityApprovedRows).toBe(2);
+    expect(summary.exactSafe.reviewedAuthorityPendingRows).toBe(0);
+    expect(summary.exactSafe.scopeReviewedRowPacketRows).toBe(2);
+    expect(summary.exactSafe.familyApprovedRows).toBe(0);
+    expect(summary.exactSafe.familyRejectedRows).toBe(1);
+    expect(summary.exactSafe.familyPendingRows).toBe(1);
     expect(summary.policy.reviewRows).toBe(0);
     expect(summary.policy.familyReviewRows).toBe(0);
-    expect(summary.manualTarget.batchIndex.totalRows).toBe(1);
-    expect(summary.manualTarget.familyReviewRows).toBe(1);
+    expect(summary.manualTarget.batchIndex.totalRows).toBe(0);
+    expect(summary.manualTarget.ownerEvidenceIndex.totalRows).toBe(0);
+    expect(summary.manualTarget.ownerEvidenceFamilyIndex.totalFamilies).toBe(0);
+    expect(summary.manualTarget.ownerEvidenceFamilyIndex.candidateUniqueOwnerFamilies).toBe(0);
+    expect(summary.manualTarget.ownerEvidenceIndex.candidateUniqueOwnerRows).toBe(0);
+    expect(summary.manualTarget.familyReviewRows).toBe(0);
+    expect(summary.catalogAbsent.familyClusterIndex.totalRows).toBe(1);
+    expect(summary.catalogAbsent.familyClusterIndex.totalFamilies).toBe(1);
+    expect(summary.reviewedCollision.familyClusterIndex.totalRows).toBe(1);
+    expect(summary.reviewedCollision.familyClusterIndex.totalFamilies).toBe(1);
+    expect(summary.reviewedCollision.familyReviewRows).toBe(1);
     expect(summary.manualTarget.suggestions).toEqual({
-      candidateUniqueOwner: 1,
+      candidateUniqueOwner: 0,
       collisionCandidates: 0,
       missingRuntimeOwner: 0,
     });
 
     expect(existsSync(summary.outputPaths.summary)).toBe(true);
     expect(existsSync(summary.outputPaths.reviewedAuthorityApprovedExactSafePacket)).toBe(true);
+    expect(existsSync(summary.outputPaths.reviewedScopeExactSafePacket)).toBe(true);
+    expect(existsSync(summary.outputPaths.reviewedCollisionFamilyReviewPacket)).toBe(true);
 
     const reviewedAuthorityRows = readFileSync(
       summary.outputPaths.reviewedAuthorityApprovedExactSafePacket,
@@ -147,15 +233,39 @@ describe('refreshLookupV2StretchWritePlaneArtifacts', () => {
       expect.arrayContaining([
         expect.objectContaining({
           surface: '페트뤼스',
-          proposalStatus: 'needs_review',
-          benchmarkGoldEntityIdSource: 'family_target_registry',
+          proposalStatus: 'approved',
+          benchmarkGoldEntityIdSource: 'semantic_scope_target_registry',
         }),
         expect.objectContaining({
           surface: '라뚜르 2009',
           proposalStatus: 'approved',
-          benchmarkGoldEntityIdSource: 'policy_family_decision_registry',
+          benchmarkGoldEntityIdSource: 'semantic_policy_registry',
         }),
       ]),
     );
-  });
+
+    const reviewedScopeRows = readFileSync(
+      summary.outputPaths.reviewedScopeExactSafePacket,
+      'utf8',
+    )
+      .split('\n')
+      .filter((line) => line.trim().length > 0)
+      .map((line) => JSON.parse(line) as {
+        surface: string;
+        proposalStatus: string;
+      });
+
+    expect(reviewedScopeRows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          surface: '페트뤼스',
+          proposalStatus: 'rejected',
+        }),
+        expect.objectContaining({
+          surface: '라뚜르 2009',
+          proposalStatus: 'needs_review',
+        }),
+      ]),
+    );
+  }, 30_000);
 });

@@ -136,6 +136,13 @@ export const LOOKUP_RETRIEVAL_CHANNELS = [
   // emits co-producer siblings. Fires when the entity_family substrate is
   // populated (operator ETL); dormant otherwise.
   'family_graph',
+  // same producer, different line/cuvee siblings from the snapshot-published
+  // scope graph. Used to surface reviewed scope-local alternatives without
+  // widening to the whole producer family.
+  'line_graph',
+  // same producer+line, different vintages from the snapshot-published scope
+  // graph. Lets the reranker see vintage-local alternatives explicitly.
+  'vintage_graph',
   // dense: RESERVED — no dense/late-interaction index in the lookup lane. Emitted
   // ONLY by the reuse-path blocker-seed projection (BLOCKER_SEED_CHANNEL).
   'dense',
@@ -167,6 +174,12 @@ export interface LookupCandidate {
   readonly canonicalLabel: string;
   readonly entityType: string;
   readonly channelHits: readonly LookupChannelHit[];
+  readonly scopeFeatureHints?: {
+    readonly lineGraphProximity?: number | undefined;
+    readonly vintageGraphProximity?: number | undefined;
+    readonly scopeQualifierAgreement?: number | undefined;
+    readonly scopeAxisAgreement?: number | undefined;
+  } | undefined;
 }
 
 export interface LookupRetrievalInput {
@@ -215,6 +228,10 @@ export interface LookupCandidateFeatures {
   readonly editDistanceScore: number;
   readonly phoneticConsistency: number;
   readonly familyGraphProximity: number;
+  readonly lineGraphProximity: number;
+  readonly vintageGraphProximity: number;
+  readonly scopeQualifierAgreement: number;
+  readonly scopeAxisAgreement: number;
   readonly popularityPrior: number;
   readonly scriptLanguageConsistency: number;
   readonly ambiguityClusterMembership: number;

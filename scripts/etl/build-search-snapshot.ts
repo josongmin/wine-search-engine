@@ -61,19 +61,29 @@ import {
   buildLookupAliasRuntimeArtifacts,
   buildLookupAmbiguityRuntimeArtifact,
   buildLookupConceptRedirectRuntimeArtifact,
+  buildLookupEntityProjectionArtifact,
   buildLookupExactSafeRuntimeArtifact,
   buildLookupResolverProjectionArtifact,
-  buildLookupEntityProjectionArtifact,
 } from './build-lookup-runtime-pack.js';
+import {
+  buildLookupReviewedFamilyRecallRuntimeArtifact,
+  buildLookupScopeGraphRuntimeArtifact,
+  buildLookupSemanticScopeRuntimeArtifact,
+} from './build-lookup-semantic-runtime-pack.js';
 import {
   buildLookupAliasBroadRecallRuntimeArtifactHash,
   buildLookupAliasRuntimeCoreArtifactHash,
   buildLookupAmbiguityRuntimeArtifactHash,
   buildLookupConceptRedirectRuntimeArtifactHash,
+  buildLookupEntityProjectionArtifactHash,
   buildLookupExactSafeRuntimeArtifactHash,
   buildLookupResolverProjectionArtifactHash,
-  buildLookupEntityProjectionArtifactHash,
 } from '../../src/domain/shared/types/search-snapshot-lookup-runtime.js';
+import {
+  buildLookupReviewedFamilyRecallRuntimeArtifactHash,
+  buildLookupScopeGraphRuntimeArtifactHash,
+  buildLookupSemanticScopeRuntimeArtifactHash,
+} from '../../src/domain/shared/types/search-snapshot-lookup-semantic-runtime.js';
 import {
   buildLookupRuntimeBundleCachePayload,
   writeLookupRuntimeBundleCache,
@@ -98,7 +108,13 @@ import {
 } from './lookup-authority-registries.js';
 import { assertLookupAuthorityBoundaryConsistency } from './lookup-authority-boundaries.js';
 import { loadLookupPolicyConflictRegistrySync } from '../eval/lookup-v2-policy-conflict-registry.js';
+import { loadLookupV2FamilyCollisionRegistrySync } from '../eval/lookup-v2-family-collision-registry.js';
+import { loadLookupV2FamilyCoreWitnessRegistrySync } from '../eval/lookup-v2-family-core-witness-registry.js';
+import { loadLookupV2LocalizedSurfaceRegistrySync } from '../eval/lookup-v2-localized-surface-registry.js';
 import { loadLookupV2PolicyFamilyDecisionRegistrySync } from '../eval/lookup-v2-policy-family-decision-registry.js';
+import { loadLookupV2SemanticScopeTargetRegistrySync } from '../eval/lookup-v2-semantic-scope-target-registry.js';
+import { buildLookupV2RuntimeSemanticDescriptorMapFromDocuments } from '../eval/lookup-v2-runtime-semantic-descriptors.js';
+import { buildReviewedCollisionFamilyCoreKeysByEntity } from '../eval/lookup-v2-runtime-surface-owner-evidence.js';
 
 export const DEFAULT_INPUT = ETL_ARTIFACT_FILES.trackc;
 export const DEFAULT_OUTPUT_DIR = ETL_ARTIFACT_FILES.searchSnapshotsDir;
@@ -111,6 +127,26 @@ const REPO_GOLD_CATALOG_PATH = path.resolve(
   'data',
   'gold-wine-catalog.jsonl',
 );
+
+function buildReviewedFamilyCoreKeysByEntity(
+  reviewedFamilyCoreWitnessRows: readonly {
+    readonly entityId: string;
+    readonly normalizedSurface: string;
+  }[],
+): ReadonlyMap<CanonicalEntityId, readonly string[]> {
+  const grouped = new Map<CanonicalEntityId, Set<string>>();
+  for (const row of reviewedFamilyCoreWitnessRows) {
+    const existing = grouped.get(row.entityId as CanonicalEntityId) ?? new Set<string>();
+    existing.add(row.normalizedSurface);
+    grouped.set(row.entityId as CanonicalEntityId, existing);
+  }
+  return new Map(
+    [...grouped.entries()].map(([entityId, surfaces]) => [
+      entityId,
+      [...surfaces].sort((left, right) => left.localeCompare(right)),
+    ]),
+  );
+}
 
 const RepoGoldCatalogRowSchema = z.object({
   entityId: z.string().min(1),
@@ -1468,6 +1504,38 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     sourceContinuityLookup,
     identityCertificatesByEntity: lookupIdentityCertificatesByEntity,
   });
+  const lookupReviewedFamilyCoreWitnessRegistry = loadLookupV2FamilyCoreWitnessRegistrySync();
+  const lookupReviewedFamilyCollisionRegistry = loadLookupV2FamilyCollisionRegistrySync();
+  const lookupLocalizedSurfaceRegistry = loadLookupV2LocalizedSurfaceRegistrySync();
+  const reviewedFamilyCoreKeysByEntity = buildReviewedFamilyCoreKeysByEntity(
+    lookupReviewedFamilyCoreWitnessRegistry,
+  );
+  const provisionalLookupEntityProjectionArtifact = buildLookupEntityProjectionArtifact({
+    snapshotId: '',
+    generatedAt,
+    records: finalRecords,
+    entityIdBySourceId,
+    goldCanonicalLookup: goldLookup,
+    sourceContinuityLookup,
+    identityCertificatesByEntity: lookupIdentityCertificatesByEntity,
+    reviewedFamilyCoreKeysByEntity,
+  });
+  const reviewedCollisionFamilyCoreKeysByEntity = buildReviewedCollisionFamilyCoreKeysByEntity({
+    documents: provisionalLookupEntityProjectionArtifact.documents,
+    reviewedCollisionRows: lookupReviewedFamilyCollisionRegistry,
+    reviewedFamilyCoreWitnessRows: lookupReviewedFamilyCoreWitnessRegistry,
+  });
+  const mergedReviewedFamilyCoreKeysByEntity = new Map<CanonicalEntityId, readonly string[]>();
+  for (const [entityId, surfaces] of reviewedFamilyCoreKeysByEntity.entries()) {
+    mergedReviewedFamilyCoreKeysByEntity.set(entityId, surfaces);
+  }
+  for (const [entityId, surfaces] of reviewedCollisionFamilyCoreKeysByEntity.entries()) {
+    const existing = mergedReviewedFamilyCoreKeysByEntity.get(entityId as CanonicalEntityId) ?? [];
+    mergedReviewedFamilyCoreKeysByEntity.set(
+      entityId as CanonicalEntityId,
+      [...new Set([...existing, ...surfaces])].sort((left, right) => left.localeCompare(right)),
+    );
+  }
   const lookupEntityProjectionArtifact = buildLookupEntityProjectionArtifact({
     snapshotId: '',
     generatedAt,
@@ -1476,6 +1544,32 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     goldCanonicalLookup: goldLookup,
     sourceContinuityLookup,
     identityCertificatesByEntity: lookupIdentityCertificatesByEntity,
+    reviewedFamilyCoreKeysByEntity: mergedReviewedFamilyCoreKeysByEntity,
+  });
+  const lookupSemanticRuntimeDescriptorMap = buildLookupV2RuntimeSemanticDescriptorMapFromDocuments(
+    lookupEntityProjectionArtifact.documents,
+  );
+  const lookupSemanticScopeTargetRegistry = loadLookupV2SemanticScopeTargetRegistrySync(
+    undefined,
+    lookupSemanticRuntimeDescriptorMap,
+  );
+  const lookupSemanticScopeRuntimeArtifact = buildLookupSemanticScopeRuntimeArtifact({
+    snapshotId: '',
+    generatedAt,
+    reviewedRows: lookupSemanticScopeTargetRegistry,
+  });
+  const lookupReviewedFamilyRecallRuntimeArtifact = buildLookupReviewedFamilyRecallRuntimeArtifact({
+    snapshotId: '',
+    generatedAt,
+    entityProjectionDocuments: lookupEntityProjectionArtifact.documents,
+    reviewedCollisionRows: lookupReviewedFamilyCollisionRegistry,
+    reviewedFamilyCoreWitnessRows: lookupReviewedFamilyCoreWitnessRegistry,
+    localizedSurfaceRegistryRows: lookupLocalizedSurfaceRegistry,
+  });
+  const lookupScopeGraphRuntimeArtifact = buildLookupScopeGraphRuntimeArtifact({
+    snapshotId: '',
+    generatedAt,
+    entityProjectionDocuments: lookupEntityProjectionArtifact.documents,
   });
   const lookupAmbiguityRuntimeArtifact = buildLookupAmbiguityRuntimeArtifact({
     snapshotId: '',
@@ -1499,6 +1593,9 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     lookupExactSafeRuntime: buildLookupExactSafeRuntimeArtifactHash(lookupExactSafeRuntimeArtifact),
     lookupResolverProjection: buildLookupResolverProjectionArtifactHash(lookupResolverProjectionArtifact),
     lookupEntityProjection: buildLookupEntityProjectionArtifactHash(lookupEntityProjectionArtifact),
+    lookupSemanticScopeRuntime: buildLookupSemanticScopeRuntimeArtifactHash(lookupSemanticScopeRuntimeArtifact),
+    lookupReviewedFamilyRecallRuntime: buildLookupReviewedFamilyRecallRuntimeArtifactHash(lookupReviewedFamilyRecallRuntimeArtifact),
+    lookupScopeGraphRuntime: buildLookupScopeGraphRuntimeArtifactHash(lookupScopeGraphRuntimeArtifact),
     lookupAmbiguityRuntime: buildLookupAmbiguityRuntimeArtifactHash(lookupAmbiguityRuntimeArtifact),
     lookupConceptRedirectRuntime: buildLookupConceptRedirectRuntimeArtifactHash(lookupConceptRedirectRuntimeArtifact),
     ambiguityRegistry: ambiguityArtifactHash,
@@ -1530,6 +1627,18 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     ...lookupEntityProjectionArtifact,
     snapshotId,
   };
+  const finalizedLookupSemanticScopeRuntimeArtifact = {
+    ...lookupSemanticScopeRuntimeArtifact,
+    snapshotId,
+  };
+  const finalizedLookupReviewedFamilyRecallRuntimeArtifact = {
+    ...lookupReviewedFamilyRecallRuntimeArtifact,
+    snapshotId,
+  };
+  const finalizedLookupScopeGraphRuntimeArtifact = {
+    ...lookupScopeGraphRuntimeArtifact,
+    snapshotId,
+  };
   const finalizedLookupAmbiguityRuntimeArtifact = {
     ...lookupAmbiguityRuntimeArtifact,
     snapshotId,
@@ -1543,6 +1652,9 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
   const lookupExactSafeRuntimeJson = `${stableJsonStringify(finalizedLookupExactSafeRuntimeArtifact)}\n`;
   const lookupResolverProjectionJson = `${stableJsonStringify(finalizedLookupResolverProjectionArtifact)}\n`;
   const lookupEntityProjectionJson = `${stableJsonStringify(finalizedLookupEntityProjectionArtifact)}\n`;
+  const lookupSemanticScopeRuntimeJson = `${stableJsonStringify(finalizedLookupSemanticScopeRuntimeArtifact)}\n`;
+  const lookupReviewedFamilyRecallRuntimeJson = `${stableJsonStringify(finalizedLookupReviewedFamilyRecallRuntimeArtifact)}\n`;
+  const lookupScopeGraphRuntimeJson = `${stableJsonStringify(finalizedLookupScopeGraphRuntimeArtifact)}\n`;
   const lookupAmbiguityRuntimeJson = `${stableJsonStringify(finalizedLookupAmbiguityRuntimeArtifact)}\n`;
   const lookupConceptRedirectRuntimeJson = `${stableJsonStringify(finalizedLookupConceptRedirectRuntimeArtifact)}\n`;
   const fieldAvailability = buildFieldAvailability(finalRecords);
@@ -1570,6 +1682,9 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
       lookupExactSafeRuntimeJson: path.join(snapshotRoot, 'lookup-exact-safe-runtime.json'),
       lookupResolverProjectionJson: path.join(snapshotRoot, 'lookup-resolver-projection.json'),
       lookupEntityProjectionJson: path.join(snapshotRoot, 'lookup-entity-projection.json'),
+      lookupSemanticScopeRuntimeJson: path.join(snapshotRoot, 'lookup-semantic-scope-runtime.json'),
+      lookupReviewedFamilyRecallRuntimeJson: path.join(snapshotRoot, 'lookup-reviewed-family-recall-runtime.json'),
+      lookupScopeGraphRuntimeJson: path.join(snapshotRoot, 'lookup-scope-graph-runtime.json'),
       lookupAmbiguityRuntimeJson: path.join(snapshotRoot, 'lookup-ambiguity-runtime.json'),
       lookupConceptRedirectRuntimeJson: path.join(snapshotRoot, 'lookup-concept-redirect-runtime.json'),
       ambiguityRegistryNdjson: path.join(snapshotRoot, 'ambiguity-registry.ndjson'),
@@ -1594,6 +1709,10 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
         + Object.keys(finalizedLookupExactSafeRuntimeArtifact.compactEntries).length,
       lookupResolverProjectionDocuments: finalizedLookupResolverProjectionArtifact.documents.length,
       lookupEntityProjectionDocuments: finalizedLookupEntityProjectionArtifact.documents.length,
+      lookupSemanticScopeRuntimeEntries: Object.keys(finalizedLookupSemanticScopeRuntimeArtifact.entries).length,
+      lookupReviewedFamilyRecallRuntimeEntries: Object.keys(finalizedLookupReviewedFamilyRecallRuntimeArtifact.entries).length,
+      lookupScopeGraphRuntimeEdges: Object.values(finalizedLookupScopeGraphRuntimeArtifact.adjacency)
+        .reduce((sum, edges) => sum + edges.length, 0),
       lookupAmbiguityRuntimeEntries: Object.keys(finalizedLookupAmbiguityRuntimeArtifact.entries).length,
       lookupConceptRedirectRuntimeEntries: Object.keys(finalizedLookupConceptRedirectRuntimeArtifact.entries).length,
       ambiguityRegistry: ambiguityRows.length,
@@ -1625,6 +1744,9 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     atomicWriteFile(manifest.artifacts.lookupExactSafeRuntimeJson, lookupExactSafeRuntimeJson),
     atomicWriteFile(manifest.artifacts.lookupResolverProjectionJson, lookupResolverProjectionJson),
     atomicWriteFile(manifest.artifacts.lookupEntityProjectionJson, lookupEntityProjectionJson),
+    atomicWriteFile(manifest.artifacts.lookupSemanticScopeRuntimeJson, lookupSemanticScopeRuntimeJson),
+    atomicWriteFile(manifest.artifacts.lookupReviewedFamilyRecallRuntimeJson, lookupReviewedFamilyRecallRuntimeJson),
+    atomicWriteFile(manifest.artifacts.lookupScopeGraphRuntimeJson, lookupScopeGraphRuntimeJson),
     atomicWriteFile(manifest.artifacts.lookupAmbiguityRuntimeJson, lookupAmbiguityRuntimeJson),
     atomicWriteFile(manifest.artifacts.lookupConceptRedirectRuntimeJson, lookupConceptRedirectRuntimeJson),
     atomicWriteFile(manifest.artifacts.ambiguityRegistryNdjson, ambiguityNdjson),
@@ -1632,6 +1754,12 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     atomicWriteFile(manifest.artifacts.metadataJson, `${JSON.stringify(metadata, null, 2)}\n`),
     atomicWriteFile(path.join(snapshotRoot, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`),
   ]);
+
+  const finalizedSemanticDescriptors = [
+    ...buildLookupV2RuntimeSemanticDescriptorMapFromDocuments(
+      finalizedLookupEntityProjectionArtifact.documents,
+    ).entries(),
+  ];
 
   await writeLookupRuntimeBundleCache(
     buildLookupRuntimeBundleCachePayload({
@@ -1643,6 +1771,9 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
         lookupAliasBroadRecallRuntimeJson: manifest.artifacts.lookupAliasBroadRecallRuntimeJson,
         lookupExactSafeRuntimeJson: manifest.artifacts.lookupExactSafeRuntimeJson,
         lookupResolverProjectionJson: manifest.artifacts.lookupResolverProjectionJson,
+        lookupSemanticScopeRuntimeJson: manifest.artifacts.lookupSemanticScopeRuntimeJson,
+        lookupReviewedFamilyRecallRuntimeJson: manifest.artifacts.lookupReviewedFamilyRecallRuntimeJson,
+        lookupScopeGraphRuntimeJson: manifest.artifacts.lookupScopeGraphRuntimeJson,
         lookupAmbiguityRuntimeJson: manifest.artifacts.lookupAmbiguityRuntimeJson,
         lookupConceptRedirectRuntimeJson: manifest.artifacts.lookupConceptRedirectRuntimeJson,
       },
@@ -1679,6 +1810,10 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
           entityId: createCanonicalEntityId(doc.entityId),
         },
       ] as const),
+      semanticDescriptors: finalizedSemanticDescriptors,
+      semanticScopeEntries: Object.entries(finalizedLookupSemanticScopeRuntimeArtifact.entries),
+      reviewedFamilyRecallEntries: Object.entries(finalizedLookupReviewedFamilyRecallRuntimeArtifact.entries),
+      scopeGraphAdjacency: Object.entries(finalizedLookupScopeGraphRuntimeArtifact.adjacency),
       ambiguityEntries: Object.entries(finalizedLookupAmbiguityRuntimeArtifact.entries).map(([normalizedForm, entry]) => [
         normalizedForm,
         {

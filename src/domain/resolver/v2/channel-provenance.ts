@@ -63,6 +63,8 @@ export function mapLookupStrategyToChannel(strategy: string): LookupRetrievalCha
     s.includes('fuzzy') || s.includes('ngram') || s.includes('trigram') || s.includes('edit') ||
     s.includes('inexact') || s.includes('lexical') || s.includes('prefix')
   ) return 'fuzzy_alias';
+  if (s.includes('vintage')) return 'vintage_graph';
+  if (s.includes('line')) return 'line_graph';
   if (s.includes('family')) return 'family_graph';
   if (s.includes('semantic') || s.includes('dense')) return 'dense';
   if (s.includes('exact') || s.includes('canonical') || s.includes('alias')) return 'exact_alias';

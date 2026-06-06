@@ -49,6 +49,12 @@ describe('Transliterator', () => {
       expect(Transliterator.romanizeWineTermPrefix('오퍼스ㅇ')).toBe('opus one');
       expect(Transliterator.romanizeWineTermPrefix('오푸스')).toBe('opus one');
     });
+
+    it('romanizes curated Korean family surfaces for Masseto and Pichon Lalande', () => {
+      expect(Transliterator.romanizeWineTerm('마세토')).toBe('masseto');
+      expect(Transliterator.romanizeWineTerm('피숑 라랑드')).toBe('pichon lalande');
+      expect(Transliterator.romanizeWineTerm('샤또 피숑 라랑드')).toBe('chateau pichon lalande');
+    });
   });
 
   describe('generateAliases', () => {

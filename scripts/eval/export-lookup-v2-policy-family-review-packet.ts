@@ -4,6 +4,7 @@ import { parseArgs } from 'node:util';
 import type { LookupV2PolicyReviewPacketRow } from './export-lookup-v2-policy-review-packet.js';
 
 export interface LookupV2PolicyFamilyReviewPacketRow {
+  readonly semanticConflictKey: string;
   readonly policyConflictSurface: string;
   readonly locale: 'ko' | 'global';
   readonly policyConflictType: LookupV2PolicyReviewPacketRow['policyConflictType'];
@@ -40,6 +41,7 @@ function isLookupV2PolicyReviewPacketRow(value: unknown): value is LookupV2Polic
   return (
     typeof row['surface'] === 'string'
     && typeof row['benchmarkGoldHint'] === 'string'
+    && typeof row['semanticConflictKey'] === 'string'
     && typeof row['policyConflictSurface'] === 'string'
     && typeof row['policyConflictType'] === 'string'
     && typeof row['authorityStatus'] === 'string'
@@ -66,6 +68,7 @@ function familyKey(row: LookupV2PolicyReviewPacketRow): string {
     throw new Error(`policy-review row is missing benchmarkGoldEntityId for family packet surface=${JSON.stringify(row.surface)}`);
   }
   return JSON.stringify([
+    row.semanticConflictKey,
     row.policyConflictSurface,
     row.benchmarkGoldEntityId,
     row.policyConflictType,
@@ -124,6 +127,7 @@ export function buildLookupV2PolicyFamilyReviewPacketRows(args: {
         .sort((left, right) => left.localeCompare(right))
         .at(-1) ?? group.exemplar.proposedAt;
       return {
+        semanticConflictKey: group.exemplar.semanticConflictKey,
         policyConflictSurface: group.exemplar.policyConflictSurface,
         locale: group.exemplar.locale,
         policyConflictType: group.exemplar.policyConflictType,
@@ -144,7 +148,8 @@ export function buildLookupV2PolicyFamilyReviewPacketRows(args: {
       };
     })
     .sort((left, right) =>
-      left.policyConflictSurface.localeCompare(right.policyConflictSurface)
+      left.semanticConflictKey.localeCompare(right.semanticConflictKey)
+      || left.policyConflictSurface.localeCompare(right.policyConflictSurface)
       || left.benchmarkGoldEntityId.localeCompare(right.benchmarkGoldEntityId),
     );
 }

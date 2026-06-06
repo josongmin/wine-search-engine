@@ -8,11 +8,11 @@
  * `resolved` to `ambiguous` (multi-vintage) prevents the wrong-positive that was
  * the sole 2026-06-02 shadow cutover blocker.
  *
- * Exact integer year comparison via the {@link extractVintageYear} SSoT — no
- * heuristic, no fuzzy matching. Domain leaf: imports only shared utils.
+ * Exact integer year comparison via the query-aware vintage SSoT — no heuristic,
+ * no fuzzy matching. Domain leaf: imports only shared utils.
  */
 
-import { extractVintageYear } from '../../shared/utils/vintage.js';
+import { extractQueryVintageYear, extractVintageYear } from '../../shared/utils/vintage.js';
 
 /** Machine-readable reason code surfaced when the guard downgrades a resolve. */
 export const VINTAGE_MISMATCH_REASON_CODE = 'vintage_mismatch_downgrade';
@@ -27,7 +27,7 @@ export function shouldDowngradeForVintageMismatch(
   candidateLabel: string | undefined,
 ): boolean {
   if (candidateLabel === undefined) return false;
-  const queryVintage = extractVintageYear(rawQuery);
+  const queryVintage = extractQueryVintageYear(rawQuery);
   if (queryVintage === null) return false;
   const candidateVintage = extractVintageYear(candidateLabel);
   if (candidateVintage === null) return false;

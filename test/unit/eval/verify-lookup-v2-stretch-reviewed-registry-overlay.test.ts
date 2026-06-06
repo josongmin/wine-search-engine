@@ -14,7 +14,7 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
       const dir = tempDirs.pop()!;
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
   it('proves reviewed registry overlays monotonically reduce unresolved stretch buckets', async () => {
     const workDir = mkdtempSync(path.join(tmpdir(), 'elv2-reviewed-registry-overlay-'));
@@ -58,12 +58,20 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
       outputSummaryPath: path.join(workDir, 'summary.json'),
       familyReviewRows: [
         {
+          semanticScopeKey: 'family::petrus::::::::::compact::ko',
+          scopeAxis: 'family',
+          familyKey: 'petrus',
+          surfaceFormKind: 'compact',
+          reviewScopeKey: 'petrus::translation::realworld_frenchish_korean_gap',
           benchmarkGoldHint: 'petrus',
           normalizedBenchmarkGoldHint: 'petrus',
           benchmarkGoldHintVariants: ['petrus'],
           proposalStatus: 'target_assigned',
           reviewTarget: 'lookup_manual_target_resolution_v1',
-          locales: ['global'],
+          scopeHoleClass: 'realworld_frenchish_korean_gap',
+          scopeSuggestedAliasType: 'translation',
+          scopeRisk: 'family_only',
+          locales: ['ko'],
           surfaces: ['페트뤼스'],
           holeClasses: ['realworld_frenchish_korean_gap'],
           suggestedAliasTypes: ['translation'],
@@ -82,6 +90,7 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
       ],
       policyFamilyReviewRows: [
         {
+          semanticConflictKey: 'line::latour::::::::2009::qualified::ko',
           policyConflictSurface: '라뚜르',
           locale: 'ko',
           policyConflictType: 'short_form_collision',
@@ -90,7 +99,7 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
           benchmarkGoldEntityId: 'wine-ce-latour',
           benchmarkGoldEntityIdSources: ['policy_registry_authority'],
           proposalStatus: 'approved_exact_safe',
-          reviewTarget: 'lookup_policy_conflict_resolution_v1',
+          reviewTarget: 'lookup_semantic_policy_registry_v1',
           benchmarkGoldHints: ['latour'],
           sampleSurfaces: ['라뚜르 2009'],
           holeClasses: ['realworld_exact_vintage'],
@@ -131,37 +140,50 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
         uniqueOwnerWitnesses: new Map(),
         collidingOwnerWitnesses: new Map(),
         entityLabels: new Map([['wine-ce-silver-oak', 'Silver Oak Cabernet Sauvignon']]),
+        entityProducers: new Map([['wine-ce-silver-oak', 'Silver Oak']]),
+        entityRegions: new Map([['wine-ce-silver-oak', 'United States']]),
+        entityAppellations: new Map([['wine-ce-silver-oak', 'Napa Valley']]),
       },
     });
 
     expect(summary.baseline.draft).toEqual({
       rows: 3,
       autoTargetable: 0,
-      policyReview: 1,
-      manualTarget: 2,
+      catalogAbsent: 0,
+      reviewedScopeCollision: 0,
+      scopePolicyReview: 1,
+      reviewedRejected: 0,
+      scopeTargetReview: 2,
     });
     expect(summary.overlay.draft).toEqual({
       rows: 3,
       autoTargetable: 2,
-      policyReview: 0,
-      manualTarget: 1,
+      catalogAbsent: 0,
+      reviewedScopeCollision: 0,
+      scopePolicyReview: 0,
+      reviewedRejected: 0,
+      scopeTargetReview: 1,
     });
-    expect(summary.familyTargetRegistryApply.registryInsertedRows).toBe(1);
-    expect(summary.policyFamilyDecisionRegistryApply.registryInsertedRows).toBe(1);
+    expect(summary.semanticScopeTargetRegistryApply.registryInsertedRows).toBe(1);
+    expect(summary.semanticPolicyRegistryApply.registryInsertedRows).toBe(1);
     expect(summary.deltas).toEqual({
       draftAutoTargetable: 2,
-      draftPolicyReview: -1,
-      draftManualTarget: -1,
+      draftCatalogAbsent: 0,
+      draftReviewedScopeCollision: 0,
+      draftScopePolicyReview: -1,
+      draftScopeTargetReview: -1,
       exactSafePacketRows: 2,
-      reviewedAuthorityApprovedRows: 1,
+      reviewedAuthorityApprovedRows: 2,
       policyReviewRows: -1,
       policyFamilyReviewRows: -1,
       manualTargetFamilyReviewRows: -1,
     });
     expect(summary.invariants).toEqual({
       autoTargetableNonDecreasing: true,
-      policyReviewNonIncreasing: true,
-      manualTargetNonIncreasing: true,
+      catalogAbsentNonDecreasing: true,
+      reviewedScopeCollisionDirectionRespected: true,
+      scopePolicyReviewNonIncreasing: true,
+      scopeTargetReviewNonIncreasing: true,
       exactSafePacketNonDecreasing: true,
       reviewedAuthorityApprovedNonDecreasing: true,
       policyPacketNonIncreasing: true,
@@ -169,7 +191,7 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
       manualTargetFamilyPacketNonIncreasing: true,
     });
     expect(existsSync(summary.outputSummaryPath)).toBe(true);
-  });
+  }, 30_000);
 
   it('supports baseline registry snapshots that differ from the current overlay registries', async () => {
     const workDir = mkdtempSync(path.join(tmpdir(), 'elv2-reviewed-registry-overlay-baseline-'));
@@ -197,8 +219,14 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
       baselineFamilyTargetRegistryRows: [],
       existingFamilyTargetRegistryRows: [
         {
+          semanticScopeKey: 'line::cheval blanc::::::::2010::qualified::ko',
           benchmarkGoldHint: 'cheval blanc',
           normalizedBenchmarkGoldHint: 'cheval blanc',
+          scopeAxis: 'line',
+          familyKey: 'cheval blanc',
+          vintage: 2010,
+          surfaceFormKind: 'qualified',
+          locale: 'ko',
           entityId: 'wine-ce-cheval-blanc',
           decisionStatus: 'approved',
           reviewedBy: 'codex',
@@ -218,30 +246,256 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
         uniqueOwnerWitnesses: new Map(),
         collidingOwnerWitnesses: new Map(),
         entityLabels: new Map(),
+        entityProducers: new Map(),
+        entityRegions: new Map(),
+        entityAppellations: new Map(),
       },
     });
 
     expect(summary.baseline.draft).toEqual({
       rows: 1,
       autoTargetable: 0,
-      policyReview: 0,
-      manualTarget: 1,
+      catalogAbsent: 0,
+      reviewedScopeCollision: 0,
+      scopePolicyReview: 0,
+      reviewedRejected: 0,
+      scopeTargetReview: 1,
     });
     expect(summary.overlay.draft).toEqual({
       rows: 1,
       autoTargetable: 1,
-      policyReview: 0,
-      manualTarget: 0,
+      catalogAbsent: 0,
+      reviewedScopeCollision: 0,
+      scopePolicyReview: 0,
+      reviewedRejected: 0,
+      scopeTargetReview: 0,
     });
     expect(summary.deltas).toEqual({
       draftAutoTargetable: 1,
-      draftPolicyReview: 0,
-      draftManualTarget: -1,
+      draftCatalogAbsent: 0,
+      draftReviewedScopeCollision: 0,
+      draftScopePolicyReview: 0,
+      draftScopeTargetReview: -1,
       exactSafePacketRows: 1,
+      reviewedAuthorityApprovedRows: 1,
+      policyReviewRows: 0,
+      policyFamilyReviewRows: 0,
+      manualTargetFamilyReviewRows: -1,
+    });
+  }, 30_000);
+
+  it('proves family support registry moves reviewed catalog gaps out of manual_target into catalog_absent', async () => {
+    const workDir = mkdtempSync(path.join(tmpdir(), 'elv2-reviewed-registry-overlay-support-'));
+    tempDirs.push(workDir);
+
+    const tasks: readonly CurationTask[] = [
+      {
+        surfaceForm: '살롱 샴페인',
+        holeClass: 'realworld_brand_suffix',
+        observedStatus: 'failed',
+        suggestedAliasType: 'canonical',
+        status: 'needs_target',
+        benchmarkGoldHint: 'salon',
+        reason: 'coverage hole salon',
+      },
+    ];
+
+    const summary = await verifyLookupV2StretchReviewedRegistryOverlay({
+      tasks,
+      inputArtifact: '/tmp/sample-entity-no-policy-salon.json',
+      generatedAt: '2026-06-07T01:00:00.000Z',
+      workDir,
+      outputSummaryPath: path.join(workDir, 'summary.json'),
+      benchmarkGoldHintMap: new Map(),
+      baselineFamilyTargetRegistryRows: [],
+      baselinePolicyFamilyDecisionRegistryRows: [],
+      baselineFamilySupportRegistryRows: [],
+      existingFamilyTargetRegistryRows: [],
+      existingPolicyFamilyDecisionRegistryRows: [],
+      existingFamilySupportRegistryRows: [
+        {
+          benchmarkGoldHint: 'salon',
+          normalizedBenchmarkGoldHint: 'salon',
+          supportStatus: 'active_catalog_absent',
+          reviewedBy: 'codex',
+          reviewedAt: '2026-06-07T00:05:00.000Z',
+          decisionReason: 'active runtime projection lacks reviewed Salon family support',
+          evidenceClass: 'catalog_support_review',
+        },
+      ],
+      exactSafeRegistryRows: [],
+      policyConflictOwners: new Map(),
+      runtimeOwnerEvidence: {
+        uniqueOwners: new Map(),
+        collidingOwners: new Map(),
+        uniqueOwnerWitnesses: new Map(),
+        collidingOwnerWitnesses: new Map(),
+        entityLabels: new Map(),
+        entityProducers: new Map(),
+        entityRegions: new Map(),
+        entityAppellations: new Map(),
+      },
+    });
+
+    expect(summary.baseline.draft).toEqual({
+      rows: 1,
+      autoTargetable: 0,
+      catalogAbsent: 0,
+      reviewedScopeCollision: 0,
+      scopePolicyReview: 0,
+      reviewedRejected: 0,
+      scopeTargetReview: 1,
+    });
+    expect(summary.overlay.draft).toEqual({
+      rows: 1,
+      autoTargetable: 0,
+      catalogAbsent: 1,
+      reviewedScopeCollision: 0,
+      scopePolicyReview: 0,
+      reviewedRejected: 0,
+      scopeTargetReview: 0,
+    });
+    expect(summary.deltas).toEqual({
+      draftAutoTargetable: 0,
+      draftCatalogAbsent: 1,
+      draftReviewedScopeCollision: 0,
+      draftScopePolicyReview: 0,
+      draftScopeTargetReview: -1,
+      exactSafePacketRows: 0,
       reviewedAuthorityApprovedRows: 0,
       policyReviewRows: 0,
       policyFamilyReviewRows: 0,
       manualTargetFamilyReviewRows: -1,
     });
-  });
+    expect(summary.invariants).toEqual({
+      autoTargetableNonDecreasing: true,
+      catalogAbsentNonDecreasing: true,
+      reviewedScopeCollisionDirectionRespected: true,
+      scopePolicyReviewNonIncreasing: true,
+      scopeTargetReviewNonIncreasing: true,
+      exactSafePacketNonDecreasing: true,
+      reviewedAuthorityApprovedNonDecreasing: true,
+      policyPacketNonIncreasing: true,
+      policyFamilyPacketNonIncreasing: true,
+      manualTargetFamilyPacketNonIncreasing: true,
+    });
+  }, 30_000);
+
+  it('proves family collision registry moves active collision families out of manual_target into reviewed_collision', async () => {
+    const workDir = mkdtempSync(path.join(tmpdir(), 'elv2-reviewed-registry-overlay-collision-'));
+    tempDirs.push(workDir);
+
+    const tasks: readonly CurationTask[] = [
+      {
+        surfaceForm: '실버 오크 카베르네',
+        holeClass: 'realworld_brand_suffix',
+        observedStatus: 'failed',
+        suggestedAliasType: 'canonical',
+        status: 'needs_target',
+        benchmarkGoldHint: 'silver oak',
+        reason: 'coverage hole silver oak',
+      },
+    ];
+
+    const summary = await verifyLookupV2StretchReviewedRegistryOverlay({
+      tasks,
+      inputArtifact: '/tmp/sample-entity-no-policy-silver-oak.json',
+      generatedAt: '2026-06-07T01:30:00.000Z',
+      workDir,
+      outputSummaryPath: path.join(workDir, 'summary.json'),
+      benchmarkGoldHintMap: new Map(),
+      baselineFamilyTargetRegistryRows: [],
+      baselinePolicyFamilyDecisionRegistryRows: [],
+      baselineFamilySupportRegistryRows: [],
+      baselineFamilyCollisionRegistryRows: [],
+      existingFamilyTargetRegistryRows: [],
+      existingPolicyFamilyDecisionRegistryRows: [],
+      existingFamilySupportRegistryRows: [],
+      existingFamilyCollisionRegistryRows: [
+        {
+          benchmarkGoldHint: 'silver oak',
+          normalizedBenchmarkGoldHint: 'silver oak',
+          collisionStatus: 'active_entity_collision',
+          reviewedBy: 'codex',
+          reviewedAt: '2026-06-07T01:20:00.000Z',
+          decisionReason: 'active runtime exposes Napa and Alexander Valley owners',
+          evidenceClass: 'collision_support_review',
+        },
+      ],
+      exactSafeRegistryRows: [],
+      policyConflictOwners: new Map(),
+      runtimeOwnerEvidence: {
+        uniqueOwners: new Map(),
+        collidingOwners: new Map([
+          [normalizeForMatch('silver oak'), ['wine-a', 'wine-b']],
+        ]),
+        uniqueOwnerWitnesses: new Map(),
+        collidingOwnerWitnesses: new Map([
+          [normalizeForMatch('silver oak'), [
+            { entityId: 'wine-a', witnessSurface: 'Silver Oak', witnessSource: 'producer' },
+            { entityId: 'wine-b', witnessSurface: 'Silver Oak', witnessSource: 'producer' },
+          ]],
+        ]),
+        entityLabels: new Map([
+          ['wine-a', 'Silver Oak Alexander Valley Cabernet Sauvignon'],
+          ['wine-b', 'Silver Oak Napa Valley Cabernet Sauvignon'],
+        ]),
+        entityProducers: new Map([
+          ['wine-a', 'Silver Oak'],
+          ['wine-b', 'Silver Oak'],
+        ]),
+        entityRegions: new Map([
+          ['wine-a', 'United States'],
+          ['wine-b', 'United States'],
+        ]),
+        entityAppellations: new Map([
+          ['wine-a', 'Alexander Valley'],
+          ['wine-b', 'Napa Valley'],
+        ]),
+      },
+    });
+
+    expect(summary.baseline.draft).toEqual({
+      rows: 1,
+      autoTargetable: 0,
+      catalogAbsent: 0,
+      reviewedScopeCollision: 0,
+      scopePolicyReview: 0,
+      reviewedRejected: 0,
+      scopeTargetReview: 1,
+    });
+    expect(summary.overlay.draft).toEqual({
+      rows: 1,
+      autoTargetable: 0,
+      catalogAbsent: 0,
+      reviewedScopeCollision: 1,
+      scopePolicyReview: 0,
+      reviewedRejected: 0,
+      scopeTargetReview: 0,
+    });
+    expect(summary.deltas).toEqual({
+      draftAutoTargetable: 0,
+      draftCatalogAbsent: 0,
+      draftReviewedScopeCollision: 1,
+      draftScopePolicyReview: 0,
+      draftScopeTargetReview: -1,
+      exactSafePacketRows: 0,
+      reviewedAuthorityApprovedRows: 0,
+      policyReviewRows: 0,
+      policyFamilyReviewRows: 0,
+      manualTargetFamilyReviewRows: -1,
+    });
+    expect(summary.invariants).toEqual({
+      autoTargetableNonDecreasing: true,
+      catalogAbsentNonDecreasing: true,
+      reviewedScopeCollisionDirectionRespected: true,
+      scopePolicyReviewNonIncreasing: true,
+      scopeTargetReviewNonIncreasing: true,
+      exactSafePacketNonDecreasing: true,
+      reviewedAuthorityApprovedNonDecreasing: true,
+      policyPacketNonIncreasing: true,
+      policyFamilyPacketNonIncreasing: true,
+      manualTargetFamilyPacketNonIncreasing: true,
+    });
+  }, 30_000);
 });

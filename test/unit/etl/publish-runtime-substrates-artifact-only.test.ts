@@ -36,6 +36,17 @@ import {
   SEARCH_SNAPSHOT_STATE_VERSION,
 } from '../../../src/domain/shared/constants/search-snapshot.js';
 import { hashStableJson } from '../../../src/domain/shared/utils/stable-json.js';
+import {
+  LOOKUP_REVIEWED_FAMILY_RECALL_RUNTIME_SCHEMA_VERSION,
+  LOOKUP_SCOPE_GRAPH_RUNTIME_SCHEMA_VERSION,
+  LOOKUP_SEMANTIC_SCOPE_RUNTIME_SCHEMA_VERSION,
+  buildLookupReviewedFamilyRecallRuntimeArtifactHash,
+  buildLookupScopeGraphRuntimeArtifactHash,
+  buildLookupSemanticScopeRuntimeArtifactHash,
+  type LookupReviewedFamilyRecallRuntimeArtifact,
+  type LookupScopeGraphRuntimeArtifact,
+  type LookupSemanticScopeRuntimeArtifact,
+} from '../../../src/domain/shared/types/search-snapshot-lookup-semantic-runtime.js';
 
 const FIELD_AVAILABILITY = {
   appellation: { populatedDocCount: 1, totalDocCount: 1, populatedDocRatio: 1 },
@@ -166,6 +177,38 @@ async function buildCurrentManifestFixture(dir: string): Promise<{
     entries: {},
   };
 
+  const semanticScopeRuntime: LookupSemanticScopeRuntimeArtifact = {
+    schemaVersion: LOOKUP_SEMANTIC_SCOPE_RUNTIME_SCHEMA_VERSION,
+    snapshotId,
+    generatedAt,
+    entries: {
+      'ko|family|opus-one|bare': {
+        semanticScopeKey: 'ko|family|opus-one|bare',
+        scopeAxis: 'family',
+        familyKey: 'opus one',
+        surfaceFormKind: 'bare',
+        locale: 'ko',
+        entityId: 'wine-opus-one-2018',
+      },
+    },
+  };
+
+  const reviewedFamilyRecallRuntime: LookupReviewedFamilyRecallRuntimeArtifact = {
+    schemaVersion: LOOKUP_REVIEWED_FAMILY_RECALL_RUNTIME_SCHEMA_VERSION,
+    snapshotId,
+    generatedAt,
+    entries: {},
+  };
+
+  const scopeGraphRuntime: LookupScopeGraphRuntimeArtifact = {
+    schemaVersion: LOOKUP_SCOPE_GRAPH_RUNTIME_SCHEMA_VERSION,
+    snapshotId,
+    generatedAt,
+    adjacency: {
+      'wine-opus-one-2018': [],
+    },
+  };
+
   const conceptRedirectRuntime: LookupConceptRedirectRuntimeArtifact = {
     schemaVersion: LOOKUP_CONCEPT_REDIRECT_RUNTIME_SCHEMA_VERSION,
     snapshotId,
@@ -182,6 +225,9 @@ async function buildCurrentManifestFixture(dir: string): Promise<{
     lookupExactSafeRuntimeJson: path.join(dir, 'lookup-exact-safe-runtime.json'),
     lookupResolverProjectionJson: path.join(dir, 'lookup-resolver-projection.json'),
     lookupEntityProjectionJson: path.join(dir, 'lookup-entity-projection.json'),
+    lookupSemanticScopeRuntimeJson: path.join(dir, 'lookup-semantic-scope-runtime.json'),
+    lookupReviewedFamilyRecallRuntimeJson: path.join(dir, 'lookup-reviewed-family-recall-runtime.json'),
+    lookupScopeGraphRuntimeJson: path.join(dir, 'lookup-scope-graph-runtime.json'),
     lookupAmbiguityRuntimeJson: path.join(dir, 'lookup-ambiguity-runtime.json'),
     lookupConceptRedirectRuntimeJson: path.join(dir, 'lookup-concept-redirect-runtime.json'),
     ambiguityRegistryNdjson: path.join(dir, 'ambiguity.ndjson'),
@@ -193,6 +239,9 @@ async function buildCurrentManifestFixture(dir: string): Promise<{
   await writeJson(artifacts.lookupExactSafeRuntimeJson, exactSafeRuntime);
   await writeJson(artifacts.lookupResolverProjectionJson, resolverProjection);
   await writeJson(artifacts.lookupEntityProjectionJson, entityProjection);
+  await writeJson(artifacts.lookupSemanticScopeRuntimeJson, semanticScopeRuntime);
+  await writeJson(artifacts.lookupReviewedFamilyRecallRuntimeJson, reviewedFamilyRecallRuntime);
+  await writeJson(artifacts.lookupScopeGraphRuntimeJson, scopeGraphRuntime);
   await writeJson(artifacts.lookupAmbiguityRuntimeJson, ambiguityRuntime);
   await writeJson(artifacts.lookupConceptRedirectRuntimeJson, conceptRedirectRuntime);
 
@@ -244,6 +293,10 @@ async function buildCurrentManifestFixture(dir: string): Promise<{
         + Object.keys(exactSafeRuntime.compactEntries).length,
       lookupResolverProjectionDocuments: resolverProjection.documents.length,
       lookupEntityProjectionDocuments: entityProjection.documents.length,
+      lookupSemanticScopeRuntimeEntries: Object.keys(semanticScopeRuntime.entries).length,
+      lookupReviewedFamilyRecallRuntimeEntries: Object.keys(reviewedFamilyRecallRuntime.entries).length,
+      lookupScopeGraphRuntimeEdges: Object.values(scopeGraphRuntime.adjacency)
+        .reduce((total, edges) => total + edges.length, 0),
       lookupAmbiguityRuntimeEntries: Object.keys(ambiguityRuntime.entries).length,
       lookupConceptRedirectRuntimeEntries: Object.keys(conceptRedirectRuntime.entries).length,
       ambiguityRegistry: 0,
@@ -258,6 +311,9 @@ async function buildCurrentManifestFixture(dir: string): Promise<{
       lookupExactSafeRuntime: buildLookupExactSafeRuntimeArtifactHash(exactSafeRuntime),
       lookupResolverProjection: buildLookupResolverProjectionArtifactHash(resolverProjection),
       lookupEntityProjection: buildLookupEntityProjectionArtifactHash(entityProjection),
+      lookupSemanticScopeRuntime: buildLookupSemanticScopeRuntimeArtifactHash(semanticScopeRuntime),
+      lookupReviewedFamilyRecallRuntime: buildLookupReviewedFamilyRecallRuntimeArtifactHash(reviewedFamilyRecallRuntime),
+      lookupScopeGraphRuntime: buildLookupScopeGraphRuntimeArtifactHash(scopeGraphRuntime),
       lookupAmbiguityRuntime: buildLookupAmbiguityRuntimeArtifactHash(ambiguityRuntime),
       lookupConceptRedirectRuntime: buildLookupConceptRedirectRuntimeArtifactHash(conceptRedirectRuntime),
       ambiguityRegistry: 'ambiguity-hash',

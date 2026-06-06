@@ -1,0 +1,12 @@
+{
+  "sourceDraftPath": "data/lookup-v2/drafts/overlay-manual-target/baseline/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl",
+  "generatedAt": "2026-06-06T20:51:23.914Z",
+  "totalFamilies": 18,
+  "governanceCounts": {
+    "family_recall_collision": 8,
+    "native_family_core_collision": 2,
+    "producer_surface_region_line_collision": 1,
+    "producer_surface_secondary_line_collision": 3,
+    "reviewed_family_core_collision": 4
+  }
+}

@@ -124,4 +124,37 @@ describe('buildLookupEntityProjectionArtifact', () => {
       expect.arrayContaining(['hill of grace']),
     );
   });
+
+  it('unions reviewed family-core witness surfaces into familyCoreKeys for snapshot-published descriptor canonicalization', () => {
+    const solaia = makeRecord({
+      sourceId: 'wine-solaia',
+      canonicalLabel: "2018 Antinori Tenuta Tignanello 'Solaia'",
+      producer: 'Antinori',
+      aliases: {
+        proposed: [],
+        identitySafeProjection: ["2018 Antinori Tenuta Tignanello 'Solaia'"],
+        noisyRecallProjection: [],
+      },
+      searchTextEn: "Antinori Tenuta Tignanello Solaia 2018",
+    });
+
+    const artifact = buildLookupEntityProjectionArtifact({
+      snapshotId: 'search-snapshot:v1:test',
+      generatedAt: '2026-06-06T00:00:00.000Z',
+      records: [solaia],
+      entityIdBySourceId: new Map([
+        ['wine-solaia', 'wine-ce-solaia'],
+      ]),
+      goldCanonicalLookup: new Map(),
+      sourceContinuityLookup: new Map(),
+      reviewedFamilyCoreKeysByEntity: new Map([
+        ['wine-ce-solaia', ['solaia']],
+      ]),
+    });
+
+    const solaiaDoc = artifact.documents.find((doc) => doc.entityId === 'wine-ce-solaia');
+    expect(solaiaDoc?.familyCoreKeys).toEqual(
+      expect.arrayContaining(['solaia']),
+    );
+  });
 });

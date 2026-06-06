@@ -1,6 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
 import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
+import type { LookupV2FamilyCollisionRegistryRow } from './lookup-v2-family-collision-registry.js';
+import {
+  loadLookupV2FamilyCoreWitnessRegistrySync,
+  type LookupV2FamilyCoreWitnessRegistryRow,
+} from './lookup-v2-family-core-witness-registry.js';
 
 export const DEFAULT_RUNTIME_STATE_PATH = resolveDataPath('data/runtime-search-snapshot.json');
 
@@ -12,6 +17,8 @@ interface LookupEntityProjectionRuntimeDocument {
   readonly entityId?: unknown;
   readonly canonicalLabel?: unknown;
   readonly producer?: unknown;
+  readonly attributeHints?: unknown;
+  readonly region?: unknown;
   readonly familyCoreKeys?: unknown;
   readonly aliasesIdentitySafe?: unknown;
   readonly aliasesNoisyRecall?: unknown;
@@ -25,6 +32,7 @@ export type LookupV2RuntimeSurfaceOwnerWitnessSource =
   | 'canonical_label'
   | 'producer'
   | 'family_core_key'
+  | 'reviewed_family_core_registry'
   | 'aliases_identity_safe'
   | 'aliases_noisy_recall';
 
@@ -38,8 +46,46 @@ export interface LookupV2RuntimeSurfaceOwnerEvidence {
   readonly uniqueOwners: ReadonlyMap<string, string>;
   readonly collidingOwners: ReadonlyMap<string, readonly string[]>;
   readonly entityLabels: ReadonlyMap<string, string>;
+  readonly entityProducers: ReadonlyMap<string, string>;
+  readonly entityRegions: ReadonlyMap<string, string>;
+  readonly entityAppellations: ReadonlyMap<string, string>;
   readonly uniqueOwnerWitnesses: ReadonlyMap<string, readonly LookupV2RuntimeSurfaceOwnerWitness[]>;
   readonly collidingOwnerWitnesses: ReadonlyMap<string, readonly LookupV2RuntimeSurfaceOwnerWitness[]>;
+}
+
+export function buildReviewedCollisionFamilyCoreKeysByEntity(args: {
+  readonly documents: readonly LookupEntityProjectionRuntimeDocument[];
+  readonly reviewedCollisionRows: readonly LookupV2FamilyCollisionRegistryRow[];
+  readonly reviewedFamilyCoreWitnessRows?: readonly LookupV2FamilyCoreWitnessRegistryRow[] | undefined;
+}): ReadonlyMap<string, readonly string[]> {
+  const evidence = buildLookupV2RuntimeSurfaceOwnerEvidence(
+    args.documents,
+    args.reviewedFamilyCoreWitnessRows,
+  );
+  const grouped = new Map<string, Set<string>>();
+
+  for (const row of args.reviewedCollisionRows) {
+    const entityIds = evidence.collidingOwners.get(row.normalizedBenchmarkGoldHint);
+    if (entityIds === undefined || entityIds.length < 2) {
+      throw new Error(
+        `reviewed collision family core overlay row ${JSON.stringify(row.benchmarkGoldHint)} has no active collision owners`,
+      );
+    }
+    for (const entityId of entityIds) {
+      const existing = grouped.get(entityId) ?? new Set<string>();
+      existing.add(row.normalizedBenchmarkGoldHint);
+      grouped.set(entityId, existing);
+    }
+  }
+
+  return new Map(
+    [...grouped.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([entityId, surfaces]) => [
+        entityId,
+        [...surfaces].sort((left, right) => left.localeCompare(right)),
+      ]),
+  );
 }
 
 function parseRuntimeState(raw: unknown): { readonly lookupEntityProjectionPath: string } {
@@ -71,10 +117,14 @@ function parseProjectionDocuments(raw: unknown): readonly LookupEntityProjection
 
 export function buildLookupV2RuntimeSurfaceOwnerEvidence(
   documents: readonly LookupEntityProjectionRuntimeDocument[],
+  reviewedFamilyCoreWitnessRows: readonly LookupV2FamilyCoreWitnessRegistryRow[] = [],
 ): LookupV2RuntimeSurfaceOwnerEvidence {
   const uniqueOwners = new Map<string, string>();
   const collidingOwners = new Map<string, Set<string>>();
   const entityLabels = new Map<string, string>();
+  const entityProducers = new Map<string, string>();
+  const entityRegions = new Map<string, string>();
+  const entityAppellations = new Map<string, string>();
   const witnessBuckets = new Map<string, LookupV2RuntimeSurfaceOwnerWitness[]>();
 
   const appendWitness = (
@@ -101,6 +151,23 @@ export function buildLookupV2RuntimeSurfaceOwnerEvidence(
     }
     if (typeof document.canonicalLabel === 'string' && document.canonicalLabel.trim().length > 0) {
       entityLabels.set(document.entityId, document.canonicalLabel);
+    }
+    if (typeof document.producer === 'string' && document.producer.trim().length > 0) {
+      entityProducers.set(document.entityId, document.producer);
+    }
+    if (typeof document.region === 'string' && document.region.trim().length > 0) {
+      entityRegions.set(document.entityId, document.region);
+    }
+    if (
+      typeof document.attributeHints === 'object'
+      && document.attributeHints !== null
+      && typeof (document.attributeHints as Record<string, unknown>)['appellation'] === 'string'
+      && ((document.attributeHints as Record<string, unknown>)['appellation'] as string).trim().length > 0
+    ) {
+      entityAppellations.set(
+        document.entityId,
+        (document.attributeHints as Record<string, string>)['appellation'],
+      );
     }
     const surfaces: readonly {
       readonly value: unknown;
@@ -157,6 +224,32 @@ export function buildLookupV2RuntimeSurfaceOwnerEvidence(
     }
   }
 
+  for (const row of reviewedFamilyCoreWitnessRows) {
+    const normalized = normalizeForMatch(row.surface);
+    if (normalized.length === 0) {
+      continue;
+    }
+    appendWitness(normalized, {
+      entityId: row.entityId,
+      witnessSurface: row.surface,
+      witnessSource: 'reviewed_family_core_registry',
+    });
+    const existingCollision = collidingOwners.get(normalized);
+    if (existingCollision !== undefined) {
+      existingCollision.add(row.entityId);
+      continue;
+    }
+    const existingOwner = uniqueOwners.get(normalized);
+    if (existingOwner === undefined) {
+      uniqueOwners.set(normalized, row.entityId);
+      continue;
+    }
+    if (existingOwner !== row.entityId) {
+      uniqueOwners.delete(normalized);
+      collidingOwners.set(normalized, new Set([existingOwner, row.entityId]));
+    }
+  }
+
   const sortWitnesses = (
     witnesses: readonly LookupV2RuntimeSurfaceOwnerWitness[],
   ): readonly LookupV2RuntimeSurfaceOwnerWitness[] =>
@@ -191,6 +284,9 @@ export function buildLookupV2RuntimeSurfaceOwnerEvidence(
       [...collidingOwners.entries()].map(([normalized, owners]) => [normalized, [...owners].sort((l, r) => l.localeCompare(r))]),
     ),
     entityLabels,
+    entityProducers,
+    entityRegions,
+    entityAppellations,
     uniqueOwnerWitnesses,
     collidingOwnerWitnesses,
   };
@@ -203,5 +299,8 @@ export function loadLookupV2RuntimeSurfaceOwnerEvidenceSync(
   const projectionDocuments = parseProjectionDocuments(
     JSON.parse(readFileSync(runtimeState.lookupEntityProjectionPath, 'utf8')) as unknown,
   );
-  return buildLookupV2RuntimeSurfaceOwnerEvidence(projectionDocuments);
+  return buildLookupV2RuntimeSurfaceOwnerEvidence(
+    projectionDocuments,
+    loadLookupV2FamilyCoreWitnessRegistrySync(),
+  );
 }

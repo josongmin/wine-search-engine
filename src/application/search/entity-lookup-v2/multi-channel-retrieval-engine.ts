@@ -22,10 +22,10 @@
  * Cascading matcher) the emitted strategies are exact / compact_exact /
  * lexical_exact / prefix_exact / transliterated_exact / transliterated_fuzzy /
  * phonetic_exact — NOT trigram/edit-distance fuzzy (those live in PgAliasMatcher,
- * which is NOT wired into the lookup lane). The `family_graph` channel (T-06 Half
- * B) fires when a FamilyGraphPort is wired and the entity_family substrate is
- * populated, emitting co-producer siblings; `dense` remains reserved (emitted only
- * via the reuse-path blocker seed).
+ * which is NOT wired into the lookup lane). The graph channels (`family_graph`,
+ * `line_graph`, `vintage_graph`) fire when an EntityScopeGraphPort is wired and
+ * the snapshot-published scope graph runtime is available; `dense` remains
+ * reserved (emitted only via the reuse-path blocker seed).
  *
  * Candidate recall is the UNION across channels; the final resolve authority
  * remains the reranker + calibrator (never a single channel's top-1).
@@ -56,18 +56,20 @@ import type {
   EntityDocumentLookupPort,
   LookupResolverProjectionPort,
 } from '../port/search-pipeline-deps.port.js';
-import type { FamilyGraphPort, FamilySibling } from '../../../domain/resolver/v2/family-graph.port.js';
+import type {
+  EntityScopeGraphPort,
+  LookupScopeGraphEdge,
+  LookupScopeGraphRelationKind,
+} from '../../../domain/resolver/v2/entity-scope-graph.port.js';
+import { buildLookupQuerySemanticProbe } from '../../../domain/resolver/v2/lookup-semantic-scope.js';
+import type { LookupReviewedFamilyRecallPort } from '../../../domain/resolver/v2/lookup-reviewed-family-recall.js';
 
 export interface MultiChannelRetrievalDeps {
   readonly aliasMatcher: AliasMatcher;
   readonly entityLookup?: EntityDocumentLookupPort | undefined;
   readonly resolverProjectionLookup?: LookupResolverProjectionPort | undefined;
-  /**
-   * T-ELV2-06 Half B: producer family graph. When wired, the engine walks each
-   * alias-recalled anchor to its persisted family and emits co-producer siblings
-   * on the `family_graph` channel. Optional — absent ⇒ the channel never fires.
-   */
-  readonly familyGraph?: FamilyGraphPort | undefined;
+  readonly reviewedFamilyRecall?: LookupReviewedFamilyRecallPort | undefined;
+  readonly entityScopeGraph?: EntityScopeGraphPort | undefined;
 }
 
 /**
@@ -77,8 +79,11 @@ export interface MultiChannelRetrievalDeps {
  * co-producer recall actually surfaces instead of being crowded out (rule 15).
  */
 const FAMILY_SIBLING_BUDGET_DIVISOR = 3;
-/** Sentinel matchedView for graph-derived (non-view) family hits. */
+/** Sentinel matchedView for graph-derived (non-view) graph hits. */
 const FAMILY_GRAPH_MATCHED_VIEW = 'family_graph';
+const LINE_GRAPH_MATCHED_VIEW = 'line_graph';
+const VINTAGE_GRAPH_MATCHED_VIEW = 'vintage_graph';
+const REVIEWED_FAMILY_RECALL_MATCHED_VIEW = 'reviewed_family_recall';
 
 /** A channel paired with the normalized view it independently queries. */
 interface ChannelViewBinding {
@@ -91,6 +96,65 @@ interface ChannelRunResult {
   readonly view: string;
   readonly latencyMs: number;
   readonly matches: readonly AliasMatchResult[];
+}
+
+function queryContainsSurface(
+  probe: ReturnType<typeof buildLookupQuerySemanticProbe>,
+  surface: string | undefined,
+): boolean {
+  if (surface === undefined || surface.length === 0) {
+    return false;
+  }
+  const paddedQuery = ` ${probe.normalizedQuery} `;
+  const paddedSurface = ` ${surface} `;
+  if (paddedQuery.includes(paddedSurface)) {
+    return true;
+  }
+  if (probe.transliteratedQuery !== undefined && ` ${probe.transliteratedQuery} `.includes(paddedSurface)) {
+    return true;
+  }
+  return probe.compactQuery.includes(surface.replace(/\s+/gu, ''));
+}
+
+function computeScopeFeatureHints(args: {
+  readonly probe: ReturnType<typeof buildLookupQuerySemanticProbe>;
+  readonly descriptor: ReturnType<NonNullable<EntityScopeGraphPort['getSemanticDescriptor']>> | undefined;
+  readonly channelHits: readonly LookupChannelHit[];
+  readonly canonicalLabel?: string | undefined;
+}): NonNullable<LookupCandidate['scopeFeatureHints']> | undefined {
+  const descriptor = args.descriptor;
+  if (descriptor === undefined) {
+    return undefined;
+  }
+  const lineMatch = queryContainsSurface(args.probe, descriptor.lineKey);
+  const regionMatch = queryContainsSurface(args.probe, descriptor.regionKey);
+  const appellationMatch = queryContainsSurface(args.probe, descriptor.appellationKey);
+  const vintageMatch =
+    args.probe.vintage !== undefined
+    && descriptor.vintage !== undefined
+    && args.probe.vintage === descriptor.vintage;
+  const qualifierMatches = [lineMatch, regionMatch, appellationMatch, vintageMatch].filter(Boolean).length;
+  const queryHasQualifiedIntent =
+    args.probe.vintage !== undefined
+    || lineMatch
+    || regionMatch
+    || appellationMatch;
+  const scopeAxisAgreement = queryHasQualifiedIntent ? (qualifierMatches > 0 ? 1 : 0) : 1;
+  return {
+    lineGraphProximity: channelBest(args.channelHits, 'line_graph'),
+    vintageGraphProximity: channelBest(args.channelHits, 'vintage_graph'),
+    scopeQualifierAgreement: qualifierMatches > 0 ? qualifierMatches / 4 : 0,
+    scopeAxisAgreement,
+  };
+}
+
+function channelBest(
+  hits: readonly LookupChannelHit[],
+  channel: LookupRetrievalChannel,
+): number {
+  return hits
+    .filter((hit) => hit.channel === channel)
+    .reduce((best, hit) => Math.max(best, hit.channelScore), 0);
 }
 
 export class MultiChannelRetrievalEngine implements LookupCandidateRetrievalPort {
@@ -120,6 +184,11 @@ export class MultiChannelRetrievalEngine implements LookupCandidateRetrievalPort
     const runs = await Promise.all(
       runnable.map((b) => this.runChannel(b.channel, b.view as string, stageTimer)),
     );
+    const queryProbe = buildLookupQuerySemanticProbe({
+      query: input.rawQuery,
+      views: input.views,
+      locale: input.locale !== undefined && input.locale.toLowerCase().startsWith('ko') ? 'ko' : 'global',
+    });
 
     // UNION + dedupe by entity. Per-candidate channel provenance is derived from
     // the matcher's REAL `lookupStrategy` (via the SSoT splitter + channel mapper),
@@ -178,55 +247,133 @@ export class MultiChannelRetrievalEngine implements LookupCandidateRetrievalPort
     }
     stageTimer?.end('retrieval.union');
 
-    // T-ELV2-06 Half B: walk each alias-recalled anchor to its persisted producer
-    // family and emit co-producer SIBLINGS on the family_graph channel. Siblings
-    // not already in the alias union become new family-only candidates. Timed +
-    // degradation-safe (empty when the substrate is unavailable).
+    if (this.deps.reviewedFamilyRecall !== undefined) {
+      const startedAt = performance.now();
+      let hitCount = 0;
+      stageTimer?.start('retrieval.dense');
+      try {
+        const matches = this.deps.reviewedFamilyRecall.findMatches({
+          query: input.rawQuery,
+          views: input.views,
+          locale: queryProbe.locale,
+        });
+        for (const match of matches) {
+          for (const entityId of match.entityIds) {
+            let entry = byEntity.get(entityId);
+            if (entry === undefined) {
+              entry = {
+                id: entityId as CanonicalEntityId,
+                key: entityId,
+                byChannel: new Map(),
+                best: clamp01(match.recallWeight),
+              };
+              byEntity.set(entityId, entry);
+            }
+            const prev = entry.byChannel.get('dense');
+            if (prev === undefined || match.recallWeight > prev.score) {
+              entry.byChannel.set('dense', {
+                matchedView: REVIEWED_FAMILY_RECALL_MATCHED_VIEW,
+                matchedAlias: match.normalizedSurface,
+                score: clamp01(match.recallWeight),
+              });
+            }
+            if (match.recallWeight > entry.best) {
+              entry.best = clamp01(match.recallWeight);
+            }
+            hitCount += 1;
+          }
+        }
+      } finally {
+        stageTimer?.end('retrieval.dense');
+      }
+      coverage.push({
+        channel: 'dense',
+        firing: hitCount > 0,
+        hitCount,
+        latencyMs: Math.max(0, performance.now() - startedAt),
+      });
+    }
+
+    // Snapshot-published entity scope graph expansion. Every graph lane is
+    // degradation-safe: a missing/broken artifact yields a dormant channel,
+    // never a sunk request.
     const aliasRecalledKeys = [...byEntity.keys()];
     const familyOnlyKeys = new Set<string>();
     if (
-      this.deps.familyGraph !== undefined
+      this.deps.entityScopeGraph !== undefined
       && aliasRecalledKeys.length > 0
       && input.suppressFamilyGraphExpansion !== true
     ) {
-      const startedAt = performance.now();
-      let familyHitCount = 0;
-      stageTimer?.start('retrieval.family_graph');
-      try {
-        const siblingsByAnchor = this.deps.familyGraph.getFamilySiblingsBatch !== undefined
-          ? await this.deps.familyGraph.getFamilySiblingsBatch(aliasRecalledKeys, _signal)
-          : await this.fanoutFamily(aliasRecalledKeys, _signal);
-        for (const [, siblings] of siblingsByAnchor) {
-          for (const sibling of siblings) {
-            const score = clamp01(sibling.edgeWeight);
-            let entry = byEntity.get(sibling.entityId);
-            if (entry === undefined) {
-              entry = { id: sibling.entityId as CanonicalEntityId, key: sibling.entityId, byChannel: new Map(), best: score };
-              byEntity.set(sibling.entityId, entry);
-              familyOnlyKeys.add(sibling.entityId);
+      const graphRuns = [
+        {
+          channel: 'family_graph' as const,
+          relationKind: 'family' as const,
+          matchedView: FAMILY_GRAPH_MATCHED_VIEW,
+          familyOnly: true,
+        },
+        {
+          channel: 'line_graph' as const,
+          relationKind: 'line' as const,
+          matchedView: LINE_GRAPH_MATCHED_VIEW,
+          familyOnly: false,
+        },
+        {
+          channel: 'vintage_graph' as const,
+          relationKind: 'vintage' as const,
+          matchedView: VINTAGE_GRAPH_MATCHED_VIEW,
+          familyOnly: false,
+        },
+      ];
+      for (const graphRun of graphRuns) {
+        const startedAt = performance.now();
+        let hitCount = 0;
+        stageTimer?.start(`retrieval.${graphRun.channel}`);
+        try {
+          const relatedByAnchor = this.deps.entityScopeGraph.getRelatedEntitiesBatch !== undefined
+            ? await this.deps.entityScopeGraph.getRelatedEntitiesBatch(aliasRecalledKeys, graphRun.relationKind, _signal)
+            : await this.fanoutScopeGraph(aliasRecalledKeys, graphRun.relationKind, _signal);
+          for (const [, relatedEntities] of relatedByAnchor) {
+            for (const related of relatedEntities) {
+              const score = clamp01(related.weight);
+              let entry = byEntity.get(related.targetEntityId);
+              if (entry === undefined) {
+                entry = {
+                  id: related.targetEntityId as CanonicalEntityId,
+                  key: related.targetEntityId,
+                  byChannel: new Map(),
+                  best: score,
+                };
+                byEntity.set(related.targetEntityId, entry);
+                if (graphRun.familyOnly) {
+                  familyOnlyKeys.add(related.targetEntityId);
+                }
+              }
+              const prev = entry.byChannel.get(graphRun.channel);
+              if (prev === undefined || score > prev.score) {
+                entry.byChannel.set(graphRun.channel, {
+                  matchedView: graphRun.matchedView,
+                  score,
+                });
+              }
+              if (score > entry.best) {
+                entry.best = score;
+              }
+              hitCount += 1;
             }
-            const prev = entry.byChannel.get('family_graph');
-            if (prev === undefined || score > prev.score) {
-              entry.byChannel.set('family_graph', { matchedView: FAMILY_GRAPH_MATCHED_VIEW, score });
-            }
-            if (score > entry.best) entry.best = score;
-            familyHitCount += 1;
           }
+        } catch (err) {
+          void err;
+        } finally {
+          stageTimer?.end(`retrieval.${graphRun.channel}`);
         }
-      } catch (err) {
-        // Family graph must never sink the request — record a dormant timed run.
-        void err; /* intentional: degrade to dormant family channel */
-      } finally {
-        stageTimer?.end('retrieval.family_graph');
+        coverage.push({
+          channel: graphRun.channel,
+          firing: hitCount > 0,
+          hitCount,
+          latencyMs: Math.max(0, performance.now() - startedAt),
+        });
       }
-      // A sibling that was ALSO alias-recalled is not family-only.
       for (const key of aliasRecalledKeys) familyOnlyKeys.delete(key);
-      coverage.push({
-        channel: 'family_graph',
-        firing: familyHitCount > 0,
-        hitCount: familyHitCount,
-        latencyMs: Math.max(0, performance.now() - startedAt),
-      });
     }
 
     // Cap the union to maxCandidates by best per-entity channel score, but RESERVE
@@ -276,21 +423,32 @@ export class MultiChannelRetrievalEngine implements LookupCandidateRetrievalPort
         canonicalLabel: doc?.canonicalLabel ?? entry.key,
         entityType: doc?.entityType ?? 'unknown',
         channelHits,
+        ...(this.deps.entityScopeGraph?.getSemanticDescriptor !== undefined
+          ? {
+              scopeFeatureHints: computeScopeFeatureHints({
+                probe: queryProbe,
+                descriptor: this.deps.entityScopeGraph.getSemanticDescriptor(String(entry.id)),
+                channelHits,
+                canonicalLabel: doc?.canonicalLabel,
+              }),
+            }
+          : {}),
       };
     });
 
     return { candidates, coverage };
   }
 
-  /** Fallback family lookup when the port has no batch variant. */
-  private async fanoutFamily(
+  /** Fallback scope-graph lookup when the port has no batch variant. */
+  private async fanoutScopeGraph(
     anchorKeys: readonly string[],
+    relationKind: LookupScopeGraphRelationKind,
     signal: AbortSignal | undefined,
-  ): Promise<ReadonlyMap<string, readonly FamilySibling[]>> {
-    const out = new Map<string, readonly FamilySibling[]>();
-    if (this.deps.familyGraph === undefined) return out;
+  ): Promise<ReadonlyMap<string, readonly LookupScopeGraphEdge[]>> {
+    const out = new Map<string, readonly LookupScopeGraphEdge[]>();
+    if (this.deps.entityScopeGraph === undefined) return out;
     for (const key of anchorKeys) {
-      out.set(key, await this.deps.familyGraph.getFamilySiblings(key, signal));
+      out.set(key, await this.deps.entityScopeGraph.getRelatedEntities(key, relationKind, signal));
     }
     return out;
   }

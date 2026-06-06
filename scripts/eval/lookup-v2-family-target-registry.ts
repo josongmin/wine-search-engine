@@ -4,8 +4,11 @@ import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
 import { loadLookupV2RuntimeKnownEntityIdsSync } from './lookup-v2-runtime-known-entity-ids.js';
 
 export interface LookupV2FamilyTargetRegistryRow {
+  readonly reviewScopeKey: string;
   readonly benchmarkGoldHint: string;
   readonly normalizedBenchmarkGoldHint: string;
+  readonly scopeHoleClass: string;
+  readonly scopeSuggestedAliasType: 'canonical' | 'translation';
   readonly entityId?: string | undefined;
   readonly decisionStatus: 'approved' | 'rejected';
   readonly reviewedBy: string;
@@ -41,6 +44,16 @@ function parseDecisionStatus(value: unknown, label: string): LookupV2FamilyTarge
   return value;
 }
 
+function parseScopeSuggestedAliasType(
+  value: unknown,
+  label: string,
+): LookupV2FamilyTargetRegistryRow['scopeSuggestedAliasType'] {
+  if (value !== 'canonical' && value !== 'translation') {
+    throw new Error(`${label} has invalid scopeSuggestedAliasType`);
+  }
+  return value;
+}
+
 function parseEntityId(
   value: unknown,
   label: string,
@@ -63,10 +76,16 @@ function parseReviewedAt(value: unknown, label: string): string {
 
 function parseRow(raw: Record<string, unknown>, lineNo: number): LookupV2FamilyTargetRegistryRow {
   const label = `lookup family target registry row ${lineNo}`;
+  const reviewScopeKey = parseNonEmptyString(raw.reviewScopeKey, `${label} reviewScopeKey`);
   const benchmarkGoldHint = parseNonEmptyString(raw.benchmarkGoldHint, `${label} benchmarkGoldHint`);
   const normalizedBenchmarkGoldHint = parseNonEmptyString(
     raw.normalizedBenchmarkGoldHint,
     `${label} normalizedBenchmarkGoldHint`,
+  );
+  const scopeHoleClass = parseNonEmptyString(raw.scopeHoleClass, `${label} scopeHoleClass`);
+  const scopeSuggestedAliasType = parseScopeSuggestedAliasType(
+    raw.scopeSuggestedAliasType,
+    `${label} scopeSuggestedAliasType`,
   );
   const decisionStatus = parseDecisionStatus(raw.decisionStatus, label);
   const entityId = parseEntityId(raw.entityId, label);
@@ -75,8 +94,11 @@ function parseRow(raw: Record<string, unknown>, lineNo: number): LookupV2FamilyT
   }
 
   return {
+    reviewScopeKey,
     benchmarkGoldHint,
     normalizedBenchmarkGoldHint,
+    scopeHoleClass,
+    scopeSuggestedAliasType,
     ...(entityId !== undefined ? { entityId } : {}),
     decisionStatus,
     reviewedBy: parseNonEmptyString(raw.reviewedBy, `${label} reviewedBy`),
@@ -84,6 +106,14 @@ function parseRow(raw: Record<string, unknown>, lineNo: number): LookupV2FamilyT
     decisionReason: parseNonEmptyString(raw.decisionReason, `${label} decisionReason`),
     evidenceClass: parseNonEmptyString(raw.evidenceClass, `${label} evidenceClass`),
   };
+}
+
+export function buildLookupV2FamilyTargetReviewScopeKey(args: {
+  readonly benchmarkGoldHint: string;
+  readonly holeClass: string;
+  readonly suggestedAliasType: LookupV2FamilyTargetRegistryRow['scopeSuggestedAliasType'];
+}): string {
+  return `${normalizeForMatch(args.benchmarkGoldHint)}::${args.suggestedAliasType}::${args.holeClass}`;
 }
 
 export function assertLookupV2FamilyTargetRegistryRowsValid(args: {
@@ -103,13 +133,23 @@ export function assertLookupV2FamilyTargetRegistryRowsValid(args: {
         `lookup family target registry normalizedBenchmarkGoldHint mismatch for hint=${JSON.stringify(row.benchmarkGoldHint)}`,
       );
     }
-    const existing = owners.get(normalizedHint);
-    if (existing !== undefined) {
+    const expectedScopeKey = buildLookupV2FamilyTargetReviewScopeKey({
+      benchmarkGoldHint: row.benchmarkGoldHint,
+      holeClass: row.scopeHoleClass,
+      suggestedAliasType: row.scopeSuggestedAliasType,
+    });
+    if (row.reviewScopeKey !== expectedScopeKey) {
       throw new Error(
-        `lookup family target registry duplicate normalizedBenchmarkGoldHint=${JSON.stringify(normalizedHint)}`,
+        `lookup family target registry reviewScopeKey mismatch for hint=${JSON.stringify(row.benchmarkGoldHint)}`,
       );
     }
-    owners.set(normalizedHint, row);
+    const existing = owners.get(row.reviewScopeKey);
+    if (existing !== undefined) {
+      throw new Error(
+        `lookup family target registry duplicate reviewScopeKey=${JSON.stringify(row.reviewScopeKey)}`,
+      );
+    }
+    owners.set(row.reviewScopeKey, row);
 
     if (row.entityId !== undefined && !knownEntityIds.has(row.entityId)) {
       throw new Error(
@@ -148,7 +188,17 @@ export function buildLookupV2FamilyTargetApprovedMap(
       .filter((row): row is LookupV2FamilyTargetRegistryRow & { readonly entityId: string } =>
         row.decisionStatus === 'approved' && row.entityId !== undefined,
       )
-      .map((row) => [row.normalizedBenchmarkGoldHint, row] as const),
+      .map((row) => [row.reviewScopeKey, row] as const),
+  );
+}
+
+export function buildLookupV2FamilyTargetRejectedMap(
+  rows: readonly LookupV2FamilyTargetRegistryRow[],
+): ReadonlyMap<string, LookupV2FamilyTargetRegistryRow> {
+  return new Map(
+    rows
+      .filter((row) => row.decisionStatus === 'rejected')
+      .map((row) => [row.reviewScopeKey, row] as const),
   );
 }
 
@@ -161,13 +211,22 @@ export function loadLookupV2FamilyTargetApprovedMapSync(
   );
 }
 
+export function loadLookupV2FamilyTargetRejectedMapSync(
+  registryPath: string = DEFAULT_LOOKUP_V2_FAMILY_TARGET_REGISTRY_PATH,
+  knownEntityIds: ReadonlySet<string> = loadLookupV2RuntimeKnownEntityIdsSync(),
+): ReadonlyMap<string, LookupV2FamilyTargetRegistryRow> {
+  return buildLookupV2FamilyTargetRejectedMap(
+    loadLookupV2FamilyTargetRegistrySync(registryPath, knownEntityIds),
+  );
+}
+
 export function sortLookupV2FamilyTargetRegistryRows(
   rows: readonly LookupV2FamilyTargetRegistryRow[],
 ): readonly LookupV2FamilyTargetRegistryRow[] {
   return rows
     .slice()
     .sort((left, right) =>
-      left.normalizedBenchmarkGoldHint.localeCompare(right.normalizedBenchmarkGoldHint)
+      left.reviewScopeKey.localeCompare(right.reviewScopeKey)
       || left.decisionStatus.localeCompare(right.decisionStatus)
       || (left.entityId ?? '').localeCompare(right.entityId ?? '')
       || left.reviewedAt.localeCompare(right.reviewedAt),

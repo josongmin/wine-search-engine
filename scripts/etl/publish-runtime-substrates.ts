@@ -26,9 +26,9 @@ import {
   buildLookupAliasRuntimeCoreArtifactHash,
   buildLookupAmbiguityRuntimeArtifactHash,
   buildLookupConceptRedirectRuntimeArtifactHash,
+  buildLookupEntityProjectionArtifactHash,
   buildLookupExactSafeRuntimeArtifactHash,
   buildLookupResolverProjectionArtifactHash,
-  buildLookupEntityProjectionArtifactHash,
   parseLookupAliasBroadRecallRuntimeArtifact,
   parseLookupAliasRuntimeArtifact,
   parseLookupAliasRuntimeCoreArtifact,
@@ -38,6 +38,14 @@ import {
   parseLookupResolverProjectionArtifact,
   parseLookupEntityProjectionArtifact,
 } from '../../src/domain/shared/types/search-snapshot-lookup-runtime.js';
+import {
+  buildLookupReviewedFamilyRecallRuntimeArtifactHash,
+  buildLookupScopeGraphRuntimeArtifactHash,
+  buildLookupSemanticScopeRuntimeArtifactHash,
+  parseLookupReviewedFamilyRecallRuntimeArtifact,
+  parseLookupScopeGraphRuntimeArtifact,
+  parseLookupSemanticScopeRuntimeArtifact,
+} from '../../src/domain/shared/types/search-snapshot-lookup-semantic-runtime.js';
 import { applyFullCanonicalGraphSync } from './canonical-entity-graph-sync.js';
 import { pgTableHasColumn } from '../../src/infrastructure/db/pg-schema-capabilities.js';
 import { createRuntimeSubstratePublishStateMachine } from './runtime-substrate-publish-state-machine.js';
@@ -545,6 +553,9 @@ async function assertLookupRuntimeArtifactsReady(
     exactSafeRuntimeRaw,
     resolverProjectionRaw,
     entityProjectionRaw,
+    semanticScopeRuntimeRaw,
+    reviewedFamilyRecallRuntimeRaw,
+    scopeGraphRuntimeRaw,
     ambiguityRuntimeRaw,
     conceptRedirectRuntimeRaw,
   ] = await Promise.all([
@@ -555,6 +566,9 @@ async function assertLookupRuntimeArtifactsReady(
     fs.readFile(manifest.artifacts.lookupExactSafeRuntimeJson, 'utf8'),
     fs.readFile(manifest.artifacts.lookupResolverProjectionJson, 'utf8'),
     fs.readFile(manifest.artifacts.lookupEntityProjectionJson, 'utf8'),
+    fs.readFile(manifest.artifacts.lookupSemanticScopeRuntimeJson, 'utf8'),
+    fs.readFile(manifest.artifacts.lookupReviewedFamilyRecallRuntimeJson, 'utf8'),
+    fs.readFile(manifest.artifacts.lookupScopeGraphRuntimeJson, 'utf8'),
     fs.readFile(manifest.artifacts.lookupAmbiguityRuntimeJson, 'utf8'),
     fs.readFile(manifest.artifacts.lookupConceptRedirectRuntimeJson, 'utf8'),
   ]);
@@ -585,6 +599,18 @@ async function assertLookupRuntimeArtifactsReady(
   const entityProjection = parseLookupEntityProjectionArtifact(
     entityProjectionRaw,
     manifest.artifacts.lookupEntityProjectionJson,
+  );
+  const semanticScopeRuntime = parseLookupSemanticScopeRuntimeArtifact(
+    semanticScopeRuntimeRaw,
+    manifest.artifacts.lookupSemanticScopeRuntimeJson,
+  );
+  const reviewedFamilyRecallRuntime = parseLookupReviewedFamilyRecallRuntimeArtifact(
+    reviewedFamilyRecallRuntimeRaw,
+    manifest.artifacts.lookupReviewedFamilyRecallRuntimeJson,
+  );
+  const scopeGraphRuntime = parseLookupScopeGraphRuntimeArtifact(
+    scopeGraphRuntimeRaw,
+    manifest.artifacts.lookupScopeGraphRuntimeJson,
   );
   const ambiguityRuntime = parseLookupAmbiguityRuntimeArtifact(
     ambiguityRuntimeRaw,
@@ -635,6 +661,22 @@ async function assertLookupRuntimeArtifactsReady(
       `Lookup entity projection count mismatch: manifest=${manifest.counts.lookupEntityProjectionDocuments} artifact=${entityProjection.documents.length}`,
     );
   }
+  if (Object.keys(semanticScopeRuntime.entries).length !== manifest.counts.lookupSemanticScopeRuntimeEntries) {
+    throw new Error(
+      `Lookup semantic scope runtime count mismatch: manifest=${manifest.counts.lookupSemanticScopeRuntimeEntries} artifact=${Object.keys(semanticScopeRuntime.entries).length}`,
+    );
+  }
+  if (Object.keys(reviewedFamilyRecallRuntime.entries).length !== manifest.counts.lookupReviewedFamilyRecallRuntimeEntries) {
+    throw new Error(
+      `Lookup reviewed family recall runtime count mismatch: manifest=${manifest.counts.lookupReviewedFamilyRecallRuntimeEntries} artifact=${Object.keys(reviewedFamilyRecallRuntime.entries).length}`,
+    );
+  }
+  const scopeGraphEdgeCount = Object.values(scopeGraphRuntime.adjacency).reduce((sum, edges) => sum + edges.length, 0);
+  if (scopeGraphEdgeCount !== manifest.counts.lookupScopeGraphRuntimeEdges) {
+    throw new Error(
+      `Lookup scope graph runtime count mismatch: manifest=${manifest.counts.lookupScopeGraphRuntimeEdges} artifact=${scopeGraphEdgeCount}`,
+    );
+  }
   if (Object.keys(ambiguityRuntime.entries).length !== manifest.counts.lookupAmbiguityRuntimeEntries) {
     throw new Error(
       `Lookup ambiguity runtime count mismatch: manifest=${manifest.counts.lookupAmbiguityRuntimeEntries} artifact=${Object.keys(ambiguityRuntime.entries).length}`,
@@ -681,6 +723,24 @@ async function assertLookupRuntimeArtifactsReady(
   if (entityProjectionHash !== manifest.hashes.lookupEntityProjection) {
     throw new Error(
       `Lookup entity projection hash mismatch: manifest=${manifest.hashes.lookupEntityProjection} artifact=${entityProjectionHash}`,
+    );
+  }
+  const semanticScopeRuntimeHash = buildLookupSemanticScopeRuntimeArtifactHash(semanticScopeRuntime);
+  if (semanticScopeRuntimeHash !== manifest.hashes.lookupSemanticScopeRuntime) {
+    throw new Error(
+      `Lookup semantic scope runtime hash mismatch: manifest=${manifest.hashes.lookupSemanticScopeRuntime} artifact=${semanticScopeRuntimeHash}`,
+    );
+  }
+  const reviewedFamilyRecallRuntimeHash = buildLookupReviewedFamilyRecallRuntimeArtifactHash(reviewedFamilyRecallRuntime);
+  if (reviewedFamilyRecallRuntimeHash !== manifest.hashes.lookupReviewedFamilyRecallRuntime) {
+    throw new Error(
+      `Lookup reviewed family recall runtime hash mismatch: manifest=${manifest.hashes.lookupReviewedFamilyRecallRuntime} artifact=${reviewedFamilyRecallRuntimeHash}`,
+    );
+  }
+  const scopeGraphRuntimeHash = buildLookupScopeGraphRuntimeArtifactHash(scopeGraphRuntime);
+  if (scopeGraphRuntimeHash !== manifest.hashes.lookupScopeGraphRuntime) {
+    throw new Error(
+      `Lookup scope graph runtime hash mismatch: manifest=${manifest.hashes.lookupScopeGraphRuntime} artifact=${scopeGraphRuntimeHash}`,
     );
   }
   const ambiguityRuntimeHash = buildLookupAmbiguityRuntimeArtifactHash(ambiguityRuntime);
@@ -748,6 +808,9 @@ function buildArtifactOnlyRuntimeState(args: {
     lookupExactSafeRuntimePath: args.manifest.artifacts.lookupExactSafeRuntimeJson,
     lookupResolverProjectionPath: args.manifest.artifacts.lookupResolverProjectionJson,
     lookupEntityProjectionPath: args.manifest.artifacts.lookupEntityProjectionJson,
+    lookupSemanticScopeRuntimePath: args.manifest.artifacts.lookupSemanticScopeRuntimeJson,
+    lookupReviewedFamilyRecallRuntimePath: args.manifest.artifacts.lookupReviewedFamilyRecallRuntimeJson,
+    lookupScopeGraphRuntimePath: args.manifest.artifacts.lookupScopeGraphRuntimeJson,
     lookupAmbiguityRuntimePath: args.manifest.artifacts.lookupAmbiguityRuntimeJson,
     lookupConceptRedirectRuntimePath: args.manifest.artifacts.lookupConceptRedirectRuntimeJson,
     quality: args.manifest.quality,
@@ -762,6 +825,9 @@ function buildArtifactOnlyRuntimeState(args: {
       lookupExactSafeRuntimeEntries: args.manifest.counts.lookupExactSafeRuntimeEntries,
       lookupResolverProjectionDocuments: args.manifest.counts.lookupResolverProjectionDocuments,
       lookupEntityProjectionDocuments: args.manifest.counts.lookupEntityProjectionDocuments,
+      lookupSemanticScopeRuntimeEntries: args.manifest.counts.lookupSemanticScopeRuntimeEntries,
+      lookupReviewedFamilyRecallRuntimeEntries: args.manifest.counts.lookupReviewedFamilyRecallRuntimeEntries,
+      lookupScopeGraphRuntimeEdges: args.manifest.counts.lookupScopeGraphRuntimeEdges,
       lookupAmbiguityRuntimeEntries: args.manifest.counts.lookupAmbiguityRuntimeEntries,
       lookupConceptRedirectRuntimeEntries: args.manifest.counts.lookupConceptRedirectRuntimeEntries,
       ambiguityRegistry: args.manifest.counts.ambiguityRegistry,
@@ -778,6 +844,9 @@ function buildArtifactOnlyRuntimeState(args: {
       lookupExactSafeRuntime: args.manifest.hashes.lookupExactSafeRuntime,
       lookupResolverProjection: args.manifest.hashes.lookupResolverProjection,
       lookupEntityProjection: args.manifest.hashes.lookupEntityProjection,
+      lookupSemanticScopeRuntime: args.manifest.hashes.lookupSemanticScopeRuntime,
+      lookupReviewedFamilyRecallRuntime: args.manifest.hashes.lookupReviewedFamilyRecallRuntime,
+      lookupScopeGraphRuntime: args.manifest.hashes.lookupScopeGraphRuntime,
       lookupAmbiguityRuntime: args.manifest.hashes.lookupAmbiguityRuntime,
       lookupConceptRedirectRuntime: args.manifest.hashes.lookupConceptRedirectRuntime,
       ambiguityRegistry: args.manifest.hashes.ambiguityRegistry,
@@ -1160,9 +1229,15 @@ export async function publishRuntimeSubstrates(args: Args): Promise<SearchSnapsh
         manifestPath: args.manifestPath,
         nlMappingsRuntimePath: runtimeNlMappingsPath,
         lookupAliasRuntimePath: manifest.artifacts.lookupAliasRuntimeJson,
+        ...(manifest.artifacts.lookupAliasBroadRecallRuntimeJson !== undefined
+          ? { lookupAliasBroadRecallRuntimePath: manifest.artifacts.lookupAliasBroadRecallRuntimeJson }
+          : {}),
         lookupExactSafeRuntimePath: manifest.artifacts.lookupExactSafeRuntimeJson,
         lookupResolverProjectionPath: manifest.artifacts.lookupResolverProjectionJson,
         lookupEntityProjectionPath: manifest.artifacts.lookupEntityProjectionJson,
+        lookupSemanticScopeRuntimePath: manifest.artifacts.lookupSemanticScopeRuntimeJson,
+        lookupReviewedFamilyRecallRuntimePath: manifest.artifacts.lookupReviewedFamilyRecallRuntimeJson,
+        lookupScopeGraphRuntimePath: manifest.artifacts.lookupScopeGraphRuntimeJson,
         lookupAmbiguityRuntimePath: manifest.artifacts.lookupAmbiguityRuntimeJson,
         lookupConceptRedirectRuntimePath: manifest.artifacts.lookupConceptRedirectRuntimeJson,
         quality: manifest.quality,
@@ -1171,9 +1246,15 @@ export async function publishRuntimeSubstrates(args: Args): Promise<SearchSnapsh
           entities: entities.length,
           aliases: aliases.length,
           lookupAliasRuntimeAliases: manifest.counts.lookupAliasRuntimeAliases,
+          ...(manifest.counts.lookupAliasBroadRecallRuntimeEntries !== undefined
+            ? { lookupAliasBroadRecallRuntimeEntries: manifest.counts.lookupAliasBroadRecallRuntimeEntries }
+            : {}),
           lookupExactSafeRuntimeEntries: manifest.counts.lookupExactSafeRuntimeEntries,
           lookupResolverProjectionDocuments: manifest.counts.lookupResolverProjectionDocuments,
           lookupEntityProjectionDocuments: manifest.counts.lookupEntityProjectionDocuments,
+          lookupSemanticScopeRuntimeEntries: manifest.counts.lookupSemanticScopeRuntimeEntries,
+          lookupReviewedFamilyRecallRuntimeEntries: manifest.counts.lookupReviewedFamilyRecallRuntimeEntries,
+          lookupScopeGraphRuntimeEdges: manifest.counts.lookupScopeGraphRuntimeEdges,
           lookupAmbiguityRuntimeEntries: manifest.counts.lookupAmbiguityRuntimeEntries,
           lookupConceptRedirectRuntimeEntries: manifest.counts.lookupConceptRedirectRuntimeEntries,
           ambiguityRegistry: ambiguityRows.length,
@@ -1184,9 +1265,15 @@ export async function publishRuntimeSubstrates(args: Args): Promise<SearchSnapsh
           entities: manifest.hashes.entities,
           aliases: manifest.hashes.aliases,
           lookupAliasRuntime: manifest.hashes.lookupAliasRuntime,
+          ...(manifest.hashes.lookupAliasBroadRecallRuntime !== undefined
+            ? { lookupAliasBroadRecallRuntime: manifest.hashes.lookupAliasBroadRecallRuntime }
+            : {}),
           lookupExactSafeRuntime: manifest.hashes.lookupExactSafeRuntime,
           lookupResolverProjection: manifest.hashes.lookupResolverProjection,
           lookupEntityProjection: manifest.hashes.lookupEntityProjection,
+          lookupSemanticScopeRuntime: manifest.hashes.lookupSemanticScopeRuntime,
+          lookupReviewedFamilyRecallRuntime: manifest.hashes.lookupReviewedFamilyRecallRuntime,
+          lookupScopeGraphRuntime: manifest.hashes.lookupScopeGraphRuntime,
           lookupAmbiguityRuntime: manifest.hashes.lookupAmbiguityRuntime,
           lookupConceptRedirectRuntime: manifest.hashes.lookupConceptRedirectRuntime,
           ambiguityRegistry: manifest.hashes.ambiguityRegistry,
@@ -1278,6 +1365,15 @@ async function run(): Promise<void> {
     if (verifiedState.hashes.lookupEntityProjection !== manifest.hashes.lookupEntityProjection) {
       throw new Error('post-promote verify failed: lookupEntityProjection hash mismatch');
     }
+    if (verifiedState.hashes.lookupSemanticScopeRuntime !== manifest.hashes.lookupSemanticScopeRuntime) {
+      throw new Error('post-promote verify failed: lookupSemanticScopeRuntime hash mismatch');
+    }
+    if (verifiedState.hashes.lookupReviewedFamilyRecallRuntime !== manifest.hashes.lookupReviewedFamilyRecallRuntime) {
+      throw new Error('post-promote verify failed: lookupReviewedFamilyRecallRuntime hash mismatch');
+    }
+    if (verifiedState.hashes.lookupScopeGraphRuntime !== manifest.hashes.lookupScopeGraphRuntime) {
+      throw new Error('post-promote verify failed: lookupScopeGraphRuntime hash mismatch');
+    }
     if (verifiedState.hashes.lookupAmbiguityRuntime !== manifest.hashes.lookupAmbiguityRuntime) {
       throw new Error('post-promote verify failed: lookupAmbiguityRuntime hash mismatch');
     }
@@ -1289,6 +1385,15 @@ async function run(): Promise<void> {
     }
     if (verifiedState.counts.lookupConceptRedirectRuntimeEntries !== manifest.counts.lookupConceptRedirectRuntimeEntries) {
       throw new Error('post-promote verify failed: lookupConceptRedirectRuntime entry count mismatch');
+    }
+    if (verifiedState.counts.lookupSemanticScopeRuntimeEntries !== manifest.counts.lookupSemanticScopeRuntimeEntries) {
+      throw new Error('post-promote verify failed: lookupSemanticScopeRuntime entry count mismatch');
+    }
+    if (verifiedState.counts.lookupReviewedFamilyRecallRuntimeEntries !== manifest.counts.lookupReviewedFamilyRecallRuntimeEntries) {
+      throw new Error('post-promote verify failed: lookupReviewedFamilyRecallRuntime entry count mismatch');
+    }
+    if (verifiedState.counts.lookupScopeGraphRuntimeEdges !== manifest.counts.lookupScopeGraphRuntimeEdges) {
+      throw new Error('post-promote verify failed: lookupScopeGraphRuntime edge count mismatch');
     }
     console.log(`Published runtime substrates for ${promotedState.snapshotId}`);
     console.log(`runtime_state=${args.runtimeStatePath}`);

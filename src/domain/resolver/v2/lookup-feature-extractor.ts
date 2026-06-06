@@ -50,6 +50,12 @@ export function extractLookupFeatures(
    * or the substrate is unavailable.
    */
   ambiguityClusterMembership = 0,
+  scopeHints?: {
+    readonly lineGraphProximity?: number | undefined;
+    readonly vintageGraphProximity?: number | undefined;
+    readonly scopeQualifierAgreement?: number | undefined;
+    readonly scopeAxisAgreement?: number | undefined;
+  },
 ): LookupCandidateFeatures {
   const distinctChannels = new Set(channelHits.map((h) => h.channel));
   return {
@@ -59,6 +65,20 @@ export function extractLookupFeatures(
     editDistanceScore: bestChannelScore(channelHits, 'fuzzy_alias'),
     phoneticConsistency: bestChannelScore(channelHits, 'jamo_phonetic'),
     familyGraphProximity: bestChannelScore(channelHits, 'family_graph'),
+    lineGraphProximity: clamp01(
+      Math.max(
+        bestChannelScore(channelHits, 'line_graph'),
+        scopeHints?.lineGraphProximity ?? 0,
+      ),
+    ),
+    vintageGraphProximity: clamp01(
+      Math.max(
+        bestChannelScore(channelHits, 'vintage_graph'),
+        scopeHints?.vintageGraphProximity ?? 0,
+      ),
+    ),
+    scopeQualifierAgreement: clamp01(scopeHints?.scopeQualifierAgreement ?? 0),
+    scopeAxisAgreement: clamp01(scopeHints?.scopeAxisAgreement ?? 0),
     // No popularity/script substrate at this layer yet — carry the calibrated
     // resolver score as the popularity-prior proxy (deterministic, bounded).
     popularityPrior: clamp01(calibratedScore),

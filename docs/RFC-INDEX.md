@@ -25,6 +25,7 @@
 19. **RFC-019** — NL Mapper Elevation to Ontology-Grounded Semantic Constraint Compiler
 20. **RFC-020** — Constraint Extraction Measurement Framework
 21. **RFC-021** — Primitive Search Surface and Agent-Orchestrated Query Composition
+22. **RFC-022** — LLM-Structured Query Analysis with Deterministic Tool Dispatch
 
 ## 문서 목록 (파일명)
 
@@ -51,6 +52,7 @@
 | 019 | `docs/rfc/RFC-019-nl-mapper-coverage.md` | Rule table를 ontology-grounded constraint compiler로 승격 |
 | 020 | `docs/rfc/RFC-020-constraint-extraction-measurement.md` | Constraint extraction 측정 프레임워크 |
 | 021 | `docs/rfc/RFC-021-primitive-search-and-agent-orchestration.md` | Public search primitive화 + agent orchestration 경계 |
+| 022 | `docs/rfc/RFC-022-llm-structured-query-analysis.md` | Analyze 단계 LLM-structured 승격(typed analysis) + deterministic tool dispatch 유지 + bounded FSM recovery loop + Failure Explanation Layer + multi-turn session state |
 
 ## 개념·용어 정렬 (논리 연결)
 

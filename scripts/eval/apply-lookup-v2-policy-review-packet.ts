@@ -4,11 +4,11 @@ import { parseArgs } from 'node:util';
 import type { LookupExactSafeProposalPacketRow } from './export-lookup-v2-exact-safe-proposal-packet.js';
 import type { LookupV2PolicyReviewPacketRow } from './export-lookup-v2-policy-review-packet.js';
 import {
-  buildLookupV2PolicyFamilyDecisionKey,
-  DEFAULT_LOOKUP_V2_POLICY_FAMILY_DECISION_REGISTRY_PATH,
-  loadLookupV2PolicyFamilyDecisionMapSync,
-  type LookupV2PolicyFamilyDecisionRegistryRow,
-} from './lookup-v2-policy-family-decision-registry.js';
+  buildLookupV2SemanticPolicyRegistryKey,
+  DEFAULT_LOOKUP_V2_SEMANTIC_POLICY_REGISTRY_PATH,
+  loadLookupV2SemanticPolicyRegistryMapSync,
+  type LookupV2SemanticPolicyRegistryRow,
+} from './lookup-v2-semantic-policy-registry.js';
 
 interface PolicyReviewApplyResult {
   readonly exactSafePacketRows: readonly LookupExactSafeProposalPacketRow[];
@@ -49,16 +49,16 @@ function parsePacketJsonl(filePath: string): readonly LookupV2PolicyReviewPacket
 
 function buildExactSafePacketSourceEvidence(
   row: LookupV2PolicyReviewPacketRow,
-  registryRow: LookupV2PolicyFamilyDecisionRegistryRow,
+  registryRow: LookupV2SemanticPolicyRegistryRow,
   registryPath: string,
 ): string {
   const registryName = path.basename(registryPath);
-  return `${row.sourceEvidence} [policy_family_decision_registry=${registryName} policy_surface=${row.policyConflictSurface} reviewedBy=${registryRow.reviewedBy} decision=${registryRow.decisionReason}]`;
+  return `${row.sourceEvidence} [semantic_policy_registry=${registryName} semantic_conflict=${row.semanticConflictKey} reviewedBy=${registryRow.reviewedBy} decision=${registryRow.decisionReason}]`;
 }
 
 export function applyLookupV2PolicyReviewPacket(args: {
   readonly packetRows: readonly LookupV2PolicyReviewPacketRow[];
-  readonly policyFamilyDecisionMap: ReadonlyMap<string, LookupV2PolicyFamilyDecisionRegistryRow>;
+  readonly policyFamilyDecisionMap: ReadonlyMap<string, LookupV2SemanticPolicyRegistryRow>;
   readonly policyFamilyDecisionRegistryPath: string;
 }): PolicyReviewApplyResult {
   const exactSafePacketRows: LookupExactSafeProposalPacketRow[] = [];
@@ -68,7 +68,7 @@ export function applyLookupV2PolicyReviewPacket(args: {
   let pendingRows = 0;
 
   for (const row of args.packetRows) {
-    if (row.reviewTarget !== 'lookup_policy_conflict_registry_v1') {
+    if (row.reviewTarget !== 'lookup_semantic_policy_registry_v1') {
       throw new Error(`unsupported reviewTarget=${JSON.stringify(row.reviewTarget)} for surface=${JSON.stringify(row.surface)}`);
     }
 
@@ -76,28 +76,34 @@ export function applyLookupV2PolicyReviewPacket(args: {
       pendingRows += 1;
       continue;
     }
-    if (row.proposalStatus === 'kept_policy_conflict') {
+    if (row.proposalStatus === 'kept_ambiguous') {
       if (row.benchmarkGoldEntityId === undefined) {
         throw new Error(`kept policy-review row is missing benchmarkGoldEntityId for surface=${JSON.stringify(row.surface)}`);
       }
+      if (row.semanticConflictKey === undefined) {
+        throw new Error(`kept policy-review row is missing semanticConflictKey for surface=${JSON.stringify(row.surface)}`);
+      }
       const registryDecision = args.policyFamilyDecisionMap.get(
-        buildLookupV2PolicyFamilyDecisionKey(row.policyConflictSurface, row.benchmarkGoldEntityId),
+        buildLookupV2SemanticPolicyRegistryKey(row.semanticConflictKey, row.benchmarkGoldEntityId),
       );
-      if (registryDecision?.decision !== 'keep_policy_conflict') {
+      if (registryDecision?.decision !== 'keep_ambiguous') {
         throw new Error(`kept policy-review row does not match reviewed policy-family registry for surface=${JSON.stringify(row.surface)}`);
       }
       keptPolicyConflictRows += 1;
       continue;
     }
-    if (row.proposalStatus === 'needs_target') {
+    if (row.proposalStatus === 'needs_scope_target') {
       if (row.benchmarkGoldEntityId === undefined) {
-        throw new Error(`needs_target policy-review row is missing benchmarkGoldEntityId for surface=${JSON.stringify(row.surface)}`);
+        throw new Error(`needs_scope_target policy-review row is missing benchmarkGoldEntityId for surface=${JSON.stringify(row.surface)}`);
+      }
+      if (row.semanticConflictKey === undefined) {
+        throw new Error(`needs_scope_target policy-review row is missing semanticConflictKey for surface=${JSON.stringify(row.surface)}`);
       }
       const registryDecision = args.policyFamilyDecisionMap.get(
-        buildLookupV2PolicyFamilyDecisionKey(row.policyConflictSurface, row.benchmarkGoldEntityId),
+        buildLookupV2SemanticPolicyRegistryKey(row.semanticConflictKey, row.benchmarkGoldEntityId),
       );
-      if (registryDecision?.decision !== 'needs_target') {
-        throw new Error(`needs_target policy-review row does not match reviewed policy-family registry for surface=${JSON.stringify(row.surface)}`);
+      if (registryDecision?.decision !== 'needs_scope_target') {
+        throw new Error(`needs_scope_target policy-review row does not match reviewed policy-family registry for surface=${JSON.stringify(row.surface)}`);
       }
       needsTargetRows += 1;
       continue;
@@ -110,8 +116,11 @@ export function applyLookupV2PolicyReviewPacket(args: {
     if (row.benchmarkGoldEntityIdSource === undefined) {
       throw new Error(`approved policy-review row is missing benchmarkGoldEntityIdSource for surface=${JSON.stringify(row.surface)}`);
     }
+    if (row.semanticConflictKey === undefined) {
+      throw new Error(`approved policy-review row is missing semanticConflictKey for surface=${JSON.stringify(row.surface)}`);
+    }
     const registryDecision = args.policyFamilyDecisionMap.get(
-      buildLookupV2PolicyFamilyDecisionKey(row.policyConflictSurface, row.benchmarkGoldEntityId),
+      buildLookupV2SemanticPolicyRegistryKey(row.semanticConflictKey, row.benchmarkGoldEntityId),
     );
     if (registryDecision?.decision !== 'promote_exact_safe') {
       throw new Error(`approved policy-review row does not match reviewed policy-family registry for surface=${JSON.stringify(row.surface)}`);
@@ -139,7 +148,7 @@ export function applyLookupV2PolicyReviewPacket(args: {
       suggestedAliasType: row.suggestedAliasType,
       holeClass: row.holeClass,
       benchmarkGoldHint: row.benchmarkGoldHint,
-      benchmarkGoldEntityIdSource: 'policy_family_decision_registry',
+      benchmarkGoldEntityIdSource: 'semantic_policy_registry',
       sourceArtifact: row.sourceArtifact,
       sourceEvidence: buildExactSafePacketSourceEvidence(
         row,
@@ -175,17 +184,17 @@ async function main(): Promise<void> {
     args: process.argv.slice(2).filter((arg) => arg !== '--'),
     options: {
       input: { type: 'string', default: '/tmp/lookup-v2-korean-realworld-stretch-policy-review-reviewed.jsonl' },
-      registry: { type: 'string', default: DEFAULT_LOOKUP_V2_POLICY_FAMILY_DECISION_REGISTRY_PATH },
+      registry: { type: 'string', default: DEFAULT_LOOKUP_V2_SEMANTIC_POLICY_REGISTRY_PATH },
       output: { type: 'string', default: '/tmp/lookup-v2-korean-realworld-stretch-policy-review-approved-exact-safe-packet.jsonl' },
     },
     allowPositionals: false,
   });
 
   const inputPath = values.input ?? '/tmp/lookup-v2-korean-realworld-stretch-policy-review-reviewed.jsonl';
-  const registryPath = values.registry ?? DEFAULT_LOOKUP_V2_POLICY_FAMILY_DECISION_REGISTRY_PATH;
+  const registryPath = values.registry ?? DEFAULT_LOOKUP_V2_SEMANTIC_POLICY_REGISTRY_PATH;
   const outputPath = values.output ?? '/tmp/lookup-v2-korean-realworld-stretch-policy-review-approved-exact-safe-packet.jsonl';
   const packetRows = parsePacketJsonl(inputPath);
-  const policyFamilyDecisionMap = loadLookupV2PolicyFamilyDecisionMapSync(registryPath);
+  const policyFamilyDecisionMap = loadLookupV2SemanticPolicyRegistryMapSync(registryPath);
   const result = applyLookupV2PolicyReviewPacket({
     packetRows,
     policyFamilyDecisionMap,
@@ -195,7 +204,7 @@ async function main(): Promise<void> {
   writeFileSync(outputPath, serializePacketRows(result.exactSafePacketRows), 'utf8');
   console.log(`[elv2-policy-review-apply] approved_exact_safe_rows=${result.approvedExactSafeRows}`);
   console.log(`[elv2-policy-review-apply] kept_policy_conflict_rows=${result.keptPolicyConflictRows}`);
-  console.log(`[elv2-policy-review-apply] needs_target_rows=${result.needsTargetRows}`);
+  console.log(`[elv2-policy-review-apply] needs_scope_target_rows=${result.needsTargetRows}`);
   console.log(`[elv2-policy-review-apply] pending_rows=${result.pendingRows}`);
   console.log(`[elv2-policy-review-apply] exact_safe_packet_rows=${result.exactSafePacketRows.length}`);
   console.log(`[elv2-policy-review-apply] output=${outputPath}`);

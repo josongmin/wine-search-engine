@@ -8,9 +8,9 @@ import type { LookupV2CurationDraftRow } from './export-lookup-v2-curation-draft
 
 export type LookupExactSafeProposalEntityIdSource =
   | 'fixture_exact'
-  | 'family_target_registry'
+  | 'semantic_scope_target_registry'
   | 'hint_resolution'
-  | 'policy_family_decision_registry'
+  | 'semantic_policy_registry'
   | 'policy_registry_authority'
   | 'runtime_identity_safe_alias'
   | 'manual_family_review_target';

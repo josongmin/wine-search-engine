@@ -161,9 +161,20 @@ describe('MultiChannelRetrievalEngine (T-ELV2-04 real)', () => {
 describe('MultiChannelRetrievalEngine — family_graph channel', () => {
   function familyGraphReturning(byAnchor: Record<string, { entityId: string; edgeWeight: number }[]>) {
     return {
-      async getFamilySiblingsBatch(ids: readonly string[]) {
-        const m = new Map<string, readonly { entityId: string; edgeWeight: number }[]>();
-        for (const id of ids) if (byAnchor[id] !== undefined) m.set(id, byAnchor[id]);
+      async getRelatedEntitiesBatch(ids: readonly string[], relationKind: string) {
+        const m = new Map<string, readonly { targetEntityId: string; relationKind: 'family'; weight: number; familyKey: string }[]>();
+        if (relationKind !== 'family') {
+          return m;
+        }
+        for (const id of ids) {
+          if (byAnchor[id] === undefined) continue;
+          m.set(id, byAnchor[id].map((edge) => ({
+            targetEntityId: edge.entityId,
+            relationKind: 'family' as const,
+            weight: edge.edgeWeight,
+            familyKey: 'family',
+          })));
+        }
         return m;
       },
     };
@@ -174,7 +185,7 @@ describe('MultiChannelRetrievalEngine — family_graph channel', () => {
       'opus one': [{ surfaceForm: 'Opus One', normalizedForm: 'opus one', entityIds: [opus], matchConfidence: 0.97, lookupStrategy: 'exact' }],
     });
     const familyGraph = familyGraphReturning({ 'opus-one-2018': [{ entityId: 'opus-one-2019', edgeWeight: 0.5 }] });
-    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, entityLookup, familyGraph });
+    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, entityLookup, entityScopeGraph: familyGraph });
     const result = await engine.retrieve(input());
     const sibling = result.candidates.find((c) => String(c.entityId) === 'opus-one-2019');
     expect(sibling).toBeDefined();
@@ -195,7 +206,7 @@ describe('MultiChannelRetrievalEngine — family_graph channel', () => {
     });
     // e1 has a family sibling 'e1-sib' at edge weight 0.5 (below both anchors).
     const familyGraph = familyGraphReturning({ e1: [{ entityId: 'e1-sib', edgeWeight: 0.5 }] });
-    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, entityLookup, familyGraph });
+    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, entityLookup, entityScopeGraph: familyGraph });
     // maxCandidates=2: a pure best-score slice would keep {e1, e2} and drop the sibling.
     const result = await engine.retrieve(input({ maxCandidates: 2 }));
     const keys = result.candidates.map((c) => String(c.entityId));
@@ -217,7 +228,7 @@ describe('MultiChannelRetrievalEngine — family_graph channel', () => {
       'opus one': [{ surfaceForm: 'Opus One', normalizedForm: 'opus one', entityIds: [opus], matchConfidence: 1, lookupStrategy: 'exact' }],
     });
     const familyGraph = familyGraphReturning({ 'opus-one-2018': [{ entityId: 'opus-one-2019', edgeWeight: 0.5 }] });
-    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, entityLookup, familyGraph });
+    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, entityLookup, entityScopeGraph: familyGraph });
     const result = await engine.retrieve(input({ suppressFamilyGraphExpansion: true }));
     expect(result.candidates.map((candidate) => String(candidate.entityId))).not.toContain('opus-one-2019');
     expect(result.coverage.some((c) => c.channel === 'family_graph')).toBe(false);
@@ -227,11 +238,57 @@ describe('MultiChannelRetrievalEngine — family_graph channel', () => {
     const matcher = matcherReturning({
       'opus one': [{ surfaceForm: 'Opus One', normalizedForm: 'opus one', entityIds: [opus], matchConfidence: 0.97 }],
     });
-    const familyGraph = { async getFamilySiblingsBatch(): Promise<never> { throw new Error('family graph down'); } };
-    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, entityLookup, familyGraph });
+    const familyGraph = { async getRelatedEntitiesBatch(): Promise<never> { throw new Error('family graph down'); } };
+    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, entityLookup, entityScopeGraph: familyGraph });
     const result = await engine.retrieve(input());
     expect(result.candidates).toHaveLength(1);
     const fam = result.coverage.find((c) => c.channel === 'family_graph');
     expect(fam?.firing).toBe(false);
+  });
+
+  it('injects reviewed family recall seeds as dense recall-only provenance without forging exact alias evidence', async () => {
+    const matcher = matcherReturning({});
+    const reviewedFamilyRecall = {
+      findMatches: vi.fn(() => [{
+        normalizedSurface: 'silver oak',
+        familyKey: 'silver oak',
+        entityIds: ['silver-oak-alexander', 'silver-oak-napa'],
+        recallWeight: 0.5,
+        localizedSurfaces: ['실버 오크', '실버오크'],
+      }]),
+    };
+    const engine = new MultiChannelRetrievalEngine({
+      aliasMatcher: matcher,
+      entityLookup,
+      reviewedFamilyRecall,
+    });
+
+    const result = await engine.retrieve(input({
+      rawQuery: '실버 오크 17',
+      views: views({
+        raw: '실버 오크 17',
+        strict: '실버 오크 17',
+        accentless: '실버 오크 17',
+        collapsedWhitespace: '실버 오크 17',
+        punctuationStripped: '실버 오크 17',
+        compact: '실버오크17',
+        vintageCanonicalized: '실버 오크 2017',
+        vintageStripped: '실버 오크',
+        transliterated: 'silver oak 17',
+        semanticVariants: ['실버 오크 17'],
+        lookupVariants: ['실버 오크 17'],
+      }),
+    }));
+
+    expect(result.candidates.map((candidate) => String(candidate.entityId)).sort()).toEqual([
+      'silver-oak-alexander',
+      'silver-oak-napa',
+    ]);
+    expect(result.candidates.every((candidate) =>
+      candidate.channelHits.some((hit) => hit.channel === 'dense' && hit.channelScore === 0.5)
+    )).toBe(true);
+    const dense = result.coverage.find((coverage) => coverage.channel === 'dense');
+    expect(dense?.firing).toBe(true);
+    expect(dense?.hitCount).toBe(2);
   });
 });

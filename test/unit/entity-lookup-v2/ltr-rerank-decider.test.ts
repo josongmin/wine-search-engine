@@ -8,6 +8,8 @@ function features(over: Partial<LookupCandidateFeatures> = {}): LookupCandidateF
   return {
     exactAliasEvidence: 0, normalizedAliasEvidence: 0, transliterationConsistency: 0,
     editDistanceScore: 0, phoneticConsistency: 0, familyGraphProximity: 0,
+    lineGraphProximity: 0, vintageGraphProximity: 0,
+    scopeQualifierAgreement: 0, scopeAxisAgreement: 0,
     popularityPrior: 0, scriptLanguageConsistency: 0, ambiguityClusterMembership: 0,
     channelAgreement: 0, ...over,
   };

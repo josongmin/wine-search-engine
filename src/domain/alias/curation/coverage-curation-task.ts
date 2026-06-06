@@ -15,6 +15,7 @@
  */
 
 import type { AliasType } from '../model/alias.js';
+import type { CoverageHoleOperatorBucket } from '../../resolver/v2/coverage-report.js';
 
 /** Why a surface entered the curation queue (mirrors the coverage hole class). */
 export interface CoverageHoleInput {
@@ -28,6 +29,8 @@ export interface CoverageHoleInput {
   readonly benchmarkGoldHint?: string | undefined;
   /** Optional exact benchmark gold entity id carried from the fixture/report. */
   readonly benchmarkGoldEntityId?: string | undefined;
+  /** Optional strict operator routing bucket carried from coverage. */
+  readonly operatorBucket?: CoverageHoleOperatorBucket | undefined;
 }
 
 export const CURATION_TASK_STATUSES = ['needs_target', 'ready_for_review'] as const;
@@ -48,6 +51,8 @@ export interface CurationTask {
   readonly benchmarkGoldHint?: string | undefined;
   /** Non-authoritative benchmark gold entity id for operator triage. */
   readonly benchmarkGoldEntityId?: string | undefined;
+  /** Strict operator routing bucket from the coverage report. */
+  readonly operatorBucket?: CoverageHoleOperatorBucket | undefined;
   /** Human-facing rationale for the curation queue. */
   readonly reason: string;
 }
@@ -93,6 +98,7 @@ export function buildCurationTasks(holes: readonly CoverageHoleInput[]): readonl
       status: 'needs_target',
       ...(hole.benchmarkGoldHint !== undefined ? { benchmarkGoldHint: hole.benchmarkGoldHint } : {}),
       ...(hole.benchmarkGoldEntityId !== undefined ? { benchmarkGoldEntityId: hole.benchmarkGoldEntityId } : {}),
+      ...(hole.operatorBucket !== undefined ? { operatorBucket: hole.operatorBucket } : {}),
       reason: `Hot-entity coverage hole (${hole.holeClass}): "${hole.surfaceForm}" resolved as "${hole.observedStatus}" — assign a target entity + alias to close it.`,
     });
   }

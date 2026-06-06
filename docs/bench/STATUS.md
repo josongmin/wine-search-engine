@@ -1,11 +1,11 @@
-# Bench Status (2026-06-06)
+# Bench Status (2026-06-07)
 
 이 폴더의 current SSOT는 이 문서다.
 
-## Current Truth Update (2026-06-06)
+## Current Truth Update (2026-06-07)
 
 - active runtime snapshot:
-  - `search-snapshot:v1:2f196589e595aa8b`
+  - `search-snapshot:v1:ca6596580fb755ef`
 - active runtime state:
   - `search_snapshot_runtime_state.v7`
 - active manifest schema:
@@ -13,105 +13,107 @@
 - correctness gates:
   - authority:
     - `/tmp/entity-resolution-validation.json`
-    - `V2 215/215`, `wrong=0`, `miss=0`
+    - `V2 215/215`, `wrong=0`, `miss=0`, gate **PASS**
   - hotset shadow:
     - `/tmp/lookup-v2-shadow-report.json`
     - `rows=45`, `V2 correct=41`, `wrong+=0`, gate **PASS**
   - Korean-famous coverage:
     - `/tmp/lookup-v2-coverage-korean-famous.json`
     - `hot_entities=67/67`, `non_entity=40/40`, `curation_tasks=0`
+  - Korean-famous shadow:
+    - `/tmp/lookup-v2-shadow-korean-famous.json`
+    - `rows=107`, `V2 correct=107`, `wrong+=0`, gate **PASS**
 - latency gate:
   - latest isolated rerun:
     - `/tmp/lookup-v2-latency-korean-famous.json`
-  - `cold_boot measured_ms=1179.602` -> **PASS**
-  - `request first_query_ms=15.648`, `warm_p50_ms=2.266`, `warm_p95_ms=17.736` -> **PASS**
+  - `cold_boot measured_ms=18054.078` -> **FAIL**
+  - `request first_query_ms=17.626`, `warm_p95_ms=110.016` -> **PASS**
   - `runtime_hydration fully_hydrated_runtime_artifact=true`, `lazy_build_detected_during_probe=false` -> **PASS**
-  - bootstrap breakdown:
-    - canonical probe: `loadLookupRuntimeBundle=1061.321ms`
-    - direct container probe: `createLookupDirectContainerMs=1143.330`
 - runtime / planner state:
   - direct lookup container boots from
     alias runtime + exact-safe + resolver projection + ambiguity + concept redirect
-  - atomic span broad-recall is now cut to `surface_only`
+  - atomic span broad-recall is cut to `surface_only`
     whenever the parent lookup surface is multi-token
-  - ambiguity runtime now expands only normalization-stable views
+  - ambiguity runtime expands only normalization-stable views
     and excludes recall-style `lookupVariants`
   - ambiguity adapters normalize at the boundary, so snapshot/PG lookup
     keyspace is aligned on `normalizeForMatch`
-- write-plane hardening result:
-  - `family_target_registry` is reviewed target SoT
-  - `family_target_registry` no longer auto-approves exact-safe
-  - exact-safe reviewed-authority auto-approve is allowed only for
-    `fixture_exact`, `policy_family_decision_registry`
-  - raw reviewed packets / runtime hints cannot bypass reviewed registries
-  - `페트뤼스` exact-safe row was removed after it reopened
-    `페트루스` wrong-positive
+  - write-plane hardening result:
+  - `lookup-localized-surface-registry-v1` is reviewed localized recall SoT
+  - `lookup-semantic-scope-target-registry-v1` is reviewed scope authority SoT
+  - `lookup-family-support-registry-v1` is reviewed catalog-support SoT
+  - `lookup-family-collision-registry-v1` is reviewed collision SoT
+  - runtime owner evidence / benchmark hints stay display-only and do not promote authority
 - publish state:
   - latest artifact-only runtime cutover is active on
-    `search-snapshot:v1:2f196589e595aa8b`
-  - full `etl:publish-search-snapshot` readiness proof는 이번 턴에 재실행하지 않았다
+    `search-snapshot:v1:ca6596580fb755ef`
+  - full `etl:publish-search-snapshot` readiness proof는 이 operator-plane wave에서 재실행하지 않았다
 - stretch truth:
-  - full stretch shadow:
-    - `/tmp/lookup-v2-shadow-korean-realworld-stretch.json`
-    - `rows=746`, `V2 correct=244`, `wrong+=0`, `concept_redirect_acc=0.100`, gate **FAIL**
-  - full stretch coverage:
-    - `/tmp/lookup-v2-coverage-korean-realworld-stretch.json`
-    - `hot_entities=67/310`, `non_entity=177/436`, `curation_tasks=243`
+  - strict fixture truth is active.
+    impossible `resolved` rows were reclassified from live operator buckets:
+    `strict_collision_ambiguous -> ambiguous`, `catalog_support_needed -> failed`
+  - entity-no-policy shadow:
+    - `/tmp/lookup-v2-shadow-korean-realworld-stretch-entity-no-policy.json`
+    - `rows=590`, `V2 correct=303`, `wrong+=0`, gate **PASS**
+  - entity-no-policy coverage:
+    - `/tmp/lookup-v2-coverage-korean-realworld-stretch-entity-no-policy.json`
+    - `hot_entities=76/239`, `non_entity=227/351`, `curation_tasks=163`
+    - operator buckets:
+      `strict_collision_ambiguous=0`, `catalog_support_needed=0`,
+      `localized_surface_gap=163`, `scope_target_missing=0`
   - current entity-no-policy draft:
     - `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl`
-    - `rows=233`, `auto_targetable=11`, `policy_review=0`, `manual_target=222`
+    - `rows=150`, `auto_targetable=7`, `scope_policy_review=1`,
+      `localized_surface_review=20`, `catalog_support_review=0`,
+      `reviewed_collision=101`, `scope_target_review=0`
   - current write-plane summary:
     - `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-write-plane-summary.json`
-    - `exact_safe_packet_rows=7`, `reviewed_authority_approved_rows=0`
-    - `exact_safe_family_review_rows=7`, `manual_target_family_review_rows=33`
-    - `manual_target suggestions: unique=4, collision=12, missing=17`
-    - manual-target packet now carries runtime witness fields
-      (`runtimeEvidenceWitnesses`, `runtimeCollisionWitnesses`)
-    - `producer` witness source is now included in runtime owner evidence;
-      this is evidence-only and does not auto-promote authority
-  - manual-target registry append overlay proof:
-    - `data/lookup-v2/drafts/lookup-v2-stretch-reviewed-registry-overlay-pol-roger-append-summary.json`
-    - baseline -> overlay:
-      - `auto_targetable 21 -> 27`
-      - `manual_target 228 -> 222`
-      - `manual_target_family_review 34 -> 33`
-      - `exact_safe_packet_rows 1 -> 7`
-    - invariants remain green:
-      `auto_targetable` non-decreasing,
-      `manual_target` non-increasing
-  - prior reviewed-manual-target wave:
-    - `data/lookup-v2/drafts/lookup-v2-stretch-reviewed-registry-overlay-manual-target-append-summary.json`
-    - baseline -> overlay:
-      - `auto_targetable 10 -> 21`
-      - `manual_target 239 -> 228`
-      - `manual_target_family_review 36 -> 34`
+    - `exact_safe_packet_rows=7`, `reviewed_authority_approved_rows=7`, `reviewed_authority_pending_rows=0`
+    - `exact_safe_family_review_rows=7`, `exact_safe_family_pending_rows=0`
+    - `catalog_support_family_clusters: rows=0, families=0`
+    - `reviewed_collision_family_clusters: rows=101, families=16`
+    - `manual_target_family_review_rows=0`
+    - `reviewed_collision_family_review_rows=87`
+    - `manual_target suggestions: unique=0, collision=0, missing=0`
+    - `manual_target owner-evidence families: total=0, collision=0, missing=0`
+  - reviewed localized surface registry:
+    - `data/lookup-v2/lookup-localized-surface-registry-v1.jsonl`
+    - active reviewed localized recall surfaces:
+      `silver oak`, `masseto`, `pichon lalande`
   - current exact-safe packet:
     - `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl`
     - `rows=7`
     - reviewed-authority source:
-      `family_target_registry=7`
-    - current packet is **review-plane only**
-    - direct auto-approve rows: `0`
-  - current exact-safe review scopes:
-    - `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-exact-safe-family-review-packet.jsonl`
-    - `rows=7`
-    - surviving scopes:
-      `petrus::translation::realworld_frenchish_korean_gap`,
-      `pol roger::canonical::{brand_suffix, compact_alias, mixed_script_alias, producer_prefixed, spaced_alias, vintage_suffix}`
-    - current reviewed decisions:
-      `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-exact-safe-family-review.review-decisions.jsonl`
-      -> `approved=0`, `rejected=7`, `pending=0`
+      `semantic_scope_target_registry=7`
   - current policy review packet:
     - `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-policy-review-packet.jsonl`
-    - `rows=0`
-    - reviewed policy registry SoT is active
-  - current family target registry approved hints:
-    - `data/lookup-v2/lookup-family-target-registry-v1.jsonl`
-    - `cheval blanc`, `opus one`, `petrus`, `pol roger`
-  - current overlay verifier:
-    - `data/lookup-v2/drafts/lookup-v2-stretch-reviewed-registry-overlay-summary.json`
-    - baseline == overlay on current reviewed registries
-    - invariants green, delta `0/0/0`
+    - `rows=1`
+  - current reviewed family-support registry:
+    - `data/lookup-v2/lookup-family-support-registry-v1.jsonl`
+    - active-catalog-absent families:
+      `armand de brignac`, `henri jayer`, `hill of grace`, `ruinart`, `salon`, `taittinger`, `veuve clicquot`
+  - current reviewed family-collision registry:
+    - `data/lookup-v2/lookup-family-collision-registry-v1.jsonl`
+    - active entity-collision families:
+      `angelus`, `beaucastel`, `beychevelle`, `caymus`, `cos destournel`, `dominus`,
+      `lynch bages`, `masseto`, `monfortino`, `montrose`, `palmer`, `pichon baron`,
+      `pichon lalande`, `pontet canet`, `rayas`, `screaming eagle`, `silver oak`, `talbot`
+    - topology outputs:
+      `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-reviewed-collision-family-clusters.jsonl`
+      `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-reviewed-collision-family-clusters-by-topology/topology-index.json`
+      `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-reviewed-collision-family-clusters-by-governance/governance-index.json`
+    - governance split:
+      - `family_recall_collision=8`
+      - `reviewed_family_core_collision=4`
+      - `native_family_core_collision=2`
+      - `producer_surface_secondary_line_collision=3`
+      - `producer_surface_region_line_collision=1`
+    - reviewed collision family-target lane:
+      `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-reviewed-collision-family-review-packet.jsonl`
+      -> `rows=98`, pending `98`
+  - operator truth:
+    - remaining long-tail debt is now almost entirely `localized_surface_gap`
+    - reviewed collisions and catalog-support absences no longer sit inside active `resolved` coverage debt
 
 아래 section은 archived historical context다. current 판단은 이 update block만 기준으로 한다.
 
@@ -153,9 +155,13 @@
       - reviewed family packets를 registry append한 뒤 next refresh가 triage를 단조 개선하는지 증명한다
       - baseline/overlay 두 refresh를 다 생성하고 invariant를 강제한다:
          `auto_targetable` non-decreasing,
+         `catalog_absent` non-decreasing,
          `policy_review` non-increasing,
          `manual_target` non-increasing
       - raw reviewed packet이 아니라 merged reviewed registries를 authority로 사용한다
+    - `pnpm run eval:lookup-v2:coverage:korean-realworld-stretch:entity-no-policy:verify-family-support-overlay`
+      - reviewed family-support registry만 baseline에서 비운 뒤 overlay를 다시 돌려
+        `catalog_absent` uplift와 `manual_target` drain delta를 canonical하게 증명한다
     - low-level owner-local debug lanes:
     - `pnpm run eval:lookup-v2:coverage:korean-realworld-stretch:entity-no-policy:export-draft`
       - entity-no-policy coverage artifact를 exact-safe curation draft JSONL로 투영한다

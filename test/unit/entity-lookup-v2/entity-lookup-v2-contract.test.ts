@@ -711,6 +711,73 @@ describe('T-ELV2-06 clarification contract on the wire', () => {
     expect(out.clarificationOptions).toHaveLength(0);
   });
 
+  it('preserves reviewed family collision clusters as ambiguous instead of collapsing them to failed', async () => {
+    const plannerPlan = makePlan({
+      rawQuery: '실버 오크',
+      normalizedQuery: '실버 오크',
+      normalizedQueryViews: makeViews('실버 오크'),
+      queryClass: 'unknown',
+      anchors: [],
+    });
+    const resolver = makeResolver('failed', [
+      { id: 'silver-oak-alexander', label: '1984 Silver Oak Alexander Valley Cabernet Sauvignon', score: 0 },
+      { id: 'silver-oak-napa', label: '2014 Silver Oak Napa Valley Cabernet Sauvignon', score: 0 },
+    ]);
+    const lookupPlanner: LookupPlannerPort = { plan: vi.fn().mockResolvedValue(plannerPlan as never) };
+    const candidateRetrieval = {
+      retrieve: vi.fn().mockResolvedValue({
+        candidates: [
+          {
+            entityId: createEntityId('silver-oak-alexander'),
+            canonicalLabel: '1984 Silver Oak Alexander Valley Cabernet Sauvignon',
+            channelHits: [
+              {
+                channel: 'dense',
+                matchedView: 'reviewed_family_recall',
+                matchedAlias: 'silver oak',
+                channelScore: 0.5,
+                channelRank: 1,
+              },
+            ],
+          },
+          {
+            entityId: createEntityId('silver-oak-napa'),
+            canonicalLabel: '2014 Silver Oak Napa Valley Cabernet Sauvignon',
+            channelHits: [
+              {
+                channel: 'dense',
+                matchedView: 'reviewed_family_recall',
+                matchedAlias: 'silver oak',
+                channelScore: 0.5,
+                channelRank: 1,
+              },
+            ],
+          },
+        ],
+        coverage: [
+          { channel: 'dense', firing: true, hitCount: 2, latencyMs: 1 },
+        ],
+      }),
+    };
+    const entityLookup = {
+      getDocuments: vi.fn(async (ids: readonly unknown[]) => new Map(
+        ids.map((id) => [id, { entityId: id, entityType: 'wine', canonicalLabel: String(id) }]),
+      )),
+    };
+    const out = await new EntityLookupV2UseCase({
+      admissionGate: new ConceptAdmissionGate(),
+      lookupPlanner,
+      entityResolver: resolver,
+      entityLookup: entityLookup as never,
+      candidateRetrieval: candidateRetrieval as never,
+      querySanitizer: { sanitize: vi.fn((q: string) => ({ safe: true, sanitizedQuery: q })) } as never,
+    }).execute({ query: '실버 오크', maxCandidates: 10, mode: 'default' });
+
+    expect(out.status).toBe('ambiguous');
+    expect(out.evidenceSummary.decisionReasonCode).toBe('reviewed_family_collision_requires_clarification');
+    expect(out.clarificationOptions).toHaveLength(2);
+  });
+
   // T-ELV2 vintage guard — the WIRED downgrade cascade (not just the predicate).
   it('downgrades a resolve to ambiguous when the query vintage ≠ the entity vintage', async () => {
     const resolver = makeResolver('resolved', [{ id: 'opus-one-2018', label: 'Opus One 2018', score: 0.97 }]);

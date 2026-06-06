@@ -143,13 +143,20 @@ export class LtrRerankDecider implements LookupRerankDecisionPort {
  * learned branch is reached only by tests with injected models, never live.
  */
 export function toRankingFeatures(f: LookupCandidateFeatures): RankingFeatures {
+  const scopeCorroboration = clamp01(
+    Math.max(
+      f.familyGraphProximity,
+      f.lineGraphProximity ?? 0,
+      f.vintageGraphProximity ?? 0,
+    ),
+  );
   return {
-    bm25Score: f.normalizedAliasEvidence,
-    semanticScore: f.transliterationConsistency,
+    bm25Score: Math.max(f.normalizedAliasEvidence, f.scopeQualifierAgreement ?? 0),
+    semanticScore: Math.max(f.transliterationConsistency, f.scopeAxisAgreement ?? 0),
     popularityScore: f.popularityPrior,
-    recencyScore: 0,
-    classMatchScore: clamp01(f.channelAgreement / LOOKUP_CHANNEL_COUNT),
-    attributeMatchScore: f.exactAliasEvidence,
+    recencyScore: f.vintageGraphProximity ?? 0,
+    classMatchScore: clamp01(Math.max(f.channelAgreement / LOOKUP_CHANNEL_COUNT, f.scopeAxisAgreement ?? 0)),
+    attributeMatchScore: Math.max(f.exactAliasEvidence, f.scopeQualifierAgreement ?? 0),
     // Reuse the (otherwise-unused-in-lookup) diversityScore slot to carry the
     // persisted ambiguity-cluster membership signal (T-06 Half A) — otherwise it
     // is computed but DROPPED before scoring. Same OOD-projection caveat as the
@@ -160,15 +167,15 @@ export function toRankingFeatures(f: LookupCandidateFeatures): RankingFeatures {
     multilingualScore: f.transliterationConsistency,
     entityPosteriorScore: f.editDistanceScore,
     identityExactnessTierScore: Math.max(f.exactAliasEvidence, f.phoneticConsistency),
-    laneCorroborationScore: f.familyGraphProximity,
-    laneDisagreementScore: clamp01(1 - f.scriptLanguageConsistency),
+    laneCorroborationScore: scopeCorroboration,
+    laneDisagreementScore: clamp01(1 - Math.max(f.scriptLanguageConsistency, f.scopeAxisAgreement ?? 0)),
     entityOnlyIndicator: 1,
     generalOnlyIndicator: 0,
   };
 }
 
 /** Declared retrieval-channel count, for normalising channel agreement. */
-const LOOKUP_CHANNEL_COUNT = 7;
+const LOOKUP_CHANNEL_COUNT = 9;
 
 function decision(
   status: LookupDecision['status'],

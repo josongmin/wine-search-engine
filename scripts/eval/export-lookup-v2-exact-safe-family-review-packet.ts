@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import type { LookupExactSafeProposalPacketRow } from './export-lookup-v2-exact-safe-proposal-packet.js';
+import type { LookupV2ExactSafeScopeRegistryRow } from './lookup-v2-exact-safe-scope-registry.js';
 
 export interface LookupExactSafeFamilyReviewPacketRow {
   readonly reviewScopeKey: string;
@@ -129,6 +130,25 @@ export function buildLookupV2ExactSafeFamilyReviewPacketRows(args: {
       };
     })
     .sort((left, right) => left.reviewScopeKey.localeCompare(right.reviewScopeKey));
+}
+
+export function applyLookupV2ExactSafeScopeRegistryToFamilyReviewPacketRows(args: {
+  readonly familyRows: readonly LookupExactSafeFamilyReviewPacketRow[];
+  readonly scopeRegistryMap: ReadonlyMap<string, LookupV2ExactSafeScopeRegistryRow>;
+}): readonly LookupExactSafeFamilyReviewPacketRow[] {
+  return args.familyRows.map((row) => {
+    const registryRow = args.scopeRegistryMap.get(row.reviewScopeKey);
+    if (registryRow === undefined) {
+      return row;
+    }
+    return {
+      ...row,
+      proposalStatus: registryRow.decisionStatus === 'approved' ? 'approved' : 'rejected',
+      reviewedBy: registryRow.reviewedBy,
+      reviewedAt: registryRow.reviewedAt,
+      decisionReason: registryRow.decisionReason,
+    };
+  });
 }
 
 function main(): void {

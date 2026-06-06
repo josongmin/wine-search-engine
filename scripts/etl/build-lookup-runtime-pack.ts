@@ -223,6 +223,20 @@ function buildFamilyCoreKeys(args: {
   return [...keys].sort((left, right) => left.localeCompare(right));
 }
 
+function mergeFamilyCoreKeys(args: {
+  readonly derivedKeys: readonly string[];
+  readonly reviewedKeys?: readonly string[] | undefined;
+}): readonly string[] {
+  const keys = new Set<string>(args.derivedKeys);
+  for (const key of args.reviewedKeys ?? []) {
+    const trimmed = key.trim();
+    if (trimmed.length > 0) {
+      keys.add(trimmed);
+    }
+  }
+  return [...keys].sort((left, right) => left.localeCompare(right));
+}
+
 function pushIndex(
   index: Map<string, number[]>,
   key: string,
@@ -588,6 +602,7 @@ export function buildLookupEntityProjectionArtifact(args: {
   readonly goldCanonicalLookup: ReadonlyMap<string, string>;
   readonly sourceContinuityLookup: ReadonlyMap<SourceRecordId, SourceEntityContinuityRecord>;
   readonly identityCertificatesByEntity?: ReadonlyMap<CanonicalEntityId, readonly LookupIdentityCertificate[]> | undefined;
+  readonly reviewedFamilyCoreKeysByEntity?: ReadonlyMap<CanonicalEntityId, readonly string[]> | undefined;
 }): LookupEntityProjectionArtifact {
   const documents: LookupEntityProjectionDocument[] = args.records.map((record) => {
     const entityId = args.entityIdBySourceId.get(record.sourceId);
@@ -644,11 +659,14 @@ export function buildLookupEntityProjectionArtifact(args: {
       ...(indexable.drinkingWindowModelVersion !== undefined ? { drinkingWindowModelVersion: indexable.drinkingWindowModelVersion } : {}),
     };
     const attributeHints = buildResolverCandidateAttributeHints(attributeHintDoc);
-    const familyCoreKeys = buildFamilyCoreKeys({
-      canonicalLabel: indexable.canonicalLabel,
-      aliasesIdentitySafe: indexable.aliasesIdentitySafe,
-      aliasesNoisyRecall: indexable.aliasesNoisyRecall,
-      producer: record.producer,
+    const familyCoreKeys = mergeFamilyCoreKeys({
+      derivedKeys: buildFamilyCoreKeys({
+        canonicalLabel: indexable.canonicalLabel,
+        aliasesIdentitySafe: indexable.aliasesIdentitySafe,
+        aliasesNoisyRecall: indexable.aliasesNoisyRecall,
+        producer: record.producer,
+      }),
+      reviewedKeys: args.reviewedFamilyCoreKeysByEntity?.get(entityId),
     });
     return {
       entityId,

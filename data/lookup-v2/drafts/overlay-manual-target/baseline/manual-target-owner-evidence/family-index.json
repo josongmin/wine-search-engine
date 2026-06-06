@@ -1,0 +1,14 @@
+{
+  "sourcePacketPath": "data/lookup-v2/drafts/overlay-manual-target/baseline/lookup-v2-korean-realworld-stretch-manual-target-family-review-packet.jsonl",
+  "generatedAt": "2026-06-06T20:51:23.914Z",
+  "totalFamilies": 11,
+  "totalScopeRows": 32,
+  "candidateUniqueOwnerFamilies": 8,
+  "collisionCandidateFamilies": 3,
+  "missingRuntimeOwnerFamilies": 0,
+  "outputPaths": {
+    "candidateUniqueOwnerFamilies": "data/lookup-v2/drafts/overlay-manual-target/baseline/manual-target-owner-evidence/candidate-unique-owner-families.jsonl",
+    "collisionCandidateFamilies": "data/lookup-v2/drafts/overlay-manual-target/baseline/manual-target-owner-evidence/collision-candidate-families.jsonl",
+    "missingRuntimeOwnerFamilies": "data/lookup-v2/drafts/overlay-manual-target/baseline/manual-target-owner-evidence/missing-runtime-owner-families.jsonl"
+  }
+}

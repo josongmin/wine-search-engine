@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { buildLookupV2ExactSafeFamilyReviewPacketRows } from '../../../scripts/eval/export-lookup-v2-exact-safe-family-review-packet.js';
+import {
+  applyLookupV2ExactSafeScopeRegistryToFamilyReviewPacketRows,
+  buildLookupV2ExactSafeFamilyReviewPacketRows,
+} from '../../../scripts/eval/export-lookup-v2-exact-safe-family-review-packet.js';
 
 describe('buildLookupV2ExactSafeFamilyReviewPacketRows', () => {
   it('groups exact-safe proposal rows by deterministic review scope', () => {
@@ -105,6 +108,72 @@ describe('buildLookupV2ExactSafeFamilyReviewPacketRows', () => {
         sourceEvidenceSamples: ['coverage hole C'],
         proposedAt: '2026-06-05T00:30:00.000Z',
       },
+    ]);
+  });
+
+  it('overlays reviewed exact-safe scope registry decisions onto matching family rows only', () => {
+    const rows = applyLookupV2ExactSafeScopeRegistryToFamilyReviewPacketRows({
+      familyRows: [
+        {
+          reviewScopeKey: 'wine-ce-cheval-blanc::canonical::realworld_exact_vintage',
+          entityId: 'wine-ce-cheval-blanc',
+          locale: 'ko',
+          candidatePromotionClass: 'exact_safe',
+          benchmarkGoldEntityIdSources: ['family_target_registry'],
+          proposalStatus: 'needs_review',
+          reviewTarget: 'lookup_exact_safe_registry_v1',
+          scopeHoleClass: 'realworld_exact_vintage',
+          scopeSuggestedAliasType: 'canonical',
+          surfaces: ['슈발 블랑 2010'],
+          benchmarkGoldHints: ['cheval blanc'],
+          rowCount: 1,
+          sourceArtifacts: ['/tmp/a.json'],
+          sourceEvidenceSamples: ['coverage hole A'],
+          proposedAt: '2026-06-05T00:00:00.000Z',
+        },
+        {
+          reviewScopeKey: 'wine-ce-cheval-blanc::translation::realworld_compact_alias',
+          entityId: 'wine-ce-cheval-blanc',
+          locale: 'ko',
+          candidatePromotionClass: 'exact_safe',
+          benchmarkGoldEntityIdSources: ['family_target_registry'],
+          proposalStatus: 'needs_review',
+          reviewTarget: 'lookup_exact_safe_registry_v1',
+          scopeHoleClass: 'realworld_compact_alias',
+          scopeSuggestedAliasType: 'translation',
+          surfaces: ['슈발블랑'],
+          benchmarkGoldHints: ['cheval blanc'],
+          rowCount: 1,
+          sourceArtifacts: ['/tmp/b.json'],
+          sourceEvidenceSamples: ['coverage hole B'],
+          proposedAt: '2026-06-05T00:00:00.000Z',
+        },
+      ],
+      scopeRegistryMap: new Map([
+        ['wine-ce-cheval-blanc::canonical::realworld_exact_vintage', {
+          reviewScopeKey: 'wine-ce-cheval-blanc::canonical::realworld_exact_vintage',
+          entityId: 'wine-ce-cheval-blanc',
+          scopeHoleClass: 'realworld_exact_vintage',
+          scopeSuggestedAliasType: 'canonical',
+          decisionStatus: 'rejected',
+          reviewedBy: 'registry',
+          reviewedAt: '2026-06-06T00:00:00.000Z',
+          decisionReason: 'reviewed reject',
+          evidenceClass: 'exact_safe_family_review',
+        }],
+      ]),
+    });
+
+    expect(rows).toEqual([
+      expect.objectContaining({
+        reviewScopeKey: 'wine-ce-cheval-blanc::canonical::realworld_exact_vintage',
+        proposalStatus: 'rejected',
+        reviewedBy: 'registry',
+      }),
+      expect.objectContaining({
+        reviewScopeKey: 'wine-ce-cheval-blanc::translation::realworld_compact_alias',
+        proposalStatus: 'needs_review',
+      }),
     ]);
   });
 });

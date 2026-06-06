@@ -69,6 +69,9 @@ export interface SearchSnapshotManifest {
     readonly lookupExactSafeRuntimeJson: string;
     readonly lookupResolverProjectionJson: string;
     readonly lookupEntityProjectionJson: string;
+    readonly lookupSemanticScopeRuntimeJson: string;
+    readonly lookupReviewedFamilyRecallRuntimeJson: string;
+    readonly lookupScopeGraphRuntimeJson: string;
     readonly lookupAmbiguityRuntimeJson: string;
     readonly lookupConceptRedirectRuntimeJson: string;
     readonly ambiguityRegistryNdjson: string;
@@ -85,6 +88,9 @@ export interface SearchSnapshotManifest {
     readonly lookupExactSafeRuntimeEntries: number;
     readonly lookupResolverProjectionDocuments: number;
     readonly lookupEntityProjectionDocuments: number;
+    readonly lookupSemanticScopeRuntimeEntries: number;
+    readonly lookupReviewedFamilyRecallRuntimeEntries: number;
+    readonly lookupScopeGraphRuntimeEdges: number;
     readonly lookupAmbiguityRuntimeEntries: number;
     readonly lookupConceptRedirectRuntimeEntries: number;
     readonly ambiguityRegistry: number;
@@ -100,6 +106,9 @@ export interface SearchSnapshotManifest {
     readonly lookupExactSafeRuntime: string;
     readonly lookupResolverProjection: string;
     readonly lookupEntityProjection: string;
+    readonly lookupSemanticScopeRuntime: string;
+    readonly lookupReviewedFamilyRecallRuntime: string;
+    readonly lookupScopeGraphRuntime: string;
     readonly lookupAmbiguityRuntime: string;
     readonly lookupConceptRedirectRuntime: string;
     readonly ambiguityRegistry: string;
@@ -115,8 +124,11 @@ export interface SearchSnapshotArtifactHashes {
   readonly entities: string;
   readonly aliases: string;
   readonly lookupAliasRuntime: string;
+  readonly lookupAliasBroadRecallRuntime?: string;
   readonly lookupResolverProjection: string;
   readonly lookupEntityProjection: string;
+  readonly lookupSemanticScopeRuntime: string;
+  readonly lookupScopeGraphRuntime: string;
   readonly lookupAmbiguityRuntime: string;
   readonly lookupConceptRedirectRuntime: string;
   readonly ambiguityRegistry: string;
@@ -135,6 +147,9 @@ export interface SearchSnapshotRuntimeState {
   readonly lookupExactSafeRuntimePath: string;
   readonly lookupResolverProjectionPath: string;
   readonly lookupEntityProjectionPath: string;
+  readonly lookupSemanticScopeRuntimePath: string;
+  readonly lookupReviewedFamilyRecallRuntimePath: string;
+  readonly lookupScopeGraphRuntimePath: string;
   readonly lookupAmbiguityRuntimePath: string;
   readonly lookupConceptRedirectRuntimePath: string;
   readonly quality: SearchSnapshotQualitySummary;
@@ -146,6 +161,9 @@ export interface SearchSnapshotRuntimeState {
       readonly lookupExactSafeRuntimeEntries: number;
     readonly lookupResolverProjectionDocuments: number;
     readonly lookupEntityProjectionDocuments: number;
+    readonly lookupSemanticScopeRuntimeEntries: number;
+    readonly lookupReviewedFamilyRecallRuntimeEntries: number;
+    readonly lookupScopeGraphRuntimeEdges: number;
     readonly lookupAmbiguityRuntimeEntries: number;
     readonly lookupConceptRedirectRuntimeEntries: number;
     readonly ambiguityRegistry: number;
@@ -160,6 +178,9 @@ export interface SearchSnapshotRuntimeState {
       readonly lookupExactSafeRuntime: string;
     readonly lookupResolverProjection: string;
     readonly lookupEntityProjection: string;
+    readonly lookupSemanticScopeRuntime: string;
+    readonly lookupReviewedFamilyRecallRuntime: string;
+    readonly lookupScopeGraphRuntime: string;
     readonly lookupAmbiguityRuntime: string;
     readonly lookupConceptRedirectRuntime: string;
     readonly ambiguityRegistry: string;
@@ -218,6 +239,9 @@ export const SearchSnapshotManifestSchema = z.object({
     lookupExactSafeRuntimeJson: z.string().min(1),
     lookupResolverProjectionJson: z.string().min(1),
     lookupEntityProjectionJson: z.string().min(1),
+    lookupSemanticScopeRuntimeJson: z.string().min(1),
+    lookupReviewedFamilyRecallRuntimeJson: z.string().min(1),
+    lookupScopeGraphRuntimeJson: z.string().min(1),
     lookupAmbiguityRuntimeJson: z.string().min(1),
     lookupConceptRedirectRuntimeJson: z.string().min(1),
     ambiguityRegistryNdjson: z.string().min(1),
@@ -234,6 +258,9 @@ export const SearchSnapshotManifestSchema = z.object({
     lookupExactSafeRuntimeEntries: z.number().int().nonnegative(),
     lookupResolverProjectionDocuments: z.number().int().nonnegative(),
     lookupEntityProjectionDocuments: z.number().int().nonnegative(),
+    lookupSemanticScopeRuntimeEntries: z.number().int().nonnegative(),
+    lookupReviewedFamilyRecallRuntimeEntries: z.number().int().nonnegative(),
+    lookupScopeGraphRuntimeEdges: z.number().int().nonnegative(),
     lookupAmbiguityRuntimeEntries: z.number().int().nonnegative(),
     lookupConceptRedirectRuntimeEntries: z.number().int().nonnegative(),
     ambiguityRegistry: z.number().int().nonnegative(),
@@ -249,6 +276,9 @@ export const SearchSnapshotManifestSchema = z.object({
     lookupExactSafeRuntime: z.string().min(1),
     lookupResolverProjection: z.string().min(1),
     lookupEntityProjection: z.string().min(1),
+    lookupSemanticScopeRuntime: z.string().min(1),
+    lookupReviewedFamilyRecallRuntime: z.string().min(1),
+    lookupScopeGraphRuntime: z.string().min(1),
     lookupAmbiguityRuntime: z.string().min(1),
     lookupConceptRedirectRuntime: z.string().min(1),
     ambiguityRegistry: z.string().min(1),
@@ -276,6 +306,9 @@ export const SearchSnapshotRuntimeStateSchema = z.object({
   lookupExactSafeRuntimePath: z.string().min(1),
   lookupResolverProjectionPath: z.string().min(1),
   lookupEntityProjectionPath: z.string().min(1),
+  lookupSemanticScopeRuntimePath: z.string().min(1),
+  lookupReviewedFamilyRecallRuntimePath: z.string().min(1),
+  lookupScopeGraphRuntimePath: z.string().min(1),
   lookupAmbiguityRuntimePath: z.string().min(1),
   lookupConceptRedirectRuntimePath: z.string().min(1),
   quality: z.object({
@@ -293,6 +326,9 @@ export const SearchSnapshotRuntimeStateSchema = z.object({
     lookupExactSafeRuntimeEntries: z.number().int().nonnegative(),
     lookupResolverProjectionDocuments: z.number().int().nonnegative(),
     lookupEntityProjectionDocuments: z.number().int().nonnegative(),
+    lookupSemanticScopeRuntimeEntries: z.number().int().nonnegative(),
+    lookupReviewedFamilyRecallRuntimeEntries: z.number().int().nonnegative(),
+    lookupScopeGraphRuntimeEdges: z.number().int().nonnegative(),
     lookupAmbiguityRuntimeEntries: z.number().int().nonnegative(),
     lookupConceptRedirectRuntimeEntries: z.number().int().nonnegative(),
     ambiguityRegistry: z.number().int().nonnegative(),
@@ -307,6 +343,9 @@ export const SearchSnapshotRuntimeStateSchema = z.object({
     lookupExactSafeRuntime: z.string().min(1),
     lookupResolverProjection: z.string().min(1),
     lookupEntityProjection: z.string().min(1),
+    lookupSemanticScopeRuntime: z.string().min(1),
+    lookupReviewedFamilyRecallRuntime: z.string().min(1),
+    lookupScopeGraphRuntime: z.string().min(1),
     lookupAmbiguityRuntime: z.string().min(1),
     lookupConceptRedirectRuntime: z.string().min(1),
     ambiguityRegistry: z.string().min(1),
@@ -329,9 +368,123 @@ export const SearchSnapshotRuntimeStateSchema = z.object({
   }).strict().optional(),
 }).strict();
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function readNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function normalizeLegacyManifestShape(parsed: unknown, filePath: string): unknown {
+  if (!isRecord(parsed)) {
+    return parsed;
+  }
+
+  const schemaVersion = readString(parsed.schemaVersion);
+  if (schemaVersion === SEARCH_SNAPSHOT_SCHEMA_VERSION) {
+    return parsed;
+  }
+  if (schemaVersion === undefined || !/^search_snapshot\.v\d+$/.test(schemaVersion)) {
+    return parsed;
+  }
+
+  const artifacts = isRecord(parsed.artifacts) ? parsed.artifacts : {};
+  const counts = isRecord(parsed.counts) ? parsed.counts : {};
+  const hashes = isRecord(parsed.hashes) ? parsed.hashes : {};
+  const documentsNdjson = readString(artifacts.documentsNdjson);
+  const entitiesNdjson = readString(artifacts.entitiesNdjson);
+  const aliasesNdjson = readString(artifacts.aliasesNdjson);
+  const ambiguityRegistryNdjson = readString(artifacts.ambiguityRegistryNdjson);
+  const nlMappingsJson = readString(artifacts.nlMappingsJson);
+  const metadataJson = readString(artifacts.metadataJson);
+  const artifactRoot = path.dirname(documentsNdjson ?? filePath);
+  const documentsCount = readNumber(counts.documents) ?? 0;
+  const entitiesCount = readNumber(counts.entities) ?? 0;
+  const aliasesCount = readNumber(counts.aliases) ?? 0;
+  const ambiguityCount = readNumber(counts.ambiguityRegistry) ?? 0;
+  const documentsHash = readString(hashes.documents) ?? 'legacy-documents-hash';
+  const entitiesHash = readString(hashes.entities) ?? documentsHash;
+  const aliasesHash = readString(hashes.aliases) ?? entitiesHash;
+  const ambiguityHash = readString(hashes.ambiguityRegistry) ?? aliasesHash;
+  const lookupAliasBroadRecallRuntimeJson = readString(artifacts.lookupAliasBroadRecallRuntimeJson);
+  const lookupAliasBroadRecallRuntimeEntries = readNumber(counts.lookupAliasBroadRecallRuntimeEntries);
+  const lookupAliasBroadRecallRuntimeHash = readString(hashes.lookupAliasBroadRecallRuntime);
+
+  return {
+    ...parsed,
+    schemaVersion: SEARCH_SNAPSHOT_SCHEMA_VERSION,
+    artifacts: {
+      documentsNdjson,
+      vespaFeedNdjson: readString(artifacts.vespaFeedNdjson) ?? path.join(artifactRoot, 'vespa-feed.ndjson'),
+      entitiesNdjson,
+      aliasesNdjson,
+      lookupAliasRuntimeJson: readString(artifacts.lookupAliasRuntimeJson) ?? path.join(artifactRoot, 'lookup-alias-runtime.json'),
+      ...(lookupAliasBroadRecallRuntimeJson === undefined
+        ? {}
+        : { lookupAliasBroadRecallRuntimeJson }),
+      lookupExactSafeRuntimeJson: readString(artifacts.lookupExactSafeRuntimeJson) ?? path.join(artifactRoot, 'lookup-exact-safe-runtime.json'),
+      lookupResolverProjectionJson: readString(artifacts.lookupResolverProjectionJson) ?? path.join(artifactRoot, 'lookup-resolver-projection.json'),
+      lookupEntityProjectionJson: readString(artifacts.lookupEntityProjectionJson) ?? path.join(artifactRoot, 'lookup-entity-projection.json'),
+      lookupSemanticScopeRuntimeJson: readString(artifacts.lookupSemanticScopeRuntimeJson) ?? path.join(artifactRoot, 'lookup-semantic-scope-runtime.json'),
+      lookupReviewedFamilyRecallRuntimeJson: readString(artifacts.lookupReviewedFamilyRecallRuntimeJson) ?? path.join(artifactRoot, 'lookup-reviewed-family-recall-runtime.json'),
+      lookupScopeGraphRuntimeJson: readString(artifacts.lookupScopeGraphRuntimeJson) ?? path.join(artifactRoot, 'lookup-scope-graph-runtime.json'),
+      lookupAmbiguityRuntimeJson: readString(artifacts.lookupAmbiguityRuntimeJson) ?? path.join(artifactRoot, 'lookup-ambiguity-runtime.json'),
+      lookupConceptRedirectRuntimeJson: readString(artifacts.lookupConceptRedirectRuntimeJson) ?? path.join(artifactRoot, 'lookup-concept-redirect-runtime.json'),
+      ambiguityRegistryNdjson,
+      nlMappingsJson,
+      metadataJson,
+    },
+    counts: {
+      documents: documentsCount,
+      vespaFeed: readNumber(counts.vespaFeed) ?? documentsCount,
+      entities: entitiesCount,
+      aliases: aliasesCount,
+      lookupAliasRuntimeAliases: readNumber(counts.lookupAliasRuntimeAliases) ?? aliasesCount,
+      ...(lookupAliasBroadRecallRuntimeEntries === undefined
+        ? {}
+        : { lookupAliasBroadRecallRuntimeEntries }),
+      lookupExactSafeRuntimeEntries: readNumber(counts.lookupExactSafeRuntimeEntries) ?? 0,
+      lookupResolverProjectionDocuments: readNumber(counts.lookupResolverProjectionDocuments) ?? entitiesCount,
+      lookupEntityProjectionDocuments: readNumber(counts.lookupEntityProjectionDocuments) ?? entitiesCount,
+      lookupSemanticScopeRuntimeEntries: readNumber(counts.lookupSemanticScopeRuntimeEntries) ?? 0,
+      lookupReviewedFamilyRecallRuntimeEntries: readNumber(counts.lookupReviewedFamilyRecallRuntimeEntries) ?? 0,
+      lookupScopeGraphRuntimeEdges: readNumber(counts.lookupScopeGraphRuntimeEdges) ?? 0,
+      lookupAmbiguityRuntimeEntries: readNumber(counts.lookupAmbiguityRuntimeEntries) ?? ambiguityCount,
+      lookupConceptRedirectRuntimeEntries: readNumber(counts.lookupConceptRedirectRuntimeEntries) ?? 0,
+      ambiguityRegistry: ambiguityCount,
+      nlMappings: readNumber(counts.nlMappings) ?? 0,
+    },
+    hashes: {
+      documents: documentsHash,
+      vespaFeed: readString(hashes.vespaFeed) ?? documentsHash,
+      entities: entitiesHash,
+      aliases: aliasesHash,
+      lookupAliasRuntime: readString(hashes.lookupAliasRuntime) ?? aliasesHash,
+      ...(lookupAliasBroadRecallRuntimeHash === undefined
+        ? {}
+        : { lookupAliasBroadRecallRuntime: lookupAliasBroadRecallRuntimeHash }),
+      lookupExactSafeRuntime: readString(hashes.lookupExactSafeRuntime) ?? aliasesHash,
+      lookupResolverProjection: readString(hashes.lookupResolverProjection) ?? entitiesHash,
+      lookupEntityProjection: readString(hashes.lookupEntityProjection) ?? entitiesHash,
+      lookupSemanticScopeRuntime: readString(hashes.lookupSemanticScopeRuntime) ?? entitiesHash,
+      lookupReviewedFamilyRecallRuntime: readString(hashes.lookupReviewedFamilyRecallRuntime) ?? entitiesHash,
+      lookupScopeGraphRuntime: readString(hashes.lookupScopeGraphRuntime) ?? entitiesHash,
+      lookupAmbiguityRuntime: readString(hashes.lookupAmbiguityRuntime) ?? ambiguityHash,
+      lookupConceptRedirectRuntime: readString(hashes.lookupConceptRedirectRuntime) ?? entitiesHash,
+      ambiguityRegistry: ambiguityHash,
+      nlMappings: readString(hashes.nlMappings) ?? entitiesHash,
+    },
+  };
+}
+
 export function parseManifest(raw: string, _filePath: string): SearchSnapshotManifest {
   const parsed: unknown = JSON.parse(raw);
-  return SearchSnapshotManifestSchema.parse(parsed);
+  return SearchSnapshotManifestSchema.parse(normalizeLegacyManifestShape(parsed, _filePath));
 }
 
 export { hashStableJson, hashText, stableJsonStringify };
@@ -354,6 +507,9 @@ export function buildSearchSnapshotContentHash(hashes: SearchSnapshotArtifactHas
     lookupExactSafeRuntime: hashes.lookupExactSafeRuntime,
     lookupResolverProjection: hashes.lookupResolverProjection,
     lookupEntityProjection: hashes.lookupEntityProjection,
+    lookupSemanticScopeRuntime: hashes.lookupSemanticScopeRuntime,
+    lookupReviewedFamilyRecallRuntime: hashes.lookupReviewedFamilyRecallRuntime,
+    lookupScopeGraphRuntime: hashes.lookupScopeGraphRuntime,
     lookupAmbiguityRuntime: hashes.lookupAmbiguityRuntime,
     lookupConceptRedirectRuntime: hashes.lookupConceptRedirectRuntime,
     ambiguityRegistry: hashes.ambiguityRegistry,

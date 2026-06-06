@@ -89,6 +89,9 @@ export function decisionReasonText(
       if (reasonCode === 'persisted_ambiguity_surface') {
         return 'This query is a known ambiguous wine surface and requires clarification.';
       }
+      if (reasonCode === 'reviewed_family_collision_requires_clarification') {
+        return 'This query matches a reviewed producer-family collision and requires clarification.';
+      }
       return 'Multiple plausible wines match this query — clarification is required.';
     case 'redirect_discovery':
       return admission.detail.length > 0

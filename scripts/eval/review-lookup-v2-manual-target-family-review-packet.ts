@@ -1,10 +1,10 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
 import type { LookupV2ManualTargetFamilyReviewPacketRow } from './export-lookup-v2-manual-target-family-review-packet.js';
 
 export interface LookupV2ManualTargetFamilyReviewDecisionRow {
+  readonly reviewScopeKey: string;
   readonly benchmarkGoldHint: string;
   readonly decision: 'assign_target' | 'reject';
   readonly entityId?: string | undefined;
@@ -13,13 +13,21 @@ export interface LookupV2ManualTargetFamilyReviewDecisionRow {
   readonly reviewedAt: string;
 }
 
+export interface LookupV2ManualTargetFamilyReviewDecisionApplyResult {
+  readonly reviewedRows: readonly LookupV2ManualTargetFamilyReviewPacketRow[];
+  readonly matchedDecisionRows: number;
+  readonly staleDecisionRows: number;
+  readonly ambiguousLegacyDecisionRows: number;
+}
+
 function isLookupV2ManualTargetFamilyReviewPacketRow(value: unknown): value is LookupV2ManualTargetFamilyReviewPacketRow {
   if (typeof value !== 'object' || value === null) {
     return false;
   }
   const row = value as Record<string, unknown>;
   return (
-    typeof row['benchmarkGoldHint'] === 'string'
+    typeof row['reviewScopeKey'] === 'string'
+    && typeof row['benchmarkGoldHint'] === 'string'
     && typeof row['normalizedBenchmarkGoldHint'] === 'string'
     && typeof row['proposalStatus'] === 'string'
     && typeof row['reviewTarget'] === 'string'
@@ -42,7 +50,8 @@ function isDecisionRow(value: unknown): value is LookupV2ManualTargetFamilyRevie
   }
   const row = value as Record<string, unknown>;
   return (
-    typeof row['benchmarkGoldHint'] === 'string'
+    typeof row['reviewScopeKey'] === 'string'
+    && typeof row['benchmarkGoldHint'] === 'string'
     && (row['decision'] === 'assign_target' || row['decision'] === 'reject')
     && (row['entityId'] === undefined || typeof row['entityId'] === 'string')
     && typeof row['reviewedBy'] === 'string'
@@ -60,54 +69,111 @@ function parseDecisionJsonl(filePath: string): readonly LookupV2ManualTargetFami
     .filter(isDecisionRow);
 }
 
-function packetKey(benchmarkGoldHint: string): string {
-  return normalizeForMatch(benchmarkGoldHint);
+function validateDecisionRow(row: LookupV2ManualTargetFamilyReviewDecisionRow): void {
+  if (row.reviewedBy.trim().length === 0) {
+    throw new Error(`manual-target family decision missing reviewedBy for hint=${JSON.stringify(row.benchmarkGoldHint)}`);
+  }
+  if (row.decisionReason.trim().length === 0) {
+    throw new Error(`manual-target family decision missing decisionReason for hint=${JSON.stringify(row.benchmarkGoldHint)}`);
+  }
+  if (Number.isNaN(Date.parse(row.reviewedAt))) {
+    throw new Error(`manual-target family decision has invalid reviewedAt for hint=${JSON.stringify(row.benchmarkGoldHint)}`);
+  }
+  if (row.decision === 'assign_target') {
+    if (row.entityId === undefined || row.entityId.trim().length === 0) {
+      throw new Error(`manual-target family assign_target decision is missing entityId for hint=${JSON.stringify(row.benchmarkGoldHint)}`);
+    }
+    return;
+  }
+  if (row.entityId !== undefined && row.entityId.trim().length > 0) {
+    throw new Error(`manual-target family reject decision must not carry entityId for hint=${JSON.stringify(row.benchmarkGoldHint)}`);
+  }
+}
+
+function buildDecisionActionKey(row: LookupV2ManualTargetFamilyReviewDecisionRow): string {
+  return row.decision === 'assign_target'
+    ? `assign_target::${row.entityId ?? ''}`
+    : 'reject';
+}
+
+function pickEffectiveDecision(
+  semanticScopeKey: string,
+  rows: readonly LookupV2ManualTargetFamilyReviewDecisionRow[],
+): LookupV2ManualTargetFamilyReviewDecisionRow {
+  const exemplar = rows[0];
+  if (exemplar === undefined) {
+    throw new Error(`manual-target family decision merge received no rows for semanticScopeKey=${JSON.stringify(semanticScopeKey)}`);
+  }
+  const exemplarActionKey = buildDecisionActionKey(exemplar);
+  for (const row of rows) {
+    if (buildDecisionActionKey(row) !== exemplarActionKey) {
+      throw new Error(`conflicting manual-target family decisions collapse onto semanticScopeKey=${JSON.stringify(semanticScopeKey)}`);
+    }
+  }
+  return [...rows]
+    .sort((left, right) => left.reviewedAt.localeCompare(right.reviewedAt))
+    .at(-1) ?? exemplar;
 }
 
 export function applyLookupV2ManualTargetFamilyReviewDecisions(args: {
   readonly packetRows: readonly LookupV2ManualTargetFamilyReviewPacketRow[];
   readonly decisionRows: readonly LookupV2ManualTargetFamilyReviewDecisionRow[];
-}): readonly LookupV2ManualTargetFamilyReviewPacketRow[] {
-  const packetByKey = new Map<string, LookupV2ManualTargetFamilyReviewPacketRow>();
+}): LookupV2ManualTargetFamilyReviewDecisionApplyResult {
+  const packetBySemanticKey = new Map<string, LookupV2ManualTargetFamilyReviewPacketRow>();
+  const legacyReviewScopeKeyToSemanticKeys = new Map<string, Set<string>>();
   for (const row of args.packetRows) {
-    const key = packetKey(row.benchmarkGoldHint);
-    if (packetByKey.has(key)) {
-      throw new Error(`duplicate manual-target family packet row for hint=${JSON.stringify(row.benchmarkGoldHint)}`);
+    const semanticKey = row.reviewScopeKey;
+    if (packetBySemanticKey.has(semanticKey)) {
+      throw new Error(`duplicate manual-target family packet row for reviewScopeKey=${JSON.stringify(row.reviewScopeKey)}`);
     }
-    packetByKey.set(key, row);
+    packetBySemanticKey.set(semanticKey, row);
+    for (const legacyReviewScopeKey of row.legacyReviewScopeKeys ?? []) {
+      const mappedKeys = legacyReviewScopeKeyToSemanticKeys.get(legacyReviewScopeKey) ?? new Set<string>();
+      mappedKeys.add(semanticKey);
+      legacyReviewScopeKeyToSemanticKeys.set(legacyReviewScopeKey, mappedKeys);
+    }
   }
 
-  const decisionByKey = new Map<string, LookupV2ManualTargetFamilyReviewDecisionRow>();
+  const decisionRowsBySemanticKey = new Map<string, LookupV2ManualTargetFamilyReviewDecisionRow[]>();
+  let matchedDecisionRows = 0;
+  let staleDecisionRows = 0;
+  let ambiguousLegacyDecisionRows = 0;
+
   for (const row of args.decisionRows) {
-    if (row.reviewedBy.trim().length === 0) {
-      throw new Error(`manual-target family decision missing reviewedBy for hint=${JSON.stringify(row.benchmarkGoldHint)}`);
+    validateDecisionRow(row);
+    const directSemanticRow = packetBySemanticKey.get(row.reviewScopeKey);
+    if (directSemanticRow !== undefined) {
+      const existing = decisionRowsBySemanticKey.get(directSemanticRow.reviewScopeKey) ?? [];
+      existing.push(row);
+      decisionRowsBySemanticKey.set(directSemanticRow.reviewScopeKey, existing);
+      matchedDecisionRows += 1;
+      continue;
     }
-    if (row.decisionReason.trim().length === 0) {
-      throw new Error(`manual-target family decision missing decisionReason for hint=${JSON.stringify(row.benchmarkGoldHint)}`);
+
+    const semanticKeys = [...(legacyReviewScopeKeyToSemanticKeys.get(row.reviewScopeKey) ?? [])];
+    if (semanticKeys.length === 0) {
+      staleDecisionRows += 1;
+      continue;
     }
-    if (Number.isNaN(Date.parse(row.reviewedAt))) {
-      throw new Error(`manual-target family decision has invalid reviewedAt for hint=${JSON.stringify(row.benchmarkGoldHint)}`);
+    if (semanticKeys.length > 1) {
+      ambiguousLegacyDecisionRows += 1;
+      continue;
     }
-    if (row.decision === 'assign_target') {
-      if (row.entityId === undefined || row.entityId.trim().length === 0) {
-        throw new Error(`manual-target family assign_target decision is missing entityId for hint=${JSON.stringify(row.benchmarkGoldHint)}`);
-      }
-    } else if (row.entityId !== undefined && row.entityId.trim().length > 0) {
-      throw new Error(`manual-target family reject decision must not carry entityId for hint=${JSON.stringify(row.benchmarkGoldHint)}`);
-    }
-    const key = packetKey(row.benchmarkGoldHint);
-    if (decisionByKey.has(key)) {
-      throw new Error(`duplicate manual-target family decision for hint=${JSON.stringify(row.benchmarkGoldHint)}`);
-    }
-    if (!packetByKey.has(key)) {
-      throw new Error(`manual-target family decision references unknown packet row for hint=${JSON.stringify(row.benchmarkGoldHint)}`);
-    }
-    decisionByKey.set(key, row);
+
+    const semanticKey = semanticKeys[0]!;
+    const existing = decisionRowsBySemanticKey.get(semanticKey) ?? [];
+    existing.push(row);
+    decisionRowsBySemanticKey.set(semanticKey, existing);
+    matchedDecisionRows += 1;
   }
 
-  return args.packetRows.map((row) => {
-    const key = packetKey(row.benchmarkGoldHint);
-    const decision = decisionByKey.get(key);
+  const effectiveDecisionBySemanticKey = new Map<string, LookupV2ManualTargetFamilyReviewDecisionRow>();
+  for (const [semanticKey, rows] of decisionRowsBySemanticKey.entries()) {
+    effectiveDecisionBySemanticKey.set(semanticKey, pickEffectiveDecision(semanticKey, rows));
+  }
+
+  const reviewedRows = args.packetRows.map((row) => {
+    const decision = effectiveDecisionBySemanticKey.get(row.reviewScopeKey);
     if (decision === undefined) {
       return row;
     }
@@ -123,6 +189,13 @@ export function applyLookupV2ManualTargetFamilyReviewDecisions(args: {
       reviewedAt: decision.reviewedAt,
     };
   });
+
+  return {
+    reviewedRows,
+    matchedDecisionRows,
+    staleDecisionRows,
+    ambiguousLegacyDecisionRows,
+  };
 }
 
 function serializeRows(rows: readonly LookupV2ManualTargetFamilyReviewPacketRow[]): string {
@@ -147,7 +220,8 @@ async function main(): Promise<void> {
   const outputPath = values.output ?? '/tmp/lookup-v2-korean-realworld-stretch-manual-target-family-review-reviewed.jsonl';
   const packetRows = parsePacketJsonl(inputPath);
   const decisionRows = parseDecisionJsonl(decisionsPath);
-  const reviewedRows = applyLookupV2ManualTargetFamilyReviewDecisions({ packetRows, decisionRows });
+  const result = applyLookupV2ManualTargetFamilyReviewDecisions({ packetRows, decisionRows });
+  const reviewedRows = result.reviewedRows;
 
   mkdirSync(path.dirname(outputPath), { recursive: true });
   writeFileSync(outputPath, serializeRows(reviewedRows), 'utf8');
@@ -157,6 +231,9 @@ async function main(): Promise<void> {
   const pending = reviewedRows.filter((row) => row.proposalStatus === 'needs_target_review').length;
   console.log(`[elv2-manual-target-family-review] packet_rows=${packetRows.length}`);
   console.log(`[elv2-manual-target-family-review] decision_rows=${decisionRows.length}`);
+  console.log(`[elv2-manual-target-family-review] matched_decision_rows=${result.matchedDecisionRows}`);
+  console.log(`[elv2-manual-target-family-review] stale_decision_rows=${result.staleDecisionRows}`);
+  console.log(`[elv2-manual-target-family-review] ambiguous_legacy_decision_rows=${result.ambiguousLegacyDecisionRows}`);
   console.log(`[elv2-manual-target-family-review] target_assigned=${assigned}`);
   console.log(`[elv2-manual-target-family-review] rejected=${rejected}`);
   console.log(`[elv2-manual-target-family-review] pending=${pending}`);

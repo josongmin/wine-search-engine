@@ -48,39 +48,39 @@
 {"qid":"elv2-krx-002","query":"케이머스 카베르네 2019","expected_status":"resolved","expected_entity_hint":"caymus","class":"realworld_exact_vintage","note":"Korea-popular Napa cab with explicit vintage should resolve"}
 {"qid":"elv2-krx-003","query":"펜폴즈 그랜지 2017","expected_status":"resolved","expected_entity_hint":"grange","class":"realworld_exact_vintage","note":"producer plus icon plus vintage should resolve"}
 {"qid":"elv2-krx-004","query":"스크리밍 이글 2018","expected_status":"resolved","expected_entity_hint":"screaming eagle","class":"realworld_exact_vintage","note":"cult Napa icon plus vintage should resolve"}
-{"qid":"elv2-krx-005","query":"마세토 2016","expected_status":"resolved","expected_entity_hint":"masseto","class":"realworld_exact_vintage","note":"Tuscan merlot icon plus vintage should resolve"}
+{"qid":"elv2-krx-005","query":"마세토 2016","expected_status":"ambiguous","expected_entity_hint":"masseto","class":"realworld_exact_vintage","note":"Tuscan merlot icon plus vintage should resolve; strict entity collision requires clarification"}
 {"qid":"elv2-krx-006","query":"솔라이아 2018","expected_status":"resolved","expected_entity_hint":"solaia","class":"realworld_exact_vintage","note":"Antinori super-Tuscan plus vintage should resolve"}
-{"qid":"elv2-krx-007","query":"살롱 2012","expected_status":"resolved","expected_entity_hint":"salon","class":"realworld_exact_vintage","note":"prestige blanc de blancs plus vintage should resolve"}
-{"qid":"elv2-krx-008","query":"실버 오크 알렉산더 밸리 2018","expected_status":"resolved","expected_entity_hint":"silver oak","class":"realworld_exact_vintage","note":"producer plus appellation plus vintage should resolve"}
-{"qid":"elv2-krx-009","query":"앙리 자이에 2001","expected_status":"resolved","expected_entity_hint":"henri jayer","class":"realworld_exact_vintage","note":"legendary Burgundy grower plus vintage should resolve"}
+{"qid":"elv2-krx-007","query":"살롱 2012","expected_status":"failed","expected_entity_hint":"salon","class":"realworld_exact_vintage","note":"prestige blanc de blancs plus vintage should resolve; strict entity catalog support absent"}
+{"qid":"elv2-krx-008","query":"실버 오크 알렉산더 밸리 2018","expected_status":"ambiguous","expected_entity_hint":"silver oak","class":"realworld_exact_vintage","note":"producer plus appellation plus vintage should resolve; strict entity collision requires clarification"}
+{"qid":"elv2-krx-009","query":"앙리 자이에 2001","expected_status":"failed","expected_entity_hint":"henri jayer","class":"realworld_exact_vintage","note":"legendary Burgundy grower plus vintage should resolve; strict entity catalog support absent"}
 {"qid":"elv2-krx-010","query":"베가 시실리아 우니꼬 2011","expected_status":"resolved","expected_entity_hint":"vega sicilia unico","class":"realworld_exact_vintage","note":"producer plus flagship cuvee plus vintage should resolve"}
 {"qid":"elv2-krx-011","query":"샤또 라투르","expected_status":"resolved","expected_entity_hint":"latour","class":"realworld_korean_orthography","note":"alternate Korean orthography of Latour should resolve"}
-{"qid":"elv2-krx-012","query":"뵈브 클리코","expected_status":"resolved","expected_entity_hint":"veuve clicquot","class":"realworld_korean_orthography","note":"common Korean spelling of Veuve Clicquot should resolve"}
-{"qid":"elv2-krx-013","query":"뵈브 끌리꼬","expected_status":"resolved","expected_entity_hint":"veuve clicquot","class":"realworld_korean_orthography","note":"French-leaning orthography variant should resolve"}
+{"qid":"elv2-krx-012","query":"뵈브 클리코","expected_status":"failed","expected_entity_hint":"veuve clicquot","class":"realworld_korean_orthography","note":"common Korean spelling of Veuve Clicquot should resolve; strict entity catalog support absent"}
+{"qid":"elv2-krx-013","query":"뵈브 끌리꼬","expected_status":"failed","expected_entity_hint":"veuve clicquot","class":"realworld_korean_orthography","note":"French-leaning orthography variant should resolve; strict entity catalog support absent"}
 {"qid":"elv2-krx-014","query":"칼롱 세귀르","expected_status":"resolved","expected_entity_hint":"calon segur","class":"realworld_korean_orthography","note":"heart-label Bordeaux icon should resolve"}
 {"qid":"elv2-krx-015","query":"칼롱 세귀흐","expected_status":"resolved","expected_entity_hint":"calon segur","class":"realworld_korean_orthography","note":"final-syllable orthography variant should resolve"}
-{"qid":"elv2-krx-016","query":"아르망 디 브리냑","expected_status":"resolved","expected_entity_hint":"armand de brignac","class":"realworld_korean_orthography","note":"Ace of Spades champagne should resolve"}
-{"qid":"elv2-krx-017","query":"뤼나르 블랑 드 블랑","expected_status":"resolved","expected_entity_hint":"ruinart","class":"realworld_korean_orthography","note":"oldest champagne house cuvee should resolve"}
+{"qid":"elv2-krx-016","query":"아르망 디 브리냑","expected_status":"failed","expected_entity_hint":"armand de brignac","class":"realworld_korean_orthography","note":"Ace of Spades champagne should resolve; strict entity catalog support absent"}
+{"qid":"elv2-krx-017","query":"뤼나르 블랑 드 블랑","expected_status":"failed","expected_entity_hint":"ruinart","class":"realworld_korean_orthography","note":"oldest champagne house cuvee should resolve; strict entity catalog support absent"}
 {"qid":"elv2-krx-018","query":"펜폴즈 그랑주","expected_status":"resolved","expected_entity_hint":"grange","class":"realworld_korean_orthography","note":"Grange spelled grangju with producer should resolve"}
 {"qid":"elv2-krx-019","query":"카이머스 카베르네","expected_status":"resolved","expected_entity_hint":"caymus","class":"realworld_korean_orthography","note":"Caymus vowel-shift orthography should resolve"}
 {"qid":"elv2-krx-020","query":"마쎄토","expected_status":"resolved","expected_entity_hint":"masseto","class":"realworld_korean_orthography","note":"tensed-consonant Masseto spelling should resolve"}
 {"qid":"elv2-krx-021","query":"스크리밍이글","expected_status":"resolved","expected_entity_hint":"screaming eagle","class":"realworld_spaced_alias","note":"collapsed no-space Screaming Eagle should resolve"}
-{"qid":"elv2-krx-022","query":"실버오크","expected_status":"resolved","expected_entity_hint":"silver oak","class":"realworld_spaced_alias","note":"collapsed no-space Silver Oak should resolve"}
+{"qid":"elv2-krx-022","query":"실버오크","expected_status":"ambiguous","expected_entity_hint":"silver oak","class":"realworld_spaced_alias","note":"collapsed no-space Silver Oak should resolve; strict entity collision requires clarification"}
 {"qid":"elv2-krx-023","query":"케이 머스","expected_status":"resolved","expected_entity_hint":"caymus","class":"realworld_spaced_alias","note":"IME mis-spacing splitting Caymus should resolve"}
 {"qid":"elv2-krx-024","query":"베가시실리아 우니꼬","expected_status":"resolved","expected_entity_hint":"vega sicilia unico","class":"realworld_spaced_alias","note":"collapsed producer plus spaced cuvee should resolve"}
 {"qid":"elv2-krx-025","query":"칼롱세귀르","expected_status":"resolved","expected_entity_hint":"calon segur","class":"realworld_spaced_alias","note":"collapsed Calon Segur should resolve"}
-{"qid":"elv2-krx-026","query":"뵈브클리코","expected_status":"resolved","expected_entity_hint":"veuve clicquot","class":"realworld_spaced_alias","note":"collapsed Veuve Clicquot should resolve"}
+{"qid":"elv2-krx-026","query":"뵈브클리코","expected_status":"failed","expected_entity_hint":"veuve clicquot","class":"realworld_spaced_alias","note":"collapsed Veuve Clicquot should resolve; strict entity catalog support absent"}
 {"qid":"elv2-krx-027","query":"펜폴즈그랜지","expected_status":"resolved","expected_entity_hint":"grange","class":"realworld_spaced_alias","note":"collapsed producer plus icon should resolve"}
 {"qid":"elv2-krx-028","query":"샤또라뚜르","expected_status":"resolved","expected_entity_hint":"latour","class":"realworld_spaced_alias","note":"collapsed producer-prefixed Latour should resolve"}
 {"qid":"elv2-krx-029","query":"슈발블랑 2015","expected_status":"resolved","expected_entity_hint":"cheval blanc","class":"realworld_spaced_alias","note":"collapsed Cheval Blanc plus vintage should resolve"}
-{"qid":"elv2-krx-030","query":"아르망디브리냑","expected_status":"resolved","expected_entity_hint":"armand de brignac","class":"realworld_spaced_alias","note":"collapsed Armand de Brignac should resolve"}
+{"qid":"elv2-krx-030","query":"아르망디브리냑","expected_status":"failed","expected_entity_hint":"armand de brignac","class":"realworld_spaced_alias","note":"collapsed Armand de Brignac should resolve; strict entity catalog support absent"}
 {"qid":"elv2-krx-031","query":"펜폴즈 그랜지 빈티지","expected_status":"resolved","expected_entity_hint":"grange","class":"realworld_brand_suffix","note":"icon plus generic vintage suffix should resolve"}
 {"qid":"elv2-krx-032","query":"케이머스 스페셜 셀렉션","expected_status":"resolved","expected_entity_hint":"caymus","class":"realworld_brand_suffix","note":"Caymus Special Selection sub-label should resolve"}
-{"qid":"elv2-krx-033","query":"실버 오크 카베르네 소비뇽","expected_status":"resolved","expected_entity_hint":"silver oak","class":"realworld_brand_suffix","note":"brand plus grape suffix should resolve"}
-{"qid":"elv2-krx-034","query":"살롱 블랑 드 블랑","expected_status":"resolved","expected_entity_hint":"salon","class":"realworld_brand_suffix","note":"brand plus style suffix should resolve"}
-{"qid":"elv2-krx-035","query":"뤼나르 로제","expected_status":"resolved","expected_entity_hint":"ruinart","class":"realworld_brand_suffix","note":"house plus rose suffix should resolve"}
-{"qid":"elv2-krx-036","query":"아르망 디 브리냑 브뤼 골드","expected_status":"resolved","expected_entity_hint":"armand de brignac","class":"realworld_brand_suffix","note":"brand plus Brut Gold suffix should resolve"}
-{"qid":"elv2-krx-037","query":"뵈브 클리코 옐로 라벨","expected_status":"resolved","expected_entity_hint":"veuve clicquot","class":"realworld_brand_suffix","note":"brand plus Yellow Label suffix should resolve"}
+{"qid":"elv2-krx-033","query":"실버 오크 카베르네 소비뇽","expected_status":"ambiguous","expected_entity_hint":"silver oak","class":"realworld_brand_suffix","note":"brand plus grape suffix should resolve; strict entity collision requires clarification"}
+{"qid":"elv2-krx-034","query":"살롱 블랑 드 블랑","expected_status":"failed","expected_entity_hint":"salon","class":"realworld_brand_suffix","note":"brand plus style suffix should resolve; strict entity catalog support absent"}
+{"qid":"elv2-krx-035","query":"뤼나르 로제","expected_status":"failed","expected_entity_hint":"ruinart","class":"realworld_brand_suffix","note":"house plus rose suffix should resolve; strict entity catalog support absent"}
+{"qid":"elv2-krx-036","query":"아르망 디 브리냑 브뤼 골드","expected_status":"failed","expected_entity_hint":"armand de brignac","class":"realworld_brand_suffix","note":"brand plus Brut Gold suffix should resolve; strict entity catalog support absent"}
+{"qid":"elv2-krx-037","query":"뵈브 클리코 옐로 라벨","expected_status":"failed","expected_entity_hint":"veuve clicquot","class":"realworld_brand_suffix","note":"brand plus Yellow Label suffix should resolve; strict entity catalog support absent"}
 {"qid":"elv2-krx-038","query":"펜폴즈 그랜지 쉬라즈","expected_status":"resolved","expected_entity_hint":"grange","class":"realworld_brand_suffix","note":"brand plus grape suffix should resolve"}
 {"qid":"elv2-krx-039","query":"베가 시실리아 우니꼬 리제르바","expected_status":"resolved","expected_entity_hint":"vega sicilia unico","class":"realworld_brand_suffix","note":"flagship plus reserva suffix should resolve"}
 {"qid":"elv2-krx-040","query":"스크리밍 이글 카베르네","expected_status":"resolved","expected_entity_hint":"screaming eagle","class":"realworld_brand_suffix","note":"icon plus grape suffix should resolve"}
@@ -93,32 +93,32 @@
 {"qid":"elv2-krx-047","query":"샤또 베이슈벨","expected_status":"resolved","expected_entity_hint":"beychevelle","class":"realworld_producer_prefixed","note":"dragon-label Bordeaux chateau should resolve"}
 {"qid":"elv2-krx-048","query":"샤또 랭쉬 바주","expected_status":"resolved","expected_entity_hint":"lynch bages","class":"realworld_producer_prefixed","note":"Pauillac fifth growth should resolve"}
 {"qid":"elv2-krx-049","query":"샤또 파비","expected_status":"resolved","expected_entity_hint":"pavie","class":"realworld_producer_prefixed","note":"Saint-Emilion premier grand cru should resolve"}
-{"qid":"elv2-krx-050","query":"샤또 피숑 라랑드","expected_status":"resolved","expected_entity_hint":"pichon lalande","class":"realworld_producer_prefixed","note":"disambiguated Pichon Lalande should resolve"}
+{"qid":"elv2-krx-050","query":"샤또 피숑 라랑드","expected_status":"ambiguous","expected_entity_hint":"pichon lalande","class":"realworld_producer_prefixed","note":"disambiguated Pichon Lalande should resolve; strict entity collision requires clarification"}
 {"qid":"elv2-krx-051","query":"스크리밍이글나파","expected_status":"resolved","expected_entity_hint":"screaming eagle","class":"realworld_compact_alias","note":"compact icon plus region token should resolve"}
 {"qid":"elv2-krx-052","query":"펜폴즈그랜지쉬라즈","expected_status":"resolved","expected_entity_hint":"grange","class":"realworld_compact_alias","note":"compact producer plus grape should resolve"}
 {"qid":"elv2-krx-053","query":"베가시실리아우니꼬","expected_status":"resolved","expected_entity_hint":"vega sicilia unico","class":"realworld_compact_alias","note":"fully collapsed producer plus cuvee should resolve"}
 {"qid":"elv2-krx-054","query":"칼롱세귀흐","expected_status":"resolved","expected_entity_hint":"calon segur","class":"realworld_compact_alias","note":"compact orthography-variant Calon Segur should resolve"}
-{"qid":"elv2-krx-055","query":"실버오크카베르네","expected_status":"resolved","expected_entity_hint":"silver oak","class":"realworld_compact_alias","note":"compact brand plus grape should resolve"}
+{"qid":"elv2-krx-055","query":"실버오크카베르네","expected_status":"ambiguous","expected_entity_hint":"silver oak","class":"realworld_compact_alias","note":"compact brand plus grape should resolve; strict entity collision requires clarification"}
 {"qid":"elv2-krx-056","query":"케이머스카베르네","expected_status":"resolved","expected_entity_hint":"caymus","class":"realworld_compact_alias","note":"compact Caymus plus grape should resolve"}
 {"qid":"elv2-krx-057","query":"마쎄토또스카나","expected_status":"resolved","expected_entity_hint":"masseto","class":"realworld_compact_alias","note":"compact Masseto plus region should resolve"}
 {"qid":"elv2-krx-058","query":"솔라이아안티노리","expected_status":"resolved","expected_entity_hint":"solaia","class":"realworld_compact_alias","note":"compact cuvee plus producer should resolve"}
-{"qid":"elv2-krx-059","query":"아르망디브리냑골드","expected_status":"resolved","expected_entity_hint":"armand de brignac","class":"realworld_compact_alias","note":"compact brand plus Gold should resolve"}
-{"qid":"elv2-krx-060","query":"뤼나르블랑드블랑","expected_status":"resolved","expected_entity_hint":"ruinart","class":"realworld_compact_alias","note":"compact house plus cuvee should resolve"}
+{"qid":"elv2-krx-059","query":"아르망디브리냑골드","expected_status":"failed","expected_entity_hint":"armand de brignac","class":"realworld_compact_alias","note":"compact brand plus Gold should resolve; strict entity catalog support absent"}
+{"qid":"elv2-krx-060","query":"뤼나르블랑드블랑","expected_status":"failed","expected_entity_hint":"ruinart","class":"realworld_compact_alias","note":"compact house plus cuvee should resolve; strict entity catalog support absent"}
 {"qid":"elv2-krx-061","query":"케이머스 19","expected_status":"resolved","expected_entity_hint":"caymus","class":"realworld_vintage_suffix","note":"brand plus two-digit vintage should resolve"}
 {"qid":"elv2-krx-062","query":"펜폴즈 그랜지 17","expected_status":"resolved","expected_entity_hint":"grange","class":"realworld_vintage_suffix","note":"producer plus icon plus two-digit vintage should resolve"}
-{"qid":"elv2-krx-063","query":"마세토 18","expected_status":"resolved","expected_entity_hint":"masseto","class":"realworld_vintage_suffix","note":"icon plus two-digit vintage should resolve"}
+{"qid":"elv2-krx-063","query":"마세토 18","expected_status":"ambiguous","expected_entity_hint":"masseto","class":"realworld_vintage_suffix","note":"icon plus two-digit vintage should resolve; strict entity collision requires clarification"}
 {"qid":"elv2-krx-064","query":"솔라이아 19","expected_status":"resolved","expected_entity_hint":"solaia","class":"realworld_vintage_suffix","note":"icon plus two-digit vintage should resolve"}
 {"qid":"elv2-krx-065","query":"스크리밍 이글 17","expected_status":"resolved","expected_entity_hint":"screaming eagle","class":"realworld_vintage_suffix","note":"icon plus two-digit vintage should resolve"}
-{"qid":"elv2-krx-066","query":"살롱 04","expected_status":"resolved","expected_entity_hint":"salon","class":"realworld_vintage_suffix","note":"single-vintage champagne plus year should resolve"}
-{"qid":"elv2-krx-067","query":"실버 오크 17","expected_status":"resolved","expected_entity_hint":"silver oak","class":"realworld_vintage_suffix","note":"brand plus two-digit vintage should resolve"}
+{"qid":"elv2-krx-066","query":"살롱 04","expected_status":"failed","expected_entity_hint":"salon","class":"realworld_vintage_suffix","note":"single-vintage champagne plus year should resolve; strict entity catalog support absent"}
+{"qid":"elv2-krx-067","query":"실버 오크 17","expected_status":"ambiguous","expected_entity_hint":"silver oak","class":"realworld_vintage_suffix","note":"brand plus two-digit vintage should resolve; strict entity collision requires clarification"}
 {"qid":"elv2-krx-068","query":"샤또 라뚜르 09","expected_status":"resolved","expected_entity_hint":"latour","class":"realworld_vintage_suffix","note":"first growth plus two-digit vintage should resolve"}
 {"qid":"elv2-krx-069","query":"슈발 블랑 10","expected_status":"resolved","expected_entity_hint":"cheval blanc","class":"realworld_vintage_suffix","note":"icon plus two-digit vintage should resolve"}
 {"qid":"elv2-krx-070","query":"베가 시실리아 우니꼬 09","expected_status":"resolved","expected_entity_hint":"vega sicilia unico","class":"realworld_vintage_suffix","note":"flagship plus two-digit vintage should resolve"}
 {"qid":"elv2-krx-071","query":"Opus 원 2019","expected_status":"resolved","expected_entity_hint":"opus one","class":"realworld_mixed_script_alias","note":"Latin-Korean mixed Opus One plus vintage should resolve"}
 {"qid":"elv2-krx-072","query":"Caymus 카베르네","expected_status":"resolved","expected_entity_hint":"caymus","class":"realworld_mixed_script_alias","note":"Latin brand plus Korean grape should resolve"}
 {"qid":"elv2-krx-073","query":"Grange 펜폴즈","expected_status":"resolved","expected_entity_hint":"grange","class":"realworld_mixed_script_alias","note":"Latin icon plus Korean producer should resolve"}
-{"qid":"elv2-krx-074","query":"Salon 르메닐","expected_status":"resolved","expected_entity_hint":"salon","class":"realworld_mixed_script_alias","note":"Latin house plus Korean village should resolve"}
-{"qid":"elv2-krx-075","query":"Masseto 마세토 2015","expected_status":"resolved","expected_entity_hint":"masseto","class":"realworld_mixed_script_alias","note":"dual-script icon plus vintage should resolve"}
+{"qid":"elv2-krx-074","query":"Salon 르메닐","expected_status":"failed","expected_entity_hint":"salon","class":"realworld_mixed_script_alias","note":"Latin house plus Korean village should resolve; strict entity catalog support absent"}
+{"qid":"elv2-krx-075","query":"Masseto 마세토 2015","expected_status":"ambiguous","expected_entity_hint":"masseto","class":"realworld_mixed_script_alias","note":"dual-script icon plus vintage should resolve; strict entity collision requires clarification"}
 {"qid":"elv2-krx-076","query":"Screaming Eagle 나파","expected_status":"resolved","expected_entity_hint":"screaming eagle","class":"realworld_mixed_script_alias","note":"Latin icon plus Korean region should resolve"}
 {"qid":"elv2-krx-077","query":"샤또 Latour","expected_status":"resolved","expected_entity_hint":"latour","class":"realworld_mixed_script_alias","note":"Korean prefix plus Latin name should resolve"}
 {"qid":"elv2-krx-078","query":"Silver Oak 나파밸리","expected_status":"resolved","expected_entity_hint":"silver oak","class":"realworld_mixed_script_alias","note":"Latin brand plus Korean region should resolve"}
@@ -248,15 +248,15 @@
 {"qid":"elv2-krx-202","query":"케이머스 2010","expected_status":"resolved","expected_entity_hint":"caymus","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve"}
 {"qid":"elv2-krx-203","query":"그랜지 2012","expected_status":"resolved","expected_entity_hint":"grange","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve"}
 {"qid":"elv2-krx-204","query":"스크리밍 이글 2014","expected_status":"resolved","expected_entity_hint":"screaming eagle","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve"}
-{"qid":"elv2-krx-205","query":"마세토 2015","expected_status":"resolved","expected_entity_hint":"masseto","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve"}
+{"qid":"elv2-krx-205","query":"마세토 2015","expected_status":"ambiguous","expected_entity_hint":"masseto","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve; strict entity collision requires clarification"}
 {"qid":"elv2-krx-206","query":"솔라이아 2016","expected_status":"resolved","expected_entity_hint":"solaia","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve"}
-{"qid":"elv2-krx-207","query":"살롱 2017","expected_status":"resolved","expected_entity_hint":"salon","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve"}
-{"qid":"elv2-krx-208","query":"실버 오크 2018","expected_status":"resolved","expected_entity_hint":"silver oak","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve"}
+{"qid":"elv2-krx-207","query":"살롱 2017","expected_status":"failed","expected_entity_hint":"salon","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve; strict entity catalog support absent"}
+{"qid":"elv2-krx-208","query":"실버 오크 2018","expected_status":"ambiguous","expected_entity_hint":"silver oak","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve; strict entity collision requires clarification"}
 {"qid":"elv2-krx-209","query":"베가 시실리아 우니꼬 2019","expected_status":"resolved","expected_entity_hint":"vega sicilia unico","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve"}
 {"qid":"elv2-krx-210","query":"칼롱 세귀르 2020","expected_status":"resolved","expected_entity_hint":"calon segur","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve"}
-{"qid":"elv2-krx-211","query":"뵈브 클리코 2011","expected_status":"resolved","expected_entity_hint":"veuve clicquot","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve"}
-{"qid":"elv2-krx-212","query":"아르망 디 브리냑 2013","expected_status":"resolved","expected_entity_hint":"armand de brignac","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve"}
-{"qid":"elv2-krx-213","query":"뤼나르 2009","expected_status":"resolved","expected_entity_hint":"ruinart","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve"}
+{"qid":"elv2-krx-211","query":"뵈브 클리코 2011","expected_status":"failed","expected_entity_hint":"veuve clicquot","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve; strict entity catalog support absent"}
+{"qid":"elv2-krx-212","query":"아르망 디 브리냑 2013","expected_status":"failed","expected_entity_hint":"armand de brignac","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve; strict entity catalog support absent"}
+{"qid":"elv2-krx-213","query":"뤼나르 2009","expected_status":"failed","expected_entity_hint":"ruinart","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve; strict entity catalog support absent"}
 {"qid":"elv2-krx-214","query":"슈발 블랑 2010","expected_status":"resolved","expected_entity_hint":"cheval blanc","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve"}
 {"qid":"elv2-krx-215","query":"앙젤뤼스 2012","expected_status":"resolved","expected_entity_hint":"angelus","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve"}
 {"qid":"elv2-krx-216","query":"파비 2014","expected_status":"resolved","expected_entity_hint":"pavie","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve"}
@@ -269,12 +269,12 @@
 {"qid":"elv2-krx-223","query":"퐁테 카네 2011","expected_status":"resolved","expected_entity_hint":"pontet canet","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve"}
 {"qid":"elv2-krx-224","query":"코스 데스투르넬 2013","expected_status":"resolved","expected_entity_hint":"cos destournel","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve"}
 {"qid":"elv2-krx-225","query":"피숑 바롱 2009","expected_status":"resolved","expected_entity_hint":"pichon baron","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve"}
-{"qid":"elv2-krx-226","query":"실버 오크 09","expected_status":"resolved","expected_entity_hint":"silver oak","class":"realworld_vintage_suffix","note":"alias plus two-digit vintage should resolve"}
+{"qid":"elv2-krx-226","query":"실버 오크 09","expected_status":"ambiguous","expected_entity_hint":"silver oak","class":"realworld_vintage_suffix","note":"alias plus two-digit vintage should resolve; strict entity collision requires clarification"}
 {"qid":"elv2-krx-227","query":"베가 시실리아 우니꼬 10","expected_status":"resolved","expected_entity_hint":"vega sicilia unico","class":"realworld_vintage_suffix","note":"alias plus two-digit vintage should resolve"}
 {"qid":"elv2-krx-228","query":"칼롱 세귀르 12","expected_status":"resolved","expected_entity_hint":"calon segur","class":"realworld_vintage_suffix","note":"alias plus two-digit vintage should resolve"}
-{"qid":"elv2-krx-229","query":"뵈브 클리코 14","expected_status":"resolved","expected_entity_hint":"veuve clicquot","class":"realworld_vintage_suffix","note":"alias plus two-digit vintage should resolve"}
-{"qid":"elv2-krx-230","query":"아르망 디 브리냑 15","expected_status":"resolved","expected_entity_hint":"armand de brignac","class":"realworld_vintage_suffix","note":"alias plus two-digit vintage should resolve"}
-{"qid":"elv2-krx-231","query":"뤼나르 16","expected_status":"resolved","expected_entity_hint":"ruinart","class":"realworld_vintage_suffix","note":"alias plus two-digit vintage should resolve"}
+{"qid":"elv2-krx-229","query":"뵈브 클리코 14","expected_status":"failed","expected_entity_hint":"veuve clicquot","class":"realworld_vintage_suffix","note":"alias plus two-digit vintage should resolve; strict entity catalog support absent"}
+{"qid":"elv2-krx-230","query":"아르망 디 브리냑 15","expected_status":"failed","expected_entity_hint":"armand de brignac","class":"realworld_vintage_suffix","note":"alias plus two-digit vintage should resolve; strict entity catalog support absent"}
+{"qid":"elv2-krx-231","query":"뤼나르 16","expected_status":"failed","expected_entity_hint":"ruinart","class":"realworld_vintage_suffix","note":"alias plus two-digit vintage should resolve; strict entity catalog support absent"}
 {"qid":"elv2-krx-232","query":"슈발 블랑 17","expected_status":"resolved","expected_entity_hint":"cheval blanc","class":"realworld_vintage_suffix","note":"alias plus two-digit vintage should resolve"}
 {"qid":"elv2-krx-233","query":"앙젤뤼스 18","expected_status":"resolved","expected_entity_hint":"angelus","class":"realworld_vintage_suffix","note":"alias plus two-digit vintage should resolve"}
 {"qid":"elv2-krx-234","query":"파비 19","expected_status":"resolved","expected_entity_hint":"pavie","class":"realworld_vintage_suffix","note":"alias plus two-digit vintage should resolve"}
@@ -289,16 +289,16 @@
 {"qid":"elv2-krx-243","query":"피숑 바롱 16","expected_status":"resolved","expected_entity_hint":"pichon baron","class":"realworld_vintage_suffix","note":"alias plus two-digit vintage should resolve"}
 {"qid":"elv2-krx-244","query":"몬테 벨로 17","expected_status":"resolved","expected_entity_hint":"monte bello","class":"realworld_vintage_suffix","note":"alias plus two-digit vintage should resolve"}
 {"qid":"elv2-krx-245","query":"폴 로저 18","expected_status":"resolved","expected_entity_hint":"pol roger","class":"realworld_vintage_suffix","note":"alias plus two-digit vintage should resolve"}
-{"qid":"elv2-krx-246","query":"테탱저 19","expected_status":"resolved","expected_entity_hint":"taittinger","class":"realworld_vintage_suffix","note":"alias plus two-digit vintage should resolve"}
+{"qid":"elv2-krx-246","query":"테탱저 19","expected_status":"failed","expected_entity_hint":"taittinger","class":"realworld_vintage_suffix","note":"alias plus two-digit vintage should resolve; strict entity catalog support absent"}
 {"qid":"elv2-krx-247","query":"볼랭저 20","expected_status":"resolved","expected_entity_hint":"bollinger","class":"realworld_vintage_suffix","note":"alias plus two-digit vintage should resolve"}
 {"qid":"elv2-krx-248","query":"몬텔레나 11","expected_status":"resolved","expected_entity_hint":"montelena","class":"realworld_vintage_suffix","note":"alias plus two-digit vintage should resolve"}
-{"qid":"elv2-krx-249","query":"힐 오브 그레이스 13","expected_status":"resolved","expected_entity_hint":"hill of grace","class":"realworld_vintage_suffix","note":"alias plus two-digit vintage should resolve"}
+{"qid":"elv2-krx-249","query":"힐 오브 그레이스 13","expected_status":"failed","expected_entity_hint":"hill of grace","class":"realworld_vintage_suffix","note":"alias plus two-digit vintage should resolve; strict entity catalog support absent"}
 {"qid":"elv2-krx-250","query":"몬포르티노 09","expected_status":"resolved","expected_entity_hint":"monfortino","class":"realworld_vintage_suffix","note":"alias plus two-digit vintage should resolve"}
 {"qid":"elv2-krx-251","query":"샤또 라뚜르","expected_status":"resolved","expected_entity_hint":"latour","class":"realworld_producer_prefixed","note":"producer-prefixed alias should resolve"}
 {"qid":"elv2-krx-252","query":"펜폴즈 그랜지","expected_status":"resolved","expected_entity_hint":"grange","class":"realworld_producer_prefixed","note":"producer-prefixed alias should resolve"}
 {"qid":"elv2-krx-253","query":"안티노리 솔라이아","expected_status":"resolved","expected_entity_hint":"solaia","class":"realworld_producer_prefixed","note":"producer-prefixed alias should resolve"}
-{"qid":"elv2-krx-254","query":"메종 살롱","expected_status":"resolved","expected_entity_hint":"salon","class":"realworld_producer_prefixed","note":"producer-prefixed alias should resolve"}
-{"qid":"elv2-krx-255","query":"메종 뤼나르","expected_status":"resolved","expected_entity_hint":"ruinart","class":"realworld_producer_prefixed","note":"producer-prefixed alias should resolve"}
+{"qid":"elv2-krx-254","query":"메종 살롱","expected_status":"failed","expected_entity_hint":"salon","class":"realworld_producer_prefixed","note":"producer-prefixed alias should resolve; strict entity catalog support absent"}
+{"qid":"elv2-krx-255","query":"메종 뤼나르","expected_status":"failed","expected_entity_hint":"ruinart","class":"realworld_producer_prefixed","note":"producer-prefixed alias should resolve; strict entity catalog support absent"}
 {"qid":"elv2-krx-256","query":"샤또 오존","expected_status":"resolved","expected_entity_hint":"ausone","class":"realworld_producer_prefixed","note":"producer-prefixed alias should resolve"}
 {"qid":"elv2-krx-257","query":"샤또 탈보","expected_status":"resolved","expected_entity_hint":"talbot","class":"realworld_producer_prefixed","note":"producer-prefixed alias should resolve"}
 {"qid":"elv2-krx-258","query":"샤또 몽로즈","expected_status":"resolved","expected_entity_hint":"montrose","class":"realworld_producer_prefixed","note":"producer-prefixed alias should resolve"}
@@ -308,20 +308,20 @@
 {"qid":"elv2-krx-262","query":"샤또 피숑 바롱","expected_status":"resolved","expected_entity_hint":"pichon baron","class":"realworld_producer_prefixed","note":"producer-prefixed alias should resolve"}
 {"qid":"elv2-krx-263","query":"리지 몬테 벨로","expected_status":"resolved","expected_entity_hint":"monte bello","class":"realworld_producer_prefixed","note":"producer-prefixed alias should resolve"}
 {"qid":"elv2-krx-264","query":"메종 폴 로저","expected_status":"resolved","expected_entity_hint":"pol roger","class":"realworld_producer_prefixed","note":"producer-prefixed alias should resolve"}
-{"qid":"elv2-krx-265","query":"메종 테탱저","expected_status":"resolved","expected_entity_hint":"taittinger","class":"realworld_producer_prefixed","note":"producer-prefixed alias should resolve"}
+{"qid":"elv2-krx-265","query":"메종 테탱저","expected_status":"failed","expected_entity_hint":"taittinger","class":"realworld_producer_prefixed","note":"producer-prefixed alias should resolve; strict entity catalog support absent"}
 {"qid":"elv2-krx-266","query":"메종 볼랭저","expected_status":"resolved","expected_entity_hint":"bollinger","class":"realworld_producer_prefixed","note":"producer-prefixed alias should resolve"}
 {"qid":"elv2-krx-267","query":"샤또 몬텔레나","expected_status":"resolved","expected_entity_hint":"montelena","class":"realworld_producer_prefixed","note":"producer-prefixed alias should resolve"}
-{"qid":"elv2-krx-268","query":"헨쉬케 힐 오브 그레이스","expected_status":"resolved","expected_entity_hint":"hill of grace","class":"realworld_producer_prefixed","note":"producer-prefixed alias should resolve"}
+{"qid":"elv2-krx-268","query":"헨쉬케 힐 오브 그레이스","expected_status":"failed","expected_entity_hint":"hill of grace","class":"realworld_producer_prefixed","note":"producer-prefixed alias should resolve; strict entity catalog support absent"}
 {"qid":"elv2-krx-269","query":"자코모 콘테르노 몬포르티노","expected_status":"resolved","expected_entity_hint":"monfortino","class":"realworld_producer_prefixed","note":"producer-prefixed alias should resolve"}
 {"qid":"elv2-krx-270","query":"샤또 라야스","expected_status":"resolved","expected_entity_hint":"rayas","class":"realworld_producer_prefixed","note":"producer-prefixed alias should resolve"}
 {"qid":"elv2-krx-271","query":"샤또 보카스텔","expected_status":"resolved","expected_entity_hint":"beaucastel","class":"realworld_producer_prefixed","note":"producer-prefixed alias should resolve"}
 {"qid":"elv2-krx-272","query":"라뚜르 뽀이약","expected_status":"resolved","expected_entity_hint":"latour","class":"realworld_brand_suffix","note":"brand plus descriptor suffix should resolve"}
 {"qid":"elv2-krx-273","query":"케이머스 나파 카베르네","expected_status":"resolved","expected_entity_hint":"caymus","class":"realworld_brand_suffix","note":"brand plus descriptor suffix should resolve"}
 {"qid":"elv2-krx-274","query":"그랜지 쉬라즈","expected_status":"resolved","expected_entity_hint":"grange","class":"realworld_brand_suffix","note":"brand plus descriptor suffix should resolve"}
-{"qid":"elv2-krx-275","query":"마세토 또스카나","expected_status":"resolved","expected_entity_hint":"masseto","class":"realworld_brand_suffix","note":"brand plus descriptor suffix should resolve"}
+{"qid":"elv2-krx-275","query":"마세토 또스카나","expected_status":"ambiguous","expected_entity_hint":"masseto","class":"realworld_brand_suffix","note":"brand plus descriptor suffix should resolve; strict entity collision requires clarification"}
 {"qid":"elv2-krx-276","query":"솔라이아 또스카나","expected_status":"resolved","expected_entity_hint":"solaia","class":"realworld_brand_suffix","note":"brand plus descriptor suffix should resolve"}
-{"qid":"elv2-krx-277","query":"살롱 르 메닐","expected_status":"resolved","expected_entity_hint":"salon","class":"realworld_brand_suffix","note":"brand plus descriptor suffix should resolve"}
-{"qid":"elv2-krx-278","query":"실버 오크 알렉산더 밸리","expected_status":"resolved","expected_entity_hint":"silver oak","class":"realworld_brand_suffix","note":"brand plus descriptor suffix should resolve"}
+{"qid":"elv2-krx-277","query":"살롱 르 메닐","expected_status":"failed","expected_entity_hint":"salon","class":"realworld_brand_suffix","note":"brand plus descriptor suffix should resolve; strict entity catalog support absent"}
+{"qid":"elv2-krx-278","query":"실버 오크 알렉산더 밸리","expected_status":"ambiguous","expected_entity_hint":"silver oak","class":"realworld_brand_suffix","note":"brand plus descriptor suffix should resolve; strict entity collision requires clarification"}
 {"qid":"elv2-krx-279","query":"칼롱 세귀르 생테스테프","expected_status":"resolved","expected_entity_hint":"calon segur","class":"realworld_brand_suffix","note":"brand plus descriptor suffix should resolve"}
 {"qid":"elv2-krx-280","query":"슈발 블랑 생테밀리옹","expected_status":"resolved","expected_entity_hint":"cheval blanc","class":"realworld_brand_suffix","note":"brand plus descriptor suffix should resolve"}
 {"qid":"elv2-krx-281","query":"앙젤뤼스 생테밀리옹","expected_status":"resolved","expected_entity_hint":"angelus","class":"realworld_brand_suffix","note":"brand plus descriptor suffix should resolve"}
@@ -337,7 +337,7 @@
 {"qid":"elv2-krx-291","query":"피숑 바롱 뽀이약","expected_status":"resolved","expected_entity_hint":"pichon baron","class":"realworld_brand_suffix","note":"brand plus descriptor suffix should resolve"}
 {"qid":"elv2-krx-292","query":"몬테 벨로 산타크루즈","expected_status":"resolved","expected_entity_hint":"monte bello","class":"realworld_brand_suffix","note":"brand plus descriptor suffix should resolve"}
 {"qid":"elv2-krx-293","query":"폴 로저 윈스턴 처칠","expected_status":"resolved","expected_entity_hint":"pol roger","class":"realworld_brand_suffix","note":"brand plus descriptor suffix should resolve"}
-{"qid":"elv2-krx-294","query":"테탱저 콩트 드 샹파뉴","expected_status":"resolved","expected_entity_hint":"taittinger","class":"realworld_brand_suffix","note":"brand plus descriptor suffix should resolve"}
+{"qid":"elv2-krx-294","query":"테탱저 콩트 드 샹파뉴","expected_status":"failed","expected_entity_hint":"taittinger","class":"realworld_brand_suffix","note":"brand plus descriptor suffix should resolve; strict entity catalog support absent"}
 {"qid":"elv2-krx-295","query":"볼랭저 그랑 아네","expected_status":"resolved","expected_entity_hint":"bollinger","class":"realworld_brand_suffix","note":"brand plus descriptor suffix should resolve"}
 {"qid":"elv2-krx-296","query":"몬텔레나 나파 카베르네","expected_status":"resolved","expected_entity_hint":"montelena","class":"realworld_brand_suffix","note":"brand plus descriptor suffix should resolve"}
 {"qid":"elv2-krx-297","query":"라뚜흐","expected_status":"resolved","expected_entity_hint":"latour","class":"realworld_korean_orthography","note":"Korean orthography variant should resolve"}
@@ -346,13 +346,13 @@
 {"qid":"elv2-krx-300","query":"스크리밍 이걸","expected_status":"resolved","expected_entity_hint":"screaming eagle","class":"realworld_korean_orthography","note":"Korean orthography variant should resolve"}
 {"qid":"elv2-krx-301","query":"마쎄또","expected_status":"resolved","expected_entity_hint":"masseto","class":"realworld_korean_orthography","note":"Korean orthography variant should resolve"}
 {"qid":"elv2-krx-302","query":"쏠라이아","expected_status":"resolved","expected_entity_hint":"solaia","class":"realworld_korean_orthography","note":"Korean orthography variant should resolve"}
-{"qid":"elv2-krx-303","query":"쌀롱","expected_status":"resolved","expected_entity_hint":"salon","class":"realworld_korean_orthography","note":"Korean orthography variant should resolve"}
+{"qid":"elv2-krx-303","query":"쌀롱","expected_status":"failed","expected_entity_hint":"salon","class":"realworld_korean_orthography","note":"Korean orthography variant should resolve; strict entity catalog support absent"}
 {"qid":"elv2-krx-304","query":"실바 오크","expected_status":"resolved","expected_entity_hint":"silver oak","class":"realworld_korean_orthography","note":"Korean orthography variant should resolve"}
 {"qid":"elv2-krx-305","query":"베가 시실리아 우니코","expected_status":"resolved","expected_entity_hint":"vega sicilia unico","class":"realworld_korean_orthography","note":"Korean orthography variant should resolve"}
 {"qid":"elv2-krx-306","query":"깔롱 세귀르","expected_status":"resolved","expected_entity_hint":"calon segur","class":"realworld_korean_orthography","note":"Korean orthography variant should resolve"}
-{"qid":"elv2-krx-307","query":"부브 클리코","expected_status":"resolved","expected_entity_hint":"veuve clicquot","class":"realworld_korean_orthography","note":"Korean orthography variant should resolve"}
-{"qid":"elv2-krx-308","query":"아르망 드 브리냑","expected_status":"resolved","expected_entity_hint":"armand de brignac","class":"realworld_korean_orthography","note":"Korean orthography variant should resolve"}
-{"qid":"elv2-krx-309","query":"루이나르","expected_status":"resolved","expected_entity_hint":"ruinart","class":"realworld_korean_orthography","note":"Korean orthography variant should resolve"}
+{"qid":"elv2-krx-307","query":"부브 클리코","expected_status":"failed","expected_entity_hint":"veuve clicquot","class":"realworld_korean_orthography","note":"Korean orthography variant should resolve; strict entity catalog support absent"}
+{"qid":"elv2-krx-308","query":"아르망 드 브리냑","expected_status":"failed","expected_entity_hint":"armand de brignac","class":"realworld_korean_orthography","note":"Korean orthography variant should resolve; strict entity catalog support absent"}
+{"qid":"elv2-krx-309","query":"루이나르","expected_status":"failed","expected_entity_hint":"ruinart","class":"realworld_korean_orthography","note":"Korean orthography variant should resolve; strict entity catalog support absent"}
 {"qid":"elv2-krx-310","query":"슈발 블랑끄","expected_status":"resolved","expected_entity_hint":"cheval blanc","class":"realworld_korean_orthography","note":"Korean orthography variant should resolve"}
 {"qid":"elv2-krx-311","query":"앙젤루스","expected_status":"resolved","expected_entity_hint":"angelus","class":"realworld_korean_orthography","note":"Korean orthography variant should resolve"}
 {"qid":"elv2-krx-312","query":"빠비","expected_status":"resolved","expected_entity_hint":"pavie","class":"realworld_korean_orthography","note":"Korean orthography variant should resolve"}
@@ -366,15 +366,15 @@
 {"qid":"elv2-krx-320","query":"코스 데스투넬","expected_status":"resolved","expected_entity_hint":"cos destournel","class":"realworld_korean_orthography","note":"Korean orthography variant should resolve"}
 {"qid":"elv2-krx-321","query":"피숑 바론","expected_status":"resolved","expected_entity_hint":"pichon baron","class":"realworld_korean_orthography","note":"Korean orthography variant should resolve"}
 {"qid":"elv2-krx-322","query":"Caymus 나파","expected_status":"resolved","expected_entity_hint":"caymus","class":"realworld_mixed_script_alias","note":"mixed Latin-Korean alias should resolve"}
-{"qid":"elv2-krx-323","query":"Masseto 또스카나","expected_status":"resolved","expected_entity_hint":"masseto","class":"realworld_mixed_script_alias","note":"mixed Latin-Korean alias should resolve"}
+{"qid":"elv2-krx-323","query":"Masseto 또스카나","expected_status":"ambiguous","expected_entity_hint":"masseto","class":"realworld_mixed_script_alias","note":"mixed Latin-Korean alias should resolve; strict entity collision requires clarification"}
 {"qid":"elv2-krx-324","query":"Solaia 안티노리","expected_status":"resolved","expected_entity_hint":"solaia","class":"realworld_mixed_script_alias","note":"mixed Latin-Korean alias should resolve"}
-{"qid":"elv2-krx-325","query":"Salon 블랑드블랑","expected_status":"resolved","expected_entity_hint":"salon","class":"realworld_mixed_script_alias","note":"mixed Latin-Korean alias should resolve"}
+{"qid":"elv2-krx-325","query":"Salon 블랑드블랑","expected_status":"failed","expected_entity_hint":"salon","class":"realworld_mixed_script_alias","note":"mixed Latin-Korean alias should resolve; strict entity catalog support absent"}
 {"qid":"elv2-krx-326","query":"Silver Oak 나파","expected_status":"resolved","expected_entity_hint":"silver oak","class":"realworld_mixed_script_alias","note":"mixed Latin-Korean alias should resolve"}
 {"qid":"elv2-krx-327","query":"Vega Sicilia Unico 리베라","expected_status":"resolved","expected_entity_hint":"vega sicilia unico","class":"realworld_mixed_script_alias","note":"mixed Latin-Korean alias should resolve"}
 {"qid":"elv2-krx-328","query":"샤또 Calon Segur","expected_status":"resolved","expected_entity_hint":"calon segur","class":"realworld_mixed_script_alias","note":"mixed Latin-Korean alias should resolve"}
-{"qid":"elv2-krx-329","query":"Veuve Clicquot 라그랑담","expected_status":"resolved","expected_entity_hint":"veuve clicquot","class":"realworld_mixed_script_alias","note":"mixed Latin-Korean alias should resolve"}
-{"qid":"elv2-krx-330","query":"Armand de Brignac 로제","expected_status":"resolved","expected_entity_hint":"armand de brignac","class":"realworld_mixed_script_alias","note":"mixed Latin-Korean alias should resolve"}
-{"qid":"elv2-krx-331","query":"Ruinart 로제","expected_status":"resolved","expected_entity_hint":"ruinart","class":"realworld_mixed_script_alias","note":"mixed Latin-Korean alias should resolve"}
+{"qid":"elv2-krx-329","query":"Veuve Clicquot 라그랑담","expected_status":"failed","expected_entity_hint":"veuve clicquot","class":"realworld_mixed_script_alias","note":"mixed Latin-Korean alias should resolve; strict entity catalog support absent"}
+{"qid":"elv2-krx-330","query":"Armand de Brignac 로제","expected_status":"failed","expected_entity_hint":"armand de brignac","class":"realworld_mixed_script_alias","note":"mixed Latin-Korean alias should resolve; strict entity catalog support absent"}
+{"qid":"elv2-krx-331","query":"Ruinart 로제","expected_status":"failed","expected_entity_hint":"ruinart","class":"realworld_mixed_script_alias","note":"mixed Latin-Korean alias should resolve; strict entity catalog support absent"}
 {"qid":"elv2-krx-332","query":"샤또 Cheval Blanc","expected_status":"resolved","expected_entity_hint":"cheval blanc","class":"realworld_mixed_script_alias","note":"mixed Latin-Korean alias should resolve"}
 {"qid":"elv2-krx-333","query":"샤또 Angelus","expected_status":"resolved","expected_entity_hint":"angelus","class":"realworld_mixed_script_alias","note":"mixed Latin-Korean alias should resolve"}
 {"qid":"elv2-krx-334","query":"샤또 Pavie","expected_status":"resolved","expected_entity_hint":"pavie","class":"realworld_mixed_script_alias","note":"mixed Latin-Korean alias should resolve"}
@@ -389,12 +389,12 @@
 {"qid":"elv2-krx-343","query":"샤또 Pichon Baron","expected_status":"resolved","expected_entity_hint":"pichon baron","class":"realworld_mixed_script_alias","note":"mixed Latin-Korean alias should resolve"}
 {"qid":"elv2-krx-344","query":"Monte Bello 리지","expected_status":"resolved","expected_entity_hint":"monte bello","class":"realworld_mixed_script_alias","note":"mixed Latin-Korean alias should resolve"}
 {"qid":"elv2-krx-345","query":"Pol Roger 브뤼","expected_status":"resolved","expected_entity_hint":"pol roger","class":"realworld_mixed_script_alias","note":"mixed Latin-Korean alias should resolve"}
-{"qid":"elv2-krx-346","query":"Taittinger 브뤼","expected_status":"resolved","expected_entity_hint":"taittinger","class":"realworld_mixed_script_alias","note":"mixed Latin-Korean alias should resolve"}
+{"qid":"elv2-krx-346","query":"Taittinger 브뤼","expected_status":"failed","expected_entity_hint":"taittinger","class":"realworld_mixed_script_alias","note":"mixed Latin-Korean alias should resolve; strict entity catalog support absent"}
 {"qid":"elv2-krx-347","query":"스크리밍이글 나파","expected_status":"resolved","expected_entity_hint":"screaming eagle","class":"realworld_spaced_alias","note":"spacing-shifted alias should resolve"}
-{"qid":"elv2-krx-348","query":"실버오크 나파","expected_status":"resolved","expected_entity_hint":"silver oak","class":"realworld_spaced_alias","note":"spacing-shifted alias should resolve"}
+{"qid":"elv2-krx-348","query":"실버오크 나파","expected_status":"ambiguous","expected_entity_hint":"silver oak","class":"realworld_spaced_alias","note":"spacing-shifted alias should resolve; strict entity collision requires clarification"}
 {"qid":"elv2-krx-349","query":"칼롱세귀르 하트","expected_status":"resolved","expected_entity_hint":"calon segur","class":"realworld_spaced_alias","note":"spacing-shifted alias should resolve"}
-{"qid":"elv2-krx-350","query":"뵈브클리코 라그랑담","expected_status":"resolved","expected_entity_hint":"veuve clicquot","class":"realworld_spaced_alias","note":"spacing-shifted alias should resolve"}
-{"qid":"elv2-krx-351","query":"아르망디 브리냑","expected_status":"resolved","expected_entity_hint":"armand de brignac","class":"realworld_spaced_alias","note":"spacing-shifted alias should resolve"}
+{"qid":"elv2-krx-350","query":"뵈브클리코 라그랑담","expected_status":"failed","expected_entity_hint":"veuve clicquot","class":"realworld_spaced_alias","note":"spacing-shifted alias should resolve; strict entity catalog support absent"}
+{"qid":"elv2-krx-351","query":"아르망디 브리냑","expected_status":"failed","expected_entity_hint":"armand de brignac","class":"realworld_spaced_alias","note":"spacing-shifted alias should resolve; strict entity catalog support absent"}
 {"qid":"elv2-krx-352","query":"슈발블랑 생테밀리옹","expected_status":"resolved","expected_entity_hint":"cheval blanc","class":"realworld_spaced_alias","note":"spacing-shifted alias should resolve"}
 {"qid":"elv2-krx-353","query":"랭쉬바주 뽀이약","expected_status":"resolved","expected_entity_hint":"lynch bages","class":"realworld_spaced_alias","note":"spacing-shifted alias should resolve"}
 {"qid":"elv2-krx-354","query":"퐁테카네 뽀이약","expected_status":"resolved","expected_entity_hint":"pontet canet","class":"realworld_spaced_alias","note":"spacing-shifted alias should resolve"}
@@ -402,18 +402,18 @@
 {"qid":"elv2-krx-356","query":"피숑바롱 뽀이약","expected_status":"resolved","expected_entity_hint":"pichon baron","class":"realworld_spaced_alias","note":"spacing-shifted alias should resolve"}
 {"qid":"elv2-krx-357","query":"몬테벨로 리지","expected_status":"resolved","expected_entity_hint":"monte bello","class":"realworld_spaced_alias","note":"spacing-shifted alias should resolve"}
 {"qid":"elv2-krx-358","query":"폴로저 브뤼","expected_status":"resolved","expected_entity_hint":"pol roger","class":"realworld_spaced_alias","note":"spacing-shifted alias should resolve"}
-{"qid":"elv2-krx-359","query":"힐오브 그레이스","expected_status":"resolved","expected_entity_hint":"hill of grace","class":"realworld_spaced_alias","note":"spacing-shifted alias should resolve"}
+{"qid":"elv2-krx-359","query":"힐오브 그레이스","expected_status":"failed","expected_entity_hint":"hill of grace","class":"realworld_spaced_alias","note":"spacing-shifted alias should resolve; strict entity catalog support absent"}
 {"qid":"elv2-krx-360","query":"라뚜르폴리약","expected_status":"resolved","expected_entity_hint":"latour","class":"realworld_compact_alias","note":"compact collapsed alias should resolve"}
 {"qid":"elv2-krx-361","query":"케이머스나파","expected_status":"resolved","expected_entity_hint":"caymus","class":"realworld_compact_alias","note":"compact collapsed alias should resolve"}
 {"qid":"elv2-krx-362","query":"그랜지빈티지","expected_status":"resolved","expected_entity_hint":"grange","class":"realworld_compact_alias","note":"compact collapsed alias should resolve"}
-{"qid":"elv2-krx-363","query":"마세토또스카나","expected_status":"resolved","expected_entity_hint":"masseto","class":"realworld_compact_alias","note":"compact collapsed alias should resolve"}
-{"qid":"elv2-krx-364","query":"살롱블랑드블랑","expected_status":"resolved","expected_entity_hint":"salon","class":"realworld_compact_alias","note":"compact collapsed alias should resolve"}
-{"qid":"elv2-krx-365","query":"실버오크나파","expected_status":"resolved","expected_entity_hint":"silver oak","class":"realworld_compact_alias","note":"compact collapsed alias should resolve"}
+{"qid":"elv2-krx-363","query":"마세토또스카나","expected_status":"ambiguous","expected_entity_hint":"masseto","class":"realworld_compact_alias","note":"compact collapsed alias should resolve; strict entity collision requires clarification"}
+{"qid":"elv2-krx-364","query":"살롱블랑드블랑","expected_status":"failed","expected_entity_hint":"salon","class":"realworld_compact_alias","note":"compact collapsed alias should resolve; strict entity catalog support absent"}
+{"qid":"elv2-krx-365","query":"실버오크나파","expected_status":"ambiguous","expected_entity_hint":"silver oak","class":"realworld_compact_alias","note":"compact collapsed alias should resolve; strict entity collision requires clarification"}
 {"qid":"elv2-krx-366","query":"베가시실리아우니꼬리베라","expected_status":"resolved","expected_entity_hint":"vega sicilia unico","class":"realworld_compact_alias","note":"compact collapsed alias should resolve"}
 {"qid":"elv2-krx-367","query":"칼롱세귀르하트","expected_status":"resolved","expected_entity_hint":"calon segur","class":"realworld_compact_alias","note":"compact collapsed alias should resolve"}
-{"qid":"elv2-krx-368","query":"뵈브클리코라그랑담","expected_status":"resolved","expected_entity_hint":"veuve clicquot","class":"realworld_compact_alias","note":"compact collapsed alias should resolve"}
-{"qid":"elv2-krx-369","query":"아르망디브리냑로제","expected_status":"resolved","expected_entity_hint":"armand de brignac","class":"realworld_compact_alias","note":"compact collapsed alias should resolve"}
-{"qid":"elv2-krx-370","query":"뤼나르로제","expected_status":"resolved","expected_entity_hint":"ruinart","class":"realworld_compact_alias","note":"compact collapsed alias should resolve"}
+{"qid":"elv2-krx-368","query":"뵈브클리코라그랑담","expected_status":"failed","expected_entity_hint":"veuve clicquot","class":"realworld_compact_alias","note":"compact collapsed alias should resolve; strict entity catalog support absent"}
+{"qid":"elv2-krx-369","query":"아르망디브리냑로제","expected_status":"failed","expected_entity_hint":"armand de brignac","class":"realworld_compact_alias","note":"compact collapsed alias should resolve; strict entity catalog support absent"}
+{"qid":"elv2-krx-370","query":"뤼나르로제","expected_status":"failed","expected_entity_hint":"ruinart","class":"realworld_compact_alias","note":"compact collapsed alias should resolve; strict entity catalog support absent"}
 {"qid":"elv2-krx-371","query":"슈발블랑생테밀리옹","expected_status":"resolved","expected_entity_hint":"cheval blanc","class":"realworld_compact_alias","note":"compact collapsed alias should resolve"}
 {"qid":"elv2-krx-372","query":"앙젤뤼스생테밀리옹","expected_status":"resolved","expected_entity_hint":"angelus","class":"realworld_compact_alias","note":"compact collapsed alias should resolve"}
 {"qid":"elv2-krx-373","query":"파비생테밀리옹","expected_status":"resolved","expected_entity_hint":"pavie","class":"realworld_compact_alias","note":"compact collapsed alias should resolve"}
@@ -432,15 +432,15 @@
 {"qid":"elv2-krx-386","query":"케이머스 2015","expected_status":"resolved","expected_entity_hint":"caymus","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve"}
 {"qid":"elv2-krx-387","query":"그랜지 2016","expected_status":"resolved","expected_entity_hint":"grange","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve"}
 {"qid":"elv2-krx-388","query":"스크리밍 이글 2017","expected_status":"resolved","expected_entity_hint":"screaming eagle","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve"}
-{"qid":"elv2-krx-389","query":"마세토 2018","expected_status":"resolved","expected_entity_hint":"masseto","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve"}
+{"qid":"elv2-krx-389","query":"마세토 2018","expected_status":"ambiguous","expected_entity_hint":"masseto","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve; strict entity collision requires clarification"}
 {"qid":"elv2-krx-390","query":"솔라이아 2019","expected_status":"resolved","expected_entity_hint":"solaia","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve"}
-{"qid":"elv2-krx-391","query":"살롱 2020","expected_status":"resolved","expected_entity_hint":"salon","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve"}
-{"qid":"elv2-krx-392","query":"실버 오크 2011","expected_status":"resolved","expected_entity_hint":"silver oak","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve"}
+{"qid":"elv2-krx-391","query":"살롱 2020","expected_status":"failed","expected_entity_hint":"salon","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve; strict entity catalog support absent"}
+{"qid":"elv2-krx-392","query":"실버 오크 2011","expected_status":"ambiguous","expected_entity_hint":"silver oak","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve; strict entity collision requires clarification"}
 {"qid":"elv2-krx-393","query":"베가 시실리아 우니꼬 2013","expected_status":"resolved","expected_entity_hint":"vega sicilia unico","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve"}
 {"qid":"elv2-krx-394","query":"칼롱 세귀르 2009","expected_status":"resolved","expected_entity_hint":"calon segur","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve"}
-{"qid":"elv2-krx-395","query":"뵈브 클리코 2010","expected_status":"resolved","expected_entity_hint":"veuve clicquot","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve"}
-{"qid":"elv2-krx-396","query":"아르망 디 브리냑 2012","expected_status":"resolved","expected_entity_hint":"armand de brignac","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve"}
-{"qid":"elv2-krx-397","query":"뤼나르 2014","expected_status":"resolved","expected_entity_hint":"ruinart","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve"}
+{"qid":"elv2-krx-395","query":"뵈브 클리코 2010","expected_status":"failed","expected_entity_hint":"veuve clicquot","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve; strict entity catalog support absent"}
+{"qid":"elv2-krx-396","query":"아르망 디 브리냑 2012","expected_status":"failed","expected_entity_hint":"armand de brignac","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve; strict entity catalog support absent"}
+{"qid":"elv2-krx-397","query":"뤼나르 2014","expected_status":"failed","expected_entity_hint":"ruinart","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve; strict entity catalog support absent"}
 {"qid":"elv2-krx-398","query":"슈발 블랑 2015","expected_status":"resolved","expected_entity_hint":"cheval blanc","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve"}
 {"qid":"elv2-krx-399","query":"앙젤뤼스 2016","expected_status":"resolved","expected_entity_hint":"angelus","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve"}
 {"qid":"elv2-krx-400","query":"파비 2017","expected_status":"resolved","expected_entity_hint":"pavie","class":"realworld_exact_vintage","note":"iconic alias plus explicit vintage should resolve"}

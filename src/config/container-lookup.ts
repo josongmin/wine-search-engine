@@ -183,6 +183,9 @@ export async function createLookupDirectContainer(
   const {
     aliasMatcher,
     resolverProjectionLookup,
+    semanticScopeRegistry,
+    reviewedFamilyRecallRegistry,
+    entityScopeGraph,
     ambiguityDictionary,
     conceptRedirectRegistry,
     exactSafeRegistry,
@@ -214,11 +217,14 @@ export async function createLookupDirectContainer(
       ambiguityDictionary,
       exactSafeRegistry,
     }),
+    semanticScopeRegistry,
     entityResolver,
     resolverProjectionLookup,
     candidateRetrieval: new MultiChannelRetrievalEngine({
       aliasMatcher,
       resolverProjectionLookup,
+      reviewedFamilyRecall: reviewedFamilyRecallRegistry,
+      entityScopeGraph,
     }),
     ...(ltrModels !== undefined
       ? { reranker: new LtrRerankDecider({ ltrModels }) }

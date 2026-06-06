@@ -237,6 +237,9 @@ export interface LoadedSearchSnapshotRuntimeState {
   readonly lookupExactSafeRuntimePath: string;
   readonly lookupResolverProjectionPath: string;
   readonly lookupEntityProjectionPath: string;
+  readonly lookupSemanticScopeRuntimePath: string;
+  readonly lookupReviewedFamilyRecallRuntimePath: string;
+  readonly lookupScopeGraphRuntimePath: string;
   readonly lookupAmbiguityRuntimePath: string;
   readonly lookupConceptRedirectRuntimePath: string;
   readonly quality: {
@@ -255,6 +258,9 @@ export interface LoadedSearchSnapshotRuntimeState {
     readonly lookupExactSafeRuntimeEntries: number;
     readonly lookupResolverProjectionDocuments: number;
     readonly lookupEntityProjectionDocuments: number;
+    readonly lookupSemanticScopeRuntimeEntries: number;
+    readonly lookupReviewedFamilyRecallRuntimeEntries: number;
+    readonly lookupScopeGraphRuntimeEdges: number;
     readonly lookupAmbiguityRuntimeEntries: number;
     readonly lookupConceptRedirectRuntimeEntries: number;
     readonly ambiguityRegistry: number;
@@ -269,6 +275,9 @@ export interface LoadedSearchSnapshotRuntimeState {
     readonly lookupExactSafeRuntime: string;
     readonly lookupResolverProjection: string;
     readonly lookupEntityProjection: string;
+    readonly lookupSemanticScopeRuntime: string;
+    readonly lookupReviewedFamilyRecallRuntime: string;
+    readonly lookupScopeGraphRuntime: string;
     readonly lookupAmbiguityRuntime: string;
     readonly lookupConceptRedirectRuntime: string;
     readonly ambiguityRegistry: string;
@@ -336,6 +345,9 @@ type RuntimeStateShape = {
   readonly lookupExactSafeRuntimePath?: unknown;
   readonly lookupResolverProjectionPath?: unknown;
   readonly lookupEntityProjectionPath?: unknown;
+  readonly lookupSemanticScopeRuntimePath?: unknown;
+  readonly lookupReviewedFamilyRecallRuntimePath?: unknown;
+  readonly lookupScopeGraphRuntimePath?: unknown;
   readonly lookupAmbiguityRuntimePath?: unknown;
   readonly lookupConceptRedirectRuntimePath?: unknown;
   readonly quality?: {
@@ -380,6 +392,9 @@ type RuntimeStateShape = {
     readonly lookupExactSafeRuntimeEntries?: unknown;
     readonly lookupResolverProjectionDocuments?: unknown;
     readonly lookupEntityProjectionDocuments?: unknown;
+    readonly lookupSemanticScopeRuntimeEntries?: unknown;
+    readonly lookupReviewedFamilyRecallRuntimeEntries?: unknown;
+    readonly lookupScopeGraphRuntimeEdges?: unknown;
     readonly lookupAmbiguityRuntimeEntries?: unknown;
     readonly lookupConceptRedirectRuntimeEntries?: unknown;
     readonly ambiguityRegistry?: unknown;
@@ -394,6 +409,9 @@ type RuntimeStateShape = {
     readonly lookupExactSafeRuntime?: unknown;
     readonly lookupResolverProjection?: unknown;
     readonly lookupEntityProjection?: unknown;
+    readonly lookupSemanticScopeRuntime?: unknown;
+    readonly lookupReviewedFamilyRecallRuntime?: unknown;
+    readonly lookupScopeGraphRuntime?: unknown;
     readonly lookupAmbiguityRuntime?: unknown;
     readonly lookupConceptRedirectRuntime?: unknown;
     readonly ambiguityRegistry?: unknown;
@@ -567,6 +585,9 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
   if (typeof parsed.lookupExactSafeRuntimePath !== 'string' || parsed.lookupExactSafeRuntimePath.length === 0) malformedReasons.push('lookupExactSafeRuntimePath');
   if (typeof parsed.lookupResolverProjectionPath !== 'string' || parsed.lookupResolverProjectionPath.length === 0) malformedReasons.push('lookupResolverProjectionPath');
   if (typeof parsed.lookupEntityProjectionPath !== 'string' || parsed.lookupEntityProjectionPath.length === 0) malformedReasons.push('lookupEntityProjectionPath');
+  if (typeof parsed.lookupSemanticScopeRuntimePath !== 'string' || parsed.lookupSemanticScopeRuntimePath.length === 0) malformedReasons.push('lookupSemanticScopeRuntimePath');
+  if (typeof parsed.lookupReviewedFamilyRecallRuntimePath !== 'string' || parsed.lookupReviewedFamilyRecallRuntimePath.length === 0) malformedReasons.push('lookupReviewedFamilyRecallRuntimePath');
+  if (typeof parsed.lookupScopeGraphRuntimePath !== 'string' || parsed.lookupScopeGraphRuntimePath.length === 0) malformedReasons.push('lookupScopeGraphRuntimePath');
   if (typeof parsed.lookupAmbiguityRuntimePath !== 'string' || parsed.lookupAmbiguityRuntimePath.length === 0) malformedReasons.push('lookupAmbiguityRuntimePath');
   if (typeof parsed.lookupConceptRedirectRuntimePath !== 'string' || parsed.lookupConceptRedirectRuntimePath.length === 0) malformedReasons.push('lookupConceptRedirectRuntimePath');
   if (quality === undefined) malformedReasons.push('quality');
@@ -580,6 +601,9 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
     if (!isFiniteCount(counts.lookupExactSafeRuntimeEntries)) malformedReasons.push('counts.lookupExactSafeRuntimeEntries');
     if (!isFiniteCount(counts.lookupResolverProjectionDocuments)) malformedReasons.push('counts.lookupResolverProjectionDocuments');
     if (!isFiniteCount(counts.lookupEntityProjectionDocuments)) malformedReasons.push('counts.lookupEntityProjectionDocuments');
+    if (!isFiniteCount(counts.lookupSemanticScopeRuntimeEntries)) malformedReasons.push('counts.lookupSemanticScopeRuntimeEntries');
+    if (!isFiniteCount(counts.lookupReviewedFamilyRecallRuntimeEntries)) malformedReasons.push('counts.lookupReviewedFamilyRecallRuntimeEntries');
+    if (!isFiniteCount(counts.lookupScopeGraphRuntimeEdges)) malformedReasons.push('counts.lookupScopeGraphRuntimeEdges');
     if (!isFiniteCount(counts.lookupAmbiguityRuntimeEntries)) malformedReasons.push('counts.lookupAmbiguityRuntimeEntries');
     if (!isFiniteCount(counts.lookupConceptRedirectRuntimeEntries)) malformedReasons.push('counts.lookupConceptRedirectRuntimeEntries');
     if (!isFiniteCount(counts.ambiguityRegistry)) malformedReasons.push('counts.ambiguityRegistry');
@@ -595,6 +619,9 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
     if (typeof hashes.lookupExactSafeRuntime !== 'string' || hashes.lookupExactSafeRuntime.length === 0) malformedReasons.push('hashes.lookupExactSafeRuntime');
     if (typeof hashes.lookupResolverProjection !== 'string' || hashes.lookupResolverProjection.length === 0) malformedReasons.push('hashes.lookupResolverProjection');
     if (typeof hashes.lookupEntityProjection !== 'string' || hashes.lookupEntityProjection.length === 0) malformedReasons.push('hashes.lookupEntityProjection');
+    if (typeof hashes.lookupSemanticScopeRuntime !== 'string' || hashes.lookupSemanticScopeRuntime.length === 0) malformedReasons.push('hashes.lookupSemanticScopeRuntime');
+    if (typeof hashes.lookupReviewedFamilyRecallRuntime !== 'string' || hashes.lookupReviewedFamilyRecallRuntime.length === 0) malformedReasons.push('hashes.lookupReviewedFamilyRecallRuntime');
+    if (typeof hashes.lookupScopeGraphRuntime !== 'string' || hashes.lookupScopeGraphRuntime.length === 0) malformedReasons.push('hashes.lookupScopeGraphRuntime');
     if (typeof hashes.lookupAmbiguityRuntime !== 'string' || hashes.lookupAmbiguityRuntime.length === 0) malformedReasons.push('hashes.lookupAmbiguityRuntime');
     if (typeof hashes.lookupConceptRedirectRuntime !== 'string' || hashes.lookupConceptRedirectRuntime.length === 0) malformedReasons.push('hashes.lookupConceptRedirectRuntime');
     if (typeof hashes.ambiguityRegistry !== 'string' || hashes.ambiguityRegistry.length === 0) malformedReasons.push('hashes.ambiguityRegistry');
@@ -620,6 +647,9 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
   const validatedLookupExactSafeRuntimePath = parsed.lookupExactSafeRuntimePath as string;
   const validatedLookupResolverProjectionPath = parsed.lookupResolverProjectionPath as string;
   const validatedLookupEntityProjectionPath = parsed.lookupEntityProjectionPath as string;
+  const validatedLookupSemanticScopeRuntimePath = parsed.lookupSemanticScopeRuntimePath as string;
+  const validatedLookupReviewedFamilyRecallRuntimePath = parsed.lookupReviewedFamilyRecallRuntimePath as string;
+  const validatedLookupScopeGraphRuntimePath = parsed.lookupScopeGraphRuntimePath as string;
   const validatedLookupAmbiguityRuntimePath = parsed.lookupAmbiguityRuntimePath as string;
   const validatedLookupConceptRedirectRuntimePath = parsed.lookupConceptRedirectRuntimePath as string;
   const validatedQuality = quality as RuntimeStateQuality;
@@ -652,6 +682,9 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
     lookupExactSafeRuntimePath: validatedLookupExactSafeRuntimePath,
     lookupResolverProjectionPath: validatedLookupResolverProjectionPath,
     lookupEntityProjectionPath: validatedLookupEntityProjectionPath,
+    lookupSemanticScopeRuntimePath: validatedLookupSemanticScopeRuntimePath,
+    lookupReviewedFamilyRecallRuntimePath: validatedLookupReviewedFamilyRecallRuntimePath,
+    lookupScopeGraphRuntimePath: validatedLookupScopeGraphRuntimePath,
     lookupAmbiguityRuntimePath: validatedLookupAmbiguityRuntimePath,
     lookupConceptRedirectRuntimePath: validatedLookupConceptRedirectRuntimePath,
     quality: normalizedQuality,
@@ -666,6 +699,9 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
       lookupExactSafeRuntimeEntries: validatedCounts.lookupExactSafeRuntimeEntries,
       lookupResolverProjectionDocuments: validatedCounts.lookupResolverProjectionDocuments,
       lookupEntityProjectionDocuments: validatedCounts.lookupEntityProjectionDocuments,
+      lookupSemanticScopeRuntimeEntries: validatedCounts.lookupSemanticScopeRuntimeEntries,
+      lookupReviewedFamilyRecallRuntimeEntries: validatedCounts.lookupReviewedFamilyRecallRuntimeEntries,
+      lookupScopeGraphRuntimeEdges: validatedCounts.lookupScopeGraphRuntimeEdges,
       lookupAmbiguityRuntimeEntries: validatedCounts.lookupAmbiguityRuntimeEntries,
       lookupConceptRedirectRuntimeEntries: validatedCounts.lookupConceptRedirectRuntimeEntries,
       ambiguityRegistry: validatedCounts.ambiguityRegistry,
@@ -682,6 +718,9 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
       lookupExactSafeRuntime: validatedHashes.lookupExactSafeRuntime,
       lookupResolverProjection: validatedHashes.lookupResolverProjection,
       lookupEntityProjection: validatedHashes.lookupEntityProjection,
+      lookupSemanticScopeRuntime: validatedHashes.lookupSemanticScopeRuntime,
+      lookupReviewedFamilyRecallRuntime: validatedHashes.lookupReviewedFamilyRecallRuntime,
+      lookupScopeGraphRuntime: validatedHashes.lookupScopeGraphRuntime,
       lookupAmbiguityRuntime: validatedHashes.lookupAmbiguityRuntime,
       lookupConceptRedirectRuntime: validatedHashes.lookupConceptRedirectRuntime,
       ambiguityRegistry: validatedHashes.ambiguityRegistry,

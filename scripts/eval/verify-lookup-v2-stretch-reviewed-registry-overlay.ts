@@ -9,24 +9,42 @@ import { applyLookupV2PolicyFamilyDecisionRegistry } from './apply-lookup-v2-pol
 import { refreshLookupV2StretchWritePlaneArtifacts, type LookupV2StretchWritePlaneRefreshSummary } from './refresh-lookup-v2-stretch-write-plane.js';
 import { loadLookupV2BenchmarkGoldHintMapSync } from './lookup-v2-benchmark-gold-map.js';
 import {
-  buildLookupV2FamilyTargetApprovedMap,
-  DEFAULT_LOOKUP_V2_FAMILY_TARGET_REGISTRY_PATH,
-  loadLookupV2FamilyTargetRegistrySync,
-  type LookupV2FamilyTargetRegistryRow,
-} from './lookup-v2-family-target-registry.js';
+  buildLookupV2SemanticScopeTargetApprovedMap,
+  buildLookupV2SemanticScopeTargetRejectedMap,
+  DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_TARGET_REGISTRY_PATH,
+  loadLookupV2SemanticScopeTargetRegistrySync,
+  type LookupV2SemanticScopeTargetRegistryRow,
+} from './lookup-v2-semantic-scope-target-registry.js';
 import { loadLookupPolicyConflictBenchmarkHintOwnerMapSync } from './lookup-v2-policy-conflict-registry.js';
 import type { LookupPolicyConflictRegistryRow } from './lookup-v2-policy-conflict-registry.js';
 import {
-  buildLookupV2PolicyFamilyDecisionMap,
-  DEFAULT_LOOKUP_V2_POLICY_FAMILY_DECISION_REGISTRY_PATH,
-  loadLookupV2PolicyFamilyDecisionRegistrySync,
-  type LookupV2PolicyFamilyDecisionRegistryRow,
-} from './lookup-v2-policy-family-decision-registry.js';
+  buildLookupV2SemanticPolicyRegistryMap,
+  DEFAULT_LOOKUP_V2_SEMANTIC_POLICY_REGISTRY_PATH,
+  loadLookupV2SemanticPolicyRegistrySync,
+  type LookupV2SemanticPolicyRegistryRow,
+} from './lookup-v2-semantic-policy-registry.js';
+import {
+  buildLookupV2FamilySupportRegistryMap,
+  DEFAULT_LOOKUP_V2_FAMILY_SUPPORT_REGISTRY_PATH,
+  loadLookupV2FamilySupportRegistrySync,
+  type LookupV2FamilySupportRegistryRow,
+} from './lookup-v2-family-support-registry.js';
+import {
+  buildLookupV2FamilyCollisionRegistryMap,
+  DEFAULT_LOOKUP_V2_FAMILY_COLLISION_REGISTRY_PATH,
+  loadLookupV2FamilyCollisionRegistrySync,
+  type LookupV2FamilyCollisionRegistryRow,
+} from './lookup-v2-family-collision-registry.js';
 import type { LookupExactSafeRegistryRow } from '../etl/lookup-exact-safe-registry.js';
 import {
   DEFAULT_LOOKUP_EXACT_SAFE_REGISTRY_PATH,
   loadLookupExactSafeRegistry,
 } from '../etl/lookup-exact-safe-registry.js';
+import type { LookupV2ExactSafeScopeRegistryRow } from './lookup-v2-exact-safe-scope-registry.js';
+import {
+  DEFAULT_LOOKUP_V2_EXACT_SAFE_SCOPE_REGISTRY_PATH,
+  loadLookupV2ExactSafeScopeRegistryMapSync,
+} from './lookup-v2-exact-safe-scope-registry.js';
 import type { LookupV2RuntimeSurfaceOwnerEvidence } from './lookup-v2-runtime-surface-owner-evidence.js';
 import { loadLookupV2RuntimeSurfaceOwnerEvidenceSync } from './lookup-v2-runtime-surface-owner-evidence.js';
 import { loadLookupV2RuntimeKnownEntityIdsSync } from './lookup-v2-runtime-known-entity-ids.js';
@@ -38,8 +56,10 @@ interface LookupV2StretchCoverageArtifact {
 
 interface LookupV2StretchReviewedRegistryOverlayInvariants {
   readonly autoTargetableNonDecreasing: boolean;
-  readonly policyReviewNonIncreasing: boolean;
-  readonly manualTargetNonIncreasing: boolean;
+  readonly catalogAbsentNonDecreasing: boolean;
+  readonly reviewedScopeCollisionDirectionRespected: boolean;
+  readonly scopePolicyReviewNonIncreasing: boolean;
+  readonly scopeTargetReviewNonIncreasing: boolean;
   readonly exactSafePacketNonDecreasing: boolean;
   readonly reviewedAuthorityApprovedNonDecreasing: boolean;
   readonly policyPacketNonIncreasing: boolean;
@@ -56,12 +76,14 @@ export interface LookupV2StretchReviewedRegistryOverlaySummary {
   readonly overlayOutputDir: string;
   readonly baseline: LookupV2StretchWritePlaneRefreshSummary;
   readonly overlay: LookupV2StretchWritePlaneRefreshSummary;
-  readonly familyTargetRegistryApply: ReturnType<typeof applyLookupV2FamilyTargetRegistry>;
-  readonly policyFamilyDecisionRegistryApply: ReturnType<typeof applyLookupV2PolicyFamilyDecisionRegistry>;
+  readonly semanticScopeTargetRegistryApply: ReturnType<typeof applyLookupV2FamilyTargetRegistry>;
+  readonly semanticPolicyRegistryApply: ReturnType<typeof applyLookupV2PolicyFamilyDecisionRegistry>;
   readonly deltas: {
     readonly draftAutoTargetable: number;
-    readonly draftPolicyReview: number;
-    readonly draftManualTarget: number;
+    readonly draftCatalogAbsent: number;
+    readonly draftReviewedScopeCollision: number;
+    readonly draftScopePolicyReview: number;
+    readonly draftScopeTargetReview: number;
     readonly exactSafePacketRows: number;
     readonly reviewedAuthorityApprovedRows: number;
     readonly policyReviewRows: number;
@@ -143,11 +165,16 @@ export async function verifyLookupV2StretchReviewedRegistryOverlay(args: {
   readonly familyReviewRows?: readonly LookupV2ManualTargetFamilyReviewPacketRow[];
   readonly policyFamilyReviewRows?: readonly LookupV2PolicyFamilyReviewPacketRow[];
   readonly benchmarkGoldHintMap?: ReadonlyMap<string, string>;
-  readonly baselineFamilyTargetRegistryRows?: readonly LookupV2FamilyTargetRegistryRow[];
-  readonly baselinePolicyFamilyDecisionRegistryRows?: readonly LookupV2PolicyFamilyDecisionRegistryRow[];
-  readonly existingFamilyTargetRegistryRows?: readonly LookupV2FamilyTargetRegistryRow[];
-  readonly existingPolicyFamilyDecisionRegistryRows?: readonly LookupV2PolicyFamilyDecisionRegistryRow[];
+  readonly baselineFamilyTargetRegistryRows?: readonly LookupV2SemanticScopeTargetRegistryRow[];
+  readonly baselinePolicyFamilyDecisionRegistryRows?: readonly LookupV2SemanticPolicyRegistryRow[];
+  readonly baselineFamilySupportRegistryRows?: readonly LookupV2FamilySupportRegistryRow[];
+  readonly baselineFamilyCollisionRegistryRows?: readonly LookupV2FamilyCollisionRegistryRow[];
+  readonly existingFamilyTargetRegistryRows?: readonly LookupV2SemanticScopeTargetRegistryRow[];
+  readonly existingPolicyFamilyDecisionRegistryRows?: readonly LookupV2SemanticPolicyRegistryRow[];
+  readonly existingFamilySupportRegistryRows?: readonly LookupV2FamilySupportRegistryRow[];
+  readonly existingFamilyCollisionRegistryRows?: readonly LookupV2FamilyCollisionRegistryRow[];
   readonly exactSafeRegistryRows?: readonly LookupExactSafeRegistryRow[];
+  readonly exactSafeScopeRegistryMap?: ReadonlyMap<string, LookupV2ExactSafeScopeRegistryRow>;
   readonly runtimeOwnerEvidence?: LookupV2RuntimeSurfaceOwnerEvidence;
   readonly knownEntityIds?: ReadonlySet<string>;
   readonly policyConflictOwners?: ReadonlyMap<string, LookupPolicyConflictRegistryRow>;
@@ -156,9 +183,16 @@ export async function verifyLookupV2StretchReviewedRegistryOverlay(args: {
   const baselineFamilyTargetRegistryRows = args.baselineFamilyTargetRegistryRows ?? args.existingFamilyTargetRegistryRows ?? [];
   const baselinePolicyFamilyDecisionRegistryRows =
     args.baselinePolicyFamilyDecisionRegistryRows ?? args.existingPolicyFamilyDecisionRegistryRows ?? [];
+  const baselineFamilySupportRegistryRows =
+    args.baselineFamilySupportRegistryRows ?? args.existingFamilySupportRegistryRows ?? [];
+  const baselineFamilyCollisionRegistryRows =
+    args.baselineFamilyCollisionRegistryRows ?? args.existingFamilyCollisionRegistryRows ?? [];
   const existingFamilyTargetRegistryRows = args.existingFamilyTargetRegistryRows ?? [];
   const existingPolicyFamilyDecisionRegistryRows = args.existingPolicyFamilyDecisionRegistryRows ?? [];
+  const existingFamilySupportRegistryRows = args.existingFamilySupportRegistryRows ?? [];
+  const existingFamilyCollisionRegistryRows = args.existingFamilyCollisionRegistryRows ?? [];
   const exactSafeRegistryRows = args.exactSafeRegistryRows ?? [];
+  const exactSafeScopeRegistryMap = args.exactSafeScopeRegistryMap ?? new Map();
   const runtimeOwnerEvidence = args.runtimeOwnerEvidence ?? loadLookupV2RuntimeSurfaceOwnerEvidenceSync();
   const knownEntityIds = args.knownEntityIds ?? loadLookupV2RuntimeKnownEntityIdsSync();
   const policyConflictOwners = args.policyConflictOwners ?? loadLookupPolicyConflictBenchmarkHintOwnerMapSync();
@@ -174,10 +208,14 @@ export async function verifyLookupV2StretchReviewedRegistryOverlay(args: {
     generatedAt: args.generatedAt,
     outputDir: baselineOutputDir,
     benchmarkGoldHintMap,
-    familyTargetApprovedMap: buildLookupV2FamilyTargetApprovedMap(baselineFamilyTargetRegistryRows),
+    familyTargetApprovedMap: buildLookupV2SemanticScopeTargetApprovedMap(baselineFamilyTargetRegistryRows),
+    familyTargetRejectedMap: buildLookupV2SemanticScopeTargetRejectedMap(baselineFamilyTargetRegistryRows),
     policyConflictOwners,
-    policyFamilyDecisionMap: buildLookupV2PolicyFamilyDecisionMap(baselinePolicyFamilyDecisionRegistryRows),
+    policyFamilyDecisionMap: buildLookupV2SemanticPolicyRegistryMap(baselinePolicyFamilyDecisionRegistryRows),
+    familySupportRegistryMap: buildLookupV2FamilySupportRegistryMap(baselineFamilySupportRegistryRows),
+    familyCollisionRegistryMap: buildLookupV2FamilyCollisionRegistryMap(baselineFamilyCollisionRegistryRows),
     exactSafeRegistryRows,
+    exactSafeScopeRegistryMap,
     runtimeOwnerEvidence,
   });
 
@@ -204,19 +242,30 @@ export async function verifyLookupV2StretchReviewedRegistryOverlay(args: {
     generatedAt: args.generatedAt,
     outputDir: overlayOutputDir,
     benchmarkGoldHintMap,
-    familyTargetApprovedMap: buildLookupV2FamilyTargetApprovedMap(familyTargetRegistryApply.mergedRows),
+    familyTargetApprovedMap: buildLookupV2SemanticScopeTargetApprovedMap(familyTargetRegistryApply.mergedRows),
+    familyTargetRejectedMap: buildLookupV2SemanticScopeTargetRejectedMap(familyTargetRegistryApply.mergedRows),
     policyConflictOwners,
-    policyFamilyDecisionMap: buildLookupV2PolicyFamilyDecisionMap(policyFamilyDecisionRegistryApply.mergedRows),
+    policyFamilyDecisionMap: buildLookupV2SemanticPolicyRegistryMap(policyFamilyDecisionRegistryApply.mergedRows),
+    familySupportRegistryMap: buildLookupV2FamilySupportRegistryMap(existingFamilySupportRegistryRows),
+    familyCollisionRegistryMap: buildLookupV2FamilyCollisionRegistryMap(existingFamilyCollisionRegistryRows),
     exactSafeRegistryRows,
+    exactSafeScopeRegistryMap,
     runtimeOwnerEvidence,
   });
 
+  const hasReviewedCollisionFamilyReview =
+    (args.familyReviewRows ?? []).some((row) => row.reviewTarget === 'lookup_reviewed_collision_resolution_v1');
   const invariants: LookupV2StretchReviewedRegistryOverlayInvariants = {
     autoTargetableNonDecreasing: overlay.draft.autoTargetable >= baseline.draft.autoTargetable,
-    policyReviewNonIncreasing: overlay.draft.policyReview <= baseline.draft.policyReview,
-    manualTargetNonIncreasing: overlay.draft.manualTarget <= baseline.draft.manualTarget,
+    catalogAbsentNonDecreasing: overlay.draft.catalogAbsent >= baseline.draft.catalogAbsent,
+    reviewedScopeCollisionDirectionRespected: hasReviewedCollisionFamilyReview
+      ? overlay.draft.reviewedScopeCollision <= baseline.draft.reviewedScopeCollision
+      : overlay.draft.reviewedScopeCollision >= baseline.draft.reviewedScopeCollision,
+    scopePolicyReviewNonIncreasing: overlay.draft.scopePolicyReview <= baseline.draft.scopePolicyReview,
+    scopeTargetReviewNonIncreasing: overlay.draft.scopeTargetReview <= baseline.draft.scopeTargetReview,
     exactSafePacketNonDecreasing: overlay.exactSafe.packetRows >= baseline.exactSafe.packetRows,
-    reviewedAuthorityApprovedNonDecreasing: overlay.exactSafe.approvedRows >= baseline.exactSafe.approvedRows,
+    reviewedAuthorityApprovedNonDecreasing:
+      overlay.exactSafe.reviewedAuthorityApprovedRows >= baseline.exactSafe.reviewedAuthorityApprovedRows,
     policyPacketNonIncreasing: overlay.policy.reviewRows <= baseline.policy.reviewRows,
     policyFamilyPacketNonIncreasing: overlay.policy.familyReviewRows <= baseline.policy.familyReviewRows,
     manualTargetFamilyPacketNonIncreasing: overlay.manualTarget.familyReviewRows <= baseline.manualTarget.familyReviewRows,
@@ -232,14 +281,17 @@ export async function verifyLookupV2StretchReviewedRegistryOverlay(args: {
     overlayOutputDir,
     baseline,
     overlay,
-    familyTargetRegistryApply,
-    policyFamilyDecisionRegistryApply,
+    semanticScopeTargetRegistryApply: familyTargetRegistryApply,
+    semanticPolicyRegistryApply: policyFamilyDecisionRegistryApply,
     deltas: {
       draftAutoTargetable: overlay.draft.autoTargetable - baseline.draft.autoTargetable,
-      draftPolicyReview: overlay.draft.policyReview - baseline.draft.policyReview,
-      draftManualTarget: overlay.draft.manualTarget - baseline.draft.manualTarget,
+      draftCatalogAbsent: overlay.draft.catalogAbsent - baseline.draft.catalogAbsent,
+      draftReviewedScopeCollision: overlay.draft.reviewedScopeCollision - baseline.draft.reviewedScopeCollision,
+      draftScopePolicyReview: overlay.draft.scopePolicyReview - baseline.draft.scopePolicyReview,
+      draftScopeTargetReview: overlay.draft.scopeTargetReview - baseline.draft.scopeTargetReview,
       exactSafePacketRows: overlay.exactSafe.packetRows - baseline.exactSafe.packetRows,
-      reviewedAuthorityApprovedRows: overlay.exactSafe.approvedRows - baseline.exactSafe.approvedRows,
+      reviewedAuthorityApprovedRows:
+        overlay.exactSafe.reviewedAuthorityApprovedRows - baseline.exactSafe.reviewedAuthorityApprovedRows,
       policyReviewRows: overlay.policy.reviewRows - baseline.policy.reviewRows,
       policyFamilyReviewRows: overlay.policy.familyReviewRows - baseline.policy.familyReviewRows,
       manualTargetFamilyReviewRows: overlay.manualTarget.familyReviewRows - baseline.manualTarget.familyReviewRows,
@@ -260,9 +312,14 @@ async function main(): Promise<void> {
       policyFamilyReview: { type: 'string' },
       baselineFamilyRegistry: { type: 'string' },
       baselinePolicyRegistry: { type: 'string' },
-      familyRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_FAMILY_TARGET_REGISTRY_PATH },
-      policyRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_POLICY_FAMILY_DECISION_REGISTRY_PATH },
+      familyRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_TARGET_REGISTRY_PATH },
+      policyRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_SEMANTIC_POLICY_REGISTRY_PATH },
+      baselineFamilySupportRegistry: { type: 'string' },
+      familySupportRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_FAMILY_SUPPORT_REGISTRY_PATH },
+      baselineFamilyCollisionRegistry: { type: 'string' },
+      familyCollisionRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_FAMILY_COLLISION_REGISTRY_PATH },
       exactSafeRegistry: { type: 'string', default: DEFAULT_LOOKUP_EXACT_SAFE_REGISTRY_PATH },
+      exactSafeScopeRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_EXACT_SAFE_SCOPE_REGISTRY_PATH },
       workDir: { type: 'string', default: '/tmp/lookup-v2-stretch-reviewed-registry-overlay' },
       baselineOutputDir: { type: 'string' },
       overlayOutputDir: { type: 'string' },
@@ -275,9 +332,14 @@ async function main(): Promise<void> {
   const policyFamilyReviewPath = values.policyFamilyReview;
   const baselineFamilyRegistryPath = values.baselineFamilyRegistry;
   const baselinePolicyRegistryPath = values.baselinePolicyRegistry;
-  const familyRegistryPath = values.familyRegistry ?? DEFAULT_LOOKUP_V2_FAMILY_TARGET_REGISTRY_PATH;
-  const policyRegistryPath = values.policyRegistry ?? DEFAULT_LOOKUP_V2_POLICY_FAMILY_DECISION_REGISTRY_PATH;
+  const baselineFamilySupportRegistryPath = values.baselineFamilySupportRegistry;
+  const baselineFamilyCollisionRegistryPath = values.baselineFamilyCollisionRegistry;
+  const familyRegistryPath = values.familyRegistry ?? DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_TARGET_REGISTRY_PATH;
+  const policyRegistryPath = values.policyRegistry ?? DEFAULT_LOOKUP_V2_SEMANTIC_POLICY_REGISTRY_PATH;
+  const familySupportRegistryPath = values.familySupportRegistry ?? DEFAULT_LOOKUP_V2_FAMILY_SUPPORT_REGISTRY_PATH;
+  const familyCollisionRegistryPath = values.familyCollisionRegistry ?? DEFAULT_LOOKUP_V2_FAMILY_COLLISION_REGISTRY_PATH;
   const exactSafeRegistryPath = values.exactSafeRegistry ?? DEFAULT_LOOKUP_EXACT_SAFE_REGISTRY_PATH;
+  const exactSafeScopeRegistryPath = values.exactSafeScopeRegistry ?? DEFAULT_LOOKUP_V2_EXACT_SAFE_SCOPE_REGISTRY_PATH;
   const workDir = values.workDir ?? '/tmp/lookup-v2-stretch-reviewed-registry-overlay';
   const baselineOutputDir = values.baselineOutputDir;
   const overlayOutputDir = values.overlayOutputDir;
@@ -298,26 +360,41 @@ async function main(): Promise<void> {
     familyReviewRows,
     policyFamilyReviewRows,
     benchmarkGoldHintMap: loadLookupV2BenchmarkGoldHintMapSync(),
-    baselineFamilyTargetRegistryRows: loadLookupV2FamilyTargetRegistrySync(
+    baselineFamilyTargetRegistryRows: loadLookupV2SemanticScopeTargetRegistrySync(
       baselineFamilyRegistryPath ?? familyRegistryPath,
     ),
-    baselinePolicyFamilyDecisionRegistryRows: loadLookupV2PolicyFamilyDecisionRegistrySync(
+    baselinePolicyFamilyDecisionRegistryRows: loadLookupV2SemanticPolicyRegistrySync(
       baselinePolicyRegistryPath ?? policyRegistryPath,
     ),
-    existingFamilyTargetRegistryRows: loadLookupV2FamilyTargetRegistrySync(familyRegistryPath),
-    existingPolicyFamilyDecisionRegistryRows: loadLookupV2PolicyFamilyDecisionRegistrySync(policyRegistryPath),
+    baselineFamilySupportRegistryRows: loadLookupV2FamilySupportRegistrySync(
+      baselineFamilySupportRegistryPath ?? familySupportRegistryPath,
+    ),
+    baselineFamilyCollisionRegistryRows: loadLookupV2FamilyCollisionRegistrySync(
+      baselineFamilyCollisionRegistryPath ?? familyCollisionRegistryPath,
+    ),
+    existingFamilyTargetRegistryRows: loadLookupV2SemanticScopeTargetRegistrySync(familyRegistryPath),
+    existingPolicyFamilyDecisionRegistryRows: loadLookupV2SemanticPolicyRegistrySync(policyRegistryPath),
+    existingFamilySupportRegistryRows: loadLookupV2FamilySupportRegistrySync(familySupportRegistryPath),
+    existingFamilyCollisionRegistryRows: loadLookupV2FamilyCollisionRegistrySync(familyCollisionRegistryPath),
     exactSafeRegistryRows: await loadLookupExactSafeRegistry(exactSafeRegistryPath),
+    exactSafeScopeRegistryMap: loadLookupV2ExactSafeScopeRegistryMapSync(exactSafeScopeRegistryPath),
     runtimeOwnerEvidence: loadLookupV2RuntimeSurfaceOwnerEvidenceSync(),
   });
 
   console.log(`[elv2-reviewed-registry-overlay-verify] baseline_auto_targetable=${summary.baseline.draft.autoTargetable}`);
   console.log(`[elv2-reviewed-registry-overlay-verify] overlay_auto_targetable=${summary.overlay.draft.autoTargetable}`);
-  console.log(`[elv2-reviewed-registry-overlay-verify] baseline_policy_review=${summary.baseline.draft.policyReview}`);
-  console.log(`[elv2-reviewed-registry-overlay-verify] overlay_policy_review=${summary.overlay.draft.policyReview}`);
-  console.log(`[elv2-reviewed-registry-overlay-verify] baseline_manual_target=${summary.baseline.draft.manualTarget}`);
-  console.log(`[elv2-reviewed-registry-overlay-verify] overlay_manual_target=${summary.overlay.draft.manualTarget}`);
-  console.log(`[elv2-reviewed-registry-overlay-verify] family_registry_inserted=${summary.familyTargetRegistryApply.registryInsertedRows}`);
-  console.log(`[elv2-reviewed-registry-overlay-verify] policy_registry_inserted=${summary.policyFamilyDecisionRegistryApply.registryInsertedRows}`);
+  console.log(`[elv2-reviewed-registry-overlay-verify] baseline_localized_surface_review=${summary.baseline.draft.localizedSurfaceReview}`);
+  console.log(`[elv2-reviewed-registry-overlay-verify] overlay_localized_surface_review=${summary.overlay.draft.localizedSurfaceReview}`);
+  console.log(`[elv2-reviewed-registry-overlay-verify] baseline_catalog_support_review=${summary.baseline.draft.catalogSupportReview}`);
+  console.log(`[elv2-reviewed-registry-overlay-verify] overlay_catalog_support_review=${summary.overlay.draft.catalogSupportReview}`);
+  console.log(`[elv2-reviewed-registry-overlay-verify] baseline_reviewed_collision=${summary.baseline.draft.reviewedCollision}`);
+  console.log(`[elv2-reviewed-registry-overlay-verify] overlay_reviewed_collision=${summary.overlay.draft.reviewedCollision}`);
+  console.log(`[elv2-reviewed-registry-overlay-verify] baseline_scope_policy_review=${summary.baseline.draft.scopePolicyReview}`);
+  console.log(`[elv2-reviewed-registry-overlay-verify] overlay_scope_policy_review=${summary.overlay.draft.scopePolicyReview}`);
+  console.log(`[elv2-reviewed-registry-overlay-verify] baseline_scope_target_review=${summary.baseline.draft.scopeTargetReview}`);
+  console.log(`[elv2-reviewed-registry-overlay-verify] overlay_scope_target_review=${summary.overlay.draft.scopeTargetReview}`);
+  console.log(`[elv2-reviewed-registry-overlay-verify] semantic_scope_registry_inserted=${summary.semanticScopeTargetRegistryApply.registryInsertedRows}`);
+  console.log(`[elv2-reviewed-registry-overlay-verify] semantic_policy_registry_inserted=${summary.semanticPolicyRegistryApply.registryInsertedRows}`);
   console.log(`[elv2-reviewed-registry-overlay-verify] output=${summary.outputSummaryPath}`);
 }
 

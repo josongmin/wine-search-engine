@@ -10,8 +10,11 @@ import type { LookupV2ManualTargetFamilyReviewDecisionRow } from './review-looku
 import type { LookupV2ManualTargetFamilyReviewPacketRow } from './export-lookup-v2-manual-target-family-review-packet.js';
 
 export interface LookupV2ManualTargetFamilySuggestionRow {
+  readonly reviewScopeKey: string;
   readonly benchmarkGoldHint: string;
   readonly normalizedBenchmarkGoldHint: string;
+  readonly scopeHoleClass: LookupV2ManualTargetFamilyReviewPacketRow['scopeHoleClass'];
+  readonly scopeSuggestedAliasType: LookupV2ManualTargetFamilyReviewPacketRow['scopeSuggestedAliasType'];
   readonly scopeRisk: LookupV2ManualTargetFamilyReviewPacketRow['scopeRisk'];
   readonly suggestionStatus: 'candidate_unique_owner' | 'collision_candidates' | 'missing_runtime_owner';
   readonly recommendedEntityId?: string | undefined;
@@ -56,8 +59,11 @@ export function buildLookupV2ManualTargetFamilySuggestions(
     if (uniqueOwner !== undefined) {
       const uniqueOwnerWitnesses = evidence.uniqueOwnerWitnesses.get(normalizedHint);
       return {
+        reviewScopeKey: row.reviewScopeKey,
         benchmarkGoldHint: row.benchmarkGoldHint,
         normalizedBenchmarkGoldHint: row.normalizedBenchmarkGoldHint,
+        scopeHoleClass: row.scopeHoleClass,
+        scopeSuggestedAliasType: row.scopeSuggestedAliasType,
         scopeRisk: row.scopeRisk,
         suggestionStatus: 'candidate_unique_owner',
         recommendedEntityId: uniqueOwner,
@@ -74,8 +80,11 @@ export function buildLookupV2ManualTargetFamilySuggestions(
     const collidingOwnerWitnesses = evidence.collidingOwnerWitnesses.get(normalizedHint);
     if (collidingOwners !== undefined) {
       return {
+        reviewScopeKey: row.reviewScopeKey,
         benchmarkGoldHint: row.benchmarkGoldHint,
         normalizedBenchmarkGoldHint: row.normalizedBenchmarkGoldHint,
+        scopeHoleClass: row.scopeHoleClass,
+        scopeSuggestedAliasType: row.scopeSuggestedAliasType,
         scopeRisk: row.scopeRisk,
         suggestionStatus: 'collision_candidates',
         candidateEntityIds: collidingOwners,
@@ -87,13 +96,16 @@ export function buildLookupV2ManualTargetFamilySuggestions(
       };
     }
     return {
+      reviewScopeKey: row.reviewScopeKey,
       benchmarkGoldHint: row.benchmarkGoldHint,
       normalizedBenchmarkGoldHint: row.normalizedBenchmarkGoldHint,
+      scopeHoleClass: row.scopeHoleClass,
+      scopeSuggestedAliasType: row.scopeSuggestedAliasType,
       scopeRisk: row.scopeRisk,
       suggestionStatus: 'missing_runtime_owner',
       sourceEvidence: 'runtime_owner_missing',
     };
-  }).sort((l, r) => l.normalizedBenchmarkGoldHint.localeCompare(r.normalizedBenchmarkGoldHint));
+  }).sort((l, r) => l.reviewScopeKey.localeCompare(r.reviewScopeKey));
 }
 
 export function buildLookupV2ManualTargetSuggestedDecisionRows(

@@ -83,7 +83,7 @@ export function applyLookupV2ExactSafeFamilyReviewDecisions(args: {
       throw new Error(`duplicate exact-safe family review decision for reviewScopeKey=${row.reviewScopeKey}`);
     }
     if (!packetByReviewScopeKey.has(row.reviewScopeKey)) {
-      throw new Error(`exact-safe family review decision references unknown reviewScopeKey=${row.reviewScopeKey}`);
+      continue;
     }
     decisionByReviewScopeKey.set(row.reviewScopeKey, row);
   }

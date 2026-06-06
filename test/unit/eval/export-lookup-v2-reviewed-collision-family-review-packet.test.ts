@@ -1,0 +1,112 @@
+import { describe, expect, it } from 'vitest';
+import { buildLookupV2ReviewedCollisionFamilyReviewPacketRows } from '../../../scripts/eval/export-lookup-v2-manual-target-family-review-packet.js';
+
+describe('buildLookupV2ReviewedCollisionFamilyReviewPacketRows', () => {
+  it('groups reviewed_collision rows into scope-level family target review packets', () => {
+    const rows = buildLookupV2ReviewedCollisionFamilyReviewPacketRows({
+      draftRows: [
+        {
+          surface: '실버 오크 17',
+          locale: 'ko',
+          suggestedAliasType: 'canonical',
+          holeClass: 'realworld_vintage_suffix',
+          observedStatus: 'failed',
+          benchmarkGoldHint: 'silver oak',
+          triageBucket: 'reviewed_collision',
+          collisionStatus: 'active_entity_collision',
+          sourceArtifact: '/tmp/a.json',
+          sourceEvidence: 'coverage hole A',
+          reviewedAt: '2026-06-07T00:00:00.000Z',
+        },
+        {
+          surface: '실버 오크 09',
+          locale: 'ko',
+          suggestedAliasType: 'canonical',
+          holeClass: 'realworld_vintage_suffix',
+          observedStatus: 'failed',
+          benchmarkGoldHint: 'Silver Oak',
+          triageBucket: 'reviewed_collision',
+          collisionStatus: 'active_entity_collision',
+          sourceArtifact: '/tmp/b.json',
+          sourceEvidence: 'coverage hole B',
+          reviewedAt: '2026-06-07T01:00:00.000Z',
+        },
+      ],
+      runtimeOwnerEvidence: {
+        uniqueOwners: new Map(),
+        collidingOwners: new Map([['silver oak', ['wine-ce-silver-oak-av', 'wine-ce-silver-oak-napa']]]),
+        entityLabels: new Map([
+          ['wine-ce-silver-oak-av', 'Silver Oak Alexander Valley Cabernet Sauvignon'],
+          ['wine-ce-silver-oak-napa', 'Silver Oak Napa Valley Cabernet Sauvignon'],
+        ]),
+        entityProducers: new Map([
+          ['wine-ce-silver-oak-av', 'Silver Oak'],
+          ['wine-ce-silver-oak-napa', 'Silver Oak'],
+        ]),
+        entityRegions: new Map([
+          ['wine-ce-silver-oak-av', 'United States'],
+          ['wine-ce-silver-oak-napa', 'United States'],
+        ]),
+        entityAppellations: new Map([
+          ['wine-ce-silver-oak-av', 'Alexander Valley'],
+          ['wine-ce-silver-oak-napa', 'Napa Valley'],
+        ]),
+        uniqueOwnerWitnesses: new Map(),
+        collidingOwnerWitnesses: new Map([
+          ['silver oak', [
+            {
+              entityId: 'wine-ce-silver-oak-av',
+              witnessSurface: 'Silver Oak',
+              witnessSource: 'producer',
+            },
+            {
+              entityId: 'wine-ce-silver-oak-napa',
+              witnessSurface: 'Silver Oak',
+              witnessSource: 'producer',
+            },
+          ]],
+        ]),
+      },
+    });
+
+    expect(rows).toEqual([
+      {
+        reviewScopeKey: 'silver oak::canonical::realworld_vintage_suffix',
+        benchmarkGoldHint: 'silver oak',
+        normalizedBenchmarkGoldHint: 'silver oak',
+        benchmarkGoldHintVariants: ['silver oak', 'Silver Oak'],
+        proposalStatus: 'needs_target_review',
+        reviewTarget: 'lookup_reviewed_collision_resolution_v1',
+        scopeHoleClass: 'realworld_vintage_suffix',
+        scopeSuggestedAliasType: 'canonical',
+        scopeRisk: 'mixed_vintage_family',
+        locales: ['ko'],
+        surfaces: ['실버 오크 09', '실버 오크 17'],
+        holeClasses: ['realworld_vintage_suffix'],
+        suggestedAliasTypes: ['canonical'],
+        rowCount: 2,
+        sourceArtifacts: ['/tmp/a.json', '/tmp/b.json'],
+        sourceEvidenceSamples: ['coverage hole A', 'coverage hole B'],
+        runtimeEvidenceStatus: 'collision_candidates',
+        runtimeCollisionEntityIds: ['wine-ce-silver-oak-av', 'wine-ce-silver-oak-napa'],
+        runtimeCollisionEntityLabels: [
+          'Silver Oak Alexander Valley Cabernet Sauvignon',
+          'Silver Oak Napa Valley Cabernet Sauvignon',
+        ],
+        runtimeCollisionWitnesses: [
+          {
+            entityId: 'wine-ce-silver-oak-av',
+            witnessSurface: 'Silver Oak',
+            witnessSource: 'producer',
+          },
+          {
+            entityId: 'wine-ce-silver-oak-napa',
+            witnessSurface: 'Silver Oak',
+            witnessSource: 'producer',
+          },
+        ],
+        proposedAt: '2026-06-07T01:00:00.000Z',
+      },
+    ]);
+  });
+});

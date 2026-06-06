@@ -43,11 +43,17 @@ import {
   type CoverageStatus,
 } from '../../src/domain/resolver/v2/coverage-report.js';
 import { buildCurationTasks } from '../../src/domain/alias/curation/coverage-curation-task.js';
+import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
 import {
   filterLookupV2StretchRows,
   isLookupV2StretchPartition,
   type LookupV2StretchPartition,
 } from './lookup-v2-stretch-partitions.js';
+import { loadLookupV2FamilySupportRegistryMapSync } from './lookup-v2-family-support-registry.js';
+import {
+  buildLookupV2LocalizedSurfaceRegistryKey,
+  loadLookupV2LocalizedSurfaceRegistryMapSync,
+} from './lookup-v2-localized-surface-registry.js';
 
 const COVERAGE_STATUSES: ReadonlySet<string> = new Set<CoverageStatus>([
   'resolved',
@@ -64,6 +70,10 @@ interface HotsetRow {
   readonly expectedEntityHint?: string | undefined;
   readonly expectedEntityId?: string | undefined;
   readonly class: string;
+}
+
+function inferDraftLocale(surface: string): 'ko' | 'global' {
+  return /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/u.test(surface) ? 'ko' : 'global';
 }
 
 function parseHotset(corpusPath: string): readonly HotsetRow[] {
@@ -126,6 +136,8 @@ async function main(): Promise<void> {
 
   const config = loadConfig();
   const pool = getPgPool();
+  const familySupportRegistryMap = loadLookupV2FamilySupportRegistryMapSync();
+  const localizedSurfaceRegistryMap = loadLookupV2LocalizedSurfaceRegistryMapSync();
   const effectiveRuntimeStatePath = runtimeStatePath ?? DEFAULT_RUNTIME_STATE_PATH;
   const runtimeState = await loadSearchSnapshotRuntimeState(effectiveRuntimeStatePath);
   const container = await createLookupDirectContainer(config, {
@@ -138,15 +150,27 @@ async function main(): Promise<void> {
   const inputRows: CoverageInputRow[] = [];
   for (const row of hotset) {
     let observedStatus: CoverageStatus = 'failed';
+    let observedReasonCode: string | undefined;
     try {
       const result = await container.entityLookupV2UseCase.execute(
         { query: row.query, maxCandidates: LOOKUP_V2_DEFAULT_MAX_CANDIDATES, mode: 'default', requestId: `elv2-coverage-${row.qid}` },
         {},
       );
       observedStatus = result.status;
+      observedReasonCode = result.evidenceSummary.decisionReasonCode;
     } catch (err) {
       console.error(`[elv2-coverage] V2 failed for ${row.qid}:`, (err as Error).message);
     }
+    const locale = inferDraftLocale(row.query);
+    const localizedSurfaceReviewed = localizedSurfaceRegistryMap.has(
+      buildLookupV2LocalizedSurfaceRegistryKey({
+        normalizedLocalSurface: normalizeForMatch(row.query),
+        locale,
+      }),
+    );
+    const supportStatus = row.expectedEntityHint !== undefined
+      ? familySupportRegistryMap.get(normalizeForMatch(row.expectedEntityHint))?.supportStatus
+      : undefined;
     inputRows.push({
       qid: row.qid,
       query: row.query,
@@ -156,6 +180,9 @@ async function main(): Promise<void> {
       ...(row.expectedEntityId !== undefined ? { expectedEntityId: row.expectedEntityId } : {}),
       class: row.class,
       observedStatus,
+      ...(observedReasonCode !== undefined ? { observedReasonCode } : {}),
+      ...(supportStatus !== undefined ? { supportStatus } : {}),
+      ...(locale === 'ko' ? { localizedSurfaceReviewed } : {}),
     });
   }
 
@@ -168,6 +195,7 @@ async function main(): Promise<void> {
       observedStatus: hole.observedStatus,
       ...(hole.expectedEntityHint !== undefined ? { benchmarkGoldHint: hole.expectedEntityHint } : {}),
       ...(hole.expectedEntityId !== undefined ? { benchmarkGoldEntityId: hole.expectedEntityId } : {}),
+      operatorBucket: hole.operatorBucket,
     })),
   );
 

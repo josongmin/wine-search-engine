@@ -10,11 +10,23 @@ import type {
 import { loadLookupV2RuntimeSurfaceOwnerEvidenceSync } from './lookup-v2-runtime-surface-owner-evidence.js';
 
 export interface LookupV2ManualTargetFamilyReviewPacketRow {
+  readonly semanticScopeKey: string;
+  readonly scopeAxis: LookupV2CurationDraftRow['scopeAxis'];
+  readonly familyKey: string;
+  readonly lineKey?: string | undefined;
+  readonly regionKey?: string | undefined;
+  readonly appellationKey?: string | undefined;
+  readonly vintage?: number | undefined;
+  readonly surfaceFormKind: LookupV2CurationDraftRow['surfaceFormKind'];
+  readonly reviewScopeKey: string;
+  readonly legacyReviewScopeKeys: readonly string[];
   readonly benchmarkGoldHint: string;
   readonly normalizedBenchmarkGoldHint: string;
   readonly benchmarkGoldHintVariants: readonly string[];
   readonly proposalStatus: 'needs_target_review' | 'target_assigned' | 'rejected';
-  readonly reviewTarget: 'lookup_manual_target_resolution_v1';
+  readonly reviewTarget: 'lookup_manual_target_resolution_v1' | 'lookup_reviewed_collision_resolution_v1';
+  readonly scopeHoleClass: LookupV2CurationDraftRow['holeClass'];
+  readonly scopeSuggestedAliasType: LookupV2CurationDraftRow['suggestedAliasType'];
   readonly scopeRisk: 'family_only' | 'mixed_vintage_family';
   readonly locales: readonly LookupV2CurationDraftRow['locale'][];
   readonly surfaces: readonly string[];
@@ -67,53 +79,113 @@ function sortUnique(values: readonly string[]): readonly string[] {
   return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
 
-function inferScopeRisk(rows: readonly LookupV2CurationDraftRow[]): LookupV2ManualTargetFamilyReviewPacketRow['scopeRisk'] {
-  return rows.some((row) =>
-    row.holeClass === 'realworld_exact_vintage'
-    || row.holeClass === 'realworld_vintage_suffix',
-  )
+function normalizeBenchmarkHint(value: string): string {
+  return normalizeForMatch(value);
+}
+
+function buildLegacyReviewScopeKey(row: LookupV2CurationDraftRow): string {
+  if (row.benchmarkGoldHint === undefined || row.benchmarkGoldHint.trim().length === 0) {
+    throw new Error(`manual_target draft row is missing benchmarkGoldHint for surface=${JSON.stringify(row.surface)}`);
+  }
+  return `${normalizeBenchmarkHint(row.benchmarkGoldHint)}::${row.suggestedAliasType}::${row.holeClass}`;
+}
+
+function inferFamilyScopeRisk(rows: readonly LookupV2CurationDraftRow[]): LookupV2ManualTargetFamilyReviewPacketRow['scopeRisk'] {
+  return rows.some((row) => row.vintage !== undefined)
     ? 'mixed_vintage_family'
     : 'family_only';
 }
 
-export function buildLookupV2ManualTargetFamilyReviewPacketRows(args: {
+function sameOptionalString(left: string | undefined, right: string | undefined): boolean {
+  return (left ?? undefined) === (right ?? undefined);
+}
+
+function sameOptionalNumber(left: number | undefined, right: number | undefined): boolean {
+  return (left ?? undefined) === (right ?? undefined);
+}
+
+function buildLookupV2FamilyTargetReviewPacketRows(args: {
   readonly draftRows: readonly LookupV2CurationDraftRow[];
+  readonly triageBucket: LookupV2CurationDraftRow['triageBucket'];
+  readonly reviewTarget: LookupV2ManualTargetFamilyReviewPacketRow['reviewTarget'];
   readonly runtimeOwnerEvidence?: LookupV2RuntimeSurfaceOwnerEvidence;
 }): readonly LookupV2ManualTargetFamilyReviewPacketRow[] {
   const runtimeOwnerEvidence = args.runtimeOwnerEvidence ?? loadLookupV2RuntimeSurfaceOwnerEvidenceSync();
+  const familyRowsByHint = new Map<string, LookupV2CurationDraftRow[]>();
   const groups = new Map<string, LookupV2CurationDraftRow[]>();
-  const hintVariantsByNormalized = new Map<string, Set<string>>();
+  const hintVariantsByScope = new Map<string, Set<string>>();
 
   for (const row of args.draftRows) {
-    if (row.triageBucket !== 'manual_target') {
+    if (row.triageBucket !== args.triageBucket) {
       continue;
     }
     if (row.benchmarkGoldHint === undefined || row.benchmarkGoldHint.trim().length === 0) {
       throw new Error(`manual_target draft row is missing benchmarkGoldHint for surface=${JSON.stringify(row.surface)}`);
     }
-    const normalizedHint = normalizeForMatch(row.benchmarkGoldHint);
-    if (normalizedHint.length === 0) {
-      throw new Error(`manual_target benchmarkGoldHint normalizes to empty for surface=${JSON.stringify(row.surface)}`);
-    }
-    const hintVariants = hintVariantsByNormalized.get(normalizedHint) ?? new Set<string>();
+    const reviewScopeKey = row.semanticScopeKey;
+    const normalizedHint = normalizeBenchmarkHint(row.benchmarkGoldHint);
+    const hintVariants = hintVariantsByScope.get(reviewScopeKey) ?? new Set<string>();
     hintVariants.add(row.benchmarkGoldHint);
-    hintVariantsByNormalized.set(normalizedHint, hintVariants);
+    hintVariantsByScope.set(reviewScopeKey, hintVariants);
 
-    const existing = groups.get(normalizedHint);
+    const familyRows = familyRowsByHint.get(normalizedHint);
+    if (familyRows === undefined) {
+      familyRowsByHint.set(normalizedHint, [row]);
+    } else {
+      familyRows.push(row);
+    }
+
+    const existing = groups.get(reviewScopeKey);
     if (existing === undefined) {
-      groups.set(normalizedHint, [row]);
+      groups.set(reviewScopeKey, [row]);
       continue;
     }
     existing.push(row);
   }
 
   return [...groups.entries()]
-    .map(([normalizedBenchmarkGoldHint, rows]) => {
-      const benchmarkGoldHintVariants = sortUnique([...(hintVariantsByNormalized.get(normalizedBenchmarkGoldHint) ?? [])]);
+    .map(([reviewScopeKey, rows]) => {
+      const exemplar = rows[0]!;
+      const benchmarkGoldHintVariants = sortUnique([...(hintVariantsByScope.get(reviewScopeKey) ?? [])]);
       const benchmarkGoldHint = benchmarkGoldHintVariants[0];
+      const holeClasses = sortUnique(rows.map((row) => row.holeClass));
+      const suggestedAliasTypes = sortUnique(
+        rows.map((row) => row.suggestedAliasType),
+      ) as readonly LookupV2CurationDraftRow['suggestedAliasType'][];
+      const scopeHoleClass = holeClasses[0];
+      const scopeSuggestedAliasType = suggestedAliasTypes[0];
       if (benchmarkGoldHint === undefined) {
-        throw new Error(`manual_target family review packet missing hint variant for normalized hint=${normalizedBenchmarkGoldHint}`);
+        throw new Error(`manual_target family review packet missing hint variant for reviewScopeKey=${reviewScopeKey}`);
       }
+      const normalizedBenchmarkGoldHint = normalizeBenchmarkHint(benchmarkGoldHint);
+      const legacyReviewScopeKeys = sortUnique(rows.map((row) => buildLegacyReviewScopeKey(row)));
+      if (normalizedBenchmarkGoldHint.length === 0) {
+        throw new Error(`manual_target family review packet missing normalized hint for reviewScopeKey=${reviewScopeKey}`);
+      }
+      if (legacyReviewScopeKeys.length === 0) {
+        throw new Error(`manual_target family review packet missing legacy review scope keys for reviewScopeKey=${reviewScopeKey}`);
+      }
+      if (scopeHoleClass === undefined) {
+        throw new Error(`manual_target family review packet missing hole classes for reviewScopeKey=${reviewScopeKey}`);
+      }
+      if (scopeSuggestedAliasType === undefined) {
+        throw new Error(`manual_target family review packet missing suggested alias types for reviewScopeKey=${reviewScopeKey}`);
+      }
+      for (const row of rows) {
+        if (
+          row.scopeAxis !== exemplar.scopeAxis
+          || row.familyKey !== exemplar.familyKey
+          || !sameOptionalString(row.lineKey, exemplar.lineKey)
+          || !sameOptionalString(row.regionKey, exemplar.regionKey)
+          || !sameOptionalString(row.appellationKey, exemplar.appellationKey)
+          || !sameOptionalNumber(row.vintage, exemplar.vintage)
+          || row.surfaceFormKind !== exemplar.surfaceFormKind
+          || row.locale !== exemplar.locale
+        ) {
+          throw new Error(`manual_target family semantic scope mismatch for reviewScopeKey=${reviewScopeKey}`);
+        }
+      }
+      const familyScopeRisk = inferFamilyScopeRisk(familyRowsByHint.get(normalizedBenchmarkGoldHint) ?? rows);
       const uniqueOwner = runtimeOwnerEvidence.uniqueOwners.get(normalizedBenchmarkGoldHint);
       const collidingOwners = runtimeOwnerEvidence.collidingOwners.get(normalizedBenchmarkGoldHint);
       const uniqueOwnerWitnesses = runtimeOwnerEvidence.uniqueOwnerWitnesses.get(normalizedBenchmarkGoldHint);
@@ -123,16 +195,28 @@ export function buildLookupV2ManualTargetFamilyReviewPacketRows(args: {
         .sort((left, right) => left.localeCompare(right))
         .at(-1) ?? rows[0]!.reviewedAt;
       return {
+        semanticScopeKey: reviewScopeKey,
+        scopeAxis: exemplar.scopeAxis,
+        familyKey: exemplar.familyKey,
+        ...(exemplar.lineKey !== undefined ? { lineKey: exemplar.lineKey } : {}),
+        ...(exemplar.regionKey !== undefined ? { regionKey: exemplar.regionKey } : {}),
+        ...(exemplar.appellationKey !== undefined ? { appellationKey: exemplar.appellationKey } : {}),
+        ...(exemplar.vintage !== undefined ? { vintage: exemplar.vintage } : {}),
+        surfaceFormKind: exemplar.surfaceFormKind,
+        reviewScopeKey,
+        legacyReviewScopeKeys,
         benchmarkGoldHint,
         normalizedBenchmarkGoldHint,
         benchmarkGoldHintVariants,
         proposalStatus: 'needs_target_review',
-        reviewTarget: 'lookup_manual_target_resolution_v1',
-        scopeRisk: inferScopeRisk(rows),
+        reviewTarget: args.reviewTarget,
+        scopeHoleClass,
+        scopeSuggestedAliasType,
+        scopeRisk: familyScopeRisk,
         locales: sortUnique(rows.map((row) => row.locale)) as readonly LookupV2CurationDraftRow['locale'][],
         surfaces: sortUnique(rows.map((row) => row.surface)),
-        holeClasses: sortUnique(rows.map((row) => row.holeClass)),
-        suggestedAliasTypes: sortUnique(rows.map((row) => row.suggestedAliasType)) as readonly LookupV2CurationDraftRow['suggestedAliasType'][],
+        holeClasses,
+        suggestedAliasTypes,
         rowCount: rows.length,
         sourceArtifacts: sortUnique(rows.map((row) => row.sourceArtifact)),
         sourceEvidenceSamples: sortUnique(rows.map((row) => row.sourceEvidence)),
@@ -162,7 +246,29 @@ export function buildLookupV2ManualTargetFamilyReviewPacketRows(args: {
         proposedAt,
       };
     })
-    .sort((left, right) => left.normalizedBenchmarkGoldHint.localeCompare(right.normalizedBenchmarkGoldHint));
+    .sort((left, right) => left.reviewScopeKey.localeCompare(right.reviewScopeKey));
+}
+
+export function buildLookupV2ManualTargetFamilyReviewPacketRows(args: {
+  readonly draftRows: readonly LookupV2CurationDraftRow[];
+  readonly runtimeOwnerEvidence?: LookupV2RuntimeSurfaceOwnerEvidence;
+}): readonly LookupV2ManualTargetFamilyReviewPacketRow[] {
+  return buildLookupV2FamilyTargetReviewPacketRows({
+    ...args,
+    triageBucket: 'scope_target_review',
+    reviewTarget: 'lookup_manual_target_resolution_v1',
+  });
+}
+
+export function buildLookupV2ReviewedCollisionFamilyReviewPacketRows(args: {
+  readonly draftRows: readonly LookupV2CurationDraftRow[];
+  readonly runtimeOwnerEvidence?: LookupV2RuntimeSurfaceOwnerEvidence;
+}): readonly LookupV2ManualTargetFamilyReviewPacketRow[] {
+  return buildLookupV2FamilyTargetReviewPacketRows({
+    ...args,
+    triageBucket: 'reviewed_collision',
+    reviewTarget: 'lookup_reviewed_collision_resolution_v1',
+  });
 }
 
 function main(): void {
@@ -186,7 +292,7 @@ function main(): void {
     'utf8',
   );
 
-  console.log(`[elv2-manual-target-family-review-packet] input_rows=${draftRows.filter((row) => row.triageBucket === 'manual_target').length}`);
+  console.log(`[elv2-manual-target-family-review-packet] input_rows=${draftRows.filter((row) => row.triageBucket === 'scope_target_review').length}`);
   console.log(`[elv2-manual-target-family-review-packet] family_rows=${familyRows.length}`);
   console.log(`[elv2-manual-target-family-review-packet] output=${outputPath}`);
 }

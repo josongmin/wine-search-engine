@@ -19,6 +19,11 @@
  */
 
 export type CoverageStatus = 'resolved' | 'ambiguous' | 'failed' | 'redirect_discovery';
+export type CoverageHoleOperatorBucket =
+  | 'strict_collision_ambiguous'
+  | 'localized_surface_gap'
+  | 'scope_target_missing'
+  | 'catalog_support_needed';
 
 export interface CoverageInputRow {
   readonly qid: string;
@@ -39,6 +44,12 @@ export interface CoverageInputRow {
   readonly class: string;
   /** What the engine actually returned. */
   readonly observedStatus: CoverageStatus;
+  /** Optional canonical decision reason code returned by the runtime. */
+  readonly observedReasonCode?: string | undefined;
+  /** Reviewed support-plane status for the intended family, if one exists. */
+  readonly supportStatus?: 'active_catalog_absent' | 'vintage_anchor_absent' | 'secondary_line_only' | undefined;
+  /** Whether this exact localized query surface is already reviewed. */
+  readonly localizedSurfaceReviewed?: boolean | undefined;
 }
 
 /** A hot entity the gold says should resolve, but the engine did not. */
@@ -47,6 +58,8 @@ export interface CoverageHole {
   readonly query: string;
   readonly class: string;
   readonly observedStatus: CoverageStatus;
+  readonly operatorBucket: CoverageHoleOperatorBucket;
+  readonly observedReasonCode?: string | undefined;
   readonly expectedEntityHint?: string | undefined;
   readonly expectedEntityId?: string | undefined;
 }
@@ -65,6 +78,8 @@ export interface CoverageReport {
   readonly nonEntityTotal: number;
   /** Holes grouped by hotset class, for prioritising curation. */
   readonly holesByClass: Readonly<Record<string, number>>;
+  /** Holes grouped by strict operator bucket, for owner routing. */
+  readonly holesByOperatorBucket: Readonly<Record<CoverageHoleOperatorBucket, number>>;
 }
 
 function ratio(num: number, den: number): number {
@@ -73,6 +88,19 @@ function ratio(num: number, den: number): number {
 
 function acceptedStatuses(row: CoverageInputRow): readonly CoverageStatus[] {
   return row.acceptedStatuses ?? [row.expectedStatus];
+}
+
+function classifyHole(row: CoverageInputRow): CoverageHoleOperatorBucket {
+  if (row.supportStatus !== undefined) {
+    return 'catalog_support_needed';
+  }
+  if (row.observedReasonCode === 'reviewed_family_collision_requires_clarification') {
+    return 'strict_collision_ambiguous';
+  }
+  if (row.localizedSurfaceReviewed === false) {
+    return 'localized_surface_gap';
+  }
+  return 'scope_target_missing';
 }
 
 export function buildCoverageReport(rows: readonly CoverageInputRow[]): CoverageReport {
@@ -90,6 +118,8 @@ export function buildCoverageReport(rows: readonly CoverageInputRow[]): Coverage
         query: row.query,
         class: row.class,
         observedStatus: row.observedStatus,
+        operatorBucket: classifyHole(row),
+        ...(row.observedReasonCode !== undefined ? { observedReasonCode: row.observedReasonCode } : {}),
         ...(row.expectedEntityHint !== undefined ? { expectedEntityHint: row.expectedEntityHint } : {}),
         ...(row.expectedEntityId !== undefined ? { expectedEntityId: row.expectedEntityId } : {}),
       });
@@ -104,8 +134,15 @@ export function buildCoverageReport(rows: readonly CoverageInputRow[]): Coverage
   }
 
   const holesByClass: Record<string, number> = {};
+  const holesByOperatorBucket: Record<CoverageHoleOperatorBucket, number> = {
+    strict_collision_ambiguous: 0,
+    localized_surface_gap: 0,
+    scope_target_missing: 0,
+    catalog_support_needed: 0,
+  };
   for (const hole of holes) {
     holesByClass[hole.class] = (holesByClass[hole.class] ?? 0) + 1;
+    holesByOperatorBucket[hole.operatorBucket] += 1;
   }
 
   return {
@@ -116,6 +153,7 @@ export function buildCoverageReport(rows: readonly CoverageInputRow[]): Coverage
     nonEntityCorrect,
     nonEntityTotal: nonEntityRows.length,
     holesByClass,
+    holesByOperatorBucket,
   };
 }
 
@@ -126,8 +164,9 @@ export function formatCoverageReport(report: CoverageReport): string {
   lines.push(`non-entity handling: ${report.nonEntityCorrect}/${report.nonEntityTotal} correct`);
   if (report.holes.length > 0) {
     lines.push(`coverage holes (need curation):`);
+    lines.push(`hole buckets: strict_collision_ambiguous=${report.holesByOperatorBucket.strict_collision_ambiguous}, localized_surface_gap=${report.holesByOperatorBucket.localized_surface_gap}, scope_target_missing=${report.holesByOperatorBucket.scope_target_missing}, catalog_support_needed=${report.holesByOperatorBucket.catalog_support_needed}`);
     for (const hole of report.holes) {
-      lines.push(`  - [${hole.class}] "${hole.query}" → ${hole.observedStatus} (qid ${hole.qid})`);
+      lines.push(`  - [${hole.class}/${hole.operatorBucket}] "${hole.query}" → ${hole.observedStatus} (qid ${hole.qid})`);
     }
   } else {
     lines.push('no coverage holes');

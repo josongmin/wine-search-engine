@@ -15,12 +15,13 @@ export interface LookupV2PolicyReviewPacketRow {
   readonly benchmarkGoldHint: string;
   readonly benchmarkGoldEntityId?: string | undefined;
   readonly benchmarkGoldEntityIdSource?: 'fixture_exact' | 'hint_resolution' | 'policy_registry_authority' | undefined;
+  readonly semanticConflictKey: string;
   readonly policyConflictSurface: string;
   readonly policyConflictType: LookupPolicyConflictRegistryRow['conflictType'];
   readonly authorityStatus: LookupPolicyConflictRegistryRow['authorityStatus'];
   readonly stretchExpectedStatus: LookupPolicyConflictRegistryRow['stretchExpectedStatus'];
-  readonly proposalStatus: 'needs_policy_review' | 'approved_exact_safe' | 'kept_policy_conflict' | 'needs_target';
-  readonly reviewTarget: 'lookup_policy_conflict_registry_v1';
+  readonly proposalStatus: 'needs_policy_review' | 'approved_exact_safe' | 'kept_ambiguous' | 'needs_scope_target';
+  readonly reviewTarget: 'lookup_semantic_policy_registry_v1';
   readonly sourceArtifact: string;
   readonly sourceEvidence: string;
   readonly proposedAt: string;
@@ -66,21 +67,26 @@ export function buildLookupV2PolicyReviewPacketRows(args: {
   const seen = new Set<string>();
 
   for (const row of args.draftRows) {
-    if (row.triageBucket !== 'policy_review') {
+    if (row.triageBucket !== 'scope_policy_review') {
       continue;
     }
     if (row.benchmarkGoldHint === undefined) {
-      throw new Error(`policy_review draft row is missing benchmarkGoldHint for surface=${JSON.stringify(row.surface)}`);
+      throw new Error(`scope_policy_review draft row is missing benchmarkGoldHint for surface=${JSON.stringify(row.surface)}`);
     }
     const normalizedHint = normalizeForMatch(row.benchmarkGoldHint);
     const owner = policyConflictOwners.get(normalizedHint);
     if (owner === undefined) {
       throw new Error(
-        `policy_review draft row has no reviewed policy owner for hint=${JSON.stringify(row.benchmarkGoldHint)} surface=${JSON.stringify(row.surface)}`,
+        `scope_policy_review draft row has no reviewed policy owner for hint=${JSON.stringify(row.benchmarkGoldHint)} surface=${JSON.stringify(row.surface)}`,
+      );
+    }
+    if (row.semanticConflictKey === undefined) {
+      throw new Error(
+        `scope_policy_review draft row is missing semanticConflictKey for hint=${JSON.stringify(row.benchmarkGoldHint)} surface=${JSON.stringify(row.surface)}`,
       );
     }
     const dedupeKey = JSON.stringify([
-      normalizeForMatch(row.surface),
+      row.semanticConflictKey,
       row.benchmarkGoldEntityId ?? '',
       normalizedHint,
     ]);
@@ -99,12 +105,13 @@ export function buildLookupV2PolicyReviewPacketRows(args: {
       ...(row.benchmarkGoldEntityIdSource !== undefined
         ? { benchmarkGoldEntityIdSource: row.benchmarkGoldEntityIdSource }
         : {}),
+      semanticConflictKey: row.semanticConflictKey,
       policyConflictSurface: owner.surface,
       policyConflictType: owner.conflictType,
       authorityStatus: owner.authorityStatus,
       stretchExpectedStatus: owner.stretchExpectedStatus,
       proposalStatus: 'needs_policy_review',
-      reviewTarget: 'lookup_policy_conflict_registry_v1',
+      reviewTarget: 'lookup_semantic_policy_registry_v1',
       sourceArtifact: row.sourceArtifact,
       sourceEvidence: row.sourceEvidence,
       proposedAt: row.reviewedAt,
@@ -112,7 +119,8 @@ export function buildLookupV2PolicyReviewPacketRows(args: {
   }
 
   return rows.sort((left, right) =>
-    left.policyConflictSurface.localeCompare(right.policyConflictSurface)
+    left.semanticConflictKey.localeCompare(right.semanticConflictKey)
+    || left.policyConflictSurface.localeCompare(right.policyConflictSurface)
     || left.surface.localeCompare(right.surface)
     || left.benchmarkGoldHint.localeCompare(right.benchmarkGoldHint)
     || (left.benchmarkGoldEntityId ?? '').localeCompare(right.benchmarkGoldEntityId ?? ''),
