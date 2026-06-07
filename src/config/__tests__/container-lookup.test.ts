@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { startCalibrationPreload } from '../container-lookup.js';
+import { resolveLookupV2LtrSupportState, startCalibrationPreload } from '../lookup-authority.js';
 import { MemoizedCalibrationStore } from '../../infrastructure/adapter/memoized-calibration-store.js';
 import { StubCalibrationStore } from '../container-stubs.js';
 import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
@@ -37,11 +37,11 @@ describe('startCalibrationPreload', () => {
     expect(preloadSpy).toHaveBeenCalledWith(QUERY_CLASSES);
     expect(warnSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        component: 'LookupDirectContainer',
+        component: 'LookupAuthorityServices',
         searchSnapshotId: 'search-snapshot:v1:test',
         err: expect.any(Error),
       }),
-      '[lookup-direct] calibration preload failed; keeping lazy load path authoritative',
+      '[lookup-authority] calibration preload failed; keeping lazy load path authoritative',
     );
   });
 
@@ -49,5 +49,34 @@ describe('startCalibrationPreload', () => {
     const store = new StubCalibrationStore();
 
     expect(() => startCalibrationPreload(store, { searchSnapshotId: 'search-snapshot:v1:test' })).not.toThrow();
+  });
+});
+
+describe('resolveLookupV2LtrSupportState', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('marks lookup-direct LTR as unsupported even when shared LTR config is enabled', () => {
+    const infoSpy = vi.spyOn(bootstrapLogger, 'info').mockImplementation(() => bootstrapLogger);
+
+    const result = resolveLookupV2LtrSupportState({
+      ltrServingEnabled: true,
+      runtimeLtrModelsPath: '/tmp/runtime-ltr-models.json',
+    });
+
+    expect(result).toEqual({
+      status: 'unsupported',
+      reason: 'lookup_domain_model_absent',
+    });
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: 'LookupAuthorityServices',
+        ltrServingEnabled: true,
+        runtimeLtrModelsPathConfigured: true,
+        reason: 'lookup_domain_model_absent',
+      }),
+      '[lookup-authority] lookup-v2 LTR unsupported; skipping model discovery and reranker wiring',
+    );
   });
 });

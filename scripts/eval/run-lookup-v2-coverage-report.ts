@@ -44,16 +44,27 @@ import {
 } from '../../src/domain/resolver/v2/coverage-report.js';
 import { buildCurationTasks } from '../../src/domain/alias/curation/coverage-curation-task.js';
 import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
+import { compactForLookup } from '../../src/domain/query/service/phonetic-skeleton.js';
+import {
+  buildLookupQuerySemanticProbe,
+  buildLookupSemanticScopeComponentSurfaceKey,
+  buildLookupSemanticScopeFromProbe,
+} from '../../src/domain/resolver/v2/lookup-semantic-scope.js';
 import {
   filterLookupV2StretchRows,
   isLookupV2StretchPartition,
   type LookupV2StretchPartition,
 } from './lookup-v2-stretch-partitions.js';
-import { loadLookupV2FamilySupportRegistryMapSync } from './lookup-v2-family-support-registry.js';
+import { loadLookupV2BenchmarkGoldHintMapSync } from './lookup-v2-benchmark-gold-map.js';
 import {
-  buildLookupV2LocalizedSurfaceRegistryKey,
-  loadLookupV2LocalizedSurfaceRegistryMapSync,
-} from './lookup-v2-localized-surface-registry.js';
+  buildLookupV2ApprovedScopeSurfaceMap,
+  loadLookupV2LocalizedScopeSurfaceRegistrySync,
+} from './lookup-v2-localized-scope-surface-registry.js';
+import {
+  loadLookupV2RuntimeSemanticDescriptorMapSync,
+  type LookupV2RuntimeSemanticDescriptor,
+} from './lookup-v2-runtime-semantic-descriptors.js';
+import { loadLookupV2SemanticScopeSupportRegistryMapSync } from './lookup-v2-semantic-scope-support-registry.js';
 
 const COVERAGE_STATUSES: ReadonlySet<string> = new Set<CoverageStatus>([
   'resolved',
@@ -74,6 +85,129 @@ interface HotsetRow {
 
 function inferDraftLocale(surface: string): 'ko' | 'global' {
   return /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/u.test(surface) ? 'ko' : 'global';
+}
+
+function queryContainsSurface(
+  probe: ReturnType<typeof buildLookupQuerySemanticProbe>,
+  surface: string | undefined,
+): boolean {
+  if (surface === undefined) {
+    return false;
+  }
+  const normalized = normalizeForMatch(surface);
+  if (normalized.length === 0) {
+    return false;
+  }
+  const paddedQuery = ` ${probe.normalizedQuery} `;
+  const paddedSurface = ` ${normalized} `;
+  if (paddedQuery.includes(paddedSurface)) {
+    return true;
+  }
+  const compactSurface = compactForLookup(normalized);
+  if (compactSurface.length > 0 && probe.compactQuery.includes(compactSurface)) {
+    return true;
+  }
+  return probe.transliteratedQuery !== undefined
+    && ` ${probe.transliteratedQuery} `.includes(paddedSurface);
+}
+
+function reviewedComponentMatches(args: {
+  readonly probe: ReturnType<typeof buildLookupQuerySemanticProbe>;
+  readonly componentKind: 'family' | 'line' | 'region' | 'appellation';
+  readonly componentKey: string | undefined;
+  readonly locale: 'ko' | 'global';
+  readonly approvedScopeSurfaceMap: ReadonlyMap<string, ReadonlySet<string>>;
+}): boolean {
+  if (args.componentKey === undefined) {
+    return false;
+  }
+  if (queryContainsSurface(args.probe, args.componentKey)) {
+    return true;
+  }
+  const reviewedSurfaces = args.approvedScopeSurfaceMap.get(
+    buildLookupSemanticScopeComponentSurfaceKey({
+      componentKind: args.componentKind,
+      componentKey: args.componentKey,
+      locale: args.locale,
+    }),
+  );
+  if (reviewedSurfaces === undefined) {
+    return false;
+  }
+  for (const surface of reviewedSurfaces) {
+    if (queryContainsSurface(args.probe, surface)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function classifySurfaceGapBucket(args: {
+  readonly query: string;
+  readonly locale: 'ko' | 'global';
+  readonly descriptor: LookupV2RuntimeSemanticDescriptor;
+  readonly approvedScopeSurfaceMap: ReadonlyMap<string, ReadonlySet<string>>;
+}): CoverageInputRow['surfaceGapBucket'] {
+  const probe = buildLookupQuerySemanticProbe({
+    query: args.query,
+    locale: args.locale,
+  });
+  const familyMatch = reviewedComponentMatches({
+    probe,
+    componentKind: 'family',
+    componentKey: args.descriptor.familyKey,
+    locale: args.locale,
+    approvedScopeSurfaceMap: args.approvedScopeSurfaceMap,
+  });
+  if (!familyMatch) {
+    return 'family_surface_gap';
+  }
+  const hasQualifiedSurfaceCatalog = (
+    (args.descriptor.lineKey !== undefined
+      && args.approvedScopeSurfaceMap.has(buildLookupSemanticScopeComponentSurfaceKey({
+        componentKind: 'line',
+        componentKey: args.descriptor.lineKey,
+        locale: args.locale,
+      })))
+    || (args.descriptor.regionKey !== undefined
+      && args.approvedScopeSurfaceMap.has(buildLookupSemanticScopeComponentSurfaceKey({
+        componentKind: 'region',
+        componentKey: args.descriptor.regionKey,
+        locale: args.locale,
+      })))
+    || (args.descriptor.appellationKey !== undefined
+      && args.approvedScopeSurfaceMap.has(buildLookupSemanticScopeComponentSurfaceKey({
+        componentKind: 'appellation',
+        componentKey: args.descriptor.appellationKey,
+        locale: args.locale,
+      })))
+  );
+  const matchesQualifiedSurface =
+    reviewedComponentMatches({
+      probe,
+      componentKind: 'line',
+      componentKey: args.descriptor.lineKey,
+      locale: args.locale,
+      approvedScopeSurfaceMap: args.approvedScopeSurfaceMap,
+    })
+    || reviewedComponentMatches({
+      probe,
+      componentKind: 'region',
+      componentKey: args.descriptor.regionKey,
+      locale: args.locale,
+      approvedScopeSurfaceMap: args.approvedScopeSurfaceMap,
+    })
+    || reviewedComponentMatches({
+      probe,
+      componentKind: 'appellation',
+      componentKey: args.descriptor.appellationKey,
+      locale: args.locale,
+      approvedScopeSurfaceMap: args.approvedScopeSurfaceMap,
+    });
+  if (hasQualifiedSurfaceCatalog && !matchesQualifiedSurface) {
+    return 'qualified_scope_surface_gap';
+  }
+  return undefined;
 }
 
 function parseHotset(corpusPath: string): readonly HotsetRow[] {
@@ -136,8 +270,12 @@ async function main(): Promise<void> {
 
   const config = loadConfig();
   const pool = getPgPool();
-  const familySupportRegistryMap = loadLookupV2FamilySupportRegistryMapSync();
-  const localizedSurfaceRegistryMap = loadLookupV2LocalizedSurfaceRegistryMapSync();
+  const benchmarkGoldHintMap = loadLookupV2BenchmarkGoldHintMapSync();
+  const runtimeDescriptorMap = loadLookupV2RuntimeSemanticDescriptorMapSync();
+  const approvedScopeSurfaceMap = buildLookupV2ApprovedScopeSurfaceMap(
+    loadLookupV2LocalizedScopeSurfaceRegistrySync(),
+  );
+  const scopeSupportRegistryMap = loadLookupV2SemanticScopeSupportRegistryMapSync();
   const effectiveRuntimeStatePath = runtimeStatePath ?? DEFAULT_RUNTIME_STATE_PATH;
   const runtimeState = await loadSearchSnapshotRuntimeState(effectiveRuntimeStatePath);
   const container = await createLookupDirectContainer(config, {
@@ -162,14 +300,32 @@ async function main(): Promise<void> {
       console.error(`[elv2-coverage] V2 failed for ${row.qid}:`, (err as Error).message);
     }
     const locale = inferDraftLocale(row.query);
-    const localizedSurfaceReviewed = localizedSurfaceRegistryMap.has(
-      buildLookupV2LocalizedSurfaceRegistryKey({
-        normalizedLocalSurface: normalizeForMatch(row.query),
-        locale,
-      }),
-    );
-    const supportStatus = row.expectedEntityHint !== undefined
-      ? familySupportRegistryMap.get(normalizeForMatch(row.expectedEntityHint))?.supportStatus
+    const expectedEntityId = row.expectedEntityId
+      ?? (row.expectedEntityHint !== undefined
+        ? benchmarkGoldHintMap.get(normalizeForMatch(row.expectedEntityHint))
+        : undefined);
+    const expectedDescriptor = expectedEntityId !== undefined
+      ? runtimeDescriptorMap.get(expectedEntityId)
+      : undefined;
+    const expectedScope = expectedDescriptor !== undefined
+      ? buildLookupSemanticScopeFromProbe({
+          probe: buildLookupQuerySemanticProbe({
+            query: row.query,
+            locale,
+          }),
+          descriptor: expectedDescriptor,
+        })
+      : undefined;
+    const supportStatus = expectedScope !== undefined
+      ? scopeSupportRegistryMap.get(expectedScope.semanticScopeKey)?.supportStatus
+      : undefined;
+    const surfaceGapBucket = expectedDescriptor !== undefined
+      ? classifySurfaceGapBucket({
+          query: row.query,
+          locale,
+          descriptor: expectedDescriptor,
+          approvedScopeSurfaceMap,
+        })
       : undefined;
     inputRows.push({
       qid: row.qid,
@@ -182,7 +338,7 @@ async function main(): Promise<void> {
       observedStatus,
       ...(observedReasonCode !== undefined ? { observedReasonCode } : {}),
       ...(supportStatus !== undefined ? { supportStatus } : {}),
-      ...(locale === 'ko' ? { localizedSurfaceReviewed } : {}),
+      ...(surfaceGapBucket !== undefined ? { surfaceGapBucket } : {}),
     });
   }
 

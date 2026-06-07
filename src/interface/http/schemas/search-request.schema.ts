@@ -62,7 +62,7 @@ function withRequestAliases<T extends z.ZodRawShape>(shape: T) {
  * no sessionContext (entity lookup ignores it).
  * Both camelCase (queryBudget) and snake_case (query_budget) aliases are supported
  * for budget control. The live public HTTP lookup surface is
- * `POST /v1/lookup/wine`; this retained schema is for internal tooling and
+ * `POST /v2/entity-lookup`; this retained schema is for internal tooling and
  * replay/fixture validation.
  */
 function withLookupAliases<T extends z.ZodRawShape>(shape: T) {
@@ -104,7 +104,7 @@ export type SearchRequestBody = z.infer<typeof SearchRequestSchema>;
  *
  * Stripped-down schema: no retrieval_mode override (always entity),
  * no options.mode (routing is not negotiable for lookup). The live public HTTP
- * surface is `POST /v1/lookup/wine`.
+ * surface is `POST /v2/entity-lookup`.
  */
 const LookupOptionsSchema = z.object({
   explain: z.boolean().default(false),

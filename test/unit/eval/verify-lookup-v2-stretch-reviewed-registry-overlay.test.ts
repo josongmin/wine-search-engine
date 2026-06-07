@@ -121,6 +121,9 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
       existingPolicyFamilyDecisionRegistryRows: [],
       exactSafeRegistryRows: [],
       knownEntityIds: new Set(['wine-ce-petrus', 'wine-ce-latour', 'wine-ce-silver-oak']),
+      runtimeDescriptorMap: new Map([
+        ['wine-ce-petrus', { familyKey: 'petrus' }],
+      ]),
       policyConflictOwners: new Map([
         ['latour', {
           surface: '라뚜르',
@@ -149,8 +152,9 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
     expect(summary.baseline.draft).toEqual({
       rows: 3,
       autoTargetable: 0,
-      catalogAbsent: 0,
-      reviewedScopeCollision: 0,
+      localizedSurfaceReview: 0,
+      catalogSupportReview: 0,
+      reviewedCollision: 0,
       scopePolicyReview: 1,
       reviewedRejected: 0,
       scopeTargetReview: 2,
@@ -158,8 +162,9 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
     expect(summary.overlay.draft).toEqual({
       rows: 3,
       autoTargetable: 2,
-      catalogAbsent: 0,
-      reviewedScopeCollision: 0,
+      localizedSurfaceReview: 0,
+      catalogSupportReview: 0,
+      reviewedCollision: 0,
       scopePolicyReview: 0,
       reviewedRejected: 0,
       scopeTargetReview: 1,
@@ -168,8 +173,8 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
     expect(summary.semanticPolicyRegistryApply.registryInsertedRows).toBe(1);
     expect(summary.deltas).toEqual({
       draftAutoTargetable: 2,
-      draftCatalogAbsent: 0,
-      draftReviewedScopeCollision: 0,
+      draftCatalogSupportReview: 0,
+      draftReviewedCollision: 0,
       draftScopePolicyReview: -1,
       draftScopeTargetReview: -1,
       exactSafePacketRows: 2,
@@ -180,8 +185,8 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
     });
     expect(summary.invariants).toEqual({
       autoTargetableNonDecreasing: true,
-      catalogAbsentNonDecreasing: true,
-      reviewedScopeCollisionDirectionRespected: true,
+      catalogSupportReviewNonDecreasing: true,
+      reviewedCollisionDirectionRespected: true,
       scopePolicyReviewNonIncreasing: true,
       scopeTargetReviewNonIncreasing: true,
       exactSafePacketNonDecreasing: true,
@@ -255,8 +260,9 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
     expect(summary.baseline.draft).toEqual({
       rows: 1,
       autoTargetable: 0,
-      catalogAbsent: 0,
-      reviewedScopeCollision: 0,
+      localizedSurfaceReview: 0,
+      catalogSupportReview: 0,
+      reviewedCollision: 0,
       scopePolicyReview: 0,
       reviewedRejected: 0,
       scopeTargetReview: 1,
@@ -264,16 +270,17 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
     expect(summary.overlay.draft).toEqual({
       rows: 1,
       autoTargetable: 1,
-      catalogAbsent: 0,
-      reviewedScopeCollision: 0,
+      localizedSurfaceReview: 0,
+      catalogSupportReview: 0,
+      reviewedCollision: 0,
       scopePolicyReview: 0,
       reviewedRejected: 0,
       scopeTargetReview: 0,
     });
     expect(summary.deltas).toEqual({
       draftAutoTargetable: 1,
-      draftCatalogAbsent: 0,
-      draftReviewedScopeCollision: 0,
+      draftCatalogSupportReview: 0,
+      draftReviewedCollision: 0,
       draftScopePolicyReview: 0,
       draftScopeTargetReview: -1,
       exactSafePacketRows: 1,
@@ -284,7 +291,7 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
     });
   }, 30_000);
 
-  it('proves family support registry moves reviewed catalog gaps out of manual_target into catalog_absent', async () => {
+  it('proves semantic scope support registry moves reviewed support gaps out of scope_target_review into catalog_support_review', async () => {
     const workDir = mkdtempSync(path.join(tmpdir(), 'elv2-reviewed-registry-overlay-support-'));
     tempDirs.push(workDir);
 
@@ -309,18 +316,17 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
       benchmarkGoldHintMap: new Map(),
       baselineFamilyTargetRegistryRows: [],
       baselinePolicyFamilyDecisionRegistryRows: [],
-      baselineFamilySupportRegistryRows: [],
+      baselineSemanticScopeSupportRegistryRows: [],
       existingFamilyTargetRegistryRows: [],
       existingPolicyFamilyDecisionRegistryRows: [],
-      existingFamilySupportRegistryRows: [
+      existingSemanticScopeSupportRegistryRows: [
         {
-          benchmarkGoldHint: 'salon',
-          normalizedBenchmarkGoldHint: 'salon',
-          supportStatus: 'active_catalog_absent',
+          semanticScopeKey: 'family::salon::::::::::bare::ko',
+          supportStatus: 'active_entity_absent',
           reviewedBy: 'codex',
           reviewedAt: '2026-06-07T00:05:00.000Z',
           decisionReason: 'active runtime projection lacks reviewed Salon family support',
-          evidenceClass: 'catalog_support_review',
+          evidenceClass: 'scope_support_review',
         },
       ],
       exactSafeRegistryRows: [],
@@ -340,8 +346,9 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
     expect(summary.baseline.draft).toEqual({
       rows: 1,
       autoTargetable: 0,
-      catalogAbsent: 0,
-      reviewedScopeCollision: 0,
+      localizedSurfaceReview: 0,
+      catalogSupportReview: 0,
+      reviewedCollision: 0,
       scopePolicyReview: 0,
       reviewedRejected: 0,
       scopeTargetReview: 1,
@@ -349,16 +356,17 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
     expect(summary.overlay.draft).toEqual({
       rows: 1,
       autoTargetable: 0,
-      catalogAbsent: 1,
-      reviewedScopeCollision: 0,
+      localizedSurfaceReview: 0,
+      catalogSupportReview: 1,
+      reviewedCollision: 0,
       scopePolicyReview: 0,
       reviewedRejected: 0,
       scopeTargetReview: 0,
     });
     expect(summary.deltas).toEqual({
       draftAutoTargetable: 0,
-      draftCatalogAbsent: 1,
-      draftReviewedScopeCollision: 0,
+      draftCatalogSupportReview: 1,
+      draftReviewedCollision: 0,
       draftScopePolicyReview: 0,
       draftScopeTargetReview: -1,
       exactSafePacketRows: 0,
@@ -369,8 +377,8 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
     });
     expect(summary.invariants).toEqual({
       autoTargetableNonDecreasing: true,
-      catalogAbsentNonDecreasing: true,
-      reviewedScopeCollisionDirectionRespected: true,
+      catalogSupportReviewNonDecreasing: true,
+      reviewedCollisionDirectionRespected: true,
       scopePolicyReviewNonIncreasing: true,
       scopeTargetReviewNonIncreasing: true,
       exactSafePacketNonDecreasing: true,
@@ -406,11 +414,11 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
       benchmarkGoldHintMap: new Map(),
       baselineFamilyTargetRegistryRows: [],
       baselinePolicyFamilyDecisionRegistryRows: [],
-      baselineFamilySupportRegistryRows: [],
+      baselineSemanticScopeSupportRegistryRows: [],
       baselineFamilyCollisionRegistryRows: [],
       existingFamilyTargetRegistryRows: [],
       existingPolicyFamilyDecisionRegistryRows: [],
-      existingFamilySupportRegistryRows: [],
+      existingSemanticScopeSupportRegistryRows: [],
       existingFamilyCollisionRegistryRows: [
         {
           benchmarkGoldHint: 'silver oak',
@@ -458,8 +466,9 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
     expect(summary.baseline.draft).toEqual({
       rows: 1,
       autoTargetable: 0,
-      catalogAbsent: 0,
-      reviewedScopeCollision: 0,
+      localizedSurfaceReview: 0,
+      catalogSupportReview: 0,
+      reviewedCollision: 0,
       scopePolicyReview: 0,
       reviewedRejected: 0,
       scopeTargetReview: 1,
@@ -467,16 +476,17 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
     expect(summary.overlay.draft).toEqual({
       rows: 1,
       autoTargetable: 0,
-      catalogAbsent: 0,
-      reviewedScopeCollision: 1,
+      localizedSurfaceReview: 0,
+      catalogSupportReview: 0,
+      reviewedCollision: 1,
       scopePolicyReview: 0,
       reviewedRejected: 0,
       scopeTargetReview: 0,
     });
     expect(summary.deltas).toEqual({
       draftAutoTargetable: 0,
-      draftCatalogAbsent: 0,
-      draftReviewedScopeCollision: 1,
+      draftCatalogSupportReview: 0,
+      draftReviewedCollision: 1,
       draftScopePolicyReview: 0,
       draftScopeTargetReview: -1,
       exactSafePacketRows: 0,
@@ -487,8 +497,8 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
     });
     expect(summary.invariants).toEqual({
       autoTargetableNonDecreasing: true,
-      catalogAbsentNonDecreasing: true,
-      reviewedScopeCollisionDirectionRespected: true,
+      catalogSupportReviewNonDecreasing: true,
+      reviewedCollisionDirectionRespected: true,
       scopePolicyReviewNonIncreasing: true,
       scopeTargetReviewNonIncreasing: true,
       exactSafePacketNonDecreasing: true,

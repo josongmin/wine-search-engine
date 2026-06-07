@@ -1,7 +1,7 @@
 {
   "sourceDraftPath": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl",
-  "generatedAt": "2026-06-07T01:16:09.727Z",
-  "totalRows": 20,
+  "generatedAt": "2026-06-07T14:11:43.867Z",
+  "totalRows": 22,
   "batches": [
     {
       "holeClass": "realworld_brand_suffix",
@@ -15,7 +15,7 @@
     },
     {
       "holeClass": "realworld_exact_vintage",
-      "rowCount": 8,
+      "rowCount": 10,
       "outputPath": "data/lookup-v2/drafts/manual-target-batches/realworld-exact-vintage.jsonl"
     },
     {
@@ -25,7 +25,7 @@
     },
     {
       "holeClass": "realworld_mixed_script_alias",
-      "rowCount": 2,
+      "rowCount": 1,
       "outputPath": "data/lookup-v2/drafts/manual-target-batches/realworld-mixed-script-alias.jsonl"
     },
     {
@@ -40,7 +40,7 @@
     },
     {
       "holeClass": "realworld_vintage_suffix",
-      "rowCount": 4,
+      "rowCount": 5,
       "outputPath": "data/lookup-v2/drafts/manual-target-batches/realworld-vintage-suffix.jsonl"
     }
   ]

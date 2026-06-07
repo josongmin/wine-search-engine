@@ -109,15 +109,14 @@ describe('refreshLookupV2StretchWritePlaneArtifacts', () => {
           decisionReason: 'approved latour family decision',
         }],
       ]),
-      familySupportRegistryMap: new Map([
-        ['salon', {
-          benchmarkGoldHint: 'salon',
-          normalizedBenchmarkGoldHint: 'salon',
-          supportStatus: 'active_catalog_absent',
+      semanticScopeSupportRegistryMap: new Map([
+        ['family::salon::::::::::bare::ko', {
+          semanticScopeKey: 'family::salon::::::::::bare::ko',
+          supportStatus: 'active_entity_absent',
           reviewedBy: 'registry',
           reviewedAt: '2026-06-06T01:40:00.000Z',
           decisionReason: 'active catalog lacks reviewed Salon family support',
-          evidenceClass: 'catalog_support_review',
+          evidenceClass: 'scope_support_review',
         }],
       ]),
       familyCollisionRegistryMap: new Map([
@@ -175,10 +174,11 @@ describe('refreshLookupV2StretchWritePlaneArtifacts', () => {
     expect(summary.draft).toEqual({
       rows: 4,
       autoTargetable: 2,
+      localizedSurfaceReview: 0,
       scopePolicyReview: 0,
       reviewedRejected: 0,
-      catalogAbsent: 1,
-      reviewedScopeCollision: 1,
+      catalogSupportReview: 1,
+      reviewedCollision: 1,
       scopeTargetReview: 0,
     });
     expect(summary.exactSafe.packetRows).toBe(2);
@@ -200,8 +200,8 @@ describe('refreshLookupV2StretchWritePlaneArtifacts', () => {
     expect(summary.manualTarget.ownerEvidenceFamilyIndex.candidateUniqueOwnerFamilies).toBe(0);
     expect(summary.manualTarget.ownerEvidenceIndex.candidateUniqueOwnerRows).toBe(0);
     expect(summary.manualTarget.familyReviewRows).toBe(0);
-    expect(summary.catalogAbsent.familyClusterIndex.totalRows).toBe(1);
-    expect(summary.catalogAbsent.familyClusterIndex.totalFamilies).toBe(1);
+    expect(summary.scopeSupport.familyClusterIndex.totalRows).toBe(1);
+    expect(summary.scopeSupport.familyClusterIndex.totalFamilies).toBe(1);
     expect(summary.reviewedCollision.familyClusterIndex.totalRows).toBe(1);
     expect(summary.reviewedCollision.familyClusterIndex.totalFamilies).toBe(1);
     expect(summary.reviewedCollision.familyReviewRows).toBe(1);

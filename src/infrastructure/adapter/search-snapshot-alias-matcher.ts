@@ -1,5 +1,4 @@
 import fs from 'node:fs/promises';
-import type { Pool } from 'pg';
 import { z } from 'zod';
 import type {
   AliasMatchResult,
@@ -31,22 +30,13 @@ import { buildHangulJamoKey } from '../../domain/shared/utils/hangul.js';
 import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
 import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import type { AliasType } from '../../domain/alias/model/alias.js';
-import { parseAliasType } from '../../domain/alias/model/alias.js';
 import {
   buildAliasRegistryVersion,
   type AliasRegistryVersion,
 } from '../../domain/alias/model/alias-registry-version.js';
 import { pickHigherTrustAliasType } from '../../domain/alias/service/conflict-resolver.js';
-import { runAbortablePgQuery } from '../db/abortable-pg-query.js';
-import {
-  DEFAULT_RUNTIME_STATE_PATH,
-  loadSearchSnapshotRuntimeState,
-} from '../health/search-snapshot-readiness.js';
 import { SEARCH_SNAPSHOT_SCHEMA_VERSION } from '../../domain/shared/constants/search-snapshot.js';
 import type { StageTimer } from '../../domain/shared/stage-timer.js';
-import {
-  resolveActiveSnapshot,
-} from '../db/active-snapshot-resolver.js';
 import {
   type LookupAliasBroadRecallRuntimeArtifact,
   parseTrustedLookupAliasBroadRecallRuntimeArtifact,
@@ -83,16 +73,6 @@ interface SnapshotAliasRecord {
   readonly type?: string | undefined;
 }
 
-interface PgAliasRecord {
-  readonly alias_id: string;
-  readonly entity_id: string;
-  readonly surface_form: string;
-  readonly normalized_value: string;
-  readonly source_trust: number;
-  readonly confidence: number;
-  readonly alias_type?: string;
-}
-
 type AliasStrategy = AliasMatchConfidenceStrategy;
 
 const MIN_WHOLE_TOKEN_LOOKUP_LENGTH = 4;
@@ -103,14 +83,6 @@ const MIN_WHOLE_TOKEN_LOOKUP_LENGTH = 4;
  * to avoid per-iteration allocation during the strategy decision loop.
  */
 const EMPTY_DM_KEYSET: ReadonlySet<string> = new Set<string>();
-
-type ConnectablePool = Pool & {
-  connect: Pool['connect'];
-};
-
-function hasConnect(pool: Pool): pool is ConnectablePool {
-  return typeof pool.connect === 'function';
-}
 
 const SnapshotManifestSchema = z.object({
   schemaVersion: z.literal(SEARCH_SNAPSHOT_SCHEMA_VERSION),
@@ -139,19 +111,6 @@ function tokenizeForLookup(value: string): readonly string[] {
   return buildNormalizedQueryViews(value).punctuationStripped
     .split(/\s+/)
     .filter(Boolean);
-}
-
-function createTimeoutSignal(timeoutMs: number): { signal: AbortSignal; clear: () => void } {
-  const controller = new AbortController();
-  const timer = setTimeout(() => {
-    controller.abort('PostgreSQL alias overlay load timeout');
-  }, timeoutMs);
-  return {
-    signal: controller.signal,
-    clear: () => {
-      clearTimeout(timer);
-    },
-  };
 }
 
 function parseAliasesManifestPath(raw: string, manifestPath: string): ParsedAliasesManifest {
@@ -304,125 +263,6 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
           err: error,
         },
         '[Container] Search snapshot alias manifest unavailable; continuing without in-memory alias preload',
-      );
-      return undefined;
-    }
-  }
-
-  static async loadFromPostgres(
-    pool: Pool,
-    snapshotIdOverride?: string,
-    options?: { readonly queryTimeoutMs?: number },
-  ): Promise<SearchSnapshotAliasMatcher | undefined> {
-    const queryTimeoutMs = options?.queryTimeoutMs;
-    const resolveActiveSnapshotOptions = queryTimeoutMs === undefined
-      ? undefined
-      : { queryTimeoutMs };
-    const timed = queryTimeoutMs === undefined ? undefined : createTimeoutSignal(queryTimeoutMs);
-    try {
-      const activeSnapshotId = snapshotIdOverride
-        ?? (await resolveActiveSnapshot(pool, {
-          ...resolveActiveSnapshotOptions,
-        })).activeSnapshotId;
-      let rowsResult: { rows: ReadonlyArray<PgAliasRecord> };
-      if (timed === undefined || !hasConnect(pool)) {
-        rowsResult = await pool.query<PgAliasRecord>(
-          `SELECT alias_id, entity_id, surface_form, normalized_value, source_trust, confidence, alias_type
-           FROM aliases
-           WHERE search_snapshot_id = $1 AND is_suppressed = FALSE
-           ORDER BY confidence DESC`,
-          [activeSnapshotId],
-        );
-      } else {
-        rowsResult = await runAbortablePgQuery<PgAliasRecord>(
-          pool,
-          timed.signal,
-          `SELECT alias_id, entity_id, surface_form, normalized_value, source_trust, confidence, alias_type
-           FROM aliases
-           WHERE search_snapshot_id = $1 AND is_suppressed = FALSE
-           ORDER BY confidence DESC`,
-          [activeSnapshotId],
-        );
-      }
-      const rows = rowsResult.rows;
-      const aliases: SnapshotAliasRecord[] = rows
-        .filter((row) => (
-          typeof row.alias_id === 'string' &&
-          row.alias_id.length > 0 &&
-          typeof row.entity_id === 'string' &&
-          row.entity_id.length > 0 &&
-          typeof row.surface_form === 'string' &&
-          row.surface_form.length > 0 &&
-          typeof row.normalized_value === 'string' &&
-          row.normalized_value.length > 0
-        ))
-        .map((row) => {
-          const aliasType = parseAliasType(row.alias_type);
-          return {
-            aliasId: row.alias_id,
-            entityId: row.entity_id,
-            value: row.surface_form,
-            normalizedValue: row.normalized_value,
-            sourceTrust: Number.isFinite(row.source_trust) ? row.source_trust : 0,
-            confidencePrior: Number.isFinite(row.confidence) ? row.confidence : 0,
-            ...(aliasType !== undefined ? { aliasType } : {}),
-          };
-        });
-
-      if (aliases.length === 0) {
-        bootstrapLogger.info(
-          {
-            activeSnapshotId,
-          },
-          '[Container] Search snapshot alias overlay loaded from PostgreSQL but empty; falling back to search-index',
-        );
-        return undefined;
-      }
-
-      const buildStartedAt = Date.now();
-      // pg overlay carries no alias content hash from the table read — OMIT it
-      // (exactOptionalPropertyTypes); snapshot id + count are the registry identity.
-      const registryVersion = buildAliasRegistryVersion({
-        source: 'pg_overlay',
-        aliasCount: aliases.length,
-        snapshotId: activeSnapshotId,
-      });
-      const matcher = new SearchSnapshotAliasMatcher(aliases, registryVersion);
-      bootstrapLogger.info(
-        {
-          activeSnapshotId,
-          aliasCount: aliases.length,
-          buildMs: Date.now() - buildStartedAt,
-        },
-        '[Container] Search snapshot alias overlay loaded from PostgreSQL into memory',
-      );
-      return matcher;
-    } catch (error: unknown) {
-      bootstrapLogger.warn(
-        {
-          err: error,
-        },
-        '[Container] PostgreSQL alias overlay unavailable; falling back to search-index runtime substrate',
-      );
-      return undefined;
-    } finally {
-      timed?.clear();
-    }
-  }
-
-  static async loadFromRuntimeState(
-    runtimeStatePath: string = DEFAULT_RUNTIME_STATE_PATH,
-  ): Promise<SearchSnapshotAliasMatcher | undefined> {
-    try {
-      const runtimeState = await loadSearchSnapshotRuntimeState(runtimeStatePath);
-      return await SearchSnapshotAliasMatcher.loadFromManifest(runtimeState.manifestPath);
-    } catch (error) {
-      bootstrapLogger.warn(
-        {
-          runtimeStatePath,
-          err: error,
-        },
-        '[Container] Search snapshot alias substrate unavailable; continuing without in-memory alias preload',
       );
       return undefined;
     }

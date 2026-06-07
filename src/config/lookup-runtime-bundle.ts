@@ -43,7 +43,9 @@ import type { LookupConceptRedirectInfo, LookupExactSafeMatch } from '../domain/
 import type { LookupIdentityCertificate } from '../domain/shared/types/search-snapshot-lookup-runtime.js';
 import {
   buildLookupRuntimeBundleCachePayload,
+  readLookupRuntimeBundleCacheProfiled,
   writeLookupRuntimeBundleCache,
+  type LookupRuntimeBundleCacheReadProfile,
   type LookupRuntimeBundleCacheArtifactPaths,
   type LookupRuntimeBundleCachePayload,
 } from './lookup-runtime-bundle-cache.js';
@@ -220,6 +222,46 @@ export interface LookupRuntimeBundle {
   readonly ambiguityDictionary: SearchSnapshotAmbiguityDictionary;
   readonly conceptRedirectRegistry: SearchSnapshotConceptRedirectRegistry;
   readonly exactSafeRegistry: SearchSnapshotExactSafeRegistry;
+  readonly loadProfile: LookupRuntimeBundleLoadProfile;
+}
+
+export interface LookupRuntimeBundleMaterializeProfile {
+  readonly aliasMatcherMs: number;
+  readonly warmBroadRecallIndexesMs: number;
+  readonly resolverProjectionMs: number;
+  readonly semanticScopeRegistryMs: number;
+  readonly reviewedFamilyRecallRegistryMs: number;
+  readonly semanticDescriptorsMs: number;
+  readonly entityScopeGraphMs: number;
+  readonly ambiguityDictionaryMs: number;
+  readonly conceptRedirectRegistryMs: number;
+  readonly exactSafeRegistryMs: number;
+  readonly totalMs: number;
+}
+
+export interface LookupRuntimeBundleLoadProfile {
+  readonly source: 'cache' | 'artifacts';
+  readonly manifestReadMs: number;
+  readonly manifestParseMs: number;
+  readonly cacheReadProfile?: LookupRuntimeBundleCacheReadProfile;
+  readonly artifactReadMs?: number;
+  readonly artifactParseMs?: {
+    readonly aliasRuntimeMs: number;
+    readonly aliasBroadRecallRuntimeMs: number;
+    readonly exactSafeMapsMs: number;
+    readonly resolverProjectionMs: number;
+    readonly entityProjectionMs: number;
+    readonly semanticScopeRuntimeMs: number;
+    readonly reviewedFamilyRecallRuntimeMs: number;
+    readonly scopeGraphRuntimeMs: number;
+    readonly semanticDescriptorMapMs: number;
+    readonly ambiguityRuntimeMs: number;
+    readonly conceptRedirectRuntimeMs: number;
+    readonly payloadBuildMs: number;
+    readonly totalMs: number;
+  };
+  readonly materializeMs: LookupRuntimeBundleMaterializeProfile;
+  readonly totalMs: number;
 }
 
 const lookupRuntimeBundleCache = new Map<string, Promise<LookupRuntimeBundle>>();
@@ -288,11 +330,18 @@ function buildReviewedFamilyRecallEntries(
   return Object.entries(entries).sort(([left], [right]) => left.localeCompare(right));
 }
 
+function roundMs(value: number): number {
+  return Number(value.toFixed(3));
+}
+
 function materializeLookupRuntimeBundleFromPayload(
   cacheKey: string,
   manifestPath: string,
   payload: LookupRuntimeBundleCachePayload,
+  loadProfileBase: Omit<LookupRuntimeBundleLoadProfile, 'materializeMs' | 'totalMs'>,
 ): LookupRuntimeBundle {
+  const materializeStartedAt = performance.now();
+  const aliasMatcherStartedAt = performance.now();
   const aliasMatcher = SearchSnapshotAliasMatcher.fromRuntimeArtifact(
     payload.aliasRuntimeArtifact,
     buildAliasRegistryVersion({
@@ -303,8 +352,12 @@ function materializeLookupRuntimeBundleFromPayload(
     }),
     payload.aliasBroadRecallRuntimeArtifact,
   );
+  const aliasMatcherMs = roundMs(performance.now() - aliasMatcherStartedAt);
+  const warmBroadRecallIndexesStartedAt = performance.now();
   aliasMatcher.warmBroadRecallIndexes();
+  const warmBroadRecallIndexesMs = roundMs(performance.now() - warmBroadRecallIndexesStartedAt);
 
+  const resolverProjectionStartedAt = performance.now();
   const resolverProjection = new Map<CanonicalEntityId, LookupResolverProjection>();
   for (const [entityId, projection] of payload.resolverProjectionDocuments) {
     const canonicalEntityId = createCanonicalEntityId(entityId);
@@ -313,32 +366,92 @@ function materializeLookupRuntimeBundleFromPayload(
     }
     resolverProjection.set(canonicalEntityId, projection);
   }
+  const resolverProjectionMs = roundMs(performance.now() - resolverProjectionStartedAt);
 
+  const semanticScopeRegistryStartedAt = performance.now();
   const semanticScopeRegistry = new SearchSnapshotSemanticScopeRegistry(
     payload.semanticScopeEntries.map(([, entry]) => entry),
+    new Map(
+      Object.entries(payload.semanticScopeComponentSurfaces ?? {}).map(
+        ([key, surfaces]) => [key, new Set(surfaces)] as const,
+      ),
+    ),
   );
+  const semanticScopeRegistryMs = roundMs(performance.now() - semanticScopeRegistryStartedAt);
+  const reviewedFamilyRecallRegistryStartedAt = performance.now();
   const reviewedFamilyRecallRegistry = new SearchSnapshotReviewedFamilyRecallRegistry(
     payload.reviewedFamilyRecallEntries.map(([, entry]) => entry),
   );
+  const reviewedFamilyRecallRegistryMs = roundMs(
+    performance.now() - reviewedFamilyRecallRegistryStartedAt,
+  );
+  const semanticDescriptorsStartedAt = performance.now();
   const semanticDescriptors = new Map(payload.semanticDescriptors);
+  const semanticDescriptorsMs = roundMs(performance.now() - semanticDescriptorsStartedAt);
+  const resolverProjectionLookupStartedAt = performance.now();
+  const resolverProjectionLookup = new SearchSnapshotResolverProjectionLookup(resolverProjection);
+  const resolverProjectionLookupMs = roundMs(performance.now() - resolverProjectionLookupStartedAt);
+  const entityScopeGraphStartedAt = performance.now();
+  const entityScopeGraph = new SearchSnapshotEntityScopeGraph(
+    new Map(payload.scopeGraphAdjacency),
+    semanticDescriptors,
+  );
+  const entityScopeGraphMs = roundMs(performance.now() - entityScopeGraphStartedAt);
+  const ambiguityDictionaryStartedAt = performance.now();
+  const ambiguityDictionary = new SearchSnapshotAmbiguityDictionary(new Map(payload.ambiguityEntries));
+  const ambiguityDictionaryMs = roundMs(performance.now() - ambiguityDictionaryStartedAt);
+  const conceptRedirectRegistryStartedAt = performance.now();
+  const conceptRedirectRegistry = new SearchSnapshotConceptRedirectRegistry(
+    new Map(payload.conceptRedirectEntries),
+  );
+  const conceptRedirectRegistryMs = roundMs(performance.now() - conceptRedirectRegistryStartedAt);
+  const exactSafeRegistryStartedAt = performance.now();
+  const exactSafeRegistry = new SearchSnapshotExactSafeRegistry(
+    new Map(payload.exactEntries),
+    new Map(payload.compactEntries),
+  );
+  const exactSafeRegistryMs = roundMs(performance.now() - exactSafeRegistryStartedAt);
+  const materializeMs: LookupRuntimeBundleMaterializeProfile = {
+    aliasMatcherMs,
+    warmBroadRecallIndexesMs,
+    resolverProjectionMs: roundMs(resolverProjectionMs + resolverProjectionLookupMs),
+    semanticScopeRegistryMs,
+    reviewedFamilyRecallRegistryMs,
+    semanticDescriptorsMs,
+    entityScopeGraphMs,
+    ambiguityDictionaryMs,
+    conceptRedirectRegistryMs,
+    exactSafeRegistryMs,
+    totalMs: roundMs(performance.now() - materializeStartedAt),
+  };
 
   return {
     cacheKey,
     manifestPath,
     aliasMatcher,
-    resolverProjectionLookup: new SearchSnapshotResolverProjectionLookup(resolverProjection),
+    resolverProjectionLookup,
     semanticScopeRegistry,
     reviewedFamilyRecallRegistry,
-    entityScopeGraph: new SearchSnapshotEntityScopeGraph(
-      new Map(payload.scopeGraphAdjacency),
-      semanticDescriptors,
-    ),
-    ambiguityDictionary: new SearchSnapshotAmbiguityDictionary(new Map(payload.ambiguityEntries)),
-    conceptRedirectRegistry: new SearchSnapshotConceptRedirectRegistry(new Map(payload.conceptRedirectEntries)),
-    exactSafeRegistry: new SearchSnapshotExactSafeRegistry(
-      new Map(payload.exactEntries),
-      new Map(payload.compactEntries),
-    ),
+    entityScopeGraph,
+    ambiguityDictionary,
+    conceptRedirectRegistry,
+    exactSafeRegistry,
+    loadProfile: {
+      ...loadProfileBase,
+      materializeMs,
+      totalMs: roundMs(
+        loadProfileBase.manifestReadMs
+        + loadProfileBase.manifestParseMs
+        + (loadProfileBase.cacheReadProfile === undefined
+          ? 0
+          : loadProfileBase.cacheReadProfile.readMs
+            + loadProfileBase.cacheReadProfile.deserializeMs
+            + loadProfileBase.cacheReadProfile.validateMs)
+        + (loadProfileBase.artifactReadMs ?? 0)
+        + (loadProfileBase.artifactParseMs?.totalMs ?? 0)
+        + materializeMs.totalMs,
+      ),
+    },
   };
 }
 
@@ -346,7 +459,9 @@ async function loadLookupRuntimeBundleFromArtifacts(
   cacheKey: string,
   manifestPath: string,
   manifest: z.infer<typeof LookupRuntimeBundleManifestSchema>,
+  loadProfileBase: Omit<LookupRuntimeBundleLoadProfile, 'source' | 'materializeMs' | 'totalMs' | 'artifactReadMs' | 'artifactParseMs'>,
 ): Promise<LookupRuntimeBundle> {
+  const artifactReadStartedAt = performance.now();
   const [
     aliasRuntimeRaw,
     aliasBroadRecallRuntimeRaw,
@@ -372,6 +487,9 @@ async function loadLookupRuntimeBundleFromArtifacts(
     fs.readFile(manifest.artifacts.lookupAmbiguityRuntimeJson, 'utf8'),
     fs.readFile(manifest.artifacts.lookupConceptRedirectRuntimeJson, 'utf8'),
   ]);
+  const artifactReadMs = roundMs(performance.now() - artifactReadStartedAt);
+  const artifactParseStartedAt = performance.now();
+  const aliasRuntimeStartedAt = performance.now();
   const aliasRuntimeArtifact = manifest.artifacts.lookupAliasBroadRecallRuntimeJson === undefined
     ? parseTrustedLookupAliasRuntimeArtifact(
       aliasRuntimeRaw,
@@ -381,6 +499,8 @@ async function loadLookupRuntimeBundleFromArtifacts(
       aliasRuntimeRaw,
       manifest.artifacts.lookupAliasRuntimeJson,
     );
+  const aliasRuntimeMs = roundMs(performance.now() - aliasRuntimeStartedAt);
+  const aliasBroadRecallRuntimeStartedAt = performance.now();
   const aliasBroadRecallRuntimeArtifact =
     aliasBroadRecallRuntimeRaw === undefined || manifest.artifacts.lookupAliasBroadRecallRuntimeJson === undefined
       ? undefined
@@ -388,44 +508,66 @@ async function loadLookupRuntimeBundleFromArtifacts(
         aliasBroadRecallRuntimeRaw,
         manifest.artifacts.lookupAliasBroadRecallRuntimeJson,
       );
+  const aliasBroadRecallRuntimeMs = roundMs(performance.now() - aliasBroadRecallRuntimeStartedAt);
 
+  const exactSafeMapsStartedAt = performance.now();
   const exactSafeMaps = buildExactSafeMaps(
     exactSafeRuntimeRaw,
     manifest.artifacts.lookupExactSafeRuntimeJson,
   );
+  const exactSafeMapsMs = roundMs(performance.now() - exactSafeMapsStartedAt);
+  const resolverProjectionStartedAt = performance.now();
   const resolverProjection = buildResolverProjectionMap(
     resolverProjectionRaw,
     manifest.artifacts.lookupResolverProjectionJson,
     exactSafeMaps.certificatesByEntity,
   );
+  const resolverProjectionMs = roundMs(performance.now() - resolverProjectionStartedAt);
+  const entityProjectionStartedAt = performance.now();
   const entityProjectionArtifact = parseTrustedLookupEntityProjectionArtifact(
     entityProjectionRaw,
     manifest.artifacts.lookupEntityProjectionJson,
   );
+  const entityProjectionMs = roundMs(performance.now() - entityProjectionStartedAt);
+  const semanticScopeRuntimeStartedAt = performance.now();
   const semanticScopeRuntimeArtifact = parseTrustedLookupSemanticScopeRuntimeArtifact(
     semanticScopeRuntimeRaw,
     manifest.artifacts.lookupSemanticScopeRuntimeJson,
   );
+  const semanticScopeRuntimeMs = roundMs(performance.now() - semanticScopeRuntimeStartedAt);
+  const reviewedFamilyRecallRuntimeStartedAt = performance.now();
   const reviewedFamilyRecallRuntimeArtifact = parseTrustedLookupReviewedFamilyRecallRuntimeArtifact(
     reviewedFamilyRecallRuntimeRaw,
     manifest.artifacts.lookupReviewedFamilyRecallRuntimeJson,
   );
+  const reviewedFamilyRecallRuntimeMs = roundMs(
+    performance.now() - reviewedFamilyRecallRuntimeStartedAt,
+  );
+  const scopeGraphRuntimeStartedAt = performance.now();
   const scopeGraphRuntimeArtifact = parseTrustedLookupScopeGraphRuntimeArtifact(
     scopeGraphRuntimeRaw,
     manifest.artifacts.lookupScopeGraphRuntimeJson,
   );
+  const scopeGraphRuntimeMs = roundMs(performance.now() - scopeGraphRuntimeStartedAt);
+  const semanticDescriptorMapStartedAt = performance.now();
   const semanticDescriptorMap = buildLookupSemanticDescriptorMapFromProjectionDocuments(
     entityProjectionArtifact.documents,
   );
+  const semanticDescriptorMapMs = roundMs(performance.now() - semanticDescriptorMapStartedAt);
+  const ambiguityRuntimeStartedAt = performance.now();
   const ambiguityEntries = buildAmbiguityMap(
     ambiguityRuntimeRaw,
     manifest.artifacts.lookupAmbiguityRuntimeJson,
   );
+  const ambiguityRuntimeMs = roundMs(performance.now() - ambiguityRuntimeStartedAt);
+  const conceptRedirectRuntimeStartedAt = performance.now();
   const conceptRedirectEntries = buildConceptRedirectMap(
     conceptRedirectRuntimeRaw,
     manifest.artifacts.lookupConceptRedirectRuntimeJson,
   );
+  const conceptRedirectRuntimeMs = roundMs(performance.now() - conceptRedirectRuntimeStartedAt);
 
+  const payloadBuildStartedAt = performance.now();
   const payload = buildLookupRuntimeBundleCachePayload({
     snapshotId: manifest.snapshotId,
     aliasContentHash: manifest.hashes.aliases,
@@ -439,13 +581,40 @@ async function loadLookupRuntimeBundleFromArtifacts(
     resolverProjectionDocuments: buildResolverProjectionDocuments(resolverProjection),
     semanticDescriptors: buildSemanticDescriptorEntries(semanticDescriptorMap),
     semanticScopeEntries: buildSemanticScopeEntries(semanticScopeRuntimeArtifact.entries),
+    semanticScopeComponentSurfaces: semanticScopeRuntimeArtifact.componentSurfaces ?? {},
     reviewedFamilyRecallEntries: buildReviewedFamilyRecallEntries(reviewedFamilyRecallRuntimeArtifact.entries),
     scopeGraphAdjacency: buildScopeGraphAdjacency(scopeGraphRuntimeArtifact.adjacency),
     ambiguityEntries: [...ambiguityEntries.entries()],
     conceptRedirectEntries: [...conceptRedirectEntries.entries()],
   });
+  const payloadBuildMs = roundMs(performance.now() - payloadBuildStartedAt);
+  const artifactParseMs = {
+    aliasRuntimeMs,
+    aliasBroadRecallRuntimeMs,
+    exactSafeMapsMs,
+    resolverProjectionMs,
+    entityProjectionMs,
+    semanticScopeRuntimeMs,
+    reviewedFamilyRecallRuntimeMs,
+    scopeGraphRuntimeMs,
+    semanticDescriptorMapMs,
+    ambiguityRuntimeMs,
+    conceptRedirectRuntimeMs,
+    payloadBuildMs,
+    totalMs: roundMs(performance.now() - artifactParseStartedAt),
+  };
 
-  return materializeLookupRuntimeBundleFromPayload(cacheKey, manifestPath, payload);
+  void writeLookupRuntimeBundleCache(payload).catch(() => {
+    // Cache backfill is an optimization only. Serving authority remains the
+    // parsed snapshot artifacts, so cache write failures must not block boot.
+  });
+
+  return materializeLookupRuntimeBundleFromPayload(cacheKey, manifestPath, payload, {
+    ...loadProfileBase,
+    source: 'artifacts',
+    artifactReadMs,
+    artifactParseMs,
+  });
 }
 
 export async function loadLookupRuntimeBundle(
@@ -465,9 +634,36 @@ export async function loadLookupRuntimeBundle(
 
   manifestPathByCacheKey.set(cacheKey, manifestPath);
   const pending = (async (): Promise<LookupRuntimeBundle> => {
+    const manifestReadStartedAt = performance.now();
     const manifestRaw = await fs.readFile(manifestPath, 'utf8');
+    const manifestReadMs = roundMs(performance.now() - manifestReadStartedAt);
+    const manifestParseStartedAt = performance.now();
     const manifest = parseBundleManifest(manifestRaw, manifestPath);
-    return await loadLookupRuntimeBundleFromArtifacts(cacheKey, manifestPath, manifest);
+    const manifestParseMs = roundMs(performance.now() - manifestParseStartedAt);
+    const artifactPaths = buildArtifactPaths(manifest);
+    const cacheResult = await readLookupRuntimeBundleCacheProfiled({
+      manifestPath,
+      snapshotId: manifest.snapshotId,
+      aliasContentHash: manifest.hashes.aliases,
+      artifactPaths,
+    });
+    const loadProfileBase = {
+      manifestReadMs,
+      manifestParseMs,
+      cacheReadProfile: cacheResult.profile,
+    } satisfies Omit<LookupRuntimeBundleLoadProfile, 'source' | 'materializeMs' | 'totalMs'>;
+    if (cacheResult.payload !== undefined) {
+      return materializeLookupRuntimeBundleFromPayload(
+        cacheKey,
+        manifestPath,
+        cacheResult.payload,
+        {
+          ...loadProfileBase,
+          source: 'cache',
+        },
+      );
+    }
+    return await loadLookupRuntimeBundleFromArtifacts(cacheKey, manifestPath, manifest, loadProfileBase);
   })();
 
   lookupRuntimeBundleCache.set(cacheKey, pending);
@@ -582,6 +778,7 @@ export async function backfillLookupRuntimeBundleCacheFromManifest(
     resolverProjectionDocuments: buildResolverProjectionDocuments(resolverProjection),
     semanticDescriptors: buildSemanticDescriptorEntries(semanticDescriptorMap),
     semanticScopeEntries: buildSemanticScopeEntries(semanticScopeRuntimeArtifact.entries),
+    semanticScopeComponentSurfaces: semanticScopeRuntimeArtifact.componentSurfaces ?? {},
     reviewedFamilyRecallEntries: buildReviewedFamilyRecallEntries(reviewedFamilyRecallRuntimeArtifact.entries),
     scopeGraphAdjacency: buildScopeGraphAdjacency(scopeGraphRuntimeArtifact.adjacency),
       ambiguityEntries: [...ambiguityEntries.entries()],

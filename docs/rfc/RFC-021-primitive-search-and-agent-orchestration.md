@@ -108,7 +108,7 @@
 - `POST /v1/search/hybrid`
 - `POST /v1/search/semantic`
 - `POST /v1/search/lexical`
-- `POST /v1/lookup/wine`
+- `POST /v2/entity-lookup`
 
 이 라우트들은 path가 lane authority다. body가 lane을 override하지 않는다.
 
@@ -340,7 +340,7 @@ anchor resolution을 agent prompt에 위임하면 identity authority가 사라�
 - `POST /v1/search/hybrid`
 - `POST /v1/search/semantic`
 - `POST /v1/search/lexical`
-- `POST /v1/lookup/wine`
+- `POST /v2/entity-lookup`
 
 선택지:
 

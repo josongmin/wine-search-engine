@@ -10,7 +10,6 @@ import {
 import { createSnapshotHealthReader } from '../infrastructure/health/snapshot-health-reader.js';
 import type { DrinkingWindowPredictorPort } from '../domain/drinking-window/port/drinking-window-predictor.port.js';
 import type { CalibrationStore } from '../domain/resolver/port/calibration-store.port.js';
-import { loadRuntimeLtrModels } from '../infrastructure/adapter/runtime-ltr-model-loader.js';
 import { inspectEvalBenchmarkLedgerStatus } from '../infrastructure/db/eval-benchmark-ledger-bootstrap.js';
 import type { Pool, PoolClient } from 'pg';
 import type {
@@ -20,7 +19,6 @@ import type {
 import { bootstrapLogger } from '../domain/shared/bootstrap-logger.js';
 import { globalSilentSkipCounter } from '../domain/observability/silent-skip-counters.js';
 import { isRuntimeSupportedDrinkingWindowModelVersion } from '../application/search/drinking-window-confidence.js';
-import { isLtrServingEnabled } from './ltr-serving-mode.js';
 
 const log = bootstrapLogger.child({ component: 'readiness' });
 const PROBE_TIMEOUT_MS = 3_000;
@@ -153,14 +151,6 @@ async function probeBenchmarkPersistence(pool: Pool): Promise<ReadinessStatus> {
     if (timer !== undefined) clearTimeout(timer);
     client?.release();
   }
-}
-
-async function probeRuntimeLtrArtifact(path: string): Promise<ReadinessStatus> {
-  const runtimeModels = await loadRuntimeLtrModels(path);
-  if (runtimeModels === undefined) {
-    throw new Error(`runtime LTR artifact unavailable at ${path}`);
-  }
-  return runtimeModels.size > 0 ? 'up' : 'down';
 }
 
 async function probeSearchSnapshotRuntimeWithoutPool(args?: {
@@ -315,11 +305,8 @@ export function buildHealthRouteOptions(
 ): HealthRouteOptions {
   const isProduction = config.nodeEnv === 'production';
   const hasPool = runtime.pool !== undefined;
-  const runtimeLtrModelsPath = config.runtimeLtrModelsPath;
   const runtimePool = runtime.pool;
   const runStartupEval = config.eval.runAtStartup;
-  const rerankerConfigured = config.cohere.apiKey !== undefined;
-  const ltrServingEnabled = isLtrServingEnabled(config);
   const blockerZeroCandidatesBaseline =
     globalSilentSkipCounter.snapshot().blocker_zero_candidates;
 
@@ -391,7 +378,6 @@ export function buildHealthRouteOptions(
       search_snapshot_runtime: {
         required: true, // T-E7-02: strict fail-closed regardless of NODE_ENV
         check: async (): Promise<ReadinessStatus> => {
-          const requireActiveLtr = config.searchSnapshot.requireActiveLtrForRuntime;
           if (runtime.pool === undefined) {
             if (isProduction) {
               return 'down';
@@ -400,34 +386,10 @@ export function buildHealthRouteOptions(
           }
           return probeSearchSnapshotRuntimeWithPool({
             pool: runtime.pool,
-            requireActiveLtr,
+            requireActiveLtr: false,
           });
         },
       },
-      search_snapshot_ltr: {
-        required: false,
-        check: async (): Promise<ReadinessStatus> => {
-          if (runtime.pool === undefined) {
-            if (isProduction) {
-              return 'down';
-            }
-            return probeSearchSnapshotRuntimeWithoutPool({ requireActiveLtr: true });
-          }
-          return probeSearchSnapshotRuntimeWithPool({
-            pool: runtime.pool,
-            requireActiveLtr: true,
-          });
-        },
-      },
-      ...(ltrServingEnabled && runtimeLtrModelsPath !== undefined
-        ? {
-            runtime_ltr_artifact: {
-              required: !rerankerConfigured,
-              check: async (): Promise<ReadinessStatus> =>
-                probeRuntimeLtrArtifact(runtimeLtrModelsPath),
-            },
-          }
-        : {}),
       ...(runtimeReadiness !== undefined
         ? {
             runtime_ltr_effective: {
@@ -436,13 +398,14 @@ export function buildHealthRouteOptions(
                 Promise.resolve(
                   runtimeReadiness.ltrModels.effective.loaded
                     || runtimeReadiness.ltrModels.effective.issue === 'disabled'
+                    || runtimeReadiness.ltrModels.effective.issue === 'unsupported'
                     ? 'up'
                     : 'down',
                 ),
             },
           }
         : {}),
-      ...(rerankerConfigured
+      ...(config.cohere.apiKey !== undefined
         ? {
             reranker: {
               required: false,

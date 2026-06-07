@@ -83,10 +83,10 @@ deploy-manual image_tag="":
 verify-app-endpoints query="opus one" lookup_query="opus one" base_url="{{dedicated_app_base_url}}":
     @query='{{query}}'; lookup_query='{{lookup_query}}'; base_url='{{base_url}}'; \
     base_url="$${base_url%/}"; \
-    for path in /health /ready /v1/search/hybrid /v1/search/semantic /v1/search/lexical /v1/lookup/wine /v1/agent; do \
+    for path in /health /ready /v1/search/hybrid /v1/search/semantic /v1/search/lexical /v2/entity-lookup /v1/agent; do \
       if [ "$$path" = "/health" ] || [ "$$path" = "/ready" ]; then \
         curl -fsS "$$base_url$$path" | python3 -m json.tool; \
-      elif [ "$$path" = "/v1/lookup/wine" ]; then \
+      elif [ "$$path" = "/v2/entity-lookup" ]; then \
         curl -fsS -X POST "$$base_url$$path" -H "Content-Type: application/json" -d "{\"query\":\"$$lookup_query\"}" | python3 -m json.tool; \
       elif [ "$$path" = "/v1/agent" ]; then \
         curl -fsS -X POST "$$base_url$$path" -H "Content-Type: application/json" -d "{\"messages\":[{\"role\":\"user\",\"content\":\"$$query\"}]}" | python3 -m json.tool; \

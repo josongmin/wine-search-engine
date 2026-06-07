@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { buildCoverageReport } from '../../../src/domain/resolver/v2/coverage-report.js';
 
 describe('coverage-report strict operator buckets', () => {
-  it('splits unresolved hot rows by strict collision, localized gap, catalog support, and scope target gap', () => {
+  it('splits unresolved hot rows by strict collision, family/qualified surface gaps, scope support, and scope target gap', () => {
     const report = buildCoverageReport([
       {
         qid: 'q1',
@@ -20,7 +20,7 @@ describe('coverage-report strict operator buckets', () => {
         expectedEntityHint: 'veuve clicquot',
         class: 'realworld_korean_orthography',
         observedStatus: 'failed',
-        supportStatus: 'active_catalog_absent',
+        supportStatus: 'active_entity_absent',
       },
       {
         qid: 'q3',
@@ -29,7 +29,7 @@ describe('coverage-report strict operator buckets', () => {
         expectedEntityHint: 'masseto',
         class: 'realworld_korean_orthography',
         observedStatus: 'failed',
-        localizedSurfaceReviewed: false,
+        surfaceGapBucket: 'family_surface_gap',
       },
       {
         qid: 'q4',
@@ -38,21 +38,31 @@ describe('coverage-report strict operator buckets', () => {
         expectedEntityHint: 'solaia',
         class: 'realworld_vintage_suffix',
         observedStatus: 'failed',
-        localizedSurfaceReviewed: true,
+        surfaceGapBucket: 'qualified_scope_surface_gap',
+      },
+      {
+        qid: 'q5',
+        query: '오푸스 원 2019',
+        expectedStatus: 'resolved',
+        expectedEntityHint: 'opus one',
+        class: 'realworld_vintage_suffix',
+        observedStatus: 'failed',
       },
     ]);
 
     expect(report.holesByOperatorBucket).toEqual({
       strict_collision_ambiguous: 1,
-      localized_surface_gap: 1,
+      family_surface_gap: 1,
+      qualified_scope_surface_gap: 1,
       scope_target_missing: 1,
-      catalog_support_needed: 1,
+      scope_support_needed: 1,
     });
     expect(report.holes.map((hole) => [hole.qid, hole.operatorBucket])).toEqual([
       ['q1', 'strict_collision_ambiguous'],
-      ['q2', 'catalog_support_needed'],
-      ['q3', 'localized_surface_gap'],
-      ['q4', 'scope_target_missing'],
+      ['q2', 'scope_support_needed'],
+      ['q3', 'family_surface_gap'],
+      ['q4', 'qualified_scope_surface_gap'],
+      ['q5', 'scope_target_missing'],
     ]);
   });
 });

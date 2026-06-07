@@ -24,11 +24,11 @@ import {
   loadLookupV2SemanticPolicyRegistryMapSync,
   type LookupV2SemanticPolicyRegistryRow,
 } from './lookup-v2-semantic-policy-registry.js';
-import type { LookupV2FamilySupportRegistryRow } from './lookup-v2-family-support-registry.js';
 import {
-  DEFAULT_LOOKUP_V2_FAMILY_SUPPORT_REGISTRY_PATH,
-  loadLookupV2FamilySupportRegistryMapSync,
-} from './lookup-v2-family-support-registry.js';
+  DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_SUPPORT_REGISTRY_PATH,
+  loadLookupV2SemanticScopeSupportRegistryMapSync,
+  type LookupV2SemanticScopeSupportRegistryRow,
+} from './lookup-v2-semantic-scope-support-registry.js';
 import type { LookupV2FamilyCollisionRegistryRow } from './lookup-v2-family-collision-registry.js';
 import {
   DEFAULT_LOOKUP_V2_FAMILY_COLLISION_REGISTRY_PATH,
@@ -70,13 +70,14 @@ export interface LookupV2CurationDraftRow {
     | 'reviewed_collision';
   readonly operatorBucket?:
     | 'strict_collision_ambiguous'
-    | 'localized_surface_gap'
+    | 'family_surface_gap'
+    | 'qualified_scope_surface_gap'
     | 'scope_target_missing'
-    | 'catalog_support_needed'
+    | 'scope_support_needed'
     | undefined;
   readonly policyConflictHint?: string | undefined;
   readonly semanticConflictKey?: string | undefined;
-  readonly supportStatus?: LookupV2FamilySupportRegistryRow['supportStatus'] | undefined;
+  readonly supportStatus?: LookupV2SemanticScopeSupportRegistryRow['supportStatus'] | undefined;
   readonly collisionStatus?: LookupV2FamilyCollisionRegistryRow['collisionStatus'] | undefined;
   readonly sourceArtifact: string;
   readonly sourceEvidence: string;
@@ -96,7 +97,7 @@ export function buildLookupV2CurationDraftRows(
   semanticScopeTargetRejectedMap: ReadonlyMap<string, LookupV2SemanticScopeTargetRegistryRow> = loadLookupV2SemanticScopeTargetRejectedMapSync(),
   policyConflictBenchmarkOwners: ReadonlyMap<string, LookupPolicyConflictRegistryRow> = loadLookupPolicyConflictBenchmarkHintOwnerMapSync(),
   semanticPolicyMap: ReadonlyMap<string, LookupV2SemanticPolicyRegistryRow> = loadLookupV2SemanticPolicyRegistryMapSync(),
-  familySupportRegistryMap: ReadonlyMap<string, LookupV2FamilySupportRegistryRow> = loadLookupV2FamilySupportRegistryMapSync(),
+  semanticScopeSupportRegistryMap: ReadonlyMap<string, LookupV2SemanticScopeSupportRegistryRow> = loadLookupV2SemanticScopeSupportRegistryMapSync(),
   familyCollisionRegistryMap: ReadonlyMap<string, LookupV2FamilyCollisionRegistryRow> = loadLookupV2FamilyCollisionRegistryMapSync(),
 ): readonly LookupV2CurationDraftRow[] {
   const runtimeDescriptorMap = loadLookupV2RuntimeSemanticDescriptorMapSync();
@@ -114,9 +115,6 @@ export function buildLookupV2CurationDraftRows(
       : undefined;
     const hintResolvedEntityId = normalizedBenchmarkHint !== undefined
       ? benchmarkGoldHintMap.get(normalizedBenchmarkHint)
-      : undefined;
-    const familySupportRegistryRow = normalizedBenchmarkHint !== undefined
-      ? familySupportRegistryMap.get(normalizedBenchmarkHint)
       : undefined;
     const familyCollisionRegistryRow = normalizedBenchmarkHint !== undefined
       ? familyCollisionRegistryMap.get(normalizedBenchmarkHint)
@@ -155,6 +153,7 @@ export function buildLookupV2CurationDraftRows(
       : fallbackScope;
     const approvedSemanticTarget = semanticScopeTargetApprovedMap.get(baselineScope.semanticScopeKey);
     const rejectedSemanticTarget = semanticScopeTargetRejectedMap.get(baselineScope.semanticScopeKey);
+    const semanticScopeSupportRegistryRow = semanticScopeSupportRegistryMap.get(baselineScope.semanticScopeKey);
     const semanticConflictKey = policyConflictOwner !== undefined
       ? buildLookupSemanticConflictKey({
           scopeAxis: baselineScope.scopeAxis,
@@ -202,9 +201,9 @@ export function buildLookupV2CurationDraftRows(
     const allowsCollisionScopedReviewedAuthority =
       benchmarkGoldEntityIdSource === 'semantic_scope_target_registry'
       || benchmarkGoldEntityIdSource === 'fixture_exact';
-    if (familySupportRegistryRow !== undefined && rowBenchmarkGoldEntityId !== undefined) {
+    if (semanticScopeSupportRegistryRow !== undefined && rowBenchmarkGoldEntityId !== undefined) {
       throw new Error(
-        `catalog_absent family support conflicts with reviewed authority for benchmarkGoldHint=${JSON.stringify(task.benchmarkGoldHint)}`,
+        `scope_support semantic scope support conflicts with reviewed authority for semanticScopeKey=${JSON.stringify(baselineScope.semanticScopeKey)}`,
       );
     }
     if (
@@ -216,9 +215,9 @@ export function buildLookupV2CurationDraftRows(
         `reviewed_collision family collision conflicts with reviewed authority for benchmarkGoldHint=${JSON.stringify(task.benchmarkGoldHint)}`,
       );
     }
-    if (familyCollisionRegistryRow !== undefined && familySupportRegistryRow !== undefined) {
+    if (familyCollisionRegistryRow !== undefined && semanticScopeSupportRegistryRow !== undefined) {
       throw new Error(
-        `reviewed_collision family collision conflicts with catalog_absent support for benchmarkGoldHint=${JSON.stringify(task.benchmarkGoldHint)}`,
+        `reviewed_collision family collision conflicts with semantic scope support for semanticScopeKey=${JSON.stringify(baselineScope.semanticScopeKey)}`,
       );
     }
     if (semanticPolicyDecision?.decision === 'keep_ambiguous' || semanticPolicyDecision?.decision === 'needs_scope_target') {
@@ -226,7 +225,7 @@ export function buildLookupV2CurationDraftRows(
     }
     const triageBucket = rejectedSemanticTarget !== undefined
       ? 'reviewed_rejected'
-      : familySupportRegistryRow !== undefined
+      : semanticScopeSupportRegistryRow !== undefined
         ? 'catalog_support_review'
       : isPendingPolicyReview
         ? 'scope_policy_review'
@@ -234,7 +233,7 @@ export function buildLookupV2CurationDraftRows(
           ? 'auto_targetable'
       : familyCollisionRegistryRow?.collisionStatus === 'active_entity_collision'
         ? 'reviewed_collision'
-        : task.operatorBucket === 'localized_surface_gap'
+        : task.operatorBucket === 'family_surface_gap' || task.operatorBucket === 'qualified_scope_surface_gap'
           ? 'localized_surface_review'
           : 'scope_target_review';
     return [{
@@ -262,7 +261,7 @@ export function buildLookupV2CurationDraftRows(
       ...(task.operatorBucket !== undefined ? { operatorBucket: task.operatorBucket } : {}),
       ...(isPendingPolicyReview && task.benchmarkGoldHint !== undefined ? { policyConflictHint: task.benchmarkGoldHint } : {}),
       ...(semanticConflictKey !== undefined ? { semanticConflictKey } : {}),
-      ...(familySupportRegistryRow !== undefined ? { supportStatus: familySupportRegistryRow.supportStatus } : {}),
+      ...(semanticScopeSupportRegistryRow !== undefined ? { supportStatus: semanticScopeSupportRegistryRow.supportStatus } : {}),
       ...(familyCollisionRegistryRow !== undefined ? { collisionStatus: familyCollisionRegistryRow.collisionStatus } : {}),
       sourceArtifact,
       sourceEvidence: task.reason,
@@ -279,7 +278,8 @@ function main(): void {
       output: { type: 'string', default: 'data/lookup-v2/drafts/lookup-v2-curation-draft.jsonl' },
       semanticScopeTargetRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_TARGET_REGISTRY_PATH },
       semanticPolicyRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_SEMANTIC_POLICY_REGISTRY_PATH },
-      familySupportRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_FAMILY_SUPPORT_REGISTRY_PATH },
+      semanticScopeSupportRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_SUPPORT_REGISTRY_PATH },
+      familySupportRegistry: { type: 'string' },
       familyCollisionRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_FAMILY_COLLISION_REGISTRY_PATH },
     },
   });
@@ -288,7 +288,9 @@ function main(): void {
   const outputPath = values.output ?? 'data/lookup-v2/drafts/lookup-v2-curation-draft.jsonl';
   const semanticScopeTargetRegistryPath = values.semanticScopeTargetRegistry ?? DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_TARGET_REGISTRY_PATH;
   const semanticPolicyRegistryPath = values.semanticPolicyRegistry ?? DEFAULT_LOOKUP_V2_SEMANTIC_POLICY_REGISTRY_PATH;
-  const familySupportRegistryPath = values.familySupportRegistry ?? DEFAULT_LOOKUP_V2_FAMILY_SUPPORT_REGISTRY_PATH;
+  const semanticScopeSupportRegistryPath = values.semanticScopeSupportRegistry
+    ?? values.familySupportRegistry
+    ?? DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_SUPPORT_REGISTRY_PATH;
   const familyCollisionRegistryPath = values.familyCollisionRegistry ?? DEFAULT_LOOKUP_V2_FAMILY_COLLISION_REGISTRY_PATH;
   const parsed = JSON.parse(readFileSync(inputPath, 'utf8')) as {
     generatedAt?: string;
@@ -305,7 +307,7 @@ function main(): void {
     loadLookupV2SemanticScopeTargetRejectedMapSync(semanticScopeTargetRegistryPath),
     undefined,
     loadLookupV2SemanticPolicyRegistryMapSync(semanticPolicyRegistryPath),
-    loadLookupV2FamilySupportRegistryMapSync(familySupportRegistryPath),
+    loadLookupV2SemanticScopeSupportRegistryMapSync(semanticScopeSupportRegistryPath),
     loadLookupV2FamilyCollisionRegistryMapSync(familyCollisionRegistryPath),
   );
   const autoTargetable = rows.filter((row) => row.triageBucket === 'auto_targetable').length;

@@ -95,7 +95,7 @@ pnpm run lint && pnpm run typecheck && pnpm run test   # 푸시 전
 | POST | `/v1/search/hybrid` | 하이브리드 검색 경로 강제 |
 | POST | `/v1/search/semantic` | dense-only 검색 경로 강제 |
 | POST | `/v1/search/lexical` | sparse/BM25-only 검색 경로 강제 |
-| POST | `/v1/lookup/wine` | 단일 와인 엔터티 해소 |
+| POST | `/v2/entity-lookup` | 단일 와인 엔터티 해소 |
 | POST | `/v1/agent` | single-shot agent 실행 |
 | POST | `/v1/agent/sessions` | 서버 보관형 agent 세션 생성 |
 | POST | `/v1/agent/sessions/:sessionId/turns` | agent 세션 turn 추가 |
@@ -129,7 +129,7 @@ flowchart TD
 - **`/v1/search/hybrid`** — 검색과 동일 오케스트레이션이나 **하이브리드만** 강제 실행.
 - **`/v1/search/semantic`** — dense-only 경로를 강제해 lexical 후보군을 배제.
 - **`/v1/search/lexical`** — sparse/BM25-only 경로를 강제해 임베딩 후보군을 배제.
-- **`/v1/lookup/wine`** — discovery 대신 단일 canonical wine 해소만 수행.
+- **`/v2/entity-lookup`** — discovery 대신 단일 canonical wine 해소만 수행.
 
 ---
 
@@ -279,7 +279,7 @@ flowchart TD
 
 | 스위트 파일 | 시나리오(요약) |
 |-------------|----------------|
-| **`search-api.search.test.ts`** | primitive search + lookup 계약: `POST /v1/search/{hybrid,semantic,lexical}` + `POST /v1/lookup/wine` |
+| **`search-api.search.test.ts`** | primitive search + lookup 계약: `POST /v1/search/{hybrid,semantic,lexical}` + `POST /v2/entity-lookup` |
 | **`search-api.ops.test.ts`** | `/health`, `/ready` ops endpoint 계약 |
 | **`wine-search-api.test.ts`** | canonical `/v1/agent` single-shot 계약: happy path, validation, abort, 응답 봉투 |
 | **`schema-contract.test.ts`** | 요청·응답 **Zod** 형태 vs 픽스처 |

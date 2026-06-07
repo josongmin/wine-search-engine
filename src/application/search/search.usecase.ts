@@ -386,8 +386,8 @@ export class SearchUseCase {
       ...(stageTimer !== undefined ? { stageTimer } : {}),
       // T-IR-01: forward the path-authoritative retrieval lane (set by the
       // `/v1/search/{hybrid,semantic,lexical}` route mappers) into the
-      // retrieval layer. Absent for `/v1/lookup/wine` and non-primitive
-      // internal callers, which run the default channel mix.
+      // retrieval layer. Absent for the dedicated lookup authority and
+      // non-primitive internal callers, which run the default channel mix.
       ...(request.retrievalLane !== undefined ? { retrievalLane: request.retrievalLane } : {}),
       requestId,
       requestStartTimeMs: startTime,

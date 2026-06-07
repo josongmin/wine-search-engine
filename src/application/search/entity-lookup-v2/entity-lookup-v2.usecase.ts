@@ -69,6 +69,7 @@ import { PipelineDebugStep } from '../../../domain/observability/pipeline-debug-
 import { throwIfAborted } from '../../../domain/shared/cooperative-abort.js';
 import type { RequestExecutionContext } from '../../../domain/shared/request-execution-context.js';
 import { PolicyBlockedError } from '../../../domain/shared/error/policy-blocked.js';
+import { extractQueryVintageYear } from '../../../domain/shared/utils/vintage.js';
 import type { LookupPlannerPort } from './lookup-planner.port.js';
 import type { LookupQueryPlan } from './lookup-query-plan.js';
 import type { LookupSemanticScopeRegistryPort } from '../../../domain/resolver/v2/lookup-semantic-scope.js';
@@ -732,6 +733,8 @@ export class EntityLookupV2UseCase {
       && persistedAmbiguity === undefined
       && !vintageMismatch
       && status === 'ambiguous'
+      && extractQueryVintageYear(command.query) === null
+      && hasReviewedFamilyCollisionClarificationEvidence(allCandidates)
         ? this.resolveReviewedScopeTargetIdentity({ command, allCandidates })
         : undefined;
     if (reviewedScopeTargetEntityId !== undefined) {

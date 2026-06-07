@@ -83,8 +83,8 @@ describe('lookup-v2 hotset fixture stays diverse enough to catch real regression
     expect(ambiguousCollisionRows.length).toBeGreaterThanOrEqual(7);
   });
 
-  it('keeps hotset class labels wired into the live shadow scorer for per-class gating', () => {
-    const runner = readFileSync(join(process.cwd(), 'scripts/eval/run-lookup-v2-shadow-compare.ts'), 'utf8');
+  it('keeps hotset class labels wired into the live parity scorer for per-class gating', () => {
+    const runner = readFileSync(join(process.cwd(), 'scripts/eval/run-lookup-v2-parity.ts'), 'utf8');
 
     expect(runner).toContain('queryClass: row.class');
     expect(runner).toContain('await pool.end();');

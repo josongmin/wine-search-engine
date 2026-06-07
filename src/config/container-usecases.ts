@@ -3,12 +3,8 @@ import type { MultiQueryGenerator } from '../domain/retrieval/service/multi-quer
 import type { HydeGenerator } from '../domain/retrieval/service/hyde-generator.js';
 import { InterpretUseCase } from '../application/search/interpret.usecase.js';
 import { ResolveUseCase } from '../application/search/resolve.usecase.js';
-import { EntityLookupV2UseCase } from '../application/search/entity-lookup-v2/entity-lookup-v2.usecase.js';
 import { CurationUseCase } from '../application/curation/curation.usecase.js';
 import { PgCurationStore } from '../infrastructure/curation/pg-curation-store.js';
-import { MultiChannelRetrievalEngine } from '../application/search/entity-lookup-v2/multi-channel-retrieval-engine.js';
-import { ConceptAdmissionGate } from '../domain/resolver/v2/concept-admission-gate.js';
-import { LtrRerankDecider } from '../domain/resolver/v2/ltr-rerank-decider.js';
 import { AutocompleteUseCase } from '../application/search/autocomplete.usecase.js';
 import { HybridUseCase } from '../application/search/hybrid.usecase.js';
 import { DecomposedSearchUseCase } from '../application/search/decomposed-search.usecase.js';
@@ -24,7 +20,6 @@ import type {
   AutocompleteUseCasePort,
   BatchSearchUseCasePort,
   DecomposedSearchUseCasePort,
-  EntityLookupV2UseCasePort,
   HybridUseCasePort,
   InterpretUseCasePort,
   ResolveUseCasePort,
@@ -36,7 +31,6 @@ export interface UseCaseContainerServices {
   readonly searchUseCase: SearchExecutorPort;
   readonly interpretUseCase: InterpretUseCasePort;
   readonly resolveUseCase: ResolveUseCasePort;
-  readonly entityLookupV2UseCase: EntityLookupV2UseCasePort;
   /** Operator curation plane (T-ELV2-07); present only when a PG pool is wired. */
   readonly curationUseCase?: CurationUseCase | undefined;
   readonly autocompleteUseCase: AutocompleteUseCasePort;
@@ -63,52 +57,8 @@ export function buildUseCaseContainerServices(
   config: Config,
   extensions: UseCaseExtensions = {},
 ): UseCaseContainerServices {
-  const aliasRegistryVersion = core.aliasMatcher.getRegistryVersion?.();
   const drinkingWindowUseCase = new DrinkingWindowUseCase(core.drinkingWindowPredictor);
   const queryEntrySecurityObserver = getQueryEntrySecurityMetricsCollector();
-
-  // T-ELV2-01: dedicated `/v2/entity-lookup` use case. Sibling stack to the
-  // discovery primitives — reuses the resolver primitives as substrate, owns
-  // the admission gate + 4-state calibrated decision.
-  const entityLookupV2UseCase = new EntityLookupV2UseCase({
-    admissionGate: new ConceptAdmissionGate(core.lookupConceptRedirectRegistry),
-    lookupPlanner: core.lookupPlanner,
-    entityResolver: core.entityResolver,
-    entityLookup: core.entityLookup,
-    ...(core.resolverProjectionLookup !== undefined
-      ? { resolverProjectionLookup: core.resolverProjectionLookup }
-      : {}),
-    // T-ELV2-04: real independent timed multi-channel retrieval over the live
-    // alias substrate (per-channel latency/score; replaces the latencyMs:0 reproj).
-    candidateRetrieval: new MultiChannelRetrievalEngine({
-      aliasMatcher: core.aliasMatcher,
-      entityLookup: core.entityLookup,
-      ...(core.resolverProjectionLookup !== undefined
-        ? { resolverProjectionLookup: core.resolverProjectionLookup }
-        : {}),
-    }),
-    // T-ELV2-05: learned reranker — wired ONLY when LTR serving is on AND a model
-    // is loaded (core.ltrModels present). When absent we OMIT the reranker entirely
-    // so the calibrated-abstain decision stands alone: otherwise the decider's
-    // lexicalFallback would apply its (self-admitted UNVALIDATED) 0.5/0.1 thresholds
-    // to calibratedScore on every live request and downgrade-only combine could flip
-    // a calibrated resolve — the exact threshold-tweak the ticket forbids. The
-    // learned branch is reached only with a real loaded model (or in tests via an
-    // injected model).
-    ...(core.ltrModels !== undefined
-      ? { reranker: new LtrRerankDecider({ ltrModels: core.ltrModels }) }
-      : {}),
-    // T-ELV2-06: persisted ambiguity substrate (registry-backed) enriches the
-    // clarification contract with authoritative types + severity.
-    ambiguityDictionary: core.lookupAmbiguityDictionary,
-    // T-ELV2-03: dedicated alias-registry version identity read from the live
-    // alias substrate (delegated through the CachedAliasMatcher chain), surfaced
-    // on the V2 response meta. undefined when the matcher carries no version.
-    ...(aliasRegistryVersion !== undefined
-      ? { aliasRegistryVersion }
-      : {}),
-    querySanitizer: core.querySanitizer,
-  });
 
   // T1.3b: Use DecomposedSearchAdapter to break the circular dependency.
   // SearchUseCase needs decomposedSearch; DecomposedSearchUseCase needs SearchUseCase.
@@ -179,7 +129,6 @@ export function buildUseCaseContainerServices(
 
   return {
     searchUseCase,
-    entityLookupV2UseCase,
     ...(curationUseCase !== undefined ? { curationUseCase } : {}),
     interpretUseCase: new InterpretUseCase({
       queryPlanner: core.queryPlanner,

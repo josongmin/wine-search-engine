@@ -1,10 +1,10 @@
 {
   "sourcePacketPath": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-manual-target-family-review-packet.jsonl",
-  "generatedAt": "2026-06-07T01:16:09.727Z",
+  "generatedAt": "2026-06-07T14:11:43.867Z",
   "totalFamilies": 7,
-  "totalScopeRows": 14,
-  "candidateUniqueOwnerFamilies": 4,
-  "collisionCandidateFamilies": 3,
+  "totalScopeRows": 15,
+  "candidateUniqueOwnerFamilies": 5,
+  "collisionCandidateFamilies": 2,
   "missingRuntimeOwnerFamilies": 0,
   "outputPaths": {
     "candidateUniqueOwnerFamilies": "data/lookup-v2/drafts/manual-target-owner-evidence/candidate-unique-owner-families.jsonl",

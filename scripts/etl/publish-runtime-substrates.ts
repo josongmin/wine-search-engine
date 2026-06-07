@@ -4,7 +4,6 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { PoolClient } from 'pg';
 import { loadConfig } from '../../src/config/env.js';
-import { isLtrServingEnabled } from '../../src/config/ltr-serving-mode.js';
 import { createPgPool, shouldUsePgPool } from '../../src/infrastructure/db/pg-pool.js';
 import { loadSearchSnapshotRuntimeState } from '../../src/infrastructure/health/search-snapshot-readiness.js';
 import { atomicWriteFile, chunkArray } from './etl-utils.js';
@@ -1298,12 +1297,7 @@ export async function publishRuntimeSubstratesArtifactOnly(
   const manifest = await loadManifest(args.manifestPath);
   await assertSnapshotArtifactLearnedFacetCoverage(manifest);
   await assertLookupRuntimeArtifactsReady(manifest);
-  const config = loadConfig();
-  if (isLtrServingEnabled(config)) {
-    throw new Error(
-      'artifact-only runtime substrate promote requires LTR_SERVING_ENABLED=false; live registry-backed LTR verification is unavailable in offline mode',
-    );
-  }
+  loadConfig();
 
   const nlMappingsRaw = await fs.readFile(manifest.artifacts.nlMappingsJson, 'utf8');
   await atomicWriteFile(args.runtimeNlMappingsPath, nlMappingsRaw);

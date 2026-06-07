@@ -1,6 +1,6 @@
 {
   "inputArtifact": "/tmp/lookup-v2-coverage-korean-realworld-stretch-entity-no-policy.json",
-  "generatedAt": "2026-06-07T01:16:09.727Z",
+  "generatedAt": "2026-06-07T14:11:43.867Z",
   "outputPaths": {
     "draft": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl",
     "exactSafePacket": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl",
@@ -22,47 +22,45 @@
     "summary": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-write-plane-summary.json"
   },
   "draft": {
-    "rows": 149,
-    "autoTargetable": 75,
-    "scopePolicyReview": 0,
-    "localizedSurfaceReview": 0,
+    "rows": 106,
+    "autoTargetable": 24,
+    "scopePolicyReview": 1,
+    "localizedSurfaceReview": 2,
     "reviewedRejected": 21,
     "catalogSupportReview": 0,
-    "catalogAbsent": 0,
-    "reviewedCollision": 33,
-    "reviewedScopeCollision": 33,
-    "scopeTargetReview": 20
+    "reviewedCollision": 36,
+    "scopeTargetReview": 22
   },
   "exactSafe": {
-    "packetRows": 75,
-    "reviewedAuthorityApprovedRows": 75,
+    "packetRows": 24,
+    "reviewedAuthorityApprovedRows": 24,
     "reviewedAuthorityPendingRows": 0,
     "bySource": {
-      "semantic_scope_target_registry": 75
+      "semantic_scope_target_registry": 24
     },
-    "scopeReviewedRowPacketRows": 75,
-    "familyReviewRows": 68,
+    "scopeReviewedRowPacketRows": 24,
+    "familyReviewRows": 23,
     "familyApprovedRows": 0,
     "familyRejectedRows": 7,
-    "familyPendingRows": 61,
+    "familyPendingRows": 16,
     "familySuggestions": {
       "suggestApprove": 0,
-      "manualReview": 68
+      "manualReview": 23
     }
   },
   "policy": {
-    "reviewRows": 0,
-    "familyReviewRows": 0,
+    "reviewRows": 1,
+    "familyReviewRows": 1,
     "suggestions": {
-      "keepAmbiguous": 0,
+      "keepAmbiguous": 1,
       "manualReview": 0
     }
   },
   "manualTarget": {
     "batchIndex": {
       "sourceDraftPath": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl",
-      "generatedAt": "2026-06-07T01:16:09.727Z",
-      "totalRows": 20,
+      "generatedAt": "2026-06-07T14:11:43.867Z",
+      "totalRows": 22,
       "batches": [
         {
           "holeClass": "realworld_brand_suffix",
@@ -76,7 +74,7 @@
         },
         {
           "holeClass": "realworld_exact_vintage",
-          "rowCount": 8,
+          "rowCount": 10,
           "outputPath": "data/lookup-v2/drafts/manual-target-batches/realworld-exact-vintage.jsonl"
         },
         {
@@ -86,7 +84,7 @@
         },
         {
           "holeClass": "realworld_mixed_script_alias",
-          "rowCount": 2,
+          "rowCount": 1,
           "outputPath": "data/lookup-v2/drafts/manual-target-batches/realworld-mixed-script-alias.jsonl"
         },
         {
@@ -101,16 +99,16 @@
         },
         {
           "holeClass": "realworld_vintage_suffix",
-          "rowCount": 4,
+          "rowCount": 5,
           "outputPath": "data/lookup-v2/drafts/manual-target-batches/realworld-vintage-suffix.jsonl"
         }
       ]
     },
     "ownerEvidenceIndex": {
       "sourcePacketPath": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-manual-target-family-review-packet.jsonl",
-      "generatedAt": "2026-06-07T01:16:09.727Z",
-      "totalRows": 14,
-      "candidateUniqueOwnerRows": 11,
+      "generatedAt": "2026-06-07T14:11:43.867Z",
+      "totalRows": 15,
+      "candidateUniqueOwnerRows": 12,
       "collisionCandidateRows": 3,
       "missingRuntimeOwnerRows": 0,
       "outputPaths": {
@@ -121,11 +119,11 @@
     },
     "ownerEvidenceFamilyIndex": {
       "sourcePacketPath": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-manual-target-family-review-packet.jsonl",
-      "generatedAt": "2026-06-07T01:16:09.727Z",
+      "generatedAt": "2026-06-07T14:11:43.867Z",
       "totalFamilies": 7,
-      "totalScopeRows": 14,
-      "candidateUniqueOwnerFamilies": 4,
-      "collisionCandidateFamilies": 3,
+      "totalScopeRows": 15,
+      "candidateUniqueOwnerFamilies": 5,
+      "collisionCandidateFamilies": 2,
       "missingRuntimeOwnerFamilies": 0,
       "outputPaths": {
         "candidateUniqueOwnerFamilies": "data/lookup-v2/drafts/manual-target-owner-evidence/candidate-unique-owner-families.jsonl",
@@ -133,37 +131,37 @@
         "missingRuntimeOwnerFamilies": "data/lookup-v2/drafts/manual-target-owner-evidence/missing-runtime-owner-families.jsonl"
       }
     },
-    "familyReviewRows": 14,
+    "familyReviewRows": 15,
     "suggestions": {
-      "candidateUniqueOwner": 11,
+      "candidateUniqueOwner": 12,
       "collisionCandidates": 3,
       "missingRuntimeOwner": 0
     }
   },
-  "catalogAbsent": {
+  "scopeSupport": {
     "familyClusterIndex": {
       "sourceDraftPath": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl",
-      "generatedAt": "2026-06-07T01:16:09.727Z",
+      "generatedAt": "2026-06-07T14:11:43.867Z",
       "totalRows": 0,
       "totalFamilies": 0,
-      "outputPath": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-catalog-absent-family-clusters.jsonl"
+      "outputPath": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-scope-support-family-clusters.jsonl"
     }
   },
   "reviewedCollision": {
     "familyClusterIndex": {
       "sourceDraftPath": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl",
-      "generatedAt": "2026-06-07T01:16:09.727Z",
-      "totalRows": 33,
-      "totalFamilies": 12,
+      "generatedAt": "2026-06-07T14:11:43.867Z",
+      "totalRows": 36,
+      "totalFamilies": 13,
       "outputPath": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-reviewed-collision-family-clusters.jsonl",
       "topologyCounts": {
         "single_producer_family_core_only": 4,
         "single_producer_family_core_plus_noisy_recall": 7,
-        "single_producer_mixed_witness": 1
+        "single_producer_mixed_witness": 2
       },
       "governanceCounts": {
         "family_recall_collision": 7,
-        "mixed_collision": 1,
+        "mixed_collision": 2,
         "native_family_core_collision": 2,
         "reviewed_family_core_collision": 2
       },
@@ -172,6 +170,6 @@
       "governanceOutputDir": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-reviewed-collision-family-clusters-by-governance",
       "governanceIndexPath": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-reviewed-collision-family-clusters-by-governance/governance-index.json"
     },
-    "familyReviewRows": 28
+    "familyReviewRows": 30
   }
 }

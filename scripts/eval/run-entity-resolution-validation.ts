@@ -51,7 +51,7 @@ import {
   evaluatePerClassGate,
   type ClassTally,
   type PerClassEntry,
-} from './lookup-v2-shadow-metrics.js';
+} from './lookup-v2-parity-metrics.js';
 
 const SHOULD_RESOLVE_CLASSES = ['exact_entity', 'noisy_recall'] as const;
 const SHOULD_NOT_RESOLVE_CLASSES = ['ambiguous_short_form', 'no_match'] as const;

@@ -54,4 +54,40 @@ describe('SearchSnapshotSemanticScopeRegistry reviewed-anchor seam', () => {
     });
     expect(matches.some((m) => m.entityId === 'wine-ce-angelus-grand-vin')).toBe(true);
   });
+
+  describe('reviewed component-surface index (final architecture L1)', () => {
+    // family::angelus::ko reviewed surfaces — note NONE contain the latin token
+    // "angelus"; matching MUST come from the surface index, not latin literal.
+    const componentSurfaces = new Map<string, ReadonlySet<string>>([
+      ['family::angelus::ko', new Set(['샤또 앙젤뤼스', '앙젤루스'])],
+    ]);
+    const withSurfaces = new SearchSnapshotSemanticScopeRegistry(entries, componentSurfaces);
+
+    it('STRUCTURE PROOF: Korean producer surface matches the family scope via surface index (no latin, no family recall)', () => {
+      const matches = withSurfaces.findMatches({
+        query: '샤또 앙젤뤼스',
+        views: buildNormalizedQueryViews('샤또 앙젤뤼스'),
+        locale: 'ko',
+      });
+      expect(matches.some((m) => m.entityId === 'wine-ce-angelus-grand-vin')).toBe(true);
+    });
+
+    it('without the surface index the same Korean query does NOT match (proves the index is what closes it)', () => {
+      const matches = registry.findMatches({
+        query: '샤또 앙젤뤼스',
+        views: buildNormalizedQueryViews('샤또 앙젤뤼스'),
+        locale: 'ko',
+      });
+      expect(matches).toEqual([]);
+    });
+
+    it('a Korean surface NOT in the reviewed index stays unmatched (no fuzzy leak)', () => {
+      const matches = withSurfaces.findMatches({
+        query: '랜덤 와인 이름',
+        views: buildNormalizedQueryViews('랜덤 와인 이름'),
+        locale: 'ko',
+      });
+      expect(matches).toEqual([]);
+    });
+  });
 });

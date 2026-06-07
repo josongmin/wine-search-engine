@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   assertLookupV2FamilySupportRegistryRowsValid,
   buildLookupV2FamilySupportRegistryMap,
-} from '../../../scripts/eval/lookup-v2-family-support-registry.js';
+} from '../../../scripts/archive/lookup-v2-family-support-registry.js';
 
 describe('lookup-v2-family-support-registry', () => {
   it('accepts reviewed active-catalog-absent rows with deterministic normalized hints', () => {

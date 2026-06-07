@@ -4,7 +4,7 @@ import {
   buildLookupV2ApprovedLocalizedSurfacesByLatinSurfaceMap,
   buildLookupV2LocalizedSurfaceRegistryMap,
   buildLookupV2LocalizedSurfaceRegistryKey,
-} from '../../../scripts/eval/lookup-v2-localized-surface-registry.js';
+} from '../../../scripts/archive/lookup-v2-localized-surface-registry.js';
 
 describe('lookup-v2-localized-surface-registry', () => {
   it('accepts approved localized family rows and indexes both local and latin lookups', () => {

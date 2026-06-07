@@ -27,8 +27,8 @@
    - optional:
      - `--qidPrefix kry`
      - `--write`
-5. merged corpus를 shadow / coverage rail로 재검증
-   - `pnpm run eval:lookup-v2:shadow:korean-realworld-stretch`
+5. merged corpus를 parity / coverage rail로 재검증
+   - `pnpm run eval:lookup-v2:parity:korean-realworld-stretch`
    - `pnpm run eval:lookup-v2:coverage:korean-realworld-stretch`
 
 ## Contracts

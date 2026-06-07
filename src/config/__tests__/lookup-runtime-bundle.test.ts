@@ -1,7 +1,12 @@
 import fs from 'node:fs/promises';
+import { serialize } from 'node:v8';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearLookupRuntimeBundleCacheForTests, loadLookupRuntimeBundle } from '../lookup-runtime-bundle.js';
 import { SEARCH_SNAPSHOT_SCHEMA_VERSION } from '../../domain/shared/constants/search-snapshot.js';
+import {
+  buildLookupRuntimeBundleCachePayload,
+  deriveLookupRuntimeBundleCachePaths,
+} from '../lookup-runtime-bundle-cache.js';
 
 function buildManifest(manifestPath: string, options?: { readonly splitBroadRecallArtifact?: boolean }): string {
   const base = manifestPath.replace(/\/manifest\.json$/, '');
@@ -19,6 +24,9 @@ function buildManifest(manifestPath: string, options?: { readonly splitBroadReca
       lookupExactSafeRuntimeJson: `${base}/lookup-exact-safe-runtime.json`,
       lookupResolverProjectionJson: `${base}/lookup-resolver-projection.json`,
       lookupEntityProjectionJson: `${base}/lookup-entity-projection.json`,
+      lookupSemanticScopeRuntimeJson: `${base}/lookup-semantic-scope-runtime.json`,
+      lookupReviewedFamilyRecallRuntimeJson: `${base}/lookup-reviewed-family-recall-runtime.json`,
+      lookupScopeGraphRuntimeJson: `${base}/lookup-scope-graph-runtime.json`,
       lookupAmbiguityRuntimeJson: `${base}/lookup-ambiguity-runtime.json`,
       lookupConceptRedirectRuntimeJson: `${base}/lookup-concept-redirect-runtime.json`,
     },
@@ -153,6 +161,25 @@ function buildArtifactMap(
         },
       ],
     })],
+    [`${base}/lookup-semantic-scope-runtime.json`, JSON.stringify({
+      schemaVersion: 'lookup_semantic_scope_runtime.v1',
+      snapshotId: 'search-snapshot:v1:test',
+      generatedAt: '2026-06-05T00:00:00.000Z',
+      entries: {},
+      componentSurfaces: {},
+    })],
+    [`${base}/lookup-reviewed-family-recall-runtime.json`, JSON.stringify({
+      schemaVersion: 'lookup_reviewed_family_recall_runtime.v1',
+      snapshotId: 'search-snapshot:v1:test',
+      generatedAt: '2026-06-05T00:00:00.000Z',
+      entries: {},
+    })],
+    [`${base}/lookup-scope-graph-runtime.json`, JSON.stringify({
+      schemaVersion: 'lookup_scope_graph_runtime.v1',
+      snapshotId: 'search-snapshot:v1:test',
+      generatedAt: '2026-06-05T00:00:00.000Z',
+      adjacency: {},
+    })],
     [`${base}/lookup-ambiguity-runtime.json`, JSON.stringify({
       schemaVersion: 'lookup_ambiguity_runtime.v1',
       snapshotId: 'search-snapshot:v1:test',
@@ -166,6 +193,91 @@ function buildArtifactMap(
       entries: {},
     })],
   ]);
+}
+
+function buildCachePayload(
+  manifestPath: string,
+  options?: { readonly splitBroadRecallArtifact?: boolean },
+) {
+  const artifactMap = buildArtifactMap(manifestPath, options);
+  const base = manifestPath.replace(/\/manifest\.json$/, '');
+  const exactArtifact = JSON.parse(artifactMap.get(`${base}/lookup-exact-safe-runtime.json`) ?? '{}');
+  const resolverProjectionArtifact = JSON.parse(artifactMap.get(`${base}/lookup-resolver-projection.json`) ?? '{}');
+  const entityProjectionArtifact = JSON.parse(artifactMap.get(`${base}/lookup-entity-projection.json`) ?? '{}');
+  const semanticScopeArtifact = JSON.parse(artifactMap.get(`${base}/lookup-semantic-scope-runtime.json`) ?? '{}');
+  const reviewedFamilyRecallArtifact = JSON.parse(artifactMap.get(`${base}/lookup-reviewed-family-recall-runtime.json`) ?? '{}');
+  const scopeGraphArtifact = JSON.parse(artifactMap.get(`${base}/lookup-scope-graph-runtime.json`) ?? '{}');
+  const ambiguityArtifact = JSON.parse(artifactMap.get(`${base}/lookup-ambiguity-runtime.json`) ?? '{}');
+  const conceptRedirectArtifact = JSON.parse(artifactMap.get(`${base}/lookup-concept-redirect-runtime.json`) ?? '{}');
+
+  return buildLookupRuntimeBundleCachePayload({
+    snapshotId: 'search-snapshot:v1:test',
+    aliasContentHash: 'alias-hash',
+    manifestPath,
+    artifactPaths: {
+      lookupAliasRuntimeJson: `${base}/lookup-alias-runtime.json`,
+      ...(options?.splitBroadRecallArtifact === true
+        ? { lookupAliasBroadRecallRuntimeJson: `${base}/lookup-alias-broad-recall-runtime.json` }
+        : {}),
+      lookupExactSafeRuntimeJson: `${base}/lookup-exact-safe-runtime.json`,
+      lookupResolverProjectionJson: `${base}/lookup-resolver-projection.json`,
+      lookupSemanticScopeRuntimeJson: `${base}/lookup-semantic-scope-runtime.json`,
+      lookupReviewedFamilyRecallRuntimeJson: `${base}/lookup-reviewed-family-recall-runtime.json`,
+      lookupScopeGraphRuntimeJson: `${base}/lookup-scope-graph-runtime.json`,
+      lookupAmbiguityRuntimeJson: `${base}/lookup-ambiguity-runtime.json`,
+      lookupConceptRedirectRuntimeJson: `${base}/lookup-concept-redirect-runtime.json`,
+    },
+    aliasRuntimeArtifact: JSON.parse(artifactMap.get(`${base}/lookup-alias-runtime.json`) ?? '{}'),
+    ...(options?.splitBroadRecallArtifact === true
+      ? { aliasBroadRecallRuntimeArtifact: JSON.parse(artifactMap.get(`${base}/lookup-alias-broad-recall-runtime.json`) ?? '{}') }
+      : {}),
+    exactEntries: Object.entries(exactArtifact.exactEntries ?? {}).map(([surface, entry]) => [
+      surface,
+      {
+        entityId: (entry as { entityId: string }).entityId as never,
+        locale: (entry as { locale: string }).locale,
+        kind: ((entry as { certificate: { kind: string } }).certificate.kind),
+        normalizedSurface: ((entry as { certificate: { normalizedSurface: string } }).certificate.normalizedSurface),
+      },
+    ] as const),
+    compactEntries: Object.entries(exactArtifact.compactEntries ?? {}).map(([surface, entry]) => [
+      surface,
+      {
+        entityId: (entry as { entityId: string }).entityId as never,
+        locale: (entry as { locale: string }).locale,
+        kind: ((entry as { certificate: { kind: string } }).certificate.kind),
+        normalizedSurface: ((entry as { certificate: { normalizedSurface: string } }).certificate.normalizedSurface),
+      },
+    ] as const),
+    resolverProjectionDocuments: (resolverProjectionArtifact.documents ?? []).map((doc: Record<string, unknown>) => [
+      String(doc['entityId']),
+      {
+        ...doc,
+        entityId: String(doc['entityId']) as never,
+      },
+    ] as const),
+    semanticDescriptors: (entityProjectionArtifact.documents ?? []).map((doc: Record<string, unknown>) => [
+      String(doc['entityId']),
+      {
+        entityId: String(doc['entityId']),
+        canonicalLabel: String(doc['canonicalLabel']),
+        familyCoreKeys: [],
+        localizedFamilySurfaces: [],
+      },
+    ] as const),
+    semanticScopeEntries: Object.entries(semanticScopeArtifact.entries ?? {}) as readonly (readonly [string, never])[],
+    semanticScopeComponentSurfaces: semanticScopeArtifact.componentSurfaces ?? {},
+    reviewedFamilyRecallEntries: Object.entries(reviewedFamilyRecallArtifact.entries ?? {}) as readonly (readonly [string, never])[],
+    scopeGraphAdjacency: Object.entries(scopeGraphArtifact.adjacency ?? {}) as readonly (readonly [string, readonly never[]])[],
+    ambiguityEntries: Object.entries(ambiguityArtifact.entries ?? {}).map(([surface, entry]) => [
+      surface,
+      entry as never,
+    ] as const),
+    conceptRedirectEntries: Object.entries(conceptRedirectArtifact.entries ?? {}).map(([surface, entry]) => [
+      surface,
+      entry as never,
+    ] as const),
+  });
 }
 
 describe('lookup runtime bundle cache', () => {
@@ -194,8 +306,11 @@ describe('lookup runtime bundle cache', () => {
     const second = await loadLookupRuntimeBundle('search-snapshot:v1:test', manifestPath);
 
     expect(first).toBe(second);
-    expect(readFileSpy).toHaveBeenCalledTimes(6);
+    expect(readFileSpy).toHaveBeenCalledTimes(11);
     expect(first.aliasMatcher.getRegistryVersion()?.snapshotId).toBe('search-snapshot:v1:test');
+    expect(first.loadProfile.source).toBe('artifacts');
+    expect(first.loadProfile.artifactReadMs).toBeGreaterThanOrEqual(0);
+    expect(first.loadProfile.artifactParseMs?.totalMs).toBeGreaterThanOrEqual(0);
     expect(
       (await first.resolverProjectionLookup.getResolverProjections(['entity-1' as never])).get('entity-1' as never),
     ).toBeDefined();
@@ -251,7 +366,7 @@ describe('lookup runtime bundle cache', () => {
       producer: 'Opus One Winery',
       region: 'Napa Valley',
     });
-    expect(readFileSpy).toHaveBeenCalledTimes(6);
+    expect(readFileSpy).toHaveBeenCalledTimes(11);
   });
 
   it('fully hydrates broad-recall sidecars at bundle load so request-path matchers stay warm', async () => {
@@ -302,6 +417,34 @@ describe('lookup runtime bundle cache', () => {
     const recovered = await loadLookupRuntimeBundle('search-snapshot:v1:test', manifestPath);
 
     expect(recovered.aliasMatcher).toBeDefined();
-    expect(readFileSpy).toHaveBeenCalledTimes(7);
+    expect(readFileSpy).toHaveBeenCalledTimes(12);
+  });
+
+  it('prefers the serialized runtime-bundle cache over artifact fanout reads when available', async () => {
+    const manifestPath = '/tmp/runtime-cache-hit/manifest.json';
+    const artifactMap = buildArtifactMap(manifestPath);
+    const cachePayload = buildCachePayload(manifestPath);
+    const cachePaths = deriveLookupRuntimeBundleCachePaths(manifestPath);
+    const readFileSpy = vi.spyOn(fs, 'readFile').mockImplementation(async (pathLike) => {
+      const key = String(pathLike);
+      if (key === cachePaths.cachePath) {
+        return serialize(cachePayload) as never;
+      }
+      const value = artifactMap.get(key);
+      if (value === undefined) {
+        throw new Error(`unexpected read: ${key}`);
+      }
+      return value as never;
+    });
+
+    const bundle = await loadLookupRuntimeBundle('search-snapshot:v1:test', manifestPath);
+
+    expect(bundle.aliasMatcher.getRegistryVersion()?.snapshotId).toBe('search-snapshot:v1:test');
+    expect(bundle.loadProfile.source).toBe('cache');
+    expect(bundle.loadProfile.cacheReadProfile?.hit).toBe(true);
+    expect(bundle.loadProfile.materializeMs.totalMs).toBeGreaterThanOrEqual(0);
+    expect(readFileSpy).toHaveBeenCalledTimes(2);
+    expect(readFileSpy).toHaveBeenNthCalledWith(1, manifestPath, 'utf8');
+    expect(readFileSpy).toHaveBeenNthCalledWith(2, cachePaths.cachePath);
   });
 });

@@ -11,7 +11,7 @@ import {
   DEFAULT_PER_CLASS_GATE,
   type ClassTally,
   type PerClassEntry,
-} from '../../../scripts/eval/lookup-v2-shadow-metrics.js';
+} from '../../../scripts/eval/lookup-v2-parity-metrics.js';
 import {
   fingerprintEvalRows,
   toPerClassEntries,

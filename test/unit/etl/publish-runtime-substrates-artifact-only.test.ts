@@ -389,17 +389,18 @@ describe('publishRuntimeSubstratesArtifactOnly', () => {
     expect(writtenNlMappings).toEqual(nlMappingsPayload);
   });
 
-  it('fails closed when LTR serving mode is enabled', async () => {
+  it('stays artifact-only even when the legacy LTR serving flag is enabled', async () => {
     process.env['LTR_SERVING_ENABLED'] = 'true';
     const dir = await makeTempDir();
     const { manifestPath } = await buildCurrentManifestFixture(dir);
 
-    await expect(
-      publishRuntimeSubstratesArtifactOnly({
-        manifestPath,
-        runtimeStatePath: path.join(dir, 'runtime-search-snapshot.staging.json'),
-        runtimeNlMappingsPath: path.join(dir, 'nl-mappings.staging.json'),
-      }),
-    ).rejects.toThrow(/LTR_SERVING_ENABLED=false/);
+    const stagedState = await publishRuntimeSubstratesArtifactOnly({
+      manifestPath,
+      runtimeStatePath: path.join(dir, 'runtime-search-snapshot.staging.json'),
+      runtimeNlMappingsPath: path.join(dir, 'nl-mappings.staging.json'),
+    });
+
+    expect(stagedState.snapshotId).toBeDefined();
+    expect(stagedState.counts.activeLtrModels).toBe(0);
   });
 });

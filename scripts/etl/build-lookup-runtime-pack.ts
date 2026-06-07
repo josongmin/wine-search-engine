@@ -164,14 +164,46 @@ function addFamilyCoreTerms(target: Set<string>, surface: string): void {
   }
 }
 
+function buildDisallowedFamilyCoreTerms(grapes: readonly string[]): ReadonlySet<string> {
+  const disallowed = new Set<string>();
+  for (const grape of grapes) {
+    for (const term of buildAliasPrefixTerms([grape])) {
+      const normalized = normalizeForMatch(term);
+      if (normalized.length > 0) {
+        disallowed.add(normalized);
+      }
+    }
+  }
+  return disallowed;
+}
+
+function addFilteredFamilyCoreTerms(
+  target: Set<string>,
+  surface: string,
+  disallowedNormalizedTerms: ReadonlySet<string>,
+): void {
+  for (const term of buildAliasPrefixTerms([surface])) {
+    const trimmed = term.trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+    if (disallowedNormalizedTerms.has(normalizeForMatch(trimmed))) {
+      continue;
+    }
+    target.add(trimmed);
+  }
+}
+
 function buildFamilyCoreKeys(args: {
   readonly canonicalLabel: string;
   readonly aliasesIdentitySafe: readonly string[];
   readonly aliasesNoisyRecall: readonly string[];
   readonly producer?: string | undefined;
+  readonly grapes?: readonly string[] | undefined;
 }): readonly string[] {
   const keys = new Set<string>();
   const authoritativeAnchorTokens = new Set<string>();
+  const disallowedNormalizedTerms = buildDisallowedFamilyCoreTerms(args.grapes ?? []);
   for (const surface of [
     args.canonicalLabel,
     ...(typeof args.producer === 'string' ? [args.producer] : []),
@@ -188,7 +220,7 @@ function buildFamilyCoreKeys(args: {
       continue;
     }
     if (noisyTokens.every((token) => authoritativeAnchorTokens.has(token))) {
-      addFamilyCoreTerms(keys, noisySurface);
+      addFilteredFamilyCoreTerms(keys, noisySurface, disallowedNormalizedTerms);
     }
   }
 
@@ -214,7 +246,7 @@ function buildFamilyCoreKeys(args: {
         }
         const remainder = surfaceTokens.slice(commonPrefixLength).join(' ');
         if (remainder.length > 0) {
-          addFamilyCoreTerms(keys, remainder);
+          addFilteredFamilyCoreTerms(keys, remainder, disallowedNormalizedTerms);
         }
       }
     }
@@ -427,12 +459,21 @@ export function buildLookupAliasRuntimeArtifacts(args: {
     wholeTokenIndex: mapToRecord(wholeTokenIndex),
     phoneticIndex: mapToRecord(phoneticIndex),
     doubleMetaphoneIndex: mapToRecord(doubleMetaphoneIndex),
+    doubleMetaphoneKeysByAliasId: Object.fromEntries(
+      [...doubleMetaphoneKeysByAliasId.entries()].sort(([left], [right]) => left.localeCompare(right)),
+    ),
     prefixCatalog: [...prefixCatalog.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([candidateTerm, aliasIndexes]) => ({
         candidateTerm,
         aliasIndexes: [...aliasIndexes],
       })),
+    hangulCompletionRecords: hangulCompletionRecords
+      .slice()
+      .sort((left, right) =>
+        left.jamoKey.localeCompare(right.jamoKey)
+        || left.aliasIndex - right.aliasIndex,
+      ),
   };
 
   return {
@@ -665,6 +706,7 @@ export function buildLookupEntityProjectionArtifact(args: {
         aliasesIdentitySafe: indexable.aliasesIdentitySafe,
         aliasesNoisyRecall: indexable.aliasesNoisyRecall,
         producer: record.producer,
+        grapes: indexable.grapes,
       }),
       reviewedKeys: args.reviewedFamilyCoreKeysByEntity?.get(entityId),
     });

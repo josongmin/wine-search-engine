@@ -2,9 +2,9 @@ id: tools.lookup
 name: Lookup Endpoint (Direct Entity Fetch)
 category: tools
 summary: |
-  POST /v1/lookup/wine — entity-only (exact match) 검색. detail page,
-  evidence 확장, agent grounding 용. retrieval_mode은 항상 'entity'로
-  강제되며 caller 가 override 할 수 없다.
+  POST /v2/entity-lookup — entity-only 전용 해소 surface. detail page,
+  evidence 확장, agent grounding 용. generic search wrapper가 아니라 dedicated
+  lookup authority를 직접 탄다.
 
 maturity: 3
 maturity_rationale: |
@@ -22,22 +22,22 @@ maturity_rationale: |
     - special chars 보존, AbortSignal 전파
   잔여: cross-language entity_id alias 풀 확장은 retrieval.entity-lookup 책임.
 
-status: active
+status: deprecated
 since: 2025-10
 last_reviewed: 2026-05-21
 owner: core
 
 surfaces:
-  - "HTTP: POST /v1/lookup/wine"
+  - "HTTP: POST /v2/entity-lookup"
 
 key_files:
-  - src/interface/http/routes/primitive-search.route.ts
-  - src/interface/http/routes/search-request-mappers.ts
-  - src/interface/http/schemas/primitive-search.schema.ts
+  - src/interface/http/routes/entity-lookup-v2.route.ts
+  - src/interface/http/schemas/entity-lookup-v2.schema.ts
+  - src/config/lookup-authority.ts
 
 tests:
   integration:
-    - test/integration/http/routes/lookup.route.test.ts
+    - test/integration/http/routes/entity-lookup-v2.route.test.ts
 
 depends_on:
   - retrieval.entity-lookup
@@ -45,11 +45,11 @@ depends_on:
 related_rfcs: []
 
 known_limitations:
-  - "Multi-vintage variant 그룹핑은 entity-lookup 단계 (downstream) 책임 — route 는 단일 SearchResponseV1 만 반환하고 vintage 선택 파라미터는 노출하지 않는다."
+  - "이 항목은 legacy catalog id 유지용이다. live lookup authority 설명은 `retrieval.entity-lookup-v2`가 SSOT다."
   - "Cross-language entity_id alias 풀 확장 미흡 (retrieval.entity-lookup 영역)"
 
 next_steps:
-  - "downstream entity-lookup 의 multi-vintage 그룹핑 결과를 result_type='wine_set' 으로 포장하는 contract 검증 추가"
+  - "feature catalog consumer가 `retrieval.entity-lookup-v2`로 완전히 이관되면 이 항목 삭제"
 
 tags:
   - lookup

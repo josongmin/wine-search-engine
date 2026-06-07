@@ -5,6 +5,7 @@ const builderCalls = vi.hoisted(() => ({
   core: vi.fn(),
   features: vi.fn(),
   bind: vi.fn(),
+  authority: vi.fn(),
 }));
 
 const mockCore = {
@@ -31,9 +32,10 @@ vi.mock('../container-core.js', () => ({
 }));
 
 vi.mock('../container-features.js', () => ({
-  buildFeatureContainerServices: vi.fn((_config, _core, runtime) => {
+  buildFeatureContainerServices: vi.fn((_config, _core, _authority, runtime) => {
     builderCalls.features(runtime);
     return {
+      entityLookupV2UseCase: {} as never,
       searchUseCase: {} as never,
       interpretUseCase: {} as never,
       resolveUseCase: {} as never,
@@ -43,6 +45,17 @@ vi.mock('../container-features.js', () => ({
       drinkingWindowUseCase: {} as never,
       batchSearchUseCase: {} as never,
       evalRunner: null,
+    };
+  }),
+}));
+
+vi.mock('../lookup-authority.js', () => ({
+  createLookupAuthorityServices: vi.fn(async (_config, runtime) => {
+    builderCalls.authority(runtime);
+    return {
+      entityLookupV2UseCase: {} as never,
+      bootstrapProfile: {} as never,
+      metadata: {} as never,
     };
   }),
 }));
@@ -72,6 +85,11 @@ describe('createContainer runtime normalization', () => {
 
     expect(builderCalls.bind).toHaveBeenCalledWith({ pool });
     expect(builderCalls.core).toHaveBeenCalledWith({
+      pool,
+      searchSnapshotId: 'search-snapshot:v1:active',
+      searchSnapshotManifestPath: '/tmp/search-snapshot:v1:active/manifest.json',
+    });
+    expect(builderCalls.authority).toHaveBeenCalledWith({
       pool,
       searchSnapshotId: 'search-snapshot:v1:active',
       searchSnapshotManifestPath: '/tmp/search-snapshot:v1:active/manifest.json',

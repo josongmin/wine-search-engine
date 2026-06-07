@@ -9,7 +9,7 @@ import {
 } from './lookup-v2-semantic-scope-target-registry.js';
 import { loadLookupV2RuntimeSemanticDescriptorMapSync } from './lookup-v2-runtime-semantic-descriptors.js';
 
-interface FamilyTargetRegistryApplyResult {
+interface SemanticScopeTargetRegistryApplyResult {
   readonly mergedRows: readonly LookupV2SemanticScopeTargetRegistryRow[];
   readonly pendingRows: number;
   readonly approvedRows: number;
@@ -134,12 +134,12 @@ function registryRowMatchesDescriptor(args: {
   );
 }
 
-export function applyLookupV2FamilyTargetRegistry(args: {
+export function applyLookupV2SemanticScopeTargetRegistry(args: {
   readonly familyRows: readonly LookupV2ManualTargetFamilyReviewPacketRow[];
   readonly existingRegistryRows: readonly LookupV2SemanticScopeTargetRegistryRow[];
   readonly knownEntityIds?: ReadonlySet<string>;
   readonly runtimeDescriptorMap?: ReadonlyMap<string, unknown>;
-}): FamilyTargetRegistryApplyResult {
+}): SemanticScopeTargetRegistryApplyResult {
   const runtimeDescriptorMap = args.runtimeDescriptorMap ?? loadLookupV2RuntimeSemanticDescriptorMapSync();
   const knownEntityIds = args.knownEntityIds
     ?? new Set<string>(runtimeDescriptorMap.keys());
@@ -161,12 +161,12 @@ export function applyLookupV2FamilyTargetRegistry(args: {
     }
     const registryRow = buildRegistryRow(row);
     if (registryRow.entityId !== undefined && !knownEntityIds.has(registryRow.entityId)) {
-      throw new Error(`family-target registry apply references unknown entityId=${JSON.stringify(registryRow.entityId)} for hint=${JSON.stringify(registryRow.benchmarkGoldHint)}`);
+      throw new Error(`semantic-scope-target registry apply references unknown entityId=${JSON.stringify(registryRow.entityId)} for hint=${JSON.stringify(registryRow.benchmarkGoldHint)}`);
     }
     if (registryRow.entityId !== undefined) {
       const descriptor = runtimeDescriptorMap.get(registryRow.entityId);
       if (descriptor === undefined) {
-        throw new Error(`family-target registry apply missing runtime descriptor for entityId=${JSON.stringify(registryRow.entityId)} for hint=${JSON.stringify(registryRow.benchmarkGoldHint)}`);
+        throw new Error(`semantic-scope-target registry apply missing runtime descriptor for entityId=${JSON.stringify(registryRow.entityId)} for hint=${JSON.stringify(registryRow.benchmarkGoldHint)}`);
       }
       if (!registryRowMatchesDescriptor({ registryRow, descriptor })) {
         registryConflictRows += 1;
@@ -221,23 +221,23 @@ async function main(): Promise<void> {
   const outputPath = values.output ?? '/tmp/lookup-semantic-scope-target-registry-merged.jsonl';
   const familyRows = parsePacketJsonl(inputPath).filter(isLookupV2ManualTargetFamilyReviewPacketRow);
   const existingRegistryRows = loadLookupV2SemanticScopeTargetRegistrySync(registryPath);
-  const result = applyLookupV2FamilyTargetRegistry({
+  const result = applyLookupV2SemanticScopeTargetRegistry({
     familyRows,
     existingRegistryRows,
   });
 
   const targetPath = values.write ? registryPath : outputPath;
   if (values.write && result.registryConflictRows > 0) {
-    throw new Error(`family-target registry apply refused to write with registry_conflict_rows=${result.registryConflictRows}`);
+    throw new Error(`semantic-scope-target registry apply refused to write with registry_conflict_rows=${result.registryConflictRows}`);
   }
   writeFileSync(targetPath, serializeLookupV2SemanticScopeTargetRegistryRows(result.mergedRows), 'utf8');
 
-  console.log(`[elv2-family-target-registry-apply] pending_rows=${result.pendingRows}`);
-  console.log(`[elv2-family-target-registry-apply] approved_rows=${result.approvedRows}`);
-  console.log(`[elv2-family-target-registry-apply] rejected_rows=${result.rejectedRows}`);
-  console.log(`[elv2-family-target-registry-apply] registry_inserted_rows=${result.registryInsertedRows}`);
-  console.log(`[elv2-family-target-registry-apply] registry_skipped_existing_rows=${result.registrySkippedExistingRows}`);
-  console.log(`[elv2-family-target-registry-apply] registry_conflict_rows=${result.registryConflictRows}`);
+  console.log(`[elv2-semantic-scope-target-registry-apply] pending_rows=${result.pendingRows}`);
+  console.log(`[elv2-semantic-scope-target-registry-apply] approved_rows=${result.approvedRows}`);
+  console.log(`[elv2-semantic-scope-target-registry-apply] rejected_rows=${result.rejectedRows}`);
+  console.log(`[elv2-semantic-scope-target-registry-apply] registry_inserted_rows=${result.registryInsertedRows}`);
+  console.log(`[elv2-semantic-scope-target-registry-apply] registry_skipped_existing_rows=${result.registrySkippedExistingRows}`);
+  console.log(`[elv2-semantic-scope-target-registry-apply] registry_conflict_rows=${result.registryConflictRows}`);
   console.log(`[elv2-family-target-registry-apply] output=${targetPath}`);
 }
 

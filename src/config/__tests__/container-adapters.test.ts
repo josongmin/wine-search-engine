@@ -108,21 +108,6 @@ describe('buildCoreAdapterServices', () => {
   });
 
   it('uses search-index alias authority when PostgreSQL is unavailable', async () => {
-    const loadSpy = vi
-      .spyOn(SearchSnapshotAliasMatcher, 'loadFromRuntimeState')
-      .mockResolvedValue({
-        findMatches: () => Promise.resolve([
-          {
-            surfaceForm: 'Snapshot Opus One',
-            normalizedForm: 'snapshot opus one',
-            entityIds: ['snapshot-opus-one'],
-            matchConfidence: 0.99,
-            lookupStrategy: 'in_memory',
-          },
-        ]),
-        findMatchesBatch: () => Promise.resolve(new Map()),
-        getSurfaceForms: () => ['Snapshot Opus One'],
-      } as SearchSnapshotAliasMatcher);
     const sparseSearchSpy = vi
       .spyOn(VespaSearchIndex.prototype, 'sparseSearch')
       .mockResolvedValue([
@@ -155,10 +140,8 @@ describe('buildCoreAdapterServices', () => {
           lookupStrategy: 'index_exact',
         },
       ]);
-      expect(loadSpy).not.toHaveBeenCalled();
       expect(sparseSearchSpy).toHaveBeenCalled();
     } finally {
-      loadSpy.mockRestore();
       sparseSearchSpy.mockRestore();
     }
   });
@@ -260,9 +243,6 @@ describe('buildCoreAdapterServices', () => {
       lookupStrategy: 'in_memory',
     } as const;
     const aliasTableAvailableSpy = vi.spyOn(PgAliasMatcherAdapter, 'isAliasTableAvailable');
-    const loadFromPostgresSpy = vi
-      .spyOn(SearchSnapshotAliasMatcher, 'loadFromPostgres')
-      .mockResolvedValue(undefined);
     const loadFromManifestSpy = vi
       .spyOn(SearchSnapshotAliasMatcher, 'loadFromManifest')
       .mockResolvedValue({
@@ -290,14 +270,12 @@ describe('buildCoreAdapterServices', () => {
       });
       expect(adapters.fuzzyMatcher).toBeDefined();
       expect(aliasTableAvailableSpy).not.toHaveBeenCalled();
-      expect(loadFromPostgresSpy).not.toHaveBeenCalled();
       expect(loadFromManifestSpy).toHaveBeenCalledWith('/tmp/search-snapshot:v1:target/manifest.json');
       expect(await adapters.aliasMatcher.findMatches(exactQuery)).toEqual([exactMatch]);
       expect(await adapters.aliasMatcher.findMatches('missing snapshot alias')).toEqual([]);
       expect(sparseSearchSpy).not.toHaveBeenCalled();
     } finally {
       aliasTableAvailableSpy.mockRestore();
-      loadFromPostgresSpy.mockRestore();
       loadFromManifestSpy.mockRestore();
       sparseSearchSpy.mockRestore();
     }
@@ -305,7 +283,6 @@ describe('buildCoreAdapterServices', () => {
 
   it('fails closed when manifest-backed lookup runtime artifacts cannot be loaded', async () => {
     const aliasTableAvailableSpy = vi.spyOn(PgAliasMatcherAdapter, 'isAliasTableAvailable');
-    const loadFromPostgresSpy = vi.spyOn(SearchSnapshotAliasMatcher, 'loadFromPostgres');
     const loadFromManifestSpy = vi
       .spyOn(SearchSnapshotAliasMatcher, 'loadFromManifest')
       .mockResolvedValue(undefined);
@@ -322,11 +299,9 @@ describe('buildCoreAdapterServices', () => {
         searchSnapshotManifestPath: '/tmp/search-snapshot:v1:target/manifest.json',
       })).rejects.toThrow(/lookup runtime artifacts are required/);
       expect(aliasTableAvailableSpy).not.toHaveBeenCalled();
-      expect(loadFromPostgresSpy).not.toHaveBeenCalled();
       expect(loadFromManifestSpy).toHaveBeenCalledWith('/tmp/search-snapshot:v1:target/manifest.json');
     } finally {
       aliasTableAvailableSpy.mockRestore();
-      loadFromPostgresSpy.mockRestore();
       loadFromManifestSpy.mockRestore();
     }
   });

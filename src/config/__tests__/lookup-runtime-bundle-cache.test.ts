@@ -6,6 +6,7 @@ import {
   buildLookupRuntimeBundleCachePayload,
   deriveLookupRuntimeBundleCachePaths,
   readLookupRuntimeBundleCache,
+  readLookupRuntimeBundleCacheProfiled,
   writeLookupRuntimeBundleCache,
 } from '../lookup-runtime-bundle-cache.js';
 
@@ -103,6 +104,56 @@ describe('lookup runtime bundle cache', () => {
     expect(reloaded).toEqual(payload);
   });
 
+  it('reports cache-read timing and hit state for a valid payload', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'lookup-runtime-bundle-cache-'));
+    tempDirs.push(dir);
+    const manifestPath = path.join(dir, 'manifest.json');
+    writeFileSync(manifestPath, '{}\n', 'utf8');
+
+    const payload = buildLookupRuntimeBundleCachePayload({
+      snapshotId: 'search-snapshot:v1:test',
+      aliasContentHash: 'alias-hash',
+      manifestPath,
+      artifactPaths: {
+        lookupAliasRuntimeJson: path.join(dir, 'lookup-alias-runtime.json'),
+        lookupExactSafeRuntimeJson: path.join(dir, 'lookup-exact-safe-runtime.json'),
+        lookupResolverProjectionJson: path.join(dir, 'lookup-resolver-projection.json'),
+        lookupAmbiguityRuntimeJson: path.join(dir, 'lookup-ambiguity-runtime.json'),
+        lookupConceptRedirectRuntimeJson: path.join(dir, 'lookup-concept-redirect-runtime.json'),
+      },
+      aliasRuntimeArtifact: {
+        schemaVersion: 'lookup_alias_runtime_core.v1',
+        snapshotId: 'search-snapshot:v1:test',
+        generatedAt: '2026-06-06T00:00:00.000Z',
+        aliasRegistryHash: 'alias-hash',
+        aliases: [],
+        surfaceForms: [],
+        exactIndex: {},
+        compactIndex: {},
+      },
+      exactEntries: [],
+      compactEntries: [],
+      resolverProjectionDocuments: [],
+      ambiguityEntries: [],
+      conceptRedirectEntries: [],
+    });
+
+    await writeLookupRuntimeBundleCache(payload);
+    const result = await readLookupRuntimeBundleCacheProfiled({
+      manifestPath,
+      snapshotId: 'search-snapshot:v1:test',
+      aliasContentHash: 'alias-hash',
+      artifactPaths: payload.artifactPaths,
+    });
+
+    expect(result.payload).toEqual(payload);
+    expect(result.profile.hit).toBe(true);
+    expect(result.profile.failureStage).toBeUndefined();
+    expect(result.profile.readMs).toBeGreaterThanOrEqual(0);
+    expect(result.profile.deserializeMs).toBeGreaterThanOrEqual(0);
+    expect(result.profile.validateMs).toBeGreaterThanOrEqual(0);
+  });
+
   it('fails closed when the expected manifest binding changes', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'lookup-runtime-bundle-cache-'));
     tempDirs.push(dir);
@@ -148,5 +199,15 @@ describe('lookup runtime bundle cache', () => {
       artifactPaths: payload.artifactPaths,
     });
     expect(mismatched).toBeUndefined();
+
+    const profiledMismatch = await readLookupRuntimeBundleCacheProfiled({
+      manifestPath,
+      snapshotId: 'search-snapshot:v1:test',
+      aliasContentHash: 'different-hash',
+      artifactPaths: payload.artifactPaths,
+    });
+    expect(profiledMismatch.payload).toBeUndefined();
+    expect(profiledMismatch.profile.hit).toBe(false);
+    expect(profiledMismatch.profile.failureStage).toBe('validate');
   });
 });

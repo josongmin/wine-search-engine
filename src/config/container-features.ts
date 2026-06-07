@@ -21,6 +21,7 @@ import {
   buildUseCaseContainerServices,
   type UseCaseExtensions,
 } from './container-usecases.js';
+import type { LookupAuthorityServices } from './lookup-authority.js';
 
 interface FeatureContainerServices {
   readonly searchUseCase: SearchExecutorPort;
@@ -39,6 +40,7 @@ interface FeatureContainerServices {
 export function buildFeatureContainerServices(
   config: Config,
   core: CoreContainerServices,
+  lookupAuthority: LookupAuthorityServices,
   runtime: RuntimeHandles = {},
   useCaseExtensions: UseCaseExtensions = {},
 ): FeatureContainerServices {
@@ -47,6 +49,7 @@ export function buildFeatureContainerServices(
 
   return {
     ...useCases,
+    entityLookupV2UseCase: lookupAuthority.entityLookupV2UseCase,
     evalRunner,
   };
 }

@@ -68,15 +68,17 @@ describe('V2-only lookup cutover — removed surfaces stay removed', () => {
     expect(coverage).toContain('await pool.end();');
   });
 
-  it('lookup eval/debug runners all use the dedicated lookup-direct container', () => {
+  it('lookup eval/debug runners route through the shared authority builders only', () => {
     const authority = read('scripts/eval/run-entity-resolution-validation.ts');
-    const shadow = read('scripts/eval/run-lookup-v2-shadow-compare.ts');
+    const parity = read('scripts/eval/run-lookup-v2-parity.ts');
     const latency = read('scripts/eval/run-lookup-v2-latency-korean-famous.ts');
     const canary = read('scripts/eval/run-lookup-v2-canary-replay.ts');
     const debug = read('scripts/eval/debug-one-lookup.ts');
-    for (const script of [authority, shadow, latency, canary, debug]) {
+    for (const script of [authority, latency, canary, debug]) {
       expect(script).toContain("createLookupDirectContainer");
       expect(script).not.toContain('createContainer(config');
     }
+    expect(parity).toContain('createLookupDirectContainer');
+    expect(parity).toContain('createContainer(config');
   });
 });

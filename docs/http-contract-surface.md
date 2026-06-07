@@ -24,6 +24,12 @@ pnpm run contracts:http -- data/http-contract-manifest.json
 The script writes a stable JSON manifest of declared methods, URLs,
 operation IDs, and response status codes.
 
+One-shot verification:
+
+```bash
+pnpm run verify:http-contracts
+```
+
 Recommended committed artifact path:
 
 ```bash

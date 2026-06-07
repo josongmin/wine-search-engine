@@ -10,14 +10,9 @@ import {
 } from '../../../src/domain/ranking/service/lambdamart-ranker.js';
 
 /**
- * T-ELV2-05: serving-ON wiring through the PG-less runtime-artifact path.
- * Proves the kill-switch fix actually threads a loaded model to
- * RuntimeSupportServices.ltrModels + the readiness `effective` snapshot — the
- * behaviour the old hardcoded `return false` / `ltrModels: undefined` blocked.
- * (Registry/PG path is infra-gated; the artifact path needs no PG.)
- *
- * This exercises the WIRING with a structurally-valid model only — it does NOT
- * assert the OOD train-serve projection is valid (that remains blocked).
+ * Legacy LTR env may still be present, but serving remains structurally
+ * unsupported until a lookup-domain model exists. Pin the fail-closed
+ * contract for both serving=true and serving=false configurations.
  */
 function validArtifactEntry(queryClass: string) {
   return {
@@ -31,7 +26,7 @@ function validArtifactEntry(queryClass: string) {
   };
 }
 
-describe('LTR revival — serving-ON via runtime artifact (PG-less)', () => {
+describe('LTR remains unsupported in shared runtime support', () => {
   let dir: string;
   let goodPath: string;
   let badPath: string;
@@ -53,30 +48,31 @@ describe('LTR revival — serving-ON via runtime artifact (PG-less)', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it('serving=true + valid artifact ⇒ ltrModels loaded, effective.source=runtime_artifact', async () => {
+  it('serving=true + valid artifact still stays unsupported', async () => {
     const config = parseEnv({ NODE_ENV: 'test', LTR_SERVING_ENABLED: 'true', RUNTIME_LTR_MODELS_PATH: goodPath });
     const services = await buildRuntimeSupportServices(config, {});
-    expect(services.ltrModels).toBeDefined();
-    expect(services.ltrModels?.size).toBe(1);
+    expect(services.ltrModels).toBeUndefined();
     const eff = services.runtimeReadiness.ltrModels.effective;
-    expect(eff.source).toBe('runtime_artifact');
-    expect(eff.loaded).toBe(true);
-    expect(services.runtimeReadiness.ltrModels.artifact.selected).toBe(true);
+    expect(eff.source).toBe('none');
+    expect(eff.loaded).toBe(false);
+    expect(eff.issue).toBe('unsupported');
+    expect(services.runtimeReadiness.ltrModels.artifact.selected).toBe(false);
   });
 
-  it('serving=FALSE + valid artifact ⇒ ltrModels undefined, effective disabled (gate wins)', async () => {
+  it('serving=false + valid artifact still reports unsupported', async () => {
     const config = parseEnv({ NODE_ENV: 'test', LTR_SERVING_ENABLED: 'false', RUNTIME_LTR_MODELS_PATH: goodPath });
     const services = await buildRuntimeSupportServices(config, {});
     expect(services.ltrModels).toBeUndefined();
     expect(services.runtimeReadiness.ltrModels.effective.source).toBe('none');
-    expect(services.runtimeReadiness.ltrModels.effective.issue).toBe('disabled');
+    expect(services.runtimeReadiness.ltrModels.effective.issue).toBe('unsupported');
   });
 
-  it('serving=true + schema-mismatch artifact ⇒ ltrModels undefined via none path (no throw)', async () => {
+  it('serving=true + schema-mismatch artifact stays unsupported without throw', async () => {
     const config = parseEnv({ NODE_ENV: 'test', LTR_SERVING_ENABLED: 'true', RUNTIME_LTR_MODELS_PATH: badPath });
     const services = await buildRuntimeSupportServices(config, {});
     expect(services.ltrModels).toBeUndefined();
     expect(services.runtimeReadiness.ltrModels.effective.source).toBe('none');
     expect(services.runtimeReadiness.ltrModels.effective.loaded).toBe(false);
+    expect(services.runtimeReadiness.ltrModels.effective.issue).toBe('unsupported');
   });
 });

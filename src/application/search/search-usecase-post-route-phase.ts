@@ -643,7 +643,7 @@ export async function runSearchPostRoutePhase(
   let response: SearchResponseV1;
 
   // entity_lookup contract: when the caller passes options.clarification=false
-  // (forced by toLookupWineRequest for /v1/lookup/wine), suppress the
+  // (forced by retained internal lookup adapters), suppress the
   // entropy-abstain deflection branch and route through the normal ranked
   // decision path. The abstain decision is still emitted in auditExtension
   // so the trace is honest, but the response carries top-1 + appropriate

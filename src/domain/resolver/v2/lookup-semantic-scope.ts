@@ -344,20 +344,77 @@ export function buildLookupSemanticScopeFromProbe(args: {
   };
 }
 
+/**
+ * Reviewed component-surface index (final architecture L1, runtime-facing):
+ * componentKind::componentKey::locale -> reviewed normalized surfaces. Lets the
+ * scope matcher recognise multilingual surfaces ("샤또 앙젤뤼스") that the
+ * latin-literal token path can never see, by COMPOSING component surfaces.
+ */
+export type LookupSemanticScopeComponentKind = 'family' | 'line' | 'region' | 'appellation';
+export interface LookupSemanticScopeSurfaceIndex {
+  readonly componentSurfaces: ReadonlyMap<string, ReadonlySet<string>>;
+}
+
+export function buildLookupSemanticScopeComponentSurfaceKey(args: {
+  readonly componentKind: LookupSemanticScopeComponentKind;
+  readonly componentKey: string;
+  readonly locale: 'ko' | 'global';
+}): string {
+  return `${args.componentKind}::${args.componentKey}::${args.locale}`;
+}
+
+function componentMatches(
+  probe: LookupQuerySemanticProbe,
+  componentKind: LookupSemanticScopeComponentKind,
+  componentKey: string,
+  locale: 'ko' | 'global',
+  surfaceIndex: LookupSemanticScopeSurfaceIndex | undefined,
+): boolean {
+  // 1) latin-literal token path (global queries, latin surfaces) — kept as a
+  //    fallback so this is purely additive and never regresses.
+  if (containsNormalizedSurface(probe, componentKey)) {
+    return true;
+  }
+  // 2) reviewed multilingual surface path — any reviewed surface for this
+  //    component that the query contains satisfies the component.
+  const surfaces = surfaceIndex?.componentSurfaces.get(
+    buildLookupSemanticScopeComponentSurfaceKey({ componentKind, componentKey, locale }),
+  );
+  if (surfaces !== undefined) {
+    for (const surface of surfaces) {
+      if (containsNormalizedSurface(probe, surface)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 export function queryMatchesLookupSemanticScope(args: {
   readonly probe: LookupQuerySemanticProbe;
   readonly scope: Omit<LookupSemanticScope, 'semanticScopeKey'>;
+  readonly surfaceIndex?: LookupSemanticScopeSurfaceIndex | undefined;
 }): boolean {
-  if (!containsNormalizedSurface(args.probe, args.scope.familyKey)) {
+  const locale = args.scope.locale;
+  if (!componentMatches(args.probe, 'family', args.scope.familyKey, locale, args.surfaceIndex)) {
     return false;
   }
-  if (args.scope.lineKey !== undefined && !containsNormalizedSurface(args.probe, args.scope.lineKey)) {
+  if (
+    args.scope.lineKey !== undefined
+    && !componentMatches(args.probe, 'line', args.scope.lineKey, locale, args.surfaceIndex)
+  ) {
     return false;
   }
-  if (args.scope.regionKey !== undefined && !containsNormalizedSurface(args.probe, args.scope.regionKey)) {
+  if (
+    args.scope.regionKey !== undefined
+    && !componentMatches(args.probe, 'region', args.scope.regionKey, locale, args.surfaceIndex)
+  ) {
     return false;
   }
-  if (args.scope.appellationKey !== undefined && !containsNormalizedSurface(args.probe, args.scope.appellationKey)) {
+  if (
+    args.scope.appellationKey !== undefined
+    && !componentMatches(args.probe, 'appellation', args.scope.appellationKey, locale, args.surfaceIndex)
+  ) {
     return false;
   }
   if (args.scope.vintage !== undefined && args.probe.vintage !== args.scope.vintage) {

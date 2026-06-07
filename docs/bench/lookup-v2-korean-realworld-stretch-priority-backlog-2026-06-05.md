@@ -3,25 +3,38 @@
 ## Current Truth Update (2026-06-07)
 
 - active runtime snapshot:
-  - `search-snapshot:v1:ca6596580fb755ef`
+  - `search-snapshot:v1:c8fba9b929a376f8`
 - main gate status on current code:
   - authority:
     - `/tmp/entity-resolution-validation.json`
     - `V2 215/215`, `wrong=0`, `miss=0`, gate **PASS**
-  - hotset shadow:
-    - `/tmp/lookup-v2-shadow-report.json`
-    - `rows=45`, `V2 correct=41`, `wrong+=0`, gate **PASS**
   - Korean-famous coverage:
     - `/tmp/lookup-v2-coverage-korean-famous.json`
-    - `hot_entities=67/67`, `non_entity=40/40`, `curation_tasks=0`
+    - `hot_entities=67/67`, `non_entity=38/40`, `curation_tasks=0`
+  - Korean-famous parity:
+    - `/tmp/lookup-v2-parity-korean-famous.json`
+    - `rows=107`, `divergences=0`, gate **PASS**
+    - cold first-query timeout noise can drop the first row from the raw count, but `regressions=0`
+  - stretch entity-no-policy parity:
+    - `/tmp/lookup-v2-parity-korean-realworld-stretch-entity-no-policy.json`
+    - `rows=590`, `divergences=0`, gate **PASS**
+  - stretch entity-no-policy coverage:
+    - `/tmp/lookup-v2-coverage-korean-realworld-stretch-entity-no-policy.json`
+    - `hot_entities=114/239`, `non_entity=227/351`, `curation_tasks=125`
+    - operator buckets:
+      `strict_collision_ambiguous=10`, `family_surface_gap=10`,
+      `qualified_scope_surface_gap=0`, `scope_target_missing=105`,
+      `scope_support_needed=0`
   - latency:
     - `/tmp/lookup-v2-latency-korean-famous.json`
-    - `cold_boot=18054.078ms`, `first_query=17.626ms`, `warm_p95=110.016ms`
-    - request / hydration **PASS**, cold boot **FAIL**
+    - `cold_boot=2684.895ms`, `first_query=3209.524ms`, `warm_p95=12.336ms`
+    - warm request / hydration **PASS**, cold boot / first query **FAIL**
 - runtime note:
-  - ambiguity runtime은 normalization-stable view만 authority로 싣고
-    recall-style `lookupVariants`는 제외한다
-  - ambiguity adapters는 `normalizeForMatch` boundary lookup으로 정렬됐다
+  - active reviewed SoT는 `lookup-localized-scope-surface-registry-v1`,
+    `lookup-semantic-scope-target-registry-v1`,
+    `lookup-semantic-scope-support-registry-v1`,
+    `lookup-family-collision-registry-v1` 네 개다
+  - flat localized-surface / family-support registry는 archived migration source다
 - strict fixture truth is active.
   impossible `resolved` rows were reclassified from live operator buckets:
   `strict_collision_ambiguous -> ambiguous`, `catalog_support_needed -> failed`
@@ -31,140 +44,45 @@
     - `rows=1`
   - entity-no-policy write-plane:
     - `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-write-plane-summary.json`
-    - `draft rows=150`
-    - `auto_targetable=7`
+    - `draft rows=106`
+    - `auto_targetable=24`
     - `scope_policy_review=1`
-    - `localized_surface_review=20`
+    - `localized_surface_review=2`
     - `catalog_support_review=0`
-    - `reviewed_collision=101`
-    - `scope_target_review=0`
-    - `exact_safe_packet_rows=7`
-    - `reviewed_authority_approved_rows=7`
+    - `reviewed_collision=36`
+    - `scope_target_review=22`
+    - `exact_safe_packet_rows=24`
+    - `reviewed_authority_approved_rows=24`
     - `reviewed_authority_pending_rows=0`
-    - `exact_safe_family_review_rows=7`
-    - `exact_safe_family_pending_rows=0`
+    - `exact_safe_family_pending_rows=16`
     - `catalog-support family clusters: rows=0, families=0`
-    - `reviewed-collision family clusters: rows=101, families=16`
-    - `manual_target_family_review_rows=0`
-    - `reviewed_collision_family_review_rows=87`
-    - `manual-target suggestions: unique=0, collision=0, missing=0`
-    - `manual-target owner-evidence families: total=0, collision=0, missing=0`
-- entity-no-policy shadow:
-  - `/tmp/lookup-v2-shadow-korean-realworld-stretch-entity-no-policy.json`
-  - `rows=590`, `V2 correct=303`, `wrong+=0`, gate **PASS**
-- entity-no-policy coverage:
-  - `/tmp/lookup-v2-coverage-korean-realworld-stretch-entity-no-policy.json`
-  - `hot_entities=76/239`, `non_entity=227/351`, `curation_tasks=163`
-  - operator buckets:
-    - `localized_surface_gap=163`
-    - `strict_collision_ambiguous=0`
-    - `catalog_support_needed=0`
-    - `scope_target_missing=0`
+    - `reviewed-collision family clusters: rows=36, families=11`
+    - `manual_target_family_rows=15`
+    - `manual_target_collision_families=2`
+    - `manual_target_missing_families=0`
 - write-plane state:
-  - reviewed localized surface registry is active:
-    - `data/lookup-v2/lookup-localized-surface-registry-v1.jsonl`
-    - current reviewed surfaces:
-      `silver oak`, `masseto`, `pichon lalande`
-  - reviewed policy family registry is active:
-    - `data/lookup-v2/lookup-policy-family-decision-registry-v1.jsonl`
-    - `라뚜르`, `라피트`, `무통`, `그랜지`, `베가 시실리아`, `자코모 콘테르노`
-    - current decision은 전부 `keep_policy_conflict`
-  - family target registry is active:
-    - `data/lookup-v2/lookup-family-target-registry-v1.jsonl`
-    - current approved target hints:
-      - `calon segur`
-      - `cheval blanc`
-      - `cristal`
-      - `monte bello`
-      - `montelena`
-      - `opus one`
-      - `petrus`
-      - `pol roger`
-      - `solaia`
-    - current rejected hints include:
-      - `ausone`
-      - `bollinger`
-      - `pavie`
-      - scope-level rejects on
-        `calon segur::realworld_exact_vintage`,
-        `monte bello::realworld_vintage_suffix`,
-        `montelena::realworld_vintage_suffix`
-  - `reviewed_rejected` is now first-class.
-    false-singleton family scopes no longer stay inside blind `manual_target`
-  - exact-safe auto-approve is still limited to reviewed authority sources:
-    `fixture_exact`, `policy_family_decision_registry`
-  - `family_target_registry`는 target SoT다. exact-safe 승격은 family review를 한 번 더 통과해야 한다
+  - exact-safe auto-approve source는 `fixture_exact`, `semantic_scope_target_registry`, `semantic_policy_registry`만 허용한다
   - current exact-safe packet:
     - `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl`
-    - `rows=7`
+    - `rows=24`
     - reviewed-authority source:
-      `semantic_scope_target_registry=7`
-  - explicit exact-safe family review decisions:
-    - `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-exact-safe-family-review.review-decisions.jsonl`
-    - current `approved=0`, `rejected=14`, `pending=0`
-    - reviewed exact-safe scope SoT:
-      `data/lookup-v2/lookup-exact-safe-scope-registry-v1.jsonl`
-    - current packet residue is fully reviewed; no exact-safe blind queue remains
-  - current manual-target family packet:
-    - `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-manual-target-family-review-packet.jsonl`
-    - `input_rows=119`, `family_rows=98`
-  - current manual-target owner-evidence family clusters:
-    - `data/lookup-v2/drafts/manual-target-owner-evidence/family-index.json`
-    - `collisionCandidateFamilies=18`
-    - `missingRuntimeOwnerFamilies=0`
-    - family-cluster outputs:
-      `collision-candidate-families.jsonl`,
-      `missing-runtime-owner-families.jsonl`
-  - current family-support registry / catalog-absent cluster:
-    - `data/lookup-v2/lookup-family-support-registry-v1.jsonl`
-    - `armand de brignac`, `henri jayer`, `hill of grace`, `ruinart`, `salon`, `taittinger`, `veuve clicquot`
-    - cluster output:
-      `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-catalog-absent-family-clusters.jsonl`
-      -> `rows=51`, `families=7`
+      `semantic_scope_target_registry=24`
   - current family-collision registry / reviewed-collision cluster:
     - `data/lookup-v2/lookup-family-collision-registry-v1.jsonl`
-    - `angelus`, `beaucastel`, `beychevelle`, `caymus`, `cos destournel`, `dominus`,
-      `lynch bages`, `masseto`, `monfortino`, `montrose`, `palmer`, `pichon baron`,
-      `pichon lalande`, `pontet canet`, `rayas`, `screaming eagle`, `silver oak`, `talbot`
-    - topology outputs:
-      `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-reviewed-collision-family-clusters.jsonl`
-      `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-reviewed-collision-family-clusters-by-topology/topology-index.json`
-      `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-reviewed-collision-family-clusters-by-governance/governance-index.json`
-    - governance split:
-      - `family_recall_collision=8`
-      - `reviewed_family_core_collision=4`
-      - `native_family_core_collision=2`
-      - `producer_surface_secondary_line_collision=3`
-      - `producer_surface_region_line_collision=1`
-    - reviewed collision family-target lane:
-      `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-reviewed-collision-family-review-packet.jsonl`
-      -> `rows=98`, pending `98`
-    - highest-impact families by scope rows:
-      `silver oak=14`, `caymus=13`, `masseto=11`, `angelus=8`, `cos destournel=8`,
-      `lynch bages=8`, `pichon baron=8`, `pontet canet=8`
-    - current family membership:
-      - `family_recall_collision`:
-        `angelus`, `beychevelle`, `caymus`, `montrose`, `palmer`, `pichon baron`, `rayas`, `talbot`
-      - `reviewed_family_core_collision`:
-        `beaucastel`, `cos destournel`, `monfortino`, `pichon lalande`
-      - `native_family_core_collision`:
-        `lynch bages`, `pontet canet`
-      - `producer_surface_secondary_line_collision`:
-        `dominus`, `masseto`, `silver oak`
-      - `producer_surface_region_line_collision`:
-        `screaming eagle`
-  - reviewed family-core witness overlay:
-    - `data/lookup-v2/lookup-family-core-witness-registry-v1.jsonl`
-    - evidence-only owner split uplift:
-      `beaucastel`, `cos destournel`, `monfortino`, `solaia`, `pichon lalande`
+    - `reviewed_collision=36`, `scope_target_review=22` after active overlay
   - current overlay verifier:
     - `data/lookup-v2/drafts/lookup-v2-stretch-reviewed-registry-overlay-summary.json`
+    - reviewed-registry overlay:
+      `semantic_scope_registry_inserted=0`, `semantic_policy_registry_inserted=0`
     - collision-registry overlay proof:
-      `reviewed_collision 0 -> 119`
-      `manual_target 119 -> 0`
-      `manual_target_family_review_rows 98 -> 0`
-      `reviewed_collision_family_review_rows 0 -> 98`
+      `reviewed_collision 0 -> 36`
+      `scope_target_review 58 -> 22`
     - invariants green
+
+- residual closeout owner split:
+  - active correctness debt는 `scope_target_missing=105`가 중심이다
+  - smaller residue는 `strict_collision_ambiguous=10`, `family_surface_gap=10`
+  - latency/cold-first-query는 correctness와 분리된 별도 owner다
 
 아래 section은 archived historical RCA다. current owner 판단은 이 update block만 기준으로 본다.
 

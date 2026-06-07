@@ -3,7 +3,7 @@ import { z } from 'zod';
 /**
  * T-IR-05 + RFC-021 T-PSA-02: the active agent tool taxonomy is the retrieval
  * primitive set that mirrors the external `/v1/search/{hybrid,semantic,lexical}`
- * and `/v1/lookup/wine` HTTP surface, plus the deterministic
+ * and `/v2/entity-lookup` HTTP surface, plus the deterministic
  * `similar_to_entity` reference-similarity primitive. The convenience tools
  * (`get_food_pairings`, `check_drinking_window`, `compare_wines`) were removed
  * from the active loop — the agent composes those capabilities from primitive

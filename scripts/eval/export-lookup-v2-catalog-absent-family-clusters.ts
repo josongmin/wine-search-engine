@@ -7,7 +7,7 @@ import type { LookupV2CurationDraftRow } from './export-lookup-v2-curation-draft
 export interface LookupV2CatalogAbsentFamilyClusterRow {
   readonly benchmarkGoldHint: string;
   readonly normalizedBenchmarkGoldHint: string;
-  readonly supportStatus: 'active_catalog_absent' | 'vintage_anchor_absent' | 'secondary_line_only';
+  readonly supportStatus: 'active_entity_absent' | 'vintage_anchor_absent' | 'secondary_line_only';
   readonly familyScopeRows: number;
   readonly locales: readonly LookupV2CurationDraftRow['locale'][];
   readonly suggestedAliasTypes: readonly LookupV2CurationDraftRow['suggestedAliasType'][];

@@ -51,10 +51,20 @@ export interface LookupRuntimeBundleCachePayload {
   readonly resolverProjectionDocuments: readonly (readonly [string, LookupResolverProjection])[];
   readonly semanticDescriptors: readonly (readonly [string, LookupSemanticEntityDescriptor])[];
   readonly semanticScopeEntries: readonly (readonly [string, LookupSemanticScopeRuntimeEntry])[];
+  /** Reviewed component-surface index (final architecture L1): componentKind::componentKey::locale -> surfaces. */
+  readonly semanticScopeComponentSurfaces: Readonly<Record<string, readonly string[]>>;
   readonly reviewedFamilyRecallEntries: readonly (readonly [string, LookupReviewedFamilyRecallRuntimeEntry])[];
   readonly scopeGraphAdjacency: readonly (readonly [string, readonly LookupScopeGraphRuntimeEdge[]])[];
   readonly ambiguityEntries: readonly (readonly [string, AmbiguityInfo])[];
   readonly conceptRedirectEntries: readonly (readonly [string, LookupConceptRedirectInfo])[];
+}
+
+export interface LookupRuntimeBundleCacheReadProfile {
+  readonly readMs: number;
+  readonly deserializeMs: number;
+  readonly validateMs: number;
+  readonly hit: boolean;
+  readonly failureStage?: 'read' | 'deserialize' | 'validate';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -83,6 +93,7 @@ export function buildLookupRuntimeBundleCachePayload(args: {
   readonly resolverProjectionDocuments: readonly (readonly [string, LookupResolverProjection])[];
   readonly semanticDescriptors?: readonly (readonly [string, LookupSemanticEntityDescriptor])[];
   readonly semanticScopeEntries?: readonly (readonly [string, LookupSemanticScopeRuntimeEntry])[];
+  readonly semanticScopeComponentSurfaces?: Readonly<Record<string, readonly string[]>>;
   readonly reviewedFamilyRecallEntries?: readonly (readonly [string, LookupReviewedFamilyRecallRuntimeEntry])[];
   readonly scopeGraphAdjacency?: readonly (readonly [string, readonly LookupScopeGraphRuntimeEdge[]])[];
   readonly ambiguityEntries: readonly (readonly [string, AmbiguityInfo])[];
@@ -103,6 +114,7 @@ export function buildLookupRuntimeBundleCachePayload(args: {
     resolverProjectionDocuments: args.resolverProjectionDocuments,
     semanticDescriptors: args.semanticDescriptors ?? [],
     semanticScopeEntries: args.semanticScopeEntries ?? [],
+    semanticScopeComponentSurfaces: args.semanticScopeComponentSurfaces ?? {},
     reviewedFamilyRecallEntries: args.reviewedFamilyRecallEntries ?? [],
     scopeGraphAdjacency: args.scopeGraphAdjacency ?? [],
     ambiguityEntries: args.ambiguityEntries,
@@ -233,23 +245,90 @@ function validateLookupRuntimeBundleCachePayload(
   return payload as unknown as LookupRuntimeBundleCachePayload;
 }
 
+function roundMs(value: number): number {
+  return Number(value.toFixed(3));
+}
+
+export async function readLookupRuntimeBundleCacheProfiled(args: {
+  readonly manifestPath: string;
+  readonly snapshotId: string;
+  readonly aliasContentHash: string;
+  readonly artifactPaths: LookupRuntimeBundleCacheArtifactPaths;
+}): Promise<{
+  readonly payload: LookupRuntimeBundleCachePayload | undefined;
+  readonly profile: LookupRuntimeBundleCacheReadProfile;
+}> {
+  const { cachePath } = deriveLookupRuntimeBundleCachePaths(args.manifestPath);
+  const readStartedAt = performance.now();
+  let raw: Buffer;
+  try {
+    raw = await fs.readFile(cachePath);
+  } catch {
+    return {
+      payload: undefined,
+      profile: {
+        readMs: roundMs(performance.now() - readStartedAt),
+        deserializeMs: 0,
+        validateMs: 0,
+        hit: false,
+        failureStage: 'read',
+      },
+    };
+  }
+
+  const deserializeStartedAt = performance.now();
+  let parsed: unknown;
+  try {
+    parsed = deserialize(raw);
+  } catch {
+    return {
+      payload: undefined,
+      profile: {
+        readMs: roundMs(deserializeStartedAt - readStartedAt),
+        deserializeMs: roundMs(performance.now() - deserializeStartedAt),
+        validateMs: 0,
+        hit: false,
+        failureStage: 'deserialize',
+      },
+    };
+  }
+
+  const validateStartedAt = performance.now();
+  try {
+    return {
+      payload: validateLookupRuntimeBundleCachePayload(parsed, {
+        snapshotId: args.snapshotId,
+        aliasContentHash: args.aliasContentHash,
+        manifestPath: args.manifestPath,
+        artifactPaths: args.artifactPaths,
+      }),
+      profile: {
+        readMs: roundMs(deserializeStartedAt - readStartedAt),
+        deserializeMs: roundMs(validateStartedAt - deserializeStartedAt),
+        validateMs: roundMs(performance.now() - validateStartedAt),
+        hit: true,
+      },
+    };
+  } catch {
+    return {
+      payload: undefined,
+      profile: {
+        readMs: roundMs(deserializeStartedAt - readStartedAt),
+        deserializeMs: roundMs(validateStartedAt - deserializeStartedAt),
+        validateMs: roundMs(performance.now() - validateStartedAt),
+        hit: false,
+        failureStage: 'validate',
+      },
+    };
+  }
+}
+
 export async function readLookupRuntimeBundleCache(args: {
   readonly manifestPath: string;
   readonly snapshotId: string;
   readonly aliasContentHash: string;
   readonly artifactPaths: LookupRuntimeBundleCacheArtifactPaths;
 }): Promise<LookupRuntimeBundleCachePayload | undefined> {
-  const { cachePath } = deriveLookupRuntimeBundleCachePaths(args.manifestPath);
-  try {
-    const raw = await fs.readFile(cachePath);
-    const parsed = deserialize(raw);
-    return validateLookupRuntimeBundleCachePayload(parsed, {
-      snapshotId: args.snapshotId,
-      aliasContentHash: args.aliasContentHash,
-      manifestPath: args.manifestPath,
-      artifactPaths: args.artifactPaths,
-    });
-  } catch {
-    return undefined;
-  }
+  const result = await readLookupRuntimeBundleCacheProfiled(args);
+  return result.payload;
 }

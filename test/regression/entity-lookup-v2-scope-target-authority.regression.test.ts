@@ -15,9 +15,10 @@ import {
   type LookupV2SemanticPolicyRegistryRow,
 } from '../../scripts/eval/lookup-v2-semantic-policy-registry.js';
 import {
-  loadLookupV2LocalizedSurfaceRegistrySync,
-  type LookupV2LocalizedSurfaceRegistryRow,
-} from '../../scripts/eval/lookup-v2-localized-surface-registry.js';
+  buildLookupV2ScopeSurfaceRowKey,
+  loadLookupV2LocalizedScopeSurfaceRegistrySync,
+  type LookupV2LocalizedScopeSurfaceRegistryRow,
+} from '../../scripts/eval/lookup-v2-localized-scope-surface-registry.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -74,7 +75,7 @@ describe('entity-lookup-v2 reviewed-authority registry invariants (hell-gate)', 
   let scopeTargets: readonly LookupV2SemanticScopeTargetRegistryRow[];
   let exactSafe: readonly LookupV2ExactSafeScopeRegistryRow[];
   let policy: readonly LookupV2SemanticPolicyRegistryRow[];
-  let localized: readonly LookupV2LocalizedSurfaceRegistryRow[];
+  let localized: readonly LookupV2LocalizedScopeSurfaceRegistryRow[];
   let loadErrors: string[];
 
   beforeAll(() => {
@@ -85,7 +86,7 @@ describe('entity-lookup-v2 reviewed-authority registry invariants (hell-gate)', 
     guard('scope-target', () => { scopeTargets = loadLookupV2SemanticScopeTargetRegistrySync(); });
     guard('exact-safe', () => { exactSafe = loadLookupV2ExactSafeScopeRegistrySync(); });
     guard('policy', () => { policy = loadLookupV2SemanticPolicyRegistrySync(); });
-    guard('localized', () => { localized = loadLookupV2LocalizedSurfaceRegistrySync(); });
+    guard('localized', () => { localized = loadLookupV2LocalizedScopeSurfaceRegistrySync(); });
     descriptors = loadLookupV2RuntimeSemanticDescriptorMapSync();
     knownIds = loadLookupV2RuntimeKnownEntityIdsSync();
   }, 60_000);
@@ -167,11 +168,11 @@ describe('entity-lookup-v2 reviewed-authority registry invariants (hell-gate)', 
     expect(offenders).toEqual([]);
   });
 
-  it('localized surface registry has no duplicate (locale, normalized) keys', () => {
+  it('localized scope surface registry has no duplicate reviewed row keys', () => {
     const seen = new Set<string>();
     const dups: string[] = [];
     for (const row of localized) {
-      const key = `${row.locale}::${row.normalizedLocalSurface}`;
+      const key = buildLookupV2ScopeSurfaceRowKey(row);
       if (seen.has(key)) dups.push(key);
       seen.add(key);
     }
@@ -203,7 +204,7 @@ describe('entity-lookup-v2 reviewed-authority registry invariants (hell-gate)', 
     }
   });
 
-  it('localized surfaces stay recall-only: normalized form is canonical and evidence class is fixed', () => {
+  it('localized scope surfaces stay recall-only: normalized form is canonical and evidence class is fixed', () => {
     const offenders: string[] = [];
     for (const row of localized) {
       if (row.normalizedLocalSurface !== normalizeForMatch(row.localSurface)) {
@@ -212,7 +213,7 @@ describe('entity-lookup-v2 reviewed-authority registry invariants (hell-gate)', 
       // widen to string so the runtime guard survives even if a corrupted row
       // carried a non-canonical evidenceClass past the loader.
       const evidenceClass: string = row.evidenceClass;
-      if (evidenceClass !== 'localized_surface_review') {
+      if (evidenceClass !== 'localized_scope_surface_review') {
         offenders.push(`${row.localSurface} evidenceClass=${evidenceClass}`);
       }
       // recall-only: the localized registry row type carries NO entityId field at all.

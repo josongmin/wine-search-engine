@@ -315,6 +315,7 @@ async function main(): Promise<void> {
     metrics: {
       bootstrap_ms: bootstrapMs,
       bootstrap_breakdown_ms: bootstrapProfile ?? null,
+      runtime_bundle_load_profile_ms: runtimeBundle.loadProfile,
       first_query_ms: firstQueryMs,
       warm_p50_ms: warmP50Ms,
       warm_p95_ms: warmP95Ms,

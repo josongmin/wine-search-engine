@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { buildLookupEntityProjectionArtifact } from '../../../scripts/etl/build-lookup-runtime-pack.js';
+import {
+  buildLookupAliasRuntimeArtifacts,
+  buildLookupEntityProjectionArtifact,
+} from '../../../scripts/etl/build-lookup-runtime-pack.js';
+import type { AliasSnapshotRecord } from '../../../scripts/etl/search-snapshot-schema.js';
 import type { EnrichedSilverRecord } from '../../../scripts/etl/types.js';
 
 function makeRecord(overrides: Partial<EnrichedSilverRecord>): EnrichedSilverRecord {
@@ -69,6 +73,53 @@ function makeRecord(overrides: Partial<EnrichedSilverRecord>): EnrichedSilverRec
 }
 
 describe('buildLookupEntityProjectionArtifact', () => {
+  it('publishes Hangul completion and DM sidecars in the split broad-recall artifact', () => {
+    const aliases: readonly AliasSnapshotRecord[] = [
+      {
+        aliasId: 'alias-opus-one-ko',
+        entityId: 'wine-opus-one',
+        value: '오푸스 원',
+        normalizedValue: '오푸스 원',
+        type: 'canonical',
+        aliasType: 'canonical',
+        scope: 'entity',
+        source: 'fixture',
+        sourceTrust: 1,
+        confidencePrior: 0.99,
+      },
+      {
+        aliasId: 'alias-opus-one-en',
+        entityId: 'wine-opus-one',
+        value: 'Opus One',
+        normalizedValue: 'opus one',
+        type: 'canonical',
+        aliasType: 'canonical',
+        scope: 'entity',
+        source: 'fixture',
+        sourceTrust: 1,
+        confidencePrior: 0.99,
+      },
+    ];
+
+    const { broadRecallArtifact } = buildLookupAliasRuntimeArtifacts({
+      snapshotId: 'search-snapshot:v1:test',
+      generatedAt: '2026-06-08T00:00:00.000Z',
+      aliasRegistryHash: 'alias-hash',
+      aliases,
+    });
+
+    expect(broadRecallArtifact.doubleMetaphoneKeysByAliasId).toBeDefined();
+    expect(broadRecallArtifact.doubleMetaphoneKeysByAliasId?.['alias-opus-one-en']).toBeDefined();
+    expect(broadRecallArtifact.hangulCompletionRecords).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          aliasIndex: 0,
+          jamoKey: expect.any(String),
+        }),
+      ]),
+    );
+  });
+
   it('emits familyCoreKeys from anchored noisy-recall aliases and producer-relative canonical cores only', () => {
     const calonSegur = makeRecord({
       sourceId: 'wine-calon-segur',
@@ -155,6 +206,48 @@ describe('buildLookupEntityProjectionArtifact', () => {
     const solaiaDoc = artifact.documents.find((doc) => doc.entityId === 'wine-ce-solaia');
     expect(solaiaDoc?.familyCoreKeys).toEqual(
       expect.arrayContaining(['solaia']),
+    );
+  });
+
+  it('does not promote grape-only remainders into familyCoreKeys for benchmark-anchor style flagship labels', () => {
+    const screamingEagle = makeRecord({
+      sourceId: 'benchmark-anchor-w-screaming-eagle-2018',
+      externalId: 'w-screaming-eagle-2018',
+      canonicalLabel: 'Screaming Eagle Cabernet Sauvignon 2018',
+      producer: 'Screaming Eagle',
+      vintageYear: 2018,
+      region: 'Napa Valley',
+      appellation: 'Oakville',
+      grapes: ['Cabernet Sauvignon'],
+      aliases: {
+        proposed: [],
+        identitySafeProjection: [
+          'Screaming Eagle Cabernet Sauvignon 2018',
+          '스크리밍 이글',
+          '스크리밍이글',
+        ],
+        noisyRecallProjection: ['스크리밍 이글', '스크리밍이글'],
+      },
+      searchTextEn: 'Screaming Eagle Cabernet Sauvignon 2018 Napa Valley Oakville',
+    });
+
+    const artifact = buildLookupEntityProjectionArtifact({
+      snapshotId: 'search-snapshot:v1:test',
+      generatedAt: '2026-06-06T00:00:00.000Z',
+      records: [screamingEagle],
+      entityIdBySourceId: new Map([
+        ['benchmark-anchor-w-screaming-eagle-2018', 'w-screaming-eagle-2018'],
+      ]),
+      goldCanonicalLookup: new Map(),
+      sourceContinuityLookup: new Map(),
+    });
+
+    const screamingEagleDoc = artifact.documents.find((doc) => doc.entityId === 'w-screaming-eagle-2018');
+    expect(screamingEagleDoc?.familyCoreKeys).toEqual(
+      expect.arrayContaining(['스크리밍 이글']),
+    );
+    expect(screamingEagleDoc?.familyCoreKeys).not.toEqual(
+      expect.arrayContaining(['cabernet', 'cabernet sauvignon']),
     );
   });
 });

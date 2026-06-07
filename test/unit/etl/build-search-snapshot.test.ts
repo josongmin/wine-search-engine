@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildSearchSnapshot,
   filterIdentityConflictingBenchmarkAnchorRecords,
+  loadActiveBenchmarkCarryForwardRecords,
   loadRepoLocalCoreIconBenchmarkTargetIds,
   loadRepoLocalGoldBenchmarkAnchorRecords,
 } from '../../../scripts/etl/build-search-snapshot.js';
@@ -99,6 +100,23 @@ function makeRecord(): EnrichedSilverRecord {
   };
 }
 
+const TEST_REVIEWED_REGISTRY_OVERRIDES = {
+  familyCollisionRows: [],
+  familyCoreWitnessRows: [],
+  carryForwardTargetEntityIds: [],
+  localizedScopeSurfaceRows: [],
+  semanticScopeTargetRows: [],
+} as const;
+
+async function buildHermeticSearchSnapshot(
+  args: Parameters<typeof buildSearchSnapshot>[0],
+): Promise<Awaited<ReturnType<typeof buildSearchSnapshot>>> {
+  return buildSearchSnapshot({
+    ...args,
+    reviewedRegistryOverrides: TEST_REVIEWED_REGISTRY_OVERRIDES,
+  });
+}
+
 describe('buildSearchSnapshot', () => {
   it('exposes repo-local core-icon benchmark target ids for default snapshot backfill', async () => {
     await expect(loadRepoLocalCoreIconBenchmarkTargetIds()).resolves.toEqual(
@@ -186,7 +204,7 @@ describe('buildSearchSnapshot', () => {
       })}\n`,
     );
 
-    const result = await buildSearchSnapshot({
+    const result = await buildHermeticSearchSnapshot({
       input: inputPath,
       outputDir,
       nlMappings: nlMappingsPath,
@@ -281,7 +299,7 @@ describe('buildSearchSnapshot', () => {
     await fs.writeFile(inputPath, `${JSON.stringify(withoutGift)}\n`);
     await fs.writeFile(nlMappingsPath, JSON.stringify({ mappings: [] }));
 
-    await expect(buildSearchSnapshot({
+    await expect(buildHermeticSearchSnapshot({
       input: inputPath,
       outputDir,
       nlMappings: nlMappingsPath,
@@ -299,7 +317,7 @@ describe('buildSearchSnapshot', () => {
     await fs.writeFile(inputPath, `${JSON.stringify(withoutBeginner)}\n`);
     await fs.writeFile(nlMappingsPath, JSON.stringify({ mappings: [] }));
 
-    await expect(buildSearchSnapshot({
+    await expect(buildHermeticSearchSnapshot({
       input: inputPath,
       outputDir,
       nlMappings: nlMappingsPath,
@@ -315,7 +333,7 @@ describe('buildSearchSnapshot', () => {
     await fs.writeFile(inputPath, `${JSON.stringify(makeRecord())}\n`);
     await fs.writeFile(nlMappingsPath, JSON.stringify({ mappings: [] }));
 
-    const result = await buildSearchSnapshot({
+    const result = await buildHermeticSearchSnapshot({
       input: inputPath,
       outputDir,
       nlMappings: nlMappingsPath,
@@ -375,7 +393,7 @@ describe('buildSearchSnapshot', () => {
     await fs.writeFile(inputPath, `${JSON.stringify(margauxRecord)}\n`);
     await fs.writeFile(nlMappingsPath, JSON.stringify({ mappings: [] }));
 
-    const result = await buildSearchSnapshot({
+    const result = await buildHermeticSearchSnapshot({
       input: inputPath,
       outputDir,
       nlMappings: nlMappingsPath,
@@ -404,7 +422,7 @@ describe('buildSearchSnapshot', () => {
     await fs.writeFile(inputPath, '');
     await fs.writeFile(nlMappingsPath, JSON.stringify({ mappings: [] }));
 
-    const result = await buildSearchSnapshot({
+    const result = await buildHermeticSearchSnapshot({
       input: inputPath,
       outputDir,
       nlMappings: nlMappingsPath,
@@ -501,6 +519,7 @@ describe('buildSearchSnapshot', () => {
     const outputDir = path.join(dir, 'search-snapshots');
     const nlMappingsPath = path.join(dir, 'nl-mappings.json');
     const runtimeStatePath = path.join(dir, 'runtime-search-snapshot.json');
+    const fixtureRoot = path.join(dir, 'wine-engine-fixture');
     const previousSnapshotRoot = path.join(dir, 'previous-snapshot');
     const previousManifestPath = path.join(previousSnapshotRoot, 'manifest.json');
     const previousDocumentsPath = path.join(previousSnapshotRoot, 'documents.ndjson');
@@ -510,7 +529,6 @@ describe('buildSearchSnapshot', () => {
     await fs.writeFile(inputPath, '');
     await fs.writeFile(nlMappingsPath, JSON.stringify({ mappings: [] }));
 
-    const fixtureRoot = path.join(dir, 'wine-engine-fixture');
     await fs.mkdir(path.join(fixtureRoot, 'goldens'), { recursive: true });
     await fs.writeFile(
       path.join(fixtureRoot, 'goldens', 'canonical-entities.json'),
@@ -656,7 +674,7 @@ describe('buildSearchSnapshot', () => {
       })}\n`,
     );
 
-    const result = await buildSearchSnapshot({
+    const result = await buildHermeticSearchSnapshot({
       input: inputPath,
       outputDir,
       nlMappings: nlMappingsPath,
@@ -683,12 +701,315 @@ describe('buildSearchSnapshot', () => {
     });
   });
 
+  it('does not carry forward stale benchmark-anchor catalog records from the active snapshot', async () => {
+    const dir = await makeTempDir();
+    const runtimeStatePath = path.join(dir, 'runtime-search-snapshot.json');
+    const previousSnapshotRoot = path.join(dir, 'previous-snapshot');
+    const previousManifestPath = path.join(previousSnapshotRoot, 'manifest.json');
+    const previousDocumentsPath = path.join(previousSnapshotRoot, 'documents.ndjson');
+    const previousEntitiesPath = path.join(previousSnapshotRoot, 'entities.ndjson');
+
+    await fs.mkdir(previousSnapshotRoot, { recursive: true });
+
+    const previousRecord: EnrichedSilverRecord = {
+      ...makeRecord(),
+      sourceId: 'benchmark-anchor-w-sassicaia-2018',
+      externalId: 'w-sassicaia-2018',
+      canonicalLabel: 'Tenuta San Guido Sassicaia 2018',
+      aliases: {
+        proposed: [
+          {
+            value: '사시카야',
+            type: 'translation',
+            source: 'benchmark-anchor:repo_gold_core_icon_v1',
+            confidencePrior: 0.95,
+            needsReview: false,
+          },
+        ],
+        identitySafeProjection: ['Tenuta San Guido Sassicaia 2018', '사시카야'],
+        noisyRecallProjection: ['사시카야'],
+      },
+    };
+
+    await fs.writeFile(previousDocumentsPath, `${JSON.stringify(previousRecord)}\n`);
+    await fs.writeFile(
+      previousEntitiesPath,
+      `${JSON.stringify({
+        entityId: 'wine-ce-previous-sassicaia',
+        entityType: 'wine',
+        canonicalLabel: previousRecord.canonicalLabel,
+        identitySignature: 'identity-sassicaia',
+        relations: {},
+        attributes: {
+          grapes: previousRecord.grapes,
+          wineType: previousRecord.wineType,
+          style: previousRecord.wineType,
+          region: previousRecord.region,
+        },
+        metadata: {
+          benchmarkEntityId: 'w-sassicaia-2018',
+          sourceRecordRefs: [
+            {
+              sourceSystem: 'benchmark-anchor-catalog',
+              sourceRecordId: previousRecord.sourceId,
+            },
+          ],
+        },
+      })}\n`,
+    );
+    await fs.writeFile(
+      previousManifestPath,
+      `${JSON.stringify({
+        schemaVersion: 'search_snapshot.v1',
+        snapshotId: 'search-snapshot:v1:previous',
+        generatedAt: '2026-04-17T00:00:00.000Z',
+        contentHash: 'previous-content-hash',
+        sourceInputPath: previousDocumentsPath,
+        artifacts: {
+          documentsNdjson: previousDocumentsPath,
+          vespaFeedNdjson: path.join(previousSnapshotRoot, 'vespa-feed.ndjson'),
+          entitiesNdjson: previousEntitiesPath,
+          aliasesNdjson: path.join(previousSnapshotRoot, 'aliases.ndjson'),
+          ambiguityRegistryNdjson: path.join(previousSnapshotRoot, 'ambiguity-registry.ndjson'),
+          nlMappingsJson: path.join(previousSnapshotRoot, 'nl-mappings.json'),
+          metadataJson: path.join(previousSnapshotRoot, 'metadata.json'),
+        },
+        counts: {
+          documents: 1,
+          vespaFeed: 0,
+          entities: 1,
+          aliases: 0,
+          ambiguityRegistry: 0,
+          nlMappings: 0,
+        },
+        hashes: {
+          documents: 'documents-hash',
+          vespaFeed: 'vespa-hash',
+          entities: 'entities-hash',
+          aliases: 'aliases-hash',
+          ambiguityRegistry: 'ambiguity-hash',
+          nlMappings: 'nl-hash',
+        },
+        fieldAvailability: {
+          appellation: {
+            populatedDocCount: 1,
+            totalDocCount: 1,
+            populatedDocRatio: 1,
+          },
+        },
+        quality: {
+          status: 'degraded',
+          blockers: [],
+          bypasses: ['legacy_carry_forward_fixture'],
+          carryForwardBenchmarkCount: 0,
+          experimentalInputsPresent: false,
+        },
+      })}\n`,
+    );
+    await fs.writeFile(
+      runtimeStatePath,
+      `${JSON.stringify({
+        schemaVersion: 'search_snapshot_runtime_state.v7',
+        snapshotId: 'search-snapshot:v1:previous',
+        contentHash: 'previous-content-hash',
+        publishedAt: '2026-04-17T00:00:00.000Z',
+        manifestPath: previousManifestPath,
+      })}\n`,
+    );
+
+    const carryForward = await loadActiveBenchmarkCarryForwardRecords({
+      currentRecords: [],
+      runtimeStatePath,
+    });
+
+    expect(carryForward).toEqual([]);
+  });
+
+  it('carries forward active reviewed-authority owner entities from the active snapshot when current input dropped them', async () => {
+    const dir = await makeTempDir();
+    const inputPath = path.join(dir, 'silver-trackc.ndjson');
+    const outputDir = path.join(dir, 'search-snapshots');
+    const nlMappingsPath = path.join(dir, 'nl-mappings.json');
+    const runtimeStatePath = path.join(dir, 'runtime-search-snapshot.json');
+    const fixtureRoot = path.join(dir, 'wine-engine-fixture');
+    const previousSnapshotRoot = path.join(dir, 'previous-snapshot');
+    const previousManifestPath = path.join(previousSnapshotRoot, 'manifest.json');
+    const previousDocumentsPath = path.join(previousSnapshotRoot, 'documents.ndjson');
+    const previousEntitiesPath = path.join(previousSnapshotRoot, 'entities.ndjson');
+
+    await fs.mkdir(previousSnapshotRoot, { recursive: true });
+    await fs.mkdir(path.join(fixtureRoot, 'goldens'), { recursive: true });
+    await fs.writeFile(inputPath, '');
+    await fs.writeFile(nlMappingsPath, JSON.stringify({ mappings: [] }));
+    await fs.writeFile(
+      path.join(fixtureRoot, 'goldens', 'canonical-entities.json'),
+      `${JSON.stringify({ _type: 'goldens', entities: [] })}\n`,
+    );
+
+    const previousRecord = makeRecord();
+    await fs.writeFile(previousDocumentsPath, `${JSON.stringify(previousRecord)}\n`);
+    await fs.writeFile(
+      previousEntitiesPath,
+      `${JSON.stringify({
+        entityId: 'wine-ce-reviewed-authority-owner',
+        entityType: 'wine',
+        canonicalLabel: previousRecord.canonicalLabel,
+        identitySignature: 'identity-reviewed-authority-owner',
+        relations: {},
+        attributes: {
+          grapes: previousRecord.grapes,
+          wineType: previousRecord.wineType,
+          style: previousRecord.wineType,
+          region: previousRecord.region,
+        },
+        metadata: {
+          sourceRecordRefs: [
+            {
+              sourceSystem: 'benchmark-anchor-catalog',
+              sourceRecordId: previousRecord.sourceId,
+            },
+          ],
+        },
+      })}\n`,
+    );
+    await fs.writeFile(
+      previousManifestPath,
+      `${JSON.stringify({
+        schemaVersion: 'search_snapshot.v1',
+        snapshotId: 'search-snapshot:v1:previous',
+        generatedAt: '2026-04-17T00:00:00.000Z',
+        contentHash: 'previous-content-hash',
+        sourceInputPath: previousDocumentsPath,
+        artifacts: {
+          documentsNdjson: previousDocumentsPath,
+          vespaFeedNdjson: path.join(previousSnapshotRoot, 'vespa-feed.ndjson'),
+          entitiesNdjson: previousEntitiesPath,
+          aliasesNdjson: path.join(previousSnapshotRoot, 'aliases.ndjson'),
+          ambiguityRegistryNdjson: path.join(previousSnapshotRoot, 'ambiguity-registry.ndjson'),
+          nlMappingsJson: path.join(previousSnapshotRoot, 'nl-mappings.json'),
+          metadataJson: path.join(previousSnapshotRoot, 'metadata.json'),
+        },
+        counts: {
+          documents: 1,
+          vespaFeed: 0,
+          entities: 1,
+          aliases: 0,
+          ambiguityRegistry: 0,
+          nlMappings: 0,
+        },
+        hashes: {
+          documents: 'documents-hash',
+          vespaFeed: 'vespa-hash',
+          entities: 'entities-hash',
+          aliases: 'aliases-hash',
+          ambiguityRegistry: 'ambiguity-hash',
+          nlMappings: 'nl-hash',
+        },
+        fieldAvailability: {
+          appellation: {
+            populatedDocCount: 1,
+            totalDocCount: 1,
+            populatedDocRatio: 1,
+          },
+        },
+        quality: {
+          status: 'degraded',
+          blockers: [],
+          bypasses: ['legacy_carry_forward_fixture'],
+          carryForwardBenchmarkCount: 0,
+          experimentalInputsPresent: false,
+        },
+      })}\n`,
+    );
+    await fs.writeFile(
+      runtimeStatePath,
+      `${JSON.stringify({
+        schemaVersion: 'search_snapshot_runtime_state.v4',
+        snapshotId: 'search-snapshot:v1:previous',
+        contentHash: 'previous-content-hash',
+        publishedAt: '2026-04-17T00:00:00.000Z',
+        manifestPath: previousManifestPath,
+        nlMappingsRuntimePath: path.join(dir, 'nl-mappings.json'),
+        lookupAliasRuntimePath: path.join(previousSnapshotRoot, 'lookup-alias-runtime.json'),
+        lookupEntityProjectionPath: path.join(previousSnapshotRoot, 'lookup-entity-projection.json'),
+        counts: {
+          entities: 1,
+          aliases: 0,
+          lookupAliasRuntimeAliases: 0,
+          lookupEntityProjectionDocuments: 1,
+          ambiguityRegistry: 0,
+          nlMappings: 0,
+          activeLtrModels: 0,
+        },
+        hashes: {
+          entities: 'entities-hash',
+          aliases: 'aliases-hash',
+          lookupAliasRuntime: 'lookup-alias-runtime-hash',
+          lookupEntityProjection: 'lookup-entity-projection-hash',
+          ambiguityRegistry: 'ambiguity-hash',
+          nlMappings: 'nl-hash',
+          activeLtrModels: 'ltr-hash',
+        },
+        fieldAvailability: {
+          appellation: {
+            populatedDocCount: 1,
+            totalDocCount: 1,
+            populatedDocRatio: 1,
+          },
+        },
+        quality: {
+          status: 'degraded',
+          blockers: [],
+          bypasses: ['legacy_carry_forward_fixture'],
+          carryForwardBenchmarkCount: 0,
+          experimentalInputsPresent: false,
+        },
+      })}\n`,
+    );
+
+    const result = await buildSearchSnapshot({
+      input: inputPath,
+      outputDir,
+      nlMappings: nlMappingsPath,
+      fixtureRepoRoot: fixtureRoot,
+      runtimeStatePath,
+      reviewedRegistryOverrides: {
+        ...TEST_REVIEWED_REGISTRY_OVERRIDES,
+        carryForwardTargetEntityIds: ['wine-ce-reviewed-authority-owner'],
+      },
+    });
+
+    const documentsRaw = await fs.readFile(result.manifest.artifacts.documentsNdjson, 'utf8');
+    const documentRows = parseNdjson<EnrichedSilverRecord>(
+      documentsRaw,
+      result.manifest.artifacts.documentsNdjson,
+    ).records;
+    expect(documentRows.map((row) => row.sourceId)).toContain(previousRecord.sourceId);
+
+    const entitiesRaw = await fs.readFile(result.manifest.artifacts.entitiesNdjson, 'utf8');
+    const entityRows = parseNdjson<EntitySnapshotRecord>(
+      entitiesRaw,
+      result.manifest.artifacts.entitiesNdjson,
+    ).records;
+    expect(entityRows).toHaveLength(1);
+    expect(entityRows[0]?.canonicalLabel).toBe(previousRecord.canonicalLabel);
+    expect(entityRows[0]?.metadata).toMatchObject({
+      sourceRecordRefs: [
+        {
+          sourceRecordId: previousRecord.sourceId,
+        },
+      ],
+    });
+  });
+
   it('backfills missing benchmark anchors from the repo-local gold catalog with core-icon query surfaces', async () => {
     const records = await loadRepoLocalGoldBenchmarkAnchorRecords([
       'w-dom-perignon-2013',
       'w-krug-grande-cuvee-170eme-nv',
       'w-louis-roederer-cristal-2014',
       'w-giacomo-conterno-monfortino-2015',
+      'w-petrus-2016',
+      'w-sassicaia-2018',
     ]);
 
     const byId = new Map(records.map((record) => [record.benchmarkAnchorEntityId, record] as const));
@@ -696,5 +1017,11 @@ describe('buildSearchSnapshot', () => {
     expect(byId.get('w-krug-grande-cuvee-170eme-nv')?.aliases.identitySafeProjection).toContain('크루그 그랑 뀌베');
     expect(byId.get('w-louis-roederer-cristal-2014')?.aliases.identitySafeProjection).toContain('루이로드레 크리스탈');
     expect(byId.get('w-giacomo-conterno-monfortino-2015')?.aliases.identitySafeProjection).toContain('자코모콘테르노');
+    expect(byId.get('w-petrus-2016')?.aliases.identitySafeProjection).not.toContain('페트루스');
+    expect(byId.get('w-petrus-2016')?.aliases.noisyRecallProjection).toContain('페트루스');
+    expect(byId.get('w-sassicaia-2018')?.aliases.identitySafeProjection).not.toContain('사시카야');
+    expect(byId.get('w-sassicaia-2018')?.aliases.identitySafeProjection).not.toContain('사씨카이야');
+    expect(byId.get('w-sassicaia-2018')?.aliases.noisyRecallProjection).toContain('사시카야');
+    expect(byId.get('w-sassicaia-2018')?.aliases.noisyRecallProjection).toContain('사씨카이야');
   });
 });

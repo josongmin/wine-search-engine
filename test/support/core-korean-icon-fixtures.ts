@@ -327,6 +327,13 @@ export const CORE_KOREAN_ICON_AMBIGUITY_CASES: readonly CoreKoreanAmbiguityCase[
     severity: 'high',
   },
   {
+    query: '페트루스',
+    expectedCandidateEntityId: 'w-petrus-2016',
+    forbiddenResolvedEntityId: 'w-petrus-2016',
+    ambiguityTypes: ['korean_typo', 'entity'],
+    severity: 'high',
+  },
+  {
     query: '이켐',
     expectedCandidateEntityId: 'w-chateau-dyquem-2015',
     forbiddenResolvedEntityId: 'w-chateau-dyquem-2015',
@@ -387,6 +394,20 @@ export const CORE_KOREAN_ICON_AMBIGUITY_CASES: readonly CoreKoreanAmbiguityCase[
     expectedCandidateEntityId: 'w-opus-one-2018',
     forbiddenResolvedEntityId: 'w-opus-one-2018',
     ambiguityTypes: ['near_miss', 'entity'],
+    severity: 'high',
+  },
+  {
+    query: '사시카야',
+    expectedCandidateEntityId: 'w-sassicaia-2018',
+    forbiddenResolvedEntityId: 'w-sassicaia-2018',
+    ambiguityTypes: ['korean_typo', 'entity'],
+    severity: 'high',
+  },
+  {
+    query: '사씨카이야',
+    expectedCandidateEntityId: 'w-sassicaia-2018',
+    forbiddenResolvedEntityId: 'w-sassicaia-2018',
+    ambiguityTypes: ['korean_typo', 'entity'],
     severity: 'high',
   },
   {

@@ -141,6 +141,18 @@ describe('QueryNormalizer', () => {
     );
   });
 
+  it('does not auto-promote risky bare Sassicaia typo variants without an explicit vintage', () => {
+    const views = normalizer.normalize('사시카야');
+
+    expect(views.lookupVariants).not.toContain('sassicaia');
+  });
+
+  it('still canonicalizes risky Sassicaia typo variants when an explicit vintage is present', () => {
+    const views = normalizer.normalize('사씨카이야 2018');
+
+    expect(views.lookupVariants).toContain('sassicaia');
+  });
+
   it('keeps price-like tokens intact while stripping vintages', () => {
     const views = normalizer.normalize('10만원 이하 오푸스원 19');
 

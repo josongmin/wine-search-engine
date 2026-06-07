@@ -200,7 +200,7 @@ curl -fsS https://asommguide.shop:9011/v1/search/hybrid \
 - hybrid search: `https://asommguide.shop:9011/v1/search/hybrid`
 - semantic search: `https://asommguide.shop:9011/v1/search/semantic`
 - lexical search: `https://asommguide.shop:9011/v1/search/lexical`
-- lookup: `https://asommguide.shop:9011/v1/lookup/wine`
+- lookup: `https://asommguide.shop:9011/v2/entity-lookup`
 - agent: `https://asommguide.shop:9011/v1/agent`
 
 내부:

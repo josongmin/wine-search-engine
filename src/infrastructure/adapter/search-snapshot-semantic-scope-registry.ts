@@ -4,6 +4,7 @@ import {
   queryMatchesLookupSemanticScope,
   type LookupSemanticScopeMatch,
   type LookupSemanticScopeRegistryPort,
+  type LookupSemanticScopeSurfaceIndex,
 } from '../../domain/resolver/v2/lookup-semantic-scope.js';
 import type { LookupSemanticScopeRuntimeEntry } from '../../domain/shared/types/search-snapshot-lookup-semantic-runtime.js';
 
@@ -21,13 +22,19 @@ function specificityScore(entry: LookupSemanticScopeRuntimeEntry): number {
 
 export class SearchSnapshotSemanticScopeRegistry implements LookupSemanticScopeRegistryPort {
   private readonly reviewedTargetEntityIds: ReadonlySet<string>;
+  private readonly surfaceIndex: LookupSemanticScopeSurfaceIndex | undefined;
 
   constructor(
     private readonly entries: readonly LookupSemanticScopeRuntimeEntry[],
+    // Reviewed component-surface index (final architecture L1). Optional and
+    // purely additive: when absent the matcher falls back to latin-literal
+    // token matching exactly as before (zero regression).
+    componentSurfaces?: ReadonlyMap<string, ReadonlySet<string>>,
   ) {
     // Every runtime scope entry is a reviewed approved target (rejected rows
     // never reach the runtime artifact), so the anchor set is just their ids.
     this.reviewedTargetEntityIds = new Set(entries.map((entry) => entry.entityId));
+    this.surfaceIndex = componentSurfaces !== undefined ? { componentSurfaces } : undefined;
   }
 
   getReviewedTargetEntityIds(): ReadonlySet<string> {
@@ -59,6 +66,7 @@ export class SearchSnapshotSemanticScopeRegistry implements LookupSemanticScopeR
             surfaceFormKind: entry.surfaceFormKind,
             locale: entry.locale,
           },
+          ...(this.surfaceIndex !== undefined ? { surfaceIndex: this.surfaceIndex } : {}),
         })
       )
       .sort((left, right) =>

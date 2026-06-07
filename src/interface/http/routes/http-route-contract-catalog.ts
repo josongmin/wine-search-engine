@@ -82,9 +82,7 @@ interface DeclaredHttpRouteContract {
  *           remaining runtime contract is the minimal
  *           search + agent + liveness/readiness set. Remaining: 9.
  *   7.1.0 — T-ELV2-01: add the dedicated entity-lookup V2 surface
- *           (`POST /v2/entity-lookup`) (2026-06-02). Additive — V1
- *           `/v1/lookup/wine` is unchanged and remains the authority until the
- *           T-ELV2-08 shadow-compare cutover. Remaining: 10.
+ *           (`POST /v2/entity-lookup`) (2026-06-02). Additive. Remaining: 10.
  *   7.2.0 — T-ELV2-07: add the trusted operator read plane
  *           (`POST /v2/entity-lookup/ops/inspect`, X-Debug-Key gated) (2026-06-02).
  *           Additive. Remaining: 11.

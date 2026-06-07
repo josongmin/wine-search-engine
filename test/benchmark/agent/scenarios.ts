@@ -12,7 +12,7 @@
  *
  * Lookup-authority gates live elsewhere:
  *   - pnpm run eval:lookup-v2:authority
- *   - pnpm run eval:lookup-v2:shadow
+ *   - pnpm run eval:lookup-v2:parity
  *
  * AGENT_SCENARIOS is exploratory corpus only. The repo does NOT currently
  * ship a live agent benchmark runner, so do NOT document `runner.ts`,

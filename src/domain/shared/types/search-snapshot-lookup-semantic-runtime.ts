@@ -38,6 +38,13 @@ export interface LookupSemanticScopeRuntimeArtifact {
   readonly snapshotId: string;
   readonly generatedAt: string;
   readonly entries: Readonly<Record<string, LookupSemanticScopeRuntimeEntry>>;
+  /**
+   * Reviewed multilingual component-surface index (final architecture L1):
+   * `componentKind::componentKey::locale` -> reviewed normalized surfaces.
+   * Optional + additive: absence means the matcher falls back to latin-literal
+   * token matching (zero regression for snapshots built before this field).
+   */
+  readonly componentSurfaces?: Readonly<Record<string, readonly string[]>> | undefined;
 }
 
 export interface LookupScopeGraphRuntimeEdge {
@@ -108,6 +115,7 @@ export const LookupSemanticScopeRuntimeArtifactSchema = z.object({
   snapshotId: z.string().min(1),
   generatedAt: z.string().min(1),
   entries: z.record(z.string().min(1), LookupSemanticScopeRuntimeEntrySchema),
+  componentSurfaces: z.record(z.string().min(1), z.array(z.string().min(1)).readonly()).optional(),
 }).strict();
 
 export const LookupScopeGraphRuntimeArtifactSchema = z.object({

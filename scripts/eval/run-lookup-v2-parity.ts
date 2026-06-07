@@ -1,22 +1,9 @@
 /**
- * Entity Lookup V2 — live V1↔V2 shadow-compare runner (T-ELV2-08).
+ * Entity Lookup V2 — direct-authority vs full-container parity runner.
  *
- * Executes BOTH the explicit legacy-core `lookup_wine` path and the
- * `/v2/entity-lookup` path (`entityLookupV2UseCase`) over the labeled hotset
- * corpus, normalizes each into a {@link ShadowSideOutcome}, scores the run with
- * the pure {@link buildShadowReport} gate, writes a JSON report, and EXITS
- * NON-ZERO when the cutover gate fails.
- *
- * This is the rail the cutover checklist requires before V1 authority can be
- * removed (RFC DoD §7 — "shadow compare 없이 cutover 금지"). It is infra-gated:
- * it constructs the real container, so it needs the runtime stack (PG / Vespa /
- * embedding) available — run it in a stack-up environment / CI lane, not unit.
- *
- *   pnpm run eval:lookup-v2:shadow [-- --corpus <path> --output <path>]
- *
- * Post-cutover note: this lane opts into `legacy_core` explicitly. It is not a
- * public `/v1/lookup/wine` route-parity proof after compatibility-backed
- * cutover.
+ * Executes the shared lookup-direct authority and the full application
+ * container's `/v2/entity-lookup` wiring over the labeled corpus, then fails
+ * closed when any lookup outcome diverges.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -24,6 +11,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { loadConfig } from '../../src/config/env.js';
 import { createLookupDirectContainer } from '../../src/config/container-lookup.js';
+import { createContainer } from '../../src/config/container.js';
 import { getPgPool } from '../../src/infrastructure/db/pg-pool.js';
 import { SEARCH_SNAPSHOT_SCHEMA_VERSION } from '../../src/domain/shared/constants/search-snapshot.js';
 import { LOOKUP_V2_DEFAULT_MAX_CANDIDATES } from '../../src/interface/http/constants.js';
@@ -37,36 +25,36 @@ import {
   resolveEvalRuntimeBinding,
 } from './runtime-binding-args.js';
 import {
-  buildShadowReport,
-  type ShadowRow,
-  type ShadowSideOutcome,
-  type ShadowStatus,
-} from './lookup-v2-shadow-metrics.js';
+  buildParityReport,
+  type LookupEvalStatus,
+  type LookupEvalSideOutcome,
+  type ParityRow,
+} from './lookup-v2-parity-metrics.js';
 import {
   filterLookupV2StretchRows,
   isLookupV2StretchPartition,
   type LookupV2StretchPartition,
 } from './lookup-v2-stretch-partitions.js';
 
-interface HotsetRow {
+interface CorpusRow {
   readonly qid: string;
   readonly query: string;
-  readonly expectedStatus: ShadowStatus;
-  readonly accepted_statuses?: readonly ShadowStatus[] | undefined;
+  readonly expectedStatus: LookupEvalStatus;
+  readonly accepted_statuses?: readonly LookupEvalStatus[] | undefined;
   readonly expected_entity_hint?: string;
   readonly class?: string;
 }
 
-const HOTSET_STATUSES: ReadonlySet<string> = new Set<ShadowStatus>([
+const CORPUS_STATUSES: ReadonlySet<string> = new Set<LookupEvalStatus>([
   'resolved',
   'ambiguous',
   'failed',
   'redirect_discovery',
 ]);
 
-function parseHotset(corpusPath: string): readonly HotsetRow[] {
+function parseCorpus(corpusPath: string): readonly CorpusRow[] {
   const raw = readFileSync(corpusPath, 'utf8');
-  const rows: HotsetRow[] = [];
+  const rows: CorpusRow[] = [];
   for (const line of raw.split('\n')) {
     const trimmed = line.trim();
     if (trimmed.length === 0) continue;
@@ -77,16 +65,16 @@ function parseHotset(corpusPath: string): readonly HotsetRow[] {
     const query = obj['query'];
     const expected = obj['expected_status'];
     if (typeof qid !== 'string' || typeof query !== 'string' || typeof expected !== 'string') continue;
-    if (!HOTSET_STATUSES.has(expected)) continue;
+    if (!CORPUS_STATUSES.has(expected)) continue;
     const acceptedStatuses = Array.isArray(obj['accepted_statuses'])
       ? obj['accepted_statuses']
           .filter((status): status is string => typeof status === 'string')
-          .filter((status): status is ShadowStatus => HOTSET_STATUSES.has(status))
+          .filter((status): status is LookupEvalStatus => CORPUS_STATUSES.has(status))
       : undefined;
     rows.push({
       qid,
       query,
-      expectedStatus: expected as ShadowStatus,
+      expectedStatus: expected as LookupEvalStatus,
       ...(acceptedStatuses !== undefined && acceptedStatuses.length > 0 ? { accepted_statuses: acceptedStatuses } : {}),
       ...(typeof obj['expected_entity_hint'] === 'string' ? { expected_entity_hint: obj['expected_entity_hint'] } : {}),
       ...(typeof obj['class'] === 'string' ? { class: obj['class'] } : {}),
@@ -95,72 +83,73 @@ function parseHotset(corpusPath: string): readonly HotsetRow[] {
   return rows;
 }
 
-/** Map a V1 lookup response onto the shared 4-state shadow outcome. */
+function toOutcome(result: {
+  readonly status: LookupEvalStatus;
+  readonly topCandidate: null | {
+    readonly entityId: string;
+    readonly canonicalLabel: string;
+  };
+}): LookupEvalSideOutcome {
+  if (result.topCandidate === null) {
+    return { status: result.status };
+  }
+  return {
+    status: result.status,
+    topEntityId: result.topCandidate.entityId,
+    topLabel: result.topCandidate.canonicalLabel,
+  };
+}
+
 async function main(): Promise<void> {
-  // `pnpm run X -- --output Y` forwards a literal `--` terminator; drop it so
-  // the forwarded options still parse (parseArgs treats `--` as end-of-options).
-  const argv = process.argv.slice(2).filter((a) => a !== '--');
+  const argv = process.argv.slice(2).filter((arg) => arg !== '--');
   const { values } = parseArgs({
     args: argv,
     options: {
       corpus: { type: 'string', default: 'test/fixtures/lookup-v2-hotset.jsonl' },
-      output: { type: 'string', default: '/tmp/lookup-v2-shadow-report.json' },
+      output: { type: 'string', default: '/tmp/lookup-v2-parity-report.json' },
       partition: { type: 'string', default: 'all' },
       ...EVAL_RUNTIME_BINDING_OPTIONS,
     },
   });
   const corpusPath = values.corpus ?? 'test/fixtures/lookup-v2-hotset.jsonl';
-  const outputPath = values.output ?? '/tmp/lookup-v2-shadow-report.json';
+  const outputPath = values.output ?? '/tmp/lookup-v2-parity-report.json';
   const rawPartition = values.partition ?? 'all';
   if (!isLookupV2StretchPartition(rawPartition)) {
-    throw new Error(`[elv2-shadow] invalid --partition: ${rawPartition}`);
+    throw new Error(`[elv2-parity] invalid --partition: ${rawPartition}`);
   }
   const partition: LookupV2StretchPartition = rawPartition;
   const { runtimeStatePath, useActiveRuntime } = resolveEvalRuntimeBinding(values);
   requireExplicitEvalRuntimeBinding({ runtimeStatePath, useActiveRuntime });
 
-  const hotset = filterLookupV2StretchRows(parseHotset(corpusPath), partition);
-  if (hotset.length === 0) {
-    throw new Error(`[elv2-shadow] empty hotset corpus: ${corpusPath} (partition=${partition})`);
+  const corpus = filterLookupV2StretchRows(parseCorpus(corpusPath), partition);
+  if (corpus.length === 0) {
+    throw new Error(`[elv2-parity] empty corpus: ${corpusPath} (partition=${partition})`);
   }
 
   const config = loadConfig();
-  // Inject the live RDS pool so the lookup-direct container keeps the same
-  // PG-backed blocker/calibration semantics as production authority while
-  // avoiding generic search/bootstrap tax.
   const pool = getPgPool();
   const effectiveRuntimeStatePath = runtimeStatePath ?? DEFAULT_RUNTIME_STATE_PATH;
   const runtimeState = await loadSearchSnapshotRuntimeState(effectiveRuntimeStatePath);
-  const container = await createLookupDirectContainer(config, {
+  const runtime = {
     pool,
     searchSnapshotId: runtimeState.snapshotId,
     searchSnapshotManifestPath: runtimeState.manifestPath,
     searchSnapshotFieldAvailability: runtimeState.fieldAvailability,
-  });
+  } as const;
+  const directContainer = await createLookupDirectContainer(config, runtime);
+  const fullContainer = await createContainer(config, runtime);
 
-  const rows: ShadowRow[] = [];
-  for (const row of hotset) {
-    const requestId = `elv2-shadow-${row.qid}`;
-
-    // V2-only cutover: the legacy `/v1` lookup seam was REMOVED. The V1 column is
-    // retained as a removed-marker for report-shape stability only; it is no
-    // longer executed (EntityLookupV2 is the sole lookup authority).
-    const v1: ShadowSideOutcome = { status: 'failed' };
-
-    // V2 — dedicated entity-lookup path.
-    let v2: ShadowSideOutcome = { status: 'failed' };
-    try {
-      const v2Result = await container.entityLookupV2UseCase.execute(
-        { query: row.query, maxCandidates: LOOKUP_V2_DEFAULT_MAX_CANDIDATES, mode: 'default', requestId },
-        {},
-      );
-      v2 = v2Result.topCandidate !== null
-        ? { status: v2Result.status, topEntityId: v2Result.topCandidate.entityId, topLabel: v2Result.topCandidate.canonicalLabel }
-        : { status: v2Result.status };
-    } catch (err) {
-      console.error(`[elv2-shadow] V2 failed for ${row.qid}:`, (err as Error).message);
-    }
-
+  const rows: ParityRow[] = [];
+  for (const row of corpus) {
+    const requestId = `elv2-parity-${row.qid}`;
+    const command = {
+      query: row.query,
+      maxCandidates: LOOKUP_V2_DEFAULT_MAX_CANDIDATES,
+      mode: 'default' as const,
+      requestId,
+    };
+    const directResult = await directContainer.entityLookupV2UseCase.execute(command, {});
+    const fullContainerResult = await fullContainer.entityLookupV2UseCase.execute(command, {});
     rows.push({
       qid: row.qid,
       query: row.query,
@@ -168,19 +157,17 @@ async function main(): Promise<void> {
       expectedStatus: row.expectedStatus,
       ...(row.accepted_statuses !== undefined ? { acceptedStatuses: row.accepted_statuses } : {}),
       ...(row.expected_entity_hint !== undefined ? { expectedLabelHint: row.expected_entity_hint } : {}),
-      v1,
-      v2,
+      direct: toOutcome(directResult),
+      fullContainer: toOutcome(fullContainerResult),
     });
   }
 
-  const report = buildShadowReport(rows);
-  // Tamper-evident, self-describing artifact: a committed PASS claim must carry
-  // a real timestamp + git SHA so it can be audited / reproduced (self-review C2).
+  const report = buildParityReport(rows);
   let gitSha = 'unknown';
   try {
     gitSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   } catch {
-    // not in a git checkout — leave 'unknown'
+    // leave unknown
   }
   writeFileSync(
     outputPath,
@@ -202,20 +189,22 @@ async function main(): Promise<void> {
     'utf8',
   );
 
-  console.log(`[elv2-shadow] rows=${report.rowCount}`);
-  console.log(`[elv2-shadow] V1 correct=${report.v1.correct} wrong+=${report.v1.wrongPositive} | V2 correct=${report.v2.correct} wrong+=${report.v2.wrongPositive}`);
-  console.log(`[elv2-shadow] improvements=${report.improvements} regressions=${report.regressions} concept_redirect_acc=${report.v2ConceptRedirectAccuracy.toFixed(3)}`);
-  console.log(`[elv2-shadow] cutover gate: ${report.gate.pass ? 'PASS' : 'FAIL'}`);
+  console.log(`[elv2-parity] rows=${report.rowCount}`);
+  console.log(
+    `[elv2-parity] direct correct=${report.direct.correct}/${report.direct.total} | fullContainer correct=${report.fullContainer.correct}/${report.fullContainer.total}`,
+  );
+  console.log(`[elv2-parity] divergences=${report.divergences.length}`);
+  console.log(`[elv2-parity] gate: ${report.gate.pass ? 'PASS' : 'FAIL'}`);
   for (const reason of report.gate.reasons) {
-    console.log(`[elv2-shadow]   - ${reason}`);
+    console.log(`[elv2-parity]   - ${reason}`);
   }
-  console.log(`[elv2-shadow] report → ${outputPath}`);
+  console.log(`[elv2-parity] report → ${outputPath}`);
 
   await pool.end();
   process.exit(report.gate.pass ? 0 : 1);
 }
 
-main().catch((err: unknown) => {
-  console.error('[elv2-shadow] FATAL', err);
+main().catch((error: unknown) => {
+  console.error('[elv2-parity] FATAL', error);
   process.exit(2);
 });

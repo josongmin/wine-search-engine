@@ -21,9 +21,10 @@
 export type CoverageStatus = 'resolved' | 'ambiguous' | 'failed' | 'redirect_discovery';
 export type CoverageHoleOperatorBucket =
   | 'strict_collision_ambiguous'
-  | 'localized_surface_gap'
+  | 'family_surface_gap'
+  | 'qualified_scope_surface_gap'
   | 'scope_target_missing'
-  | 'catalog_support_needed';
+  | 'scope_support_needed';
 
 export interface CoverageInputRow {
   readonly qid: string;
@@ -46,10 +47,14 @@ export interface CoverageInputRow {
   readonly observedStatus: CoverageStatus;
   /** Optional canonical decision reason code returned by the runtime. */
   readonly observedReasonCode?: string | undefined;
-  /** Reviewed support-plane status for the intended family, if one exists. */
-  readonly supportStatus?: 'active_catalog_absent' | 'vintage_anchor_absent' | 'secondary_line_only' | undefined;
-  /** Whether this exact localized query surface is already reviewed. */
-  readonly localizedSurfaceReviewed?: boolean | undefined;
+  /** Reviewed support-plane status for the intended semantic scope, if one exists. */
+  readonly supportStatus?:
+    | 'active_entity_absent'
+    | 'vintage_anchor_absent'
+    | 'secondary_line_only'
+    | undefined;
+  /** Reviewed surface gap class for the intended semantic scope, when known. */
+  readonly surfaceGapBucket?: 'family_surface_gap' | 'qualified_scope_surface_gap' | undefined;
 }
 
 /** A hot entity the gold says should resolve, but the engine did not. */
@@ -92,13 +97,13 @@ function acceptedStatuses(row: CoverageInputRow): readonly CoverageStatus[] {
 
 function classifyHole(row: CoverageInputRow): CoverageHoleOperatorBucket {
   if (row.supportStatus !== undefined) {
-    return 'catalog_support_needed';
+    return 'scope_support_needed';
   }
   if (row.observedReasonCode === 'reviewed_family_collision_requires_clarification') {
     return 'strict_collision_ambiguous';
   }
-  if (row.localizedSurfaceReviewed === false) {
-    return 'localized_surface_gap';
+  if (row.surfaceGapBucket !== undefined) {
+    return row.surfaceGapBucket;
   }
   return 'scope_target_missing';
 }
@@ -136,9 +141,10 @@ export function buildCoverageReport(rows: readonly CoverageInputRow[]): Coverage
   const holesByClass: Record<string, number> = {};
   const holesByOperatorBucket: Record<CoverageHoleOperatorBucket, number> = {
     strict_collision_ambiguous: 0,
-    localized_surface_gap: 0,
+    family_surface_gap: 0,
+    qualified_scope_surface_gap: 0,
     scope_target_missing: 0,
-    catalog_support_needed: 0,
+    scope_support_needed: 0,
   };
   for (const hole of holes) {
     holesByClass[hole.class] = (holesByClass[hole.class] ?? 0) + 1;
@@ -164,7 +170,7 @@ export function formatCoverageReport(report: CoverageReport): string {
   lines.push(`non-entity handling: ${report.nonEntityCorrect}/${report.nonEntityTotal} correct`);
   if (report.holes.length > 0) {
     lines.push(`coverage holes (need curation):`);
-    lines.push(`hole buckets: strict_collision_ambiguous=${report.holesByOperatorBucket.strict_collision_ambiguous}, localized_surface_gap=${report.holesByOperatorBucket.localized_surface_gap}, scope_target_missing=${report.holesByOperatorBucket.scope_target_missing}, catalog_support_needed=${report.holesByOperatorBucket.catalog_support_needed}`);
+    lines.push(`hole buckets: strict_collision_ambiguous=${report.holesByOperatorBucket.strict_collision_ambiguous}, family_surface_gap=${report.holesByOperatorBucket.family_surface_gap}, qualified_scope_surface_gap=${report.holesByOperatorBucket.qualified_scope_surface_gap}, scope_target_missing=${report.holesByOperatorBucket.scope_target_missing}, scope_support_needed=${report.holesByOperatorBucket.scope_support_needed}`);
     for (const hole of report.holes) {
       lines.push(`  - [${hole.class}/${hole.operatorBucket}] "${hole.query}" → ${hole.observedStatus} (qid ${hole.qid})`);
     }

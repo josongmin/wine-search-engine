@@ -1202,8 +1202,8 @@ async function invokeToolPort(
       // " " or "__TODO__" — see SOLID H2 audit notes.
       //
       // Path-authoritative lookup primitive. This bypasses the legacy
-      // `mode='entity'` hint so the tool shares the exact contract with
-      // `/v1/lookup/wine` and does not depend on planner/entity-route drift.
+      // `mode='entity'` hint so the tool shares the exact dedicated lookup
+      // authority and does not depend on planner/entity-route drift.
       const normalized = normalizeLookupWineInput(call.input);
       if (!normalized.ok) {
         return {

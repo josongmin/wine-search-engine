@@ -51,6 +51,7 @@ vi.mock('../container-core.js', () => ({
 
 vi.mock('../container-features.js', () => ({
   buildFeatureContainerServices: vi.fn(() => ({
+    entityLookupV2UseCase: { execute: vi.fn() } as never,
     searchUseCase: { execute: vi.fn() } as never,
     decomposedSearchUseCase: { execute: vi.fn() } as never,
     interpretUseCase: {} as never,
@@ -60,6 +61,14 @@ vi.mock('../container-features.js', () => ({
     autocompleteUseCase: {} as never,
     drinkingWindowUseCase: { check: vi.fn() } as never,
     evalRunner: null,
+  })),
+}));
+
+vi.mock('../lookup-authority.js', () => ({
+  createLookupAuthorityServices: vi.fn(async () => ({
+    entityLookupV2UseCase: { execute: vi.fn() } as never,
+    bootstrapProfile: {} as never,
+    metadata: {} as never,
   })),
 }));
 

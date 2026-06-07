@@ -17,9 +17,9 @@ import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
 import { buildNormalizedQueryViews } from '../../src/domain/query/service/query-normalizer.js';
 import { deriveLookupSemanticEntityDescriptor } from '../../src/domain/resolver/v2/lookup-semantic-scope.js';
 import type { LookupV2SemanticScopeTargetRegistryRow } from '../eval/lookup-v2-semantic-scope-target-registry.js';
+import type { LookupV2LocalizedScopeSurfaceRegistryRow } from '../eval/lookup-v2-localized-scope-surface-registry.js';
 import type { LookupV2FamilyCollisionRegistryRow } from '../eval/lookup-v2-family-collision-registry.js';
 import type { LookupV2FamilyCoreWitnessRegistryRow } from '../eval/lookup-v2-family-core-witness-registry.js';
-import type { LookupV2LocalizedSurfaceRegistryRow } from '../eval/lookup-v2-localized-surface-registry.js';
 import { buildLookupV2RuntimeSurfaceOwnerEvidence } from '../eval/lookup-v2-runtime-surface-owner-evidence.js';
 
 interface RuntimeDescriptor {
@@ -97,6 +97,10 @@ export function buildLookupSemanticScopeRuntimeArtifact(args: {
   readonly snapshotId: string;
   readonly generatedAt: string;
   readonly reviewedRows: readonly LookupV2SemanticScopeTargetRegistryRow[];
+  // Reviewed component-surface rows (final architecture L1). Optional: when
+  // omitted the artifact carries no componentSurfaces and the matcher falls
+  // back to latin-literal token matching (zero regression).
+  readonly scopeSurfaceRows?: readonly LookupV2LocalizedScopeSurfaceRegistryRow[] | undefined;
 }): LookupSemanticScopeRuntimeArtifact {
   const entries: Record<string, LookupSemanticScopeRuntimeEntry> = {};
   for (const row of args.reviewedRows
@@ -121,11 +125,31 @@ export function buildLookupSemanticScopeRuntimeArtifact(args: {
       entityId: row.entityId,
     };
   }
+  // Materialize reviewed component surfaces: componentKind::componentKey::locale
+  // -> sorted unique normalized surfaces. Fail-closed on empty normalized form.
+  const componentSurfaceSets = new Map<string, Set<string>>();
+  for (const row of args.scopeSurfaceRows ?? []) {
+    if (row.decisionStatus !== 'approved') {
+      continue;
+    }
+    if (row.normalizedLocalSurface.trim().length === 0) {
+      throw new Error(`lookup surface index empty normalized surface for componentKey=${row.componentKey}`);
+    }
+    const key = `${row.componentKind}::${row.componentKey}::${row.locale}`;
+    const existing = componentSurfaceSets.get(key) ?? new Set<string>();
+    existing.add(row.normalizedLocalSurface);
+    componentSurfaceSets.set(key, existing);
+  }
+  const componentSurfaces: Record<string, readonly string[]> = {};
+  for (const key of [...componentSurfaceSets.keys()].sort()) {
+    componentSurfaces[key] = [...componentSurfaceSets.get(key)!].sort();
+  }
   return {
     schemaVersion: LOOKUP_SEMANTIC_SCOPE_RUNTIME_SCHEMA_VERSION,
     snapshotId: args.snapshotId,
     generatedAt: args.generatedAt,
     entries,
+    ...(Object.keys(componentSurfaces).length > 0 ? { componentSurfaces } : {}),
   };
 }
 
@@ -244,7 +268,7 @@ export function buildLookupReviewedFamilyRecallRuntimeArtifact(args: {
   readonly entityProjectionDocuments: readonly LookupEntityProjectionDocument[];
   readonly reviewedCollisionRows: readonly LookupV2FamilyCollisionRegistryRow[];
   readonly reviewedFamilyCoreWitnessRows?: readonly LookupV2FamilyCoreWitnessRegistryRow[] | undefined;
-  readonly localizedSurfaceRegistryRows?: readonly LookupV2LocalizedSurfaceRegistryRow[] | undefined;
+  readonly localizedScopeSurfaceRows?: readonly LookupV2LocalizedScopeSurfaceRegistryRow[] | undefined;
 }): LookupReviewedFamilyRecallRuntimeArtifact {
   const ownerEvidence = buildLookupV2RuntimeSurfaceOwnerEvidence(
     args.entityProjectionDocuments,
@@ -269,11 +293,11 @@ export function buildLookupReviewedFamilyRecallRuntimeArtifact(args: {
       (ownerEvidence.collidingOwnerWitnesses.get(normalizedSurface) ?? []).map((witness) => witness.witnessSource),
     )].sort((left, right) => left.localeCompare(right));
     const localizedSurfaces = [...new Set(
-      (args.localizedSurfaceRegistryRows ?? [])
+      (args.localizedScopeSurfaceRows ?? [])
         .filter((localizedRow) =>
           localizedRow.decisionStatus === 'approved'
-          && localizedRow.surfaceClass === 'family'
-          && normalizeForMatch(localizedRow.latinSurface) === normalizedSurface,
+          && localizedRow.componentKind === 'family'
+          && normalizeForMatch(localizedRow.componentKey) === normalizedSurface,
         )
         .map((localizedRow) => buildNormalizedQueryViews(localizedRow.localSurface).vintageStripped.trim())
         .filter((surface) => surface.length > 0)

@@ -45,12 +45,21 @@ vi.mock('../container-core.js', () => ({
 
 vi.mock('../container-features.js', () => ({
   buildFeatureContainerServices: vi.fn(() => ({
+    entityLookupV2UseCase: { execute: vi.fn() } as never,
     searchUseCase: {} as never,
     decomposedSearchUseCase: { execute: vi.fn() } as never,
     interpretUseCase: {} as never,
     resolveUseCase: {} as never,
     hybridUseCase: {} as never,
     batchSearchUseCase: {} as never,
+  })),
+}));
+
+vi.mock('../lookup-authority.js', () => ({
+  createLookupAuthorityServices: vi.fn(async () => ({
+    entityLookupV2UseCase: { execute: vi.fn() } as never,
+    bootstrapProfile: {} as never,
+    metadata: {} as never,
   })),
 }));
 

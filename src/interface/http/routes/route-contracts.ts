@@ -265,9 +265,9 @@ export const EntityLookupV2OpsPublishProposalRouteContract = defineRouteContract
 });
 
 // ---------------------------------------------------------------------------
-// T-IR-01 primitive surface — `/v1/search/{hybrid,semantic,lexical}` and
-// `/v1/lookup/wine`. The body shape is identical across all four; the URL
-// is the authority on which retrieval lane runs (architecture-decision §2.2).
+// T-IR-01 primitive search surface — `/v1/search/{hybrid,semantic,lexical}`.
+// The body shape is identical across the three search routes; the URL is the
+// authority on which retrieval lane runs (architecture-decision §2.2).
 // ---------------------------------------------------------------------------
 
 const PrimitiveSearchResponseSchema = z.union([SearchResponseSchema, ComparisonSearchResponseSchema]);

@@ -311,7 +311,7 @@ describe('search snapshot runtime readiness', () => {
     expect(mockVerifySearchSnapshotRuntimeStateLive).not.toHaveBeenCalled();
   });
 
-  it('keeps search_snapshot_runtime up but marks search_snapshot_ltr down when no pool is available and no active LTR exists', async () => {
+  it('keeps search_snapshot_runtime up and omits the legacy LTR-only probe when no pool is available', async () => {
     mockLoadSearchSnapshotRuntimeState.mockResolvedValue({
       quality: CANONICAL_QUALITY,
       counts: {
@@ -327,10 +327,7 @@ describe('search snapshot runtime readiness', () => {
     const health = buildHealthRouteOptions(config, {});
 
     await expect(health.readiness?.search_snapshot_runtime?.check?.()).resolves.toBe('up');
-    await expect(health.readiness?.search_snapshot_ltr?.check?.()).rejects.toThrow(
-      /Active LTR runtime count is zero/,
-    );
-    expect(health.readiness?.search_snapshot_ltr?.required).toBe(false);
+    expect(health.readiness?.search_snapshot_ltr).toBeUndefined();
   });
 
   it('surfaces an unloaded drinking-window predictor as a degraded readiness check', async () => {

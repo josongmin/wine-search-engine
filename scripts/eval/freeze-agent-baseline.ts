@@ -84,7 +84,7 @@ async function run(): Promise<void> {
     console.error('  - pnpm run bench:smoke');
     console.error('  - pnpm run bench:agent:export-scenarios-md');
     console.error('  - pnpm run eval:lookup-v2:authority -- --use-active-runtime --output /tmp/entity-resolution-validation.json');
-    console.error('  - pnpm run eval:lookup-v2:shadow -- --use-active-runtime --output /tmp/lookup-v2-shadow-report.json');
+    console.error('  - pnpm run eval:lookup-v2:parity -- --use-active-runtime --output /tmp/lookup-v2-parity-report.json');
     console.error('[freeze-baseline] restore the agent runner before freezing live agent baselines again.');
     process.exitCode = 1;
     return;

@@ -67,6 +67,7 @@ import { AgentSessionService } from '../application/wine-search/agent-session-se
 import { AgentUseCase } from '../application/wine-search/agent-usecase.js';
 import type { AgentUseCasePort } from '../application/wine-search/port/agent-usecase.port.js';
 import { bindLiveSearchSnapshotRuntimeHandles } from './runtime-handles.js';
+import { createLookupAuthorityServices } from './lookup-authority.js';
 export interface Container {
   /** Chat LLM when an OpenAI credential pool or Codex ChatGPT login token is available. */
   readonly chatLlm?: ChatLlmPort;
@@ -329,7 +330,14 @@ export async function createContainer(
     };
   })();
 
-  const features = buildFeatureContainerServices(config, core, runtimeHandles, useCaseExtensions);
+  const lookupAuthority = await createLookupAuthorityServices(config, runtimeHandles);
+  const features = buildFeatureContainerServices(
+    config,
+    core,
+    lookupAuthority,
+    runtimeHandles,
+    useCaseExtensions,
+  );
   // Defense-in-depth: env validation already throws when AGENT_ENABLED=true
   // and no OpenAI credential is set (see config/env.ts). If we somehow reach here
   // without a chatLlm, fail loudly rather than silently 404 the agent route.

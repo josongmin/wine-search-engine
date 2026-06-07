@@ -206,7 +206,7 @@ describe('buildRuntimeSupportServices', () => {
       expect.objectContaining({
         configured: true,
         loaded: false,
-        issue: 'disabled',
+        issue: 'unsupported',
       }),
     );
     expect(services.runtimeReadiness.ltrModels.effective).toEqual(
@@ -214,7 +214,7 @@ describe('buildRuntimeSupportServices', () => {
         source: 'none',
         loaded: false,
         modelCount: 0,
-        issue: 'disabled',
+        issue: 'unsupported',
         required: false,
       }),
     );
@@ -223,7 +223,7 @@ describe('buildRuntimeSupportServices', () => {
         configured: false,
         loaded: false,
         selected: false,
-        issue: 'disabled',
+        issue: 'unsupported',
       }),
     );
     await rm(tempDir, { recursive: true, force: true });
@@ -244,7 +244,7 @@ describe('buildRuntimeSupportServices', () => {
       expect.objectContaining({
         configured: true,
         loaded: false,
-        issue: 'disabled',
+        issue: 'unsupported',
       }),
     );
     expect(services.ltrModels).toBeUndefined();
@@ -302,7 +302,7 @@ describe('buildRuntimeSupportServices', () => {
         source: 'none',
         loaded: false,
         modelCount: 0,
-        issue: 'disabled',
+        issue: 'unsupported',
         required: false,
       }),
     );
@@ -311,7 +311,56 @@ describe('buildRuntimeSupportServices', () => {
       expect.objectContaining({
         configured: false,
         loaded: false,
-        issue: 'disabled',
+        issue: 'unsupported',
+      }),
+    );
+    expect(pool.query).not.toHaveBeenCalled();
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it('keeps shared runtime LTR unsupported even when the serving flag is enabled', async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), 'runtime-ltr-unsupported-'));
+    const modelPath = path.join(tempDir, 'runtime-ltr-models.json');
+    await writeFile(modelPath, JSON.stringify({
+      queryClassModels: {
+        red_wine: {
+          queryClass: 'ignored',
+          weights: makeWeights(40),
+          bias: 0.3,
+          featureSchemaHash: LTR_FEATURE_SCHEMA_HASH,
+          trainingExampleCount: 22,
+          ndcg5ValidationScore: 0.71,
+          trainedAt: '2026-04-01T00:00:00Z',
+        },
+      },
+    }, null, 2));
+
+    const pool = {
+      query: vi.fn().mockResolvedValue({ rows: [] }),
+    } as never;
+    const config = parseEnv({
+      NODE_ENV: 'test',
+      LTR_SERVING_ENABLED: 'true',
+      RUNTIME_LTR_MODELS_PATH: modelPath,
+    });
+
+    const services = await buildRuntimeSupportServices(config, { pool });
+
+    expect(services.ltrModels).toBeUndefined();
+    expect(services.runtimeReadiness.runtimeLtrArtifact).toEqual(
+      expect.objectContaining({
+        configured: true,
+        loaded: false,
+        issue: 'unsupported',
+      }),
+    );
+    expect(services.runtimeReadiness.ltrModels.effective).toEqual(
+      expect.objectContaining({
+        source: 'none',
+        loaded: false,
+        modelCount: 0,
+        issue: 'unsupported',
+        required: false,
       }),
     );
     expect(pool.query).not.toHaveBeenCalled();
@@ -365,7 +414,7 @@ describe('buildRuntimeSupportServices', () => {
       expect.objectContaining({
         configured: false,
         loaded: false,
-        issue: 'disabled',
+        issue: 'unsupported',
       }),
     );
     expect(services.runtimeReadiness.ltrModels.effective).toEqual(
@@ -373,7 +422,7 @@ describe('buildRuntimeSupportServices', () => {
         source: 'none',
         loaded: false,
         modelCount: 0,
-        issue: 'disabled',
+        issue: 'unsupported',
         required: false,
       }),
     );

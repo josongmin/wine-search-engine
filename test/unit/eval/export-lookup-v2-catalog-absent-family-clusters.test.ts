@@ -2,9 +2,9 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it } from 'vitest';
-import { writeLookupV2CatalogAbsentFamilyClusters } from '../../../scripts/eval/export-lookup-v2-catalog-absent-family-clusters.js';
+import { writeLookupV2ScopeSupportFamilyClusters } from '../../../scripts/eval/export-lookup-v2-scope-support-family-clusters.js';
 
-describe('writeLookupV2CatalogAbsentFamilyClusters', () => {
+describe('writeLookupV2ScopeSupportFamilyClusters', () => {
   const tempDirs: string[] = [];
 
   afterEach(() => {
@@ -18,7 +18,7 @@ describe('writeLookupV2CatalogAbsentFamilyClusters', () => {
     tempDirs.push(outputDir);
     const outputPath = path.join(outputDir, 'catalog-absent.jsonl');
 
-    const index = writeLookupV2CatalogAbsentFamilyClusters({
+    const index = writeLookupV2ScopeSupportFamilyClusters({
       draftRows: [
         {
           surface: '살롱 샴페인',
@@ -28,7 +28,7 @@ describe('writeLookupV2CatalogAbsentFamilyClusters', () => {
           observedStatus: 'failed',
           benchmarkGoldHint: 'salon',
           triageBucket: 'catalog_support_review',
-          supportStatus: 'active_catalog_absent',
+          supportStatus: 'active_entity_absent',
           sourceArtifact: '/tmp/a.json',
           sourceEvidence: 'hole a',
           reviewedAt: '2026-06-07T00:05:00.000Z',
@@ -41,7 +41,7 @@ describe('writeLookupV2CatalogAbsentFamilyClusters', () => {
           observedStatus: 'failed',
           benchmarkGoldHint: 'salon',
           triageBucket: 'catalog_support_review',
-          supportStatus: 'active_catalog_absent',
+          supportStatus: 'active_entity_absent',
           sourceArtifact: '/tmp/b.json',
           sourceEvidence: 'hole b',
           reviewedAt: '2026-06-07T00:05:00.000Z',
@@ -70,7 +70,7 @@ describe('writeLookupV2CatalogAbsentFamilyClusters', () => {
       benchmarkGoldHint: 'salon',
       normalizedBenchmarkGoldHint: 'salon',
       familyScopeRows: 2,
-      supportStatus: 'active_catalog_absent',
+      supportStatus: 'active_entity_absent',
     }));
   });
 });

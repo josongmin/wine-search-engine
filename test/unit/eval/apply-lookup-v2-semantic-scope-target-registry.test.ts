@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { applyLookupV2FamilyTargetRegistry } from '../../../scripts/eval/apply-lookup-v2-family-target-registry.js';
+import { applyLookupV2SemanticScopeTargetRegistry } from '../../../scripts/eval/apply-lookup-v2-semantic-scope-target-registry.js';
 
-describe('applyLookupV2FamilyTargetRegistry', () => {
+describe('applyLookupV2SemanticScopeTargetRegistry', () => {
   it('appends reviewed semantic scope rows into the registry and tracks pending rows', () => {
-    const result = applyLookupV2FamilyTargetRegistry({
+    const result = applyLookupV2SemanticScopeTargetRegistry({
       familyRows: [
         {
           semanticScopeKey: 'family::petrus::::::::::bare::ko',
@@ -88,7 +88,7 @@ describe('applyLookupV2FamilyTargetRegistry', () => {
   });
 
   it('fails closed on conflicting existing owners', () => {
-    const result = applyLookupV2FamilyTargetRegistry({
+    const result = applyLookupV2SemanticScopeTargetRegistry({
       familyRows: [
         {
           semanticScopeKey: 'family::petrus::::::::::bare::ko',
@@ -149,7 +149,7 @@ describe('applyLookupV2FamilyTargetRegistry', () => {
   });
 
   it('preserves reviewed_collision evidence class when applying collision family reviews', () => {
-    const result = applyLookupV2FamilyTargetRegistry({
+    const result = applyLookupV2SemanticScopeTargetRegistry({
       familyRows: [
         {
           semanticScopeKey: 'line::silver oak::::::::2017::qualified::ko',
@@ -203,7 +203,7 @@ describe('applyLookupV2FamilyTargetRegistry', () => {
   });
 
   it('fails closed when the reviewed row family scope does not match the runtime descriptor owner', () => {
-    const result = applyLookupV2FamilyTargetRegistry({
+    const result = applyLookupV2SemanticScopeTargetRegistry({
       familyRows: [
         {
           semanticScopeKey: 'family::solaia::::::::::bare::ko',

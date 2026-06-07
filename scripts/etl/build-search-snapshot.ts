@@ -108,11 +108,23 @@ import {
 } from './lookup-authority-registries.js';
 import { assertLookupAuthorityBoundaryConsistency } from './lookup-authority-boundaries.js';
 import { loadLookupPolicyConflictRegistrySync } from '../eval/lookup-v2-policy-conflict-registry.js';
-import { loadLookupV2FamilyCollisionRegistrySync } from '../eval/lookup-v2-family-collision-registry.js';
-import { loadLookupV2FamilyCoreWitnessRegistrySync } from '../eval/lookup-v2-family-core-witness-registry.js';
-import { loadLookupV2LocalizedSurfaceRegistrySync } from '../eval/lookup-v2-localized-surface-registry.js';
+import {
+  loadLookupV2FamilyCollisionRegistrySync,
+  type LookupV2FamilyCollisionRegistryRow,
+} from '../eval/lookup-v2-family-collision-registry.js';
+import {
+  loadLookupV2FamilyCoreWitnessRegistrySync,
+  type LookupV2FamilyCoreWitnessRegistryRow,
+} from '../eval/lookup-v2-family-core-witness-registry.js';
+import {
+  loadLookupV2LocalizedScopeSurfaceRegistrySync,
+  type LookupV2LocalizedScopeSurfaceRegistryRow,
+} from '../eval/lookup-v2-localized-scope-surface-registry.js';
 import { loadLookupV2PolicyFamilyDecisionRegistrySync } from '../eval/lookup-v2-policy-family-decision-registry.js';
-import { loadLookupV2SemanticScopeTargetRegistrySync } from '../eval/lookup-v2-semantic-scope-target-registry.js';
+import {
+  loadLookupV2SemanticScopeTargetRegistrySync,
+  type LookupV2SemanticScopeTargetRegistryRow,
+} from '../eval/lookup-v2-semantic-scope-target-registry.js';
 import { buildLookupV2RuntimeSemanticDescriptorMapFromDocuments } from '../eval/lookup-v2-runtime-semantic-descriptors.js';
 import { buildReviewedCollisionFamilyCoreKeysByEntity } from '../eval/lookup-v2-runtime-surface-owner-evidence.js';
 
@@ -175,6 +187,13 @@ export interface Args {
   readonly nlMappings: string;
   readonly fixtureRepoRoot?: string | undefined;
   readonly runtimeStatePath?: string | undefined;
+  readonly reviewedRegistryOverrides?: {
+    readonly familyCollisionRows?: readonly LookupV2FamilyCollisionRegistryRow[] | undefined;
+    readonly familyCoreWitnessRows?: readonly LookupV2FamilyCoreWitnessRegistryRow[] | undefined;
+    readonly carryForwardTargetEntityIds?: readonly CanonicalEntityId[] | undefined;
+    readonly localizedScopeSurfaceRows?: readonly LookupV2LocalizedScopeSurfaceRegistryRow[] | undefined;
+    readonly semanticScopeTargetRows?: readonly LookupV2SemanticScopeTargetRegistryRow[] | undefined;
+  } | undefined;
 }
 
 function parseArgs(argv: readonly string[]): Args {
@@ -591,18 +610,23 @@ async function loadRepoLocalCoreIconEquivalentPublicIdsByTargetId(
   return equivalentPublicIds;
 }
 
-async function loadActiveBenchmarkCarryForwardRecords(args: {
+export async function loadActiveBenchmarkCarryForwardRecords(args: {
   readonly currentRecords: readonly SnapshotBuildRecord[];
   readonly fixtureRepoRoot?: string | undefined;
   readonly runtimeStatePath?: string | undefined;
+  readonly carryForwardTargetEntityIds?: readonly CanonicalEntityId[] | undefined;
 }): Promise<readonly SnapshotBuildRecord[]> {
   const runtimeStatePath = args.runtimeStatePath ?? DEFAULT_RUNTIME_STATE_PATH;
   if (!existsSync(runtimeStatePath)) {
     return [];
   }
 
-  const requiredTargetIds = await loadRequiredBenchmarkTargetIds(args.fixtureRepoRoot);
-  if (requiredTargetIds.length === 0) {
+  const requiredTargetIds = new Set<string>(await loadRequiredBenchmarkTargetIds(args.fixtureRepoRoot));
+  for (const entityId of args.carryForwardTargetEntityIds ?? []) {
+    requiredTargetIds.add(entityId);
+  }
+  const explicitCarryForwardTargetIds = new Set<string>(args.carryForwardTargetEntityIds ?? []);
+  if (requiredTargetIds.size === 0) {
     return [];
   }
 
@@ -636,7 +660,6 @@ async function loadActiveBenchmarkCarryForwardRecords(args: {
   const previousEntities = parseNdjson<EntitySnapshotRecord>(entitiesRaw, entitiesPath).records;
   const previousRecordBySourceId = new Map(previousRecords.map((record) => [record.sourceId, record] as const));
   const currentSourceIds = new Set(args.currentRecords.map((record) => record.sourceId));
-  const requiredSet = new Set(requiredTargetIds);
   const carryForward = new Map<SourceRecordId, SnapshotBuildRecord>();
 
   for (const entity of previousEntities) {
@@ -646,12 +669,25 @@ async function loadActiveBenchmarkCarryForwardRecords(args: {
     };
     const benchmarkEntityId =
       typeof metadata.benchmarkEntityId === 'string' ? metadata.benchmarkEntityId : undefined;
-    if (!requiredSet.has(entity.entityId) && (benchmarkEntityId == null || !requiredSet.has(benchmarkEntityId))) {
+    if (!requiredTargetIds.has(entity.entityId) && (benchmarkEntityId == null || !requiredTargetIds.has(benchmarkEntityId))) {
       continue;
     }
     const refs = Array.isArray(metadata.sourceRecordRefs) ? metadata.sourceRecordRefs : [];
     for (const ref of refs) {
-      if (ref?.sourceSystem !== SOURCE_SYSTEM_VIVINO_SILVER || typeof ref.sourceRecordId !== 'string') {
+      if (
+        (ref?.sourceSystem !== SOURCE_SYSTEM_VIVINO_SILVER
+          && ref?.sourceSystem !== SOURCE_SYSTEM_BENCHMARK_ANCHOR_CATALOG)
+        || typeof ref.sourceRecordId !== 'string'
+      ) {
+        continue;
+      }
+      if (
+        ref.sourceSystem === SOURCE_SYSTEM_BENCHMARK_ANCHOR_CATALOG
+        && !explicitCarryForwardTargetIds.has(entity.entityId)
+        && (benchmarkEntityId === undefined || !explicitCarryForwardTargetIds.has(benchmarkEntityId))
+      ) {
+        // Rebuild benchmark-anchor records from the current authoritative
+        // seed/catalog path instead of reviving stale runtime copies.
         continue;
       }
       if (currentSourceIds.has(ref.sourceRecordId as SourceRecordId)) {
@@ -665,6 +701,32 @@ async function loadActiveBenchmarkCarryForwardRecords(args: {
   }
 
   return [...carryForward.values()].sort((left, right) => left.sourceId.localeCompare(right.sourceId));
+}
+
+async function loadReviewedAuthorityCarryForwardEntityIds(args: {
+  readonly reviewedRegistryOverrides?: Args['reviewedRegistryOverrides'];
+}): Promise<readonly CanonicalEntityId[]> {
+  const overrideIds = args.reviewedRegistryOverrides?.carryForwardTargetEntityIds;
+  if (overrideIds !== undefined) {
+    return [...new Set(overrideIds)].sort((left, right) => left.localeCompare(right));
+  }
+  if (args.reviewedRegistryOverrides !== undefined) {
+    return [];
+  }
+
+  const entityIds = new Set<CanonicalEntityId>();
+  for (const row of loadLookupV2SemanticScopeTargetRegistrySync()) {
+    if (row.decisionStatus === 'approved' && row.entityId !== undefined) {
+      entityIds.add(row.entityId as CanonicalEntityId);
+    }
+  }
+  for (const row of loadLookupV2PolicyFamilyDecisionRegistrySync()) {
+    entityIds.add(row.entityId as CanonicalEntityId);
+  }
+  for (const row of await loadLookupExactSafeRegistry()) {
+    entityIds.add(row.entityId);
+  }
+  return [...entityIds].sort((left, right) => left.localeCompare(right));
 }
 
 async function assertRequiredBenchmarkCoverage(args: {
@@ -1391,6 +1453,9 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     .map((record) => stripExperimentalSnapshotFields(record as SnapshotBuildRecord))
     .sort((left, right) => left.sourceId.localeCompare(right.sourceId));
   assertSuitabilityCoverage(baseRecords);
+  const reviewedAuthorityCarryForwardEntityIds = await loadReviewedAuthorityCarryForwardEntityIds({
+    reviewedRegistryOverrides: args.reviewedRegistryOverrides,
+  });
   const [goldLookup, sourceContinuityLookup, carryForwardRecords] = await Promise.all([
     loadGoldCanonicalLookupForBuild({ fixtureRepoRoot: args.fixtureRepoRoot }),
     loadActiveSourceEntityContinuity(args.runtimeStatePath, {
@@ -1400,6 +1465,7 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
       currentRecords: baseRecords,
       fixtureRepoRoot: args.fixtureRepoRoot,
       runtimeStatePath: args.runtimeStatePath,
+      carryForwardTargetEntityIds: reviewedAuthorityCarryForwardEntityIds,
     }),
   ]);
   const records = [...baseRecords, ...carryForwardRecords]
@@ -1504,9 +1570,12 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     sourceContinuityLookup,
     identityCertificatesByEntity: lookupIdentityCertificatesByEntity,
   });
-  const lookupReviewedFamilyCoreWitnessRegistry = loadLookupV2FamilyCoreWitnessRegistrySync();
-  const lookupReviewedFamilyCollisionRegistry = loadLookupV2FamilyCollisionRegistrySync();
-  const lookupLocalizedSurfaceRegistry = loadLookupV2LocalizedSurfaceRegistrySync();
+  const lookupReviewedFamilyCoreWitnessRegistry =
+    args.reviewedRegistryOverrides?.familyCoreWitnessRows
+    ?? loadLookupV2FamilyCoreWitnessRegistrySync();
+  const lookupReviewedFamilyCollisionRegistry =
+    args.reviewedRegistryOverrides?.familyCollisionRows
+    ?? loadLookupV2FamilyCollisionRegistrySync();
   const reviewedFamilyCoreKeysByEntity = buildReviewedFamilyCoreKeysByEntity(
     lookupReviewedFamilyCoreWitnessRegistry,
   );
@@ -1549,14 +1618,20 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
   const lookupSemanticRuntimeDescriptorMap = buildLookupV2RuntimeSemanticDescriptorMapFromDocuments(
     lookupEntityProjectionArtifact.documents,
   );
-  const lookupSemanticScopeTargetRegistry = loadLookupV2SemanticScopeTargetRegistrySync(
-    undefined,
-    lookupSemanticRuntimeDescriptorMap,
-  );
+  const lookupSemanticScopeTargetRegistry =
+    args.reviewedRegistryOverrides?.semanticScopeTargetRows
+    ?? loadLookupV2SemanticScopeTargetRegistrySync(
+      undefined,
+      lookupSemanticRuntimeDescriptorMap,
+    );
+  const lookupLocalizedScopeSurfaceRegistry =
+    args.reviewedRegistryOverrides?.localizedScopeSurfaceRows
+    ?? loadLookupV2LocalizedScopeSurfaceRegistrySync();
   const lookupSemanticScopeRuntimeArtifact = buildLookupSemanticScopeRuntimeArtifact({
     snapshotId: '',
     generatedAt,
     reviewedRows: lookupSemanticScopeTargetRegistry,
+    scopeSurfaceRows: lookupLocalizedScopeSurfaceRegistry,
   });
   const lookupReviewedFamilyRecallRuntimeArtifact = buildLookupReviewedFamilyRecallRuntimeArtifact({
     snapshotId: '',
@@ -1564,7 +1639,7 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     entityProjectionDocuments: lookupEntityProjectionArtifact.documents,
     reviewedCollisionRows: lookupReviewedFamilyCollisionRegistry,
     reviewedFamilyCoreWitnessRows: lookupReviewedFamilyCoreWitnessRegistry,
-    localizedSurfaceRegistryRows: lookupLocalizedSurfaceRegistry,
+    localizedScopeSurfaceRows: lookupLocalizedScopeSurfaceRegistry,
   });
   const lookupScopeGraphRuntimeArtifact = buildLookupScopeGraphRuntimeArtifact({
     snapshotId: '',
