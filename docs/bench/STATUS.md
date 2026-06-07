@@ -4,42 +4,50 @@
 
 ## Current Truth Update (2026-06-08)
 
-- active runtime snapshot:
-  - `search-snapshot:v1:d2a964e484ff2284`
-- active runtime state:
-  - `search_snapshot_runtime_state.v7`
-- active manifest schema:
-  - `search_snapshot.v5`
-- correctness gates:
-  - authority:
-    - `/tmp/entity-resolution-validation-codex-2026-06-08-after-ambiguity-fix.json`
+- active runtime pointer:
+  - runtime state:
+    - `/Users/songmin/.wine-search-engine/data/runtime-search-snapshot.json`
+  - snapshot:
+    - `search-snapshot:v1:6384d22559774856`
+  - runtime state schema:
+    - `search_snapshot_runtime_state.v7`
+  - manifest schema:
+    - `search_snapshot.v5`
+- latest verified artifacts currently on disk:
+  - hotset parity on active pointer:
+    - `/tmp/lookup-v2-parity-report.json`
+    - generated `2026-06-07T18:24:55.709Z`
+    - snapshot `search-snapshot:v1:6384d22559774856`
+    - `rows=45`, `divergences=0`, gate **PASS**
+  - authority artifact:
+    - `/tmp/entity-resolution-validation.json`
+    - snapshot `search-snapshot:v1:6384d22559774856`
     - `V2 215/215`, `wrong=0`, `miss=0`, gate **PASS**
-  - Korean-famous parity:
-    - `/tmp/lookup-v2-parity-korean-famous.json`
-    - `rows=107`, `divergences=0`, gate **PASS**
-  - Korean-famous coverage:
-    - `/tmp/lookup-v2-coverage-korean-famous.json`
-    - `hot_entities=67/67`, `non_entity=38/40`, `curation_tasks=0`
-  - stretch entity-no-policy parity:
-    - `/tmp/lookup-v2-parity-korean-realworld-stretch-entity-no-policy.json`
-    - `rows=590`, `divergences=0`, gate **PASS**
-  - stretch entity-no-policy coverage:
+  - stretch entity-no-policy coverage artifact:
     - `/tmp/lookup-v2-coverage-korean-realworld-stretch-entity-no-policy.json`
-    - `hot_entities=120/239`, `non_entity=227/351`, `curation_tasks=119`
+    - generated `2026-06-07T19:35:50.329Z`
+    - snapshot `search-snapshot:v1:6384d22559774856`
+    - `hot_entities=142/239`, `non_entity=227/351`, `holes=97`
     - operator buckets:
-      `strict_collision_ambiguous=10`, `family_surface_gap=6`,
-      `qualified_scope_surface_gap=0`, `scope_target_missing=103`,
+      `strict_collision_ambiguous=10`, `family_surface_gap=0`,
+      `qualified_scope_surface_gap=0`, `scope_target_missing=87`,
       `scope_support_needed=0`
-- latency gate:
-  - latest isolated rerun:
+  - latest isolated latency artifact:
     - `/tmp/lookup-v2-latency-korean-famous-codex-2026-06-08-rca-profiled-rerun2.json`
-  - `cold_boot measured_ms=1956.946` -> **PASS**
-  - `request first_query_ms=169.209` -> **PASS**
-  - `warm_p95_ms=85.702` -> **PASS**
-  - `runtime_hydration fully_hydrated_runtime_artifact=true`, `lazy_build_detected_during_probe=false` -> **PASS**
-  - RCA:
-    - active bottleneck is cache-hit `v8 deserialize`, not runtime materialization
-    - latest profiled rerun: `cache read=121.457ms`, `deserialize=1769.713ms`, `materialize=4.242ms`
+    - generated `2026-06-07T16:55:10.931Z`
+    - snapshot `search-snapshot:v1:d2a964e484ff2284`
+    - `cold_boot measured_ms=1956.946` -> **PASS**
+    - `request first_query_ms=169.209` -> **PASS**
+    - `warm_p95_ms=85.702` -> **PASS**
+    - `runtime_hydration fully_hydrated_runtime_artifact=true`, `lazy_build_detected_during_probe=false` -> **PASS**
+    - RCA:
+      - active bottleneck is cache-hit `v8 deserialize`, not runtime materialization
+      - latest profiled rerun: `cache read=121.457ms`, `deserialize=1769.713ms`, `materialize=4.242ms`
+- active proof gap:
+  - current runtime pointer `6384d22559774856` has hotset parity proof on disk
+  - current runtime pointer now also has fresh authority / stretch coverage / write-plane / reviewed-overlay artifacts on disk
+  - current runtime pointer still does **not** have a fresh isolated latency artifact on disk
+  - older `d2a964e484ff2284` latency artifact remains useful RCA evidence, but it is not active-pointer proof
 - runtime / planner state:
   - active reviewed SoT:
     - `data/lookup-v2/lookup-localized-scope-surface-registry-v1.jsonl`
@@ -53,41 +61,55 @@
     reviewed family recall, and concept redirect artifacts
   - runtime owner evidence / benchmark hints stay display-only and do not promote authority
 - publish state:
-  - latest canonical publish is active on
+  - active runtime pointer is `search-snapshot:v1:6384d22559774856`
+  - last verified stretch/latency artifacts currently on disk still reference
     `search-snapshot:v1:d2a964e484ff2284`
 - stretch truth:
   - current entity-no-policy draft:
-    - `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl`
-    - `rows=106`, `auto_targetable=24`, `scope_policy_review=1`,
-      `localized_surface_review=2`, `catalog_support_review=0`,
-      `reviewed_collision=36`, `scope_target_review=22`
+    - `/Users/songmin/.wine-search-engine/data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl`
+    - `rows=94`, `auto_targetable=25`, `scope_policy_review=0`,
+      `localized_surface_review=0`, `catalog_support_review=0`,
+      `reviewed_collision=35`, `scope_target_review=13`,
+      `reviewed_rejected=21`
   - current write-plane summary:
-    - `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-write-plane-summary.json`
-    - `exact_safe_packet_rows=24`, `reviewed_authority_approved_rows=24`, `reviewed_authority_pending_rows=0`
-    - `exact_safe_family_pending_rows=16`
+    - `/Users/songmin/.wine-search-engine/data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-write-plane-summary.json`
+    - `exact_safe_packet_rows=25`, `reviewed_authority_approved_rows=25`, `reviewed_authority_pending_rows=0`
+    - `exact_safe_family_review_rows=25`, `exact_safe_family_pending_rows=17`
     - `catalog_support_family_clusters: rows=0, families=0`
-    - `reviewed_collision_family_clusters: rows=36, families=11`
-    - `manual_target_family_rows=15`
-    - `manual_target_collision_families=2`
-    - `manual_target_missing_families=0`
+    - `reviewed_collision_family_clusters: rows=35, families=12`
+    - `reviewed_collision_family_review_rows=29`
+    - `manual_target_batch_rows=13`
+    - `manual_target_family_rows=11`
+    - `manual_target_candidate_unique_owner_rows=0`
+    - `manual_target_collision_candidate_rows=1`
+    - `manual_target_missing_runtime_owner_rows=10`
   - current policy review packet:
     - `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-policy-review-packet.jsonl`
-    - `rows=1`
+    - `rows=0`
   - current reviewed family-collision registry:
     - `data/lookup-v2/lookup-family-collision-registry-v1.jsonl`
   - overlay proof:
     - `data/lookup-v2/drafts/lookup-v2-stretch-reviewed-registry-overlay-summary.json`
     - reviewed-registry overlay: no pending reviewed registry delta (`semantic_scope_registry_inserted=0`, `semantic_policy_registry_inserted=0`)
-    - family-collision overlay: `reviewed_collision 0 -> 36`, `scope_target_review 58 -> 22`
+    - family-collision overlay: `reviewed_collision 0 -> 36`, `scope_target_review 58 -> 23`
 
 - residual operator debt:
-  - remaining stretch debt is concentrated in `scope_target_missing=105`
-    with smaller `strict_collision_ambiguous=10` and `family_surface_gap=10`
+  - remaining stretch debt is concentrated in `scope_target_missing=87`
+    with smaller `strict_collision_ambiguous=10`
   - semantic-scope cutover is active; remaining work is reviewed authority/data expansion, not legacy plane migration
 
 아래 section은 archived historical context다. current 판단은 이 update block만 기준으로 한다.
 
 ## Current executable lanes
+
+- blocking rails for current active runtime pointer:
+  - `pnpm run eval:lookup-v2:authority`
+  - `pnpm run eval:lookup-v2:parity` or `pnpm run lookup-v2:cutover-gate`
+  - `pnpm run eval:lookup-v2:latency:korean-famous`
+- non-blocking lanes:
+  - hotset coverage / stretch parity / stretch coverage / write-plane refresh / reviewed overlay proofs
+  - corpus expansion / merge / canary replay / owner-local packet review lanes
+  - these lanes explain long-tail residue and operator backlog, but they are not active-runtime cutover gates
 
 - `pnpm run bench:smoke`
   - deterministic agent-benchmark scorer/unit/regression lane
@@ -179,10 +201,12 @@
   - artifact는 `slo.cold_boot`, `slo.request`, `slo.runtime_hydration`을 분리 출력한다; 운영 판단도 cold-start와 steady-state request를 분리해서 해야 한다
   - current owner-stage artifact는 `planner_total`, `retrieval_total`,
     `candidate_generation`, `blocker`, `resolver`, `ambiguity_lookup`를 함께 출력한다
-  - current active truth는
+  - latest verified isolated artifact currently on disk는
     `/tmp/lookup-v2-latency-korean-famous-codex-2026-06-08-rca-profiled-rerun2.json`
     기준 `cold_boot measured_ms=1956.946`로 **PASS**,
     `request first_query_ms=169.209`, `warm_p95_ms=85.702`도 **PASS**다
+  - current active runtime pointer는 `search-snapshot:v1:6384d22559774856`이고,
+    이 pointer에 대한 fresh isolated latency artifact는 아직 없다
 - `pnpm run eval:lookup-v2:canary:build -- --input <traffic.ndjson> --output <corpus.jsonl> --query-field <dotted.path> [route/method filters]`
   - explicit real-traffic canary corpus extractor
   - heuristic field guessing 없이 dotted-path 계약으로만 replay corpus를 만든다
@@ -381,5 +405,7 @@
 ## Documentation policy
 
 - current 문서에서 missing command / missing file를 executable lane처럼 적지 않는다
-- lookup authority 품질 판단은 `docs/plans/jun-2-genearl/entity-lookup-v2/cutover-checklist.md`와
-  `docs/plans/jun-2-genearl/entity-lookup-v2/IMPROVEMENT-PLAN-2026-06-03.md`를 따른다
+- lookup authority 품질 판단의 current SSOT는 이 문서와
+  `tools/feature-catalog/features/retrieval/entity-lookup-v2.yaml`이다
+- `docs/plans/jun-2-genearl/entity-lookup-v2/*`는 RCA / handoff history다.
+  current authority 문서로 취급하지 않는다

@@ -15,7 +15,7 @@ describe('approveLookupV2ReviewedAuthorityExactSafeProposalPacket', () => {
           suggestedAliasType: 'canonical',
           holeClass: 'realworld_exact_vintage',
           benchmarkGoldHint: 'latour',
-          benchmarkGoldEntityIdSource: 'policy_family_decision_registry',
+          benchmarkGoldEntityIdSource: 'semantic_policy_registry',
           sourceArtifact: '/tmp/a.json',
           sourceEvidence: 'coverage hole',
           proposedAt: '2026-06-06T00:00:00.000Z',
@@ -30,7 +30,7 @@ describe('approveLookupV2ReviewedAuthorityExactSafeProposalPacket', () => {
           suggestedAliasType: 'translation',
           holeClass: 'realworld_frenchish_korean_gap',
           benchmarkGoldHint: 'petrus',
-          benchmarkGoldEntityIdSource: 'family_target_registry',
+          benchmarkGoldEntityIdSource: 'semantic_scope_target_registry',
           sourceArtifact: '/tmp/c.json',
           sourceEvidence: 'coverage hole',
           proposedAt: '2026-06-06T00:00:00.000Z',
@@ -61,7 +61,7 @@ describe('approveLookupV2ReviewedAuthorityExactSafeProposalPacket', () => {
       reviewedBy: 'registry:reviewed-authority',
     }));
     expect(rows[1]).toEqual(expect.objectContaining({
-      proposalStatus: 'needs_review',
+      proposalStatus: 'approved',
     }));
     expect(rows[2]).toEqual(expect.objectContaining({
       proposalStatus: 'needs_review',

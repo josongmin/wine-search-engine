@@ -1,11 +1,12 @@
-# Entity Lookup V2 — Build Status (2026-06-02, overnight autonomous run)
+# Entity Lookup V2 — Build Status (Historical Snapshot)
 
 > Branch: **`feat/entity-lookup-v2`** (off `535c9439`). Isolated from the
 > concurrent commit loop on `deploy/aws-ec2-pipeline` / `main`. All work is
 > committed (HEAD-durable); nothing depends on the working tree surviving.
 >
-> Historical build log. Current cutover truth lives in
-> `cutover-checklist.md` and `IMPROVEMENT-PLAN-2026-06-03.md`.
+> Historical build log only.
+> Current authority truth moved to `docs/bench/STATUS.md` and
+> `tools/feature-catalog/features/retrieval/entity-lookup-v2.yaml`.
 
 ## TL;DR
 

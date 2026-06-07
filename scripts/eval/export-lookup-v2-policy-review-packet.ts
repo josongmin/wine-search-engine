@@ -5,6 +5,7 @@ import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
 import type { LookupV2CurationDraftRow } from './export-lookup-v2-curation-drafts.js';
 import type { LookupPolicyConflictRegistryRow } from './lookup-v2-policy-conflict-registry.js';
 import { loadLookupPolicyConflictBenchmarkHintOwnerMapSync } from './lookup-v2-policy-conflict-registry.js';
+import { resolveCliDataPathArg } from './cli-data-path.js';
 
 export interface LookupV2PolicyReviewPacketRow {
   readonly surface: string;
@@ -136,8 +137,8 @@ function main(): void {
     },
   });
 
-  const inputPath = values.input ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl';
-  const outputPath = values.output ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-policy-review-packet.jsonl';
+  const inputPath = resolveCliDataPathArg(values.input ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl');
+  const outputPath = resolveCliDataPathArg(values.output ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-policy-review-packet.jsonl');
   const draftRows = parseDraftJsonl(inputPath);
   const packetRows = buildLookupV2PolicyReviewPacketRows({ draftRows });
 

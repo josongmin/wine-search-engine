@@ -4,6 +4,7 @@ import { parseArgs } from 'node:util';
 import type { CurationTask } from '../../src/domain/alias/curation/coverage-curation-task.js';
 import {
   buildLookupV2CurationDraftRows,
+  buildLookupV2CurationDraftRowsWithRuntimeDescriptors,
   type LookupV2CurationDraftRow,
 } from './export-lookup-v2-curation-drafts.js';
 import {
@@ -92,6 +93,10 @@ import {
   DEFAULT_LOOKUP_V2_FAMILY_COLLISION_REGISTRY_PATH,
   loadLookupV2FamilyCollisionRegistryMapSync,
 } from './lookup-v2-family-collision-registry.js';
+import {
+  buildLookupV2ApprovedScopeSurfaceMap,
+  loadLookupV2LocalizedScopeSurfaceRegistrySync,
+} from './lookup-v2-localized-scope-surface-registry.js';
 import type { LookupExactSafeRegistryRow } from '../etl/lookup-exact-safe-registry.js';
 import {
   DEFAULT_LOOKUP_EXACT_SAFE_REGISTRY_PATH,
@@ -107,6 +112,9 @@ import {
   loadLookupV2RuntimeSurfaceOwnerEvidenceSync,
 } from './lookup-v2-runtime-surface-owner-evidence.js';
 import { applyLookupV2ExactSafeFamilyReviewPacket } from './apply-lookup-v2-exact-safe-family-review-packet.js';
+import { resolveCliDataPathArg } from './cli-data-path.js';
+import type { LookupV2RuntimeSemanticDescriptor } from './lookup-v2-runtime-semantic-descriptors.js';
+import { loadLookupV2RuntimeSemanticDescriptorMapSync } from './lookup-v2-runtime-semantic-descriptors.js';
 
 interface LookupV2StretchCoverageArtifact {
   readonly generatedAt?: string;
@@ -237,6 +245,7 @@ export async function refreshLookupV2StretchWritePlaneArtifacts(args: {
   readonly inputArtifact: string;
   readonly generatedAt: string;
   readonly outputDir: string;
+  readonly runtimeDescriptorMap?: ReadonlyMap<string, LookupV2RuntimeSemanticDescriptor>;
   readonly benchmarkGoldHintMap?: ReadonlyMap<string, string>;
   readonly familyTargetApprovedMap?: ReadonlyMap<string, LookupV2SemanticScopeTargetRegistryRow>;
   readonly familyTargetRejectedMap?: ReadonlyMap<string, LookupV2SemanticScopeTargetRegistryRow>;
@@ -244,15 +253,17 @@ export async function refreshLookupV2StretchWritePlaneArtifacts(args: {
   readonly policyFamilyDecisionMap?: ReadonlyMap<string, LookupV2SemanticPolicyRegistryRow>;
   readonly semanticScopeSupportRegistryMap?: ReadonlyMap<string, LookupV2SemanticScopeSupportRegistryRow>;
   readonly familyCollisionRegistryMap?: ReadonlyMap<string, LookupV2FamilyCollisionRegistryRow>;
+  readonly approvedScopeSurfaceMap?: ReadonlyMap<string, ReadonlySet<string>>;
   readonly exactSafeRegistryRows?: readonly LookupExactSafeRegistryRow[];
   readonly exactSafeScopeRegistryMap?: ReadonlyMap<string, LookupV2ExactSafeScopeRegistryRow>;
   readonly runtimeOwnerEvidence?: LookupV2RuntimeSurfaceOwnerEvidence;
 }): Promise<LookupV2StretchWritePlaneRefreshSummary> {
   const outputPaths = buildOutputPaths(args.outputDir);
-  const draftRows = buildLookupV2CurationDraftRows(
+  const draftRows = buildLookupV2CurationDraftRowsWithRuntimeDescriptors(
     args.tasks,
     args.inputArtifact,
     args.generatedAt,
+    args.runtimeDescriptorMap ?? loadLookupV2RuntimeSemanticDescriptorMapSync(),
     args.benchmarkGoldHintMap,
     args.familyTargetApprovedMap,
     args.familyTargetRejectedMap,
@@ -260,6 +271,8 @@ export async function refreshLookupV2StretchWritePlaneArtifacts(args: {
     args.policyFamilyDecisionMap,
     args.semanticScopeSupportRegistryMap,
     args.familyCollisionRegistryMap,
+    args.approvedScopeSurfaceMap
+      ?? buildLookupV2ApprovedScopeSurfaceMap(loadLookupV2LocalizedScopeSurfaceRegistrySync()),
   );
   writeJsonl(outputPaths.draft, draftRows);
 
@@ -321,11 +334,13 @@ export async function refreshLookupV2StretchWritePlaneArtifacts(args: {
   const manualTargetFamilyReviewRows = buildLookupV2ManualTargetFamilyReviewPacketRows({
     draftRows,
     runtimeOwnerEvidence,
+    runtimeDescriptorMap: args.runtimeDescriptorMap,
   });
   writeJsonl(outputPaths.manualTargetFamilyReviewPacket, manualTargetFamilyReviewRows);
   const reviewedCollisionFamilyReviewRows = buildLookupV2ReviewedCollisionFamilyReviewPacketRows({
     draftRows,
     runtimeOwnerEvidence,
+    runtimeDescriptorMap: args.runtimeDescriptorMap,
   });
   writeJsonl(outputPaths.reviewedCollisionFamilyReviewPacket, reviewedCollisionFamilyReviewRows);
   const manualTargetOwnerEvidenceIndex = writeLookupV2ManualTargetRuntimeOwnerPartitions({
@@ -438,7 +453,7 @@ async function main(): Promise<void> {
   });
 
   const inputPath = values.input ?? '/tmp/lookup-v2-coverage-korean-realworld-stretch-entity-no-policy.json';
-  const outputDir = values.outputDir ?? 'data/lookup-v2/drafts';
+  const outputDir = resolveCliDataPathArg(values.outputDir ?? 'data/lookup-v2/drafts');
   const familyTargetRegistryPath = values.semanticScopeTargetRegistry ?? DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_TARGET_REGISTRY_PATH;
   const policyFamilyDecisionRegistryPath = values.semanticPolicyRegistry ?? DEFAULT_LOOKUP_V2_SEMANTIC_POLICY_REGISTRY_PATH;
   const semanticScopeSupportRegistryPath = values.semanticScopeSupportRegistry ?? DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_SUPPORT_REGISTRY_PATH;

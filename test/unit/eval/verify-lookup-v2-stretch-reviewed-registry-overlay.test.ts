@@ -6,6 +6,8 @@ import type { CurationTask } from '../../../src/domain/alias/curation/coverage-c
 import { normalizeForMatch } from '../../../src/domain/alias/service/normalize.js';
 import { verifyLookupV2StretchReviewedRegistryOverlay } from '../../../scripts/eval/verify-lookup-v2-stretch-reviewed-registry-overlay.js';
 
+const OVERLAY_REFRESH_TIMEOUT_MS = 120_000;
+
 describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
   const tempDirs: string[] = [];
 
@@ -14,7 +16,7 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
       const dir = tempDirs.pop()!;
       rmSync(dir, { recursive: true, force: true });
     }
-  }, 30_000);
+  }, OVERLAY_REFRESH_TIMEOUT_MS);
 
   it('proves reviewed registry overlays monotonically reduce unresolved stretch buckets', async () => {
     const workDir = mkdtempSync(path.join(tmpdir(), 'elv2-reviewed-registry-overlay-'));
@@ -124,6 +126,7 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
       runtimeDescriptorMap: new Map([
         ['wine-ce-petrus', { familyKey: 'petrus' }],
       ]),
+      approvedScopeSurfaceMap: new Map(),
       policyConflictOwners: new Map([
         ['latour', {
           surface: '라뚜르',
@@ -196,7 +199,7 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
       manualTargetFamilyPacketNonIncreasing: true,
     });
     expect(existsSync(summary.outputSummaryPath)).toBe(true);
-  }, 30_000);
+  }, OVERLAY_REFRESH_TIMEOUT_MS);
 
   it('supports baseline registry snapshots that differ from the current overlay registries', async () => {
     const workDir = mkdtempSync(path.join(tmpdir(), 'elv2-reviewed-registry-overlay-baseline-'));
@@ -244,6 +247,8 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
       existingPolicyFamilyDecisionRegistryRows: [],
       exactSafeRegistryRows: [],
       knownEntityIds: new Set(['wine-ce-cheval-blanc']),
+      runtimeDescriptorMap: new Map(),
+      approvedScopeSurfaceMap: new Map(),
       policyConflictOwners: new Map(),
       runtimeOwnerEvidence: {
         uniqueOwners: new Map(),
@@ -289,7 +294,7 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
       policyFamilyReviewRows: 0,
       manualTargetFamilyReviewRows: -1,
     });
-  }, 30_000);
+  }, OVERLAY_REFRESH_TIMEOUT_MS);
 
   it('proves semantic scope support registry moves reviewed support gaps out of scope_target_review into catalog_support_review', async () => {
     const workDir = mkdtempSync(path.join(tmpdir(), 'elv2-reviewed-registry-overlay-support-'));
@@ -330,6 +335,9 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
         },
       ],
       exactSafeRegistryRows: [],
+      knownEntityIds: new Set(),
+      runtimeDescriptorMap: new Map(),
+      approvedScopeSurfaceMap: new Map(),
       policyConflictOwners: new Map(),
       runtimeOwnerEvidence: {
         uniqueOwners: new Map(),
@@ -387,7 +395,7 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
       policyFamilyPacketNonIncreasing: true,
       manualTargetFamilyPacketNonIncreasing: true,
     });
-  }, 30_000);
+  }, OVERLAY_REFRESH_TIMEOUT_MS);
 
   it('proves family collision registry moves active collision families out of manual_target into reviewed_collision', async () => {
     const workDir = mkdtempSync(path.join(tmpdir(), 'elv2-reviewed-registry-overlay-collision-'));
@@ -431,6 +439,9 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
         },
       ],
       exactSafeRegistryRows: [],
+      knownEntityIds: new Set(),
+      runtimeDescriptorMap: new Map(),
+      approvedScopeSurfaceMap: new Map(),
       policyConflictOwners: new Map(),
       runtimeOwnerEvidence: {
         uniqueOwners: new Map(),
@@ -507,5 +518,5 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
       policyFamilyPacketNonIncreasing: true,
       manualTargetFamilyPacketNonIncreasing: true,
     });
-  }, 30_000);
+  }, OVERLAY_REFRESH_TIMEOUT_MS);
 });

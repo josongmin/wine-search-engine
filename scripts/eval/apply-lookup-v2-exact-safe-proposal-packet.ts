@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import {
@@ -10,6 +10,7 @@ import {
 } from '../etl/lookup-exact-safe-registry.js';
 import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
 import type { LookupExactSafeProposalPacketRow } from './export-lookup-v2-exact-safe-proposal-packet.js';
+import { resolveCliDataPathArg } from './cli-data-path.js';
 
 interface ApplyResult {
   readonly mergedRows: readonly LookupExactSafeRegistryRow[];
@@ -144,7 +145,9 @@ async function main(): Promise<void> {
     allowPositionals: false,
   });
 
-  const inputPath = values.input ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl';
+  const inputPath = resolveCliDataPathArg(
+    values.input ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl',
+  );
   const registryPath = values.registry ?? DEFAULT_LOOKUP_EXACT_SAFE_REGISTRY_PATH;
   const outputPath = values.output ?? '/tmp/korean-exact-safe-registry-merged.jsonl';
   const packetRows = parsePacketJsonl(inputPath);
@@ -156,6 +159,7 @@ async function main(): Promise<void> {
   });
 
   const targetPath = values.write ? registryPath : outputPath;
+  mkdirSync(path.dirname(targetPath), { recursive: true });
   writeFileSync(targetPath, serializeLookupExactSafeRegistryRows(result.mergedRows), 'utf8');
 
   console.log(`[elv2-exact-safe-proposal-apply] approved_rows=${result.approvedRows}`);

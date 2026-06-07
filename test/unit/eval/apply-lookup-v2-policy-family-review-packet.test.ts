@@ -6,6 +6,7 @@ describe('applyLookupV2PolicyFamilyReviewPacket', () => {
     const rows = applyLookupV2PolicyFamilyReviewPacket({
       familyRows: [
         {
+          semanticConflictKey: 'ko::short_form_collision::라뚜르',
           policyConflictSurface: '라뚜르',
           locale: 'ko',
           policyConflictType: 'short_form_collision',
@@ -29,7 +30,9 @@ describe('applyLookupV2PolicyFamilyReviewPacket', () => {
         },
       ],
       policyFamilyDecisionMap: new Map([
-        ['라뚜르::wine-ce-latour', {
+        ['ko::short_form_collision::라뚜르::wine-ce-latour', {
+          semanticConflictKey: 'ko::short_form_collision::라뚜르',
+          conflictClass: 'short_form_collision',
           policyConflictSurface: '라뚜르',
           entityId: 'wine-ce-latour',
           decision: 'promote_exact_safe',
@@ -42,6 +45,7 @@ describe('applyLookupV2PolicyFamilyReviewPacket', () => {
         {
           surface: '라뚜르 2009',
           locale: 'ko',
+          semanticConflictKey: 'ko::short_form_collision::라뚜르',
           suggestedAliasType: 'canonical',
           holeClass: 'realworld_exact_vintage',
           observedStatus: 'failed',
@@ -61,6 +65,7 @@ describe('applyLookupV2PolicyFamilyReviewPacket', () => {
         {
           surface: '샤또 라뚜르',
           locale: 'ko',
+          semanticConflictKey: 'ko::short_form_collision::라뚜르',
           suggestedAliasType: 'translation',
           holeClass: 'realworld_producer_prefixed',
           observedStatus: 'failed',
@@ -104,6 +109,7 @@ describe('applyLookupV2PolicyFamilyReviewPacket', () => {
         {
           surface: '라뚜르 2009',
           locale: 'ko',
+          semanticConflictKey: 'ko::short_form_collision::라뚜르',
           suggestedAliasType: 'canonical',
           holeClass: 'realworld_exact_vintage',
           observedStatus: 'failed',

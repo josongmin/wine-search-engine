@@ -1,34 +1,47 @@
 # Lookup V2 Korean Realworld Stretch Priority Backlog (2026-06-05)
 
-## Current Truth Update (2026-06-07)
+## Current Truth Update (2026-06-08)
 
-- active runtime snapshot:
-  - `search-snapshot:v1:c8fba9b929a376f8`
-- main gate status on current code:
-  - authority:
-    - `/tmp/entity-resolution-validation.json`
-    - `V2 215/215`, `wrong=0`, `miss=0`, gate **PASS**
-  - Korean-famous coverage:
-    - `/tmp/lookup-v2-coverage-korean-famous.json`
-    - `hot_entities=67/67`, `non_entity=38/40`, `curation_tasks=0`
-  - Korean-famous parity:
-    - `/tmp/lookup-v2-parity-korean-famous.json`
-    - `rows=107`, `divergences=0`, gate **PASS**
-    - cold first-query timeout noise can drop the first row from the raw count, but `regressions=0`
-  - stretch entity-no-policy parity:
-    - `/tmp/lookup-v2-parity-korean-realworld-stretch-entity-no-policy.json`
-    - `rows=590`, `divergences=0`, gate **PASS**
+- document scope:
+  - 이 문서는 stretch owner backlog 전용이다
+  - active-runtime cutover gate SSOT는 `docs/bench/STATUS.md`에서 관리한다
+- active runtime pointer:
+  - runtime state:
+    - `/Users/songmin/.wine-search-engine/data/runtime-search-snapshot.json`
+  - snapshot:
+    - `search-snapshot:v1:6384d22559774856`
+- latest verified stretch backlog artifacts currently on disk:
   - stretch entity-no-policy coverage:
     - `/tmp/lookup-v2-coverage-korean-realworld-stretch-entity-no-policy.json`
-    - `hot_entities=114/239`, `non_entity=227/351`, `curation_tasks=125`
+    - generated `2026-06-07T19:35:50.329Z`
+    - snapshot `search-snapshot:v1:6384d22559774856`
+    - `hot_entities=142/239`, `non_entity=227/351`, `holes=97`
     - operator buckets:
-      `strict_collision_ambiguous=10`, `family_surface_gap=10`,
-      `qualified_scope_surface_gap=0`, `scope_target_missing=105`,
+      `strict_collision_ambiguous=10`, `family_surface_gap=0`,
+      `qualified_scope_surface_gap=0`, `scope_target_missing=87`,
       `scope_support_needed=0`
-  - latency:
-    - `/tmp/lookup-v2-latency-korean-famous.json`
-    - `cold_boot=2684.895ms`, `first_query=3209.524ms`, `warm_p95=12.336ms`
-    - warm request / hydration **PASS**, cold boot / first query **FAIL**
+  - stretch write-plane summary:
+    - `/Users/songmin/.wine-search-engine/data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-write-plane-summary.json`
+    - `draft.rows=94`, `auto_targetable=25`, `scope_policy_review=0`,
+      `localized_surface_review=0`, `catalog_support_review=0`,
+      `reviewed_collision=35`, `scope_target_review=13`,
+      `reviewed_rejected=21`
+    - `exact_safe_packet_rows=25`, `reviewed_authority_approved_rows=25`,
+      `reviewed_authority_pending_rows=0`
+    - `exact_safe_family_review_rows=25`, `exact_safe_family_pending_rows=17`
+    - `reviewed_collision_family_clusters: rows=35, families=12`
+    - `reviewed_collision_family_review_rows=29`
+    - `manual_target_batch_rows=13`
+    - `manual_target_family_rows=11`
+    - `manual_target_candidate_unique_owner_rows=0`
+    - `manual_target_collision_candidate_rows=1`
+    - `manual_target_missing_runtime_owner_rows=10`
+  - latest isolated latency artifact for the same stretch era:
+    - `/tmp/lookup-v2-latency-korean-famous-codex-2026-06-08-rca-profiled-rerun2.json`
+    - generated `2026-06-07T16:55:10.931Z`
+    - snapshot `search-snapshot:v1:d2a964e484ff2284`
+    - `cold_boot=1956.946ms`, `first_query=169.209ms`, `warm_p95=85.702ms`
+    - isolated latency gate **PASS**
 - runtime note:
   - active reviewed SoT는 `lookup-localized-scope-surface-registry-v1`,
     `lookup-semantic-scope-target-registry-v1`,
@@ -38,51 +51,59 @@
 - strict fixture truth is active.
   impossible `resolved` rows were reclassified from live operator buckets:
   `strict_collision_ambiguous -> ambiguous`, `catalog_support_needed -> failed`
+- active proof gap:
+  - current runtime pointer `6384d22559774856`에 대한 fresh stretch coverage / write-plane artifact는 now present
+  - current runtime pointer에 대한 fresh isolated latency artifact는 아직 없다
+  - 이 문서의 숫자는 backlog triage truth이며, cutover blocking rails는 `docs/bench/STATUS.md`에서 따로 본다
 - owner split:
   - policy review lane:
     - `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-policy-review-packet.jsonl`
-    - `rows=1`
+    - `rows=0`
   - entity-no-policy write-plane:
-    - `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-write-plane-summary.json`
-    - `draft rows=106`
-    - `auto_targetable=24`
-    - `scope_policy_review=1`
-    - `localized_surface_review=2`
+    - `/Users/songmin/.wine-search-engine/data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-write-plane-summary.json`
+    - `draft rows=94`
+    - `auto_targetable=25`
+    - `scope_policy_review=0`
+    - `localized_surface_review=0`
     - `catalog_support_review=0`
-    - `reviewed_collision=36`
-    - `scope_target_review=22`
-    - `exact_safe_packet_rows=24`
-    - `reviewed_authority_approved_rows=24`
+    - `reviewed_collision=35`
+    - `scope_target_review=13`
+    - `exact_safe_packet_rows=25`
+    - `reviewed_authority_approved_rows=25`
     - `reviewed_authority_pending_rows=0`
-    - `exact_safe_family_pending_rows=16`
+    - `exact_safe_family_review_rows=25`
+    - `exact_safe_family_pending_rows=17`
     - `catalog-support family clusters: rows=0, families=0`
-    - `reviewed-collision family clusters: rows=36, families=11`
-    - `manual_target_family_rows=15`
-    - `manual_target_collision_families=2`
-    - `manual_target_missing_families=0`
+    - `reviewed-collision family clusters: rows=35, families=12`
+    - `reviewed_collision_family_review_rows=29`
+    - `manual_target_batch_rows=13`
+    - `manual_target_family_rows=11`
+    - `manual_target_collision_candidate_rows=1`
+    - `manual_target_missing_runtime_owner_rows=10`
 - write-plane state:
   - exact-safe auto-approve source는 `fixture_exact`, `semantic_scope_target_registry`, `semantic_policy_registry`만 허용한다
   - current exact-safe packet:
     - `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl`
-    - `rows=24`
+    - `rows=25`
     - reviewed-authority source:
-      `semantic_scope_target_registry=24`
+      `semantic_scope_target_registry=25`
   - current family-collision registry / reviewed-collision cluster:
     - `data/lookup-v2/lookup-family-collision-registry-v1.jsonl`
-    - `reviewed_collision=36`, `scope_target_review=22` after active overlay
+    - `reviewed_collision=35`, `scope_target_review=13` after active overlay
   - current overlay verifier:
     - `data/lookup-v2/drafts/lookup-v2-stretch-reviewed-registry-overlay-summary.json`
     - reviewed-registry overlay:
       `semantic_scope_registry_inserted=0`, `semantic_policy_registry_inserted=0`
     - collision-registry overlay proof:
       `reviewed_collision 0 -> 36`
-      `scope_target_review 58 -> 22`
+      `scope_target_review 58 -> 23`
     - invariants green
 
 - residual closeout owner split:
-  - active correctness debt는 `scope_target_missing=105`가 중심이다
-  - smaller residue는 `strict_collision_ambiguous=10`, `family_surface_gap=10`
+  - active stretch backlog debt는 `scope_target_missing=87`이 중심이다
+  - smaller residue는 `strict_collision_ambiguous=10`이다
   - latency/cold-first-query는 correctness와 분리된 별도 owner다
+  - 이 문서는 non-blocking owner backlog다. cutover pass/fail 판단은 `STATUS.md`의 blocking rails로 한다
 
 아래 section은 archived historical RCA다. current owner 판단은 이 update block만 기준으로 본다.
 

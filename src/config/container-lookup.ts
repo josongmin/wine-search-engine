@@ -6,10 +6,12 @@ import type { EntityLookupV2UseCasePort } from '../application/search/port/searc
 import {
   createLookupAuthorityServices,
   type LookupAuthorityBootstrapProfile,
+  type LookupAuthorityRuntimeProbe,
 } from './lookup-authority.js';
 
 export interface LookupDirectContainer {
   readonly entityLookupV2UseCase: EntityLookupV2UseCasePort;
+  readonly runtimeProbe: LookupAuthorityRuntimeProbe;
   readonly bootstrapProfile?: (LookupAuthorityBootstrapProfile & {
     readonly runtimeHandlesMs: number;
   });
@@ -40,6 +42,7 @@ export async function createLookupDirectContainer(
 
   return {
     entityLookupV2UseCase: authority.entityLookupV2UseCase,
+    runtimeProbe: authority.runtimeProbe,
     bootstrapProfile: {
       runtimeHandlesMs,
       ...authority.bootstrapProfile,

@@ -91,17 +91,22 @@ function validateStatusSpecificFields(args: {
   readonly label: string;
 }): void {
   const { row, label } = args;
-  if (row.expected_status === 'resolved') {
-    if (typeof row.expected_entity_hint !== 'string' || row.expected_entity_hint.trim().length === 0) {
-      throw new Error(`${label} resolved row requires expected_entity_hint`);
+  if (row.expected_status === 'redirect_discovery') {
+    if (row.expected_entity_hint !== undefined) {
+      throw new Error(`${label} redirect_discovery row must not carry expected_entity_hint`);
+    }
+    if (row.expected_entity_id !== undefined) {
+      throw new Error(`${label} redirect_discovery row must not carry expected_entity_id`);
     }
     return;
   }
-  if (row.expected_entity_hint !== undefined) {
-    throw new Error(`${label} non-resolved row must not carry expected_entity_hint`);
+  if (row.expected_status === 'resolved'
+    && (typeof row.expected_entity_hint !== 'string' || row.expected_entity_hint.trim().length === 0)) {
+    throw new Error(`${label} resolved row requires expected_entity_hint`);
   }
-  if (row.expected_entity_id !== undefined) {
-    throw new Error(`${label} non-resolved row must not carry expected_entity_id`);
+  if (row.expected_entity_id !== undefined
+    && (typeof row.expected_entity_hint !== 'string' || row.expected_entity_hint.trim().length === 0)) {
+    throw new Error(`${label} expected_entity_id requires expected_entity_hint`);
   }
 }
 
@@ -302,4 +307,3 @@ export function formatLookupV2StretchCorpusSummary(summary: LookupV2StretchCorpu
   ];
   return lines.join('\n');
 }
-

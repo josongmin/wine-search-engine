@@ -3,7 +3,6 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { loadConfig } from '../../src/config/env.js';
 import { createLookupDirectContainer } from '../../src/config/container-lookup.js';
-import { loadLookupRuntimeBundle } from '../../src/config/lookup-runtime-bundle.js';
 import { createStageTimer } from '../../src/domain/shared/stage-timer.js';
 import { SEARCH_SNAPSHOT_SCHEMA_VERSION } from '../../src/domain/shared/constants/search-snapshot.js';
 import {
@@ -158,12 +157,7 @@ async function main(): Promise<void> {
   const bootstrapMs = roundMs(performance.now() - bootstrapStartedAt);
   const bootstrapProfile = container.bootstrapProfile;
 
-  const runtimeBundleCacheKey = runtimeState.snapshotId ?? runtimeState.manifestPath;
-  const runtimeBundle = await loadLookupRuntimeBundle(
-    runtimeBundleCacheKey,
-    runtimeState.manifestPath,
-  );
-  const probeMatcher = runtimeBundle.aliasMatcher;
+  const probeMatcher = container.runtimeProbe.aliasMatcher;
   if (probeMatcher === undefined) {
     throw new Error(`[elv2-latency] failed to load alias runtime matcher from ${runtimeStatePath}`);
   }
@@ -315,7 +309,7 @@ async function main(): Promise<void> {
     metrics: {
       bootstrap_ms: bootstrapMs,
       bootstrap_breakdown_ms: bootstrapProfile ?? null,
-      runtime_bundle_load_profile_ms: runtimeBundle.loadProfile,
+      runtime_bundle_load_profile_ms: bootstrapProfile?.runtimeBundleLoadProfile ?? null,
       first_query_ms: firstQueryMs,
       warm_p50_ms: warmP50Ms,
       warm_p95_ms: warmP95Ms,

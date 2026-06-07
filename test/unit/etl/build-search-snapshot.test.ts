@@ -443,7 +443,7 @@ describe('buildSearchSnapshot', () => {
 
   it('compiles the curated exact-safe registry into lookup runtime aliases and resolver certificates', async () => {
     const registryRows = await loadLookupExactSafeRegistry();
-    const snapshotEntityIds = new Set(['opus-one-2018' as const]);
+    const snapshotEntityIds = new Set(['opus-one-2018' as const, 'sassicaia-2018' as const]);
     const overlayAliases = buildLookupRuntimeOverlayAliases(registryRows, snapshotEntityIds);
     const identityCertificates = buildLookupIdentityCertificatesByEntity(registryRows, snapshotEntityIds);
     const aliasRuntimeRaw = buildLookupAliasRuntimeArtifact({
@@ -462,6 +462,26 @@ describe('buildSearchSnapshot', () => {
       expect.arrayContaining([
         expect.objectContaining({
           normalizedSurface: normalizeForMatch('오푸스원'),
+          kind: 'exact_safe',
+        }),
+      ]),
+    );
+
+    const sassicaiaHotsetAlias = aliasRuntimeRaw.aliases.find((alias) => alias.value === '사시카이아');
+    expect(sassicaiaHotsetAlias).toBeDefined();
+    expect(aliasRuntimeRaw.exactIndex[normalizeForMatch('사시카이아')]).toBeDefined();
+    expect(identityCertificates.get('sassicaia-2018' as const)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          normalizedSurface: normalizeForMatch('Sassicaia 2019'),
+          kind: 'exact_safe',
+        }),
+        expect.objectContaining({
+          normalizedSurface: normalizeForMatch('사시카이아'),
+          kind: 'exact_safe',
+        }),
+        expect.objectContaining({
+          normalizedSurface: normalizeForMatch('사씨카이아'),
           kind: 'exact_safe',
         }),
       ]),

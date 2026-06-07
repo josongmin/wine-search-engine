@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import type { LookupV2CurationDraftRow } from './export-lookup-v2-curation-drafts.js';
+import { resolveCliDataPathArg } from './cli-data-path.js';
 
 export interface LookupV2ManualTargetBatchIndexEntry {
   readonly holeClass: string;
@@ -118,8 +119,8 @@ function main(): void {
     },
   });
 
-  const inputPath = values.input ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl';
-  const outputDir = values.outputDir ?? 'data/lookup-v2/drafts/manual-target-batches';
+  const inputPath = resolveCliDataPathArg(values.input ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl');
+  const outputDir = resolveCliDataPathArg(values.outputDir ?? 'data/lookup-v2/drafts/manual-target-batches');
   const draftRows = parseDraftJsonl(inputPath);
   const generatedAt = new Date().toISOString();
   const index = writeLookupV2ManualTargetBatches({

@@ -1,12 +1,17 @@
-# Entity Lookup V2 — Improvement Plan (2026-06-03)
+# Entity Lookup V2 — Improvement Plan (Historical Audit Snapshot)
+
+> Historical / audit-only document.
+> Current authority truth moved to `docs/bench/STATUS.md` and
+> `tools/feature-catalog/features/retrieval/entity-lookup-v2.yaml`.
+> This file preserves the pre-parity rollout framing for RCA and owner handoff,
+> not for current cutover or executable-lane decisions.
 
 ## 목적
 
 V2 품질 gate를 실제로 통과시킨 뒤, lookup authority를 V1에서 V2로 승격한다.
 
-이 문서는 **현재 truth + 바로 실행 가능한 ticketized next steps** 를 고정한다.
-역사 기록/중간 RCA는 기존 2026-06-02 문서에 남기고, cutover 판단은 이 문서와
-`cutover-checklist.md`만 기준으로 본다.
+이 문서는 2026-06-03 시점의 truth + ticketized next steps snapshot을 보존한다.
+현재 cutover 판단과 executable lane은 더 이상 이 문서를 authority로 쓰지 않는다.
 
 ## Current Truth
 
@@ -56,12 +61,11 @@ V2 품질 gate를 실제로 통과시킨 뒤, lookup authority를 V1에서 V2로
   - real traffic mirror raw input
   - operator-plane PG publish availability on this host (non-gate for lookup-only artifact/direct runtime)
 
-## Authority Docs
+## 당시 Authority Docs
 
-- Current authority:
+- Historical / audit only:
   - `cutover-checklist.md`
   - `IMPROVEMENT-PLAN-2026-06-03.md`
-- Historical / audit only:
   - `entity-resolution-validation-2026-06-02.md`
   - `shadow-results-2026-06-02.md`
   - raw JSON artifacts under this folder

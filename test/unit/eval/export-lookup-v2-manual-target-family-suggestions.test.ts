@@ -24,6 +24,16 @@ describe('manual-target family suggestions', () => {
         rowCount: 1,
         sourceArtifacts: ['/tmp/a.json'],
         sourceEvidenceSamples: ['coverage hole'],
+        runtimeEvidenceStatus: 'candidate_unique_owner',
+        runtimeEvidenceEntityId: 'wine-a',
+        runtimeEvidenceEntityLabel: 'Calon Segur 2010',
+        runtimeEvidenceWitnesses: [
+          {
+            entityId: 'wine-a',
+            witnessSurface: 'Calon Segur 2010',
+            witnessSource: 'canonical_label',
+          },
+        ],
         proposedAt: '2026-06-06T00:00:00.000Z',
       },
       {
@@ -43,6 +53,21 @@ describe('manual-target family suggestions', () => {
         rowCount: 1,
         sourceArtifacts: ['/tmp/b.json'],
         sourceEvidenceSamples: ['coverage hole'],
+        runtimeEvidenceStatus: 'collision_candidates',
+        runtimeCollisionEntityIds: ['wine-b', 'wine-c'],
+        runtimeCollisionEntityLabels: ['Angelus 2012', 'Angelus 2015'],
+        runtimeCollisionWitnesses: [
+          {
+            entityId: 'wine-b',
+            witnessSurface: 'Angelus',
+            witnessSource: 'aliases_noisy_recall',
+          },
+          {
+            entityId: 'wine-c',
+            witnessSurface: 'Angelus',
+            witnessSource: 'aliases_noisy_recall',
+          },
+        ],
         proposedAt: '2026-06-06T00:00:00.000Z',
       },
       {
@@ -62,57 +87,12 @@ describe('manual-target family suggestions', () => {
         rowCount: 1,
         sourceArtifacts: ['/tmp/c.json'],
         sourceEvidenceSamples: ['coverage hole'],
+        runtimeEvidenceStatus: 'missing_runtime_owner',
         proposedAt: '2026-06-06T00:00:00.000Z',
       },
     ] as const;
 
-    const suggestions = buildLookupV2ManualTargetFamilySuggestions(packetRows, {
-      uniqueOwners: new Map([['calon segur', 'wine-a']]),
-      collidingOwners: new Map([['angelus', ['wine-b', 'wine-c']]]),
-      entityLabels: new Map([
-        ['wine-a', 'Calon Segur 2010'],
-        ['wine-b', 'Angelus 2012'],
-        ['wine-c', 'Angelus 2015'],
-      ]),
-      entityProducers: new Map([
-        ['wine-a', 'Chateau Calon-Segur'],
-        ['wine-b', 'Chateau Angelus'],
-        ['wine-c', 'Chateau Angelus'],
-      ]),
-      entityRegions: new Map([
-        ['wine-a', 'France'],
-        ['wine-b', 'France'],
-        ['wine-c', 'France'],
-      ]),
-      entityAppellations: new Map([
-        ['wine-a', 'Saint-Estephe'],
-        ['wine-b', 'Saint-Emilion'],
-        ['wine-c', 'Saint-Emilion'],
-      ]),
-      uniqueOwnerWitnesses: new Map([
-        ['calon segur', [
-          {
-            entityId: 'wine-a',
-            witnessSurface: 'Calon Segur 2010',
-            witnessSource: 'canonical_label',
-          },
-        ]],
-      ]),
-      collidingOwnerWitnesses: new Map([
-        ['angelus', [
-          {
-            entityId: 'wine-b',
-            witnessSurface: 'Angelus',
-            witnessSource: 'aliases_noisy_recall',
-          },
-          {
-            entityId: 'wine-c',
-            witnessSurface: 'Angelus',
-            witnessSource: 'aliases_noisy_recall',
-          },
-        ]],
-      ]),
-    });
+    const suggestions = buildLookupV2ManualTargetFamilySuggestions(packetRows);
 
     expect(suggestions).toEqual([
       {

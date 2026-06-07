@@ -3,8 +3,11 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import type { CurationTask } from '../../src/domain/alias/curation/coverage-curation-task.js';
 import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
+import { compactForLookup } from '../../src/domain/query/service/phonetic-skeleton.js';
+import { resolveCliDataPathArg } from './cli-data-path.js';
 import {
   buildLookupQuerySemanticProbe,
+  buildLookupSemanticScopeComponentSurfaceKey,
   buildLookupSemanticConflictKey,
   buildLookupSemanticScopeFromProbe,
   buildLookupSemanticScopeKey,
@@ -34,7 +37,15 @@ import {
   DEFAULT_LOOKUP_V2_FAMILY_COLLISION_REGISTRY_PATH,
   loadLookupV2FamilyCollisionRegistryMapSync,
 } from './lookup-v2-family-collision-registry.js';
-import { loadLookupV2RuntimeSemanticDescriptorMapSync } from './lookup-v2-runtime-semantic-descriptors.js';
+import {
+  DEFAULT_LOOKUP_V2_LOCALIZED_SCOPE_SURFACE_REGISTRY_PATH,
+  buildLookupV2ApprovedScopeSurfaceMap,
+  loadLookupV2LocalizedScopeSurfaceRegistrySync,
+} from './lookup-v2-localized-scope-surface-registry.js';
+import {
+  loadLookupV2RuntimeSemanticDescriptorMapSync,
+  type LookupV2RuntimeSemanticDescriptor,
+} from './lookup-v2-runtime-semantic-descriptors.js';
 
 export interface LookupV2CurationDraftRow {
   readonly surface: string;
@@ -88,10 +99,107 @@ export function inferDraftLocale(surface: string): 'ko' | 'global' {
   return /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/u.test(surface) ? 'ko' : 'global';
 }
 
-export function buildLookupV2CurationDraftRows(
+function queryContainsReviewedSurface(
+  probe: ReturnType<typeof buildLookupQuerySemanticProbe>,
+  surface: string | undefined,
+): boolean {
+  if (surface === undefined) {
+    return false;
+  }
+  const normalized = normalizeForMatch(surface);
+  if (normalized.length === 0) {
+    return false;
+  }
+  if (` ${probe.normalizedQuery} `.includes(` ${normalized} `)) {
+    return true;
+  }
+  const compactSurface = compactForLookup(normalized);
+  if (compactSurface.length > 0 && probe.compactQuery.includes(compactSurface)) {
+    return true;
+  }
+  return probe.transliteratedQuery !== undefined
+    && ` ${probe.transliteratedQuery} `.includes(` ${normalized} `);
+}
+
+function reviewedLocalizedComponentMatches(args: {
+  readonly probe: ReturnType<typeof buildLookupQuerySemanticProbe>;
+  readonly componentKind: 'family' | 'line' | 'region' | 'appellation';
+  readonly componentKey: string | undefined;
+  readonly locale: 'ko' | 'global';
+  readonly approvedScopeSurfaceMap: ReadonlyMap<string, ReadonlySet<string>>;
+}): boolean {
+  if (args.componentKey === undefined) {
+    return false;
+  }
+  if (queryContainsReviewedSurface(args.probe, args.componentKey)) {
+    return true;
+  }
+  const reviewedSurfaces = args.approvedScopeSurfaceMap.get(
+    buildLookupSemanticScopeComponentSurfaceKey({
+      componentKind: args.componentKind,
+      componentKey: args.componentKey,
+      locale: args.locale,
+    }),
+  );
+  if (reviewedSurfaces === undefined) {
+    return false;
+  }
+  for (const reviewedSurface of reviewedSurfaces) {
+    if (queryContainsReviewedSurface(args.probe, reviewedSurface)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function localizedSurfaceGapAlreadyReviewed(args: {
+  readonly operatorBucket: CurationTask['operatorBucket'] | undefined;
+  readonly probe: ReturnType<typeof buildLookupQuerySemanticProbe>;
+  readonly familyKey: string;
+  readonly lineKey?: string | undefined;
+  readonly regionKey?: string | undefined;
+  readonly appellationKey?: string | undefined;
+  readonly locale: 'ko' | 'global';
+  readonly approvedScopeSurfaceMap: ReadonlyMap<string, ReadonlySet<string>>;
+}): boolean {
+  if (args.operatorBucket === 'family_surface_gap') {
+    return reviewedLocalizedComponentMatches({
+      probe: args.probe,
+      componentKind: 'family',
+      componentKey: args.familyKey,
+      locale: args.locale,
+      approvedScopeSurfaceMap: args.approvedScopeSurfaceMap,
+    });
+  }
+  if (args.operatorBucket !== 'qualified_scope_surface_gap') {
+    return false;
+  }
+  return reviewedLocalizedComponentMatches({
+    probe: args.probe,
+    componentKind: 'line',
+    componentKey: args.lineKey,
+    locale: args.locale,
+    approvedScopeSurfaceMap: args.approvedScopeSurfaceMap,
+  }) || reviewedLocalizedComponentMatches({
+    probe: args.probe,
+    componentKind: 'region',
+    componentKey: args.regionKey,
+    locale: args.locale,
+    approvedScopeSurfaceMap: args.approvedScopeSurfaceMap,
+  }) || reviewedLocalizedComponentMatches({
+    probe: args.probe,
+    componentKind: 'appellation',
+    componentKey: args.appellationKey,
+    locale: args.locale,
+    approvedScopeSurfaceMap: args.approvedScopeSurfaceMap,
+  });
+}
+
+export function buildLookupV2CurationDraftRowsWithRuntimeDescriptors(
   tasks: readonly CurationTask[],
   sourceArtifact: string,
   reviewedAt: string,
+  runtimeDescriptorMap: ReadonlyMap<string, LookupV2RuntimeSemanticDescriptor>,
   benchmarkGoldHintMap: ReadonlyMap<string, string> = loadLookupV2BenchmarkGoldHintMapSync(),
   semanticScopeTargetApprovedMap: ReadonlyMap<string, LookupV2SemanticScopeTargetRegistryRow> = loadLookupV2SemanticScopeTargetApprovedMapSync(),
   semanticScopeTargetRejectedMap: ReadonlyMap<string, LookupV2SemanticScopeTargetRegistryRow> = loadLookupV2SemanticScopeTargetRejectedMapSync(),
@@ -99,8 +207,8 @@ export function buildLookupV2CurationDraftRows(
   semanticPolicyMap: ReadonlyMap<string, LookupV2SemanticPolicyRegistryRow> = loadLookupV2SemanticPolicyRegistryMapSync(),
   semanticScopeSupportRegistryMap: ReadonlyMap<string, LookupV2SemanticScopeSupportRegistryRow> = loadLookupV2SemanticScopeSupportRegistryMapSync(),
   familyCollisionRegistryMap: ReadonlyMap<string, LookupV2FamilyCollisionRegistryRow> = loadLookupV2FamilyCollisionRegistryMapSync(),
+  approvedScopeSurfaceMap: ReadonlyMap<string, ReadonlySet<string>> = new Map(),
 ): readonly LookupV2CurationDraftRow[] {
-  const runtimeDescriptorMap = loadLookupV2RuntimeSemanticDescriptorMapSync();
   return tasks.flatMap((task) => {
     const locale = inferDraftLocale(task.surfaceForm);
     const queryProbe = buildLookupQuerySemanticProbe({
@@ -220,8 +328,22 @@ export function buildLookupV2CurationDraftRows(
         `reviewed_collision family collision conflicts with semantic scope support for semanticScopeKey=${JSON.stringify(baselineScope.semanticScopeKey)}`,
       );
     }
-    if (semanticPolicyDecision?.decision === 'keep_ambiguous' || semanticPolicyDecision?.decision === 'needs_scope_target') {
+    if (localizedSurfaceGapAlreadyReviewed({
+      operatorBucket: task.operatorBucket,
+      probe: queryProbe,
+      familyKey: baselineScope.familyKey,
+      lineKey: baselineScope.lineKey,
+      regionKey: baselineScope.regionKey,
+      appellationKey: baselineScope.appellationKey,
+      locale: baselineScope.locale,
+      approvedScopeSurfaceMap,
+    })) {
       return [];
+    }
+    if (semanticPolicyDecision?.decision === 'keep_ambiguous' || semanticPolicyDecision?.decision === 'needs_scope_target') {
+      if (task.operatorBucket !== 'family_surface_gap' && task.operatorBucket !== 'qualified_scope_surface_gap') {
+        return [];
+      }
     }
     const triageBucket = rejectedSemanticTarget !== undefined
       ? 'reviewed_rejected'
@@ -270,6 +392,35 @@ export function buildLookupV2CurationDraftRows(
   });
 }
 
+export function buildLookupV2CurationDraftRows(
+  tasks: readonly CurationTask[],
+  sourceArtifact: string,
+  reviewedAt: string,
+  benchmarkGoldHintMap: ReadonlyMap<string, string> = loadLookupV2BenchmarkGoldHintMapSync(),
+  semanticScopeTargetApprovedMap: ReadonlyMap<string, LookupV2SemanticScopeTargetRegistryRow> = loadLookupV2SemanticScopeTargetApprovedMapSync(),
+  semanticScopeTargetRejectedMap: ReadonlyMap<string, LookupV2SemanticScopeTargetRegistryRow> = loadLookupV2SemanticScopeTargetRejectedMapSync(),
+  policyConflictBenchmarkOwners: ReadonlyMap<string, LookupPolicyConflictRegistryRow> = loadLookupPolicyConflictBenchmarkHintOwnerMapSync(),
+  semanticPolicyMap: ReadonlyMap<string, LookupV2SemanticPolicyRegistryRow> = loadLookupV2SemanticPolicyRegistryMapSync(),
+  semanticScopeSupportRegistryMap: ReadonlyMap<string, LookupV2SemanticScopeSupportRegistryRow> = loadLookupV2SemanticScopeSupportRegistryMapSync(),
+  familyCollisionRegistryMap: ReadonlyMap<string, LookupV2FamilyCollisionRegistryRow> = loadLookupV2FamilyCollisionRegistryMapSync(),
+  approvedScopeSurfaceMap: ReadonlyMap<string, ReadonlySet<string>> = new Map(),
+): readonly LookupV2CurationDraftRow[] {
+  return buildLookupV2CurationDraftRowsWithRuntimeDescriptors(
+    tasks,
+    sourceArtifact,
+    reviewedAt,
+    loadLookupV2RuntimeSemanticDescriptorMapSync(),
+    benchmarkGoldHintMap,
+    semanticScopeTargetApprovedMap,
+    semanticScopeTargetRejectedMap,
+    policyConflictBenchmarkOwners,
+    semanticPolicyMap,
+    semanticScopeSupportRegistryMap,
+    familyCollisionRegistryMap,
+    approvedScopeSurfaceMap,
+  );
+}
+
 function main(): void {
   const { values } = parseArgs({
     args: process.argv.slice(2).filter((arg) => arg !== '--'),
@@ -281,17 +432,20 @@ function main(): void {
       semanticScopeSupportRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_SUPPORT_REGISTRY_PATH },
       familySupportRegistry: { type: 'string' },
       familyCollisionRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_FAMILY_COLLISION_REGISTRY_PATH },
+      localizedScopeSurfaceRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_LOCALIZED_SCOPE_SURFACE_REGISTRY_PATH },
     },
   });
 
   const inputPath = values.input ?? '/tmp/lookup-v2-coverage-korean-realworld-stretch-entity-no-policy.json';
-  const outputPath = values.output ?? 'data/lookup-v2/drafts/lookup-v2-curation-draft.jsonl';
+  const outputPath = resolveCliDataPathArg(values.output ?? 'data/lookup-v2/drafts/lookup-v2-curation-draft.jsonl');
   const semanticScopeTargetRegistryPath = values.semanticScopeTargetRegistry ?? DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_TARGET_REGISTRY_PATH;
   const semanticPolicyRegistryPath = values.semanticPolicyRegistry ?? DEFAULT_LOOKUP_V2_SEMANTIC_POLICY_REGISTRY_PATH;
   const semanticScopeSupportRegistryPath = values.semanticScopeSupportRegistry
     ?? values.familySupportRegistry
     ?? DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_SUPPORT_REGISTRY_PATH;
   const familyCollisionRegistryPath = values.familyCollisionRegistry ?? DEFAULT_LOOKUP_V2_FAMILY_COLLISION_REGISTRY_PATH;
+  const localizedScopeSurfaceRegistryPath = values.localizedScopeSurfaceRegistry
+    ?? DEFAULT_LOOKUP_V2_LOCALIZED_SCOPE_SURFACE_REGISTRY_PATH;
   const parsed = JSON.parse(readFileSync(inputPath, 'utf8')) as {
     generatedAt?: string;
     curationTasks?: readonly CurationTask[];
@@ -309,6 +463,9 @@ function main(): void {
     loadLookupV2SemanticPolicyRegistryMapSync(semanticPolicyRegistryPath),
     loadLookupV2SemanticScopeSupportRegistryMapSync(semanticScopeSupportRegistryPath),
     loadLookupV2FamilyCollisionRegistryMapSync(familyCollisionRegistryPath),
+    buildLookupV2ApprovedScopeSurfaceMap(
+      loadLookupV2LocalizedScopeSurfaceRegistrySync(localizedScopeSurfaceRegistryPath),
+    ),
   );
   const autoTargetable = rows.filter((row) => row.triageBucket === 'auto_targetable').length;
   const policyReview = rows.filter((row) => row.triageBucket === 'scope_policy_review').length;

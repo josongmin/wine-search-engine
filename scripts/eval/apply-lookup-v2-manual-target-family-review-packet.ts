@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import {
@@ -14,6 +14,7 @@ import {
   loadLookupV2SemanticScopeTargetRegistrySync,
   type LookupV2SemanticScopeTargetRegistryRow,
 } from './lookup-v2-semantic-scope-target-registry.js';
+import { resolveCliDataPathArg } from './cli-data-path.js';
 
 interface ManualTargetFamilyApplyResult {
   readonly exactSafePacketRows: readonly LookupExactSafeProposalPacketRow[];
@@ -192,7 +193,9 @@ async function main(): Promise<void> {
   });
 
   const familiesPath = values.families ?? '/tmp/lookup-v2-korean-realworld-stretch-manual-target-family-review-reviewed.jsonl';
-  const draftPath = values.draft ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl';
+  const draftPath = resolveCliDataPathArg(
+    values.draft ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl',
+  );
   const familyRegistryPath = values.familyRegistry ?? DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_TARGET_REGISTRY_PATH;
   const outputPath = values.output ?? '/tmp/lookup-v2-korean-realworld-stretch-manual-target-approved-exact-safe-packet.jsonl';
   const familyRows = parsePacketJsonl(familiesPath, isLookupV2ManualTargetFamilyReviewPacketRow);
@@ -207,6 +210,7 @@ async function main(): Promise<void> {
     existingRegistryRows,
   });
 
+  mkdirSync(path.dirname(outputPath), { recursive: true });
   writeFileSync(outputPath, serializeRows(result.exactSafePacketRows), 'utf8');
   console.log(`[elv2-manual-target-family-apply] family_rows=${familyRows.length}`);
   console.log(`[elv2-manual-target-family-apply] target_assigned_families=${result.targetAssignedFamilies}`);

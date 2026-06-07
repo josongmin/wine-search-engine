@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseEnv } from '../env.js';
+import { StubCalibrationStore } from '../container-stubs.js';
 
 const semanticScopeRegistry = {
   findMatches: vi.fn(() => []),
@@ -28,6 +29,7 @@ const aliasMatcher = {
   findMatches: vi.fn(async () => []),
 };
 const entityResolver = { resolve: vi.fn() };
+const prebuiltEntityResolver = { resolve: vi.fn() };
 const loadLookupRuntimeBundle = vi.fn(async () => ({
   aliasMatcher,
   resolverProjectionLookup,
@@ -78,5 +80,27 @@ describe('createLookupAuthorityServices', () => {
       searchSnapshotManifestPath: '/tmp/search-snapshot:v1:test/manifest.json',
       runtimeBundleCacheKey: 'search-snapshot:v1:test',
     });
+  });
+
+  it('reuses prebuilt resolver and calibration store when provided by the full container path', async () => {
+    const { createLookupAuthorityServices } = await import('../lookup-authority.js');
+    const config = parseEnv({ NODE_ENV: 'test' });
+    const calibrationStore = new StubCalibrationStore();
+
+    const authority = await createLookupAuthorityServices(
+      config,
+      {
+        searchSnapshotId: 'search-snapshot:v1:test',
+        searchSnapshotManifestPath: '/tmp/search-snapshot:v1:test/manifest.json',
+      },
+      {
+        calibrationStore,
+        entityResolver: prebuiltEntityResolver as never,
+      },
+    );
+
+    const deps = (authority.entityLookupV2UseCase as any).deps;
+    expect(deps.entityResolver).toBe(prebuiltEntityResolver);
+    expect(buildEntityResolver).toHaveBeenCalledTimes(0);
   });
 });

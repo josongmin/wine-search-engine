@@ -77,6 +77,13 @@ describe('buildLookupV2ManualTargetFamilyReviewPacketRows', () => {
         ]),
         collidingOwnerWitnesses: new Map(),
       },
+      runtimeDescriptorMap: new Map([
+        ['wine-ce-calon-segur', {
+          entityId: 'wine-ce-calon-segur',
+          canonicalLabel: 'Calon Segur 2010',
+          familyKey: 'calon segur',
+        }],
+      ]),
     });
 
     expect(rows).toEqual([
@@ -207,6 +214,7 @@ describe('buildLookupV2ManualTargetFamilyReviewPacketRows', () => {
         entityRegions: new Map(),
         entityAppellations: new Map(),
       },
+      runtimeDescriptorMap: new Map(),
     });
 
     expect(rows).toEqual([
@@ -223,6 +231,112 @@ describe('buildLookupV2ManualTargetFamilyReviewPacketRows', () => {
         suggestedAliasTypes: ['canonical'],
         surfaces: ['슈발 블랑 2010', '슈발블랑 2015'],
         rowCount: 2,
+      }),
+    ]);
+  });
+
+  it('fails closed for mixed-vintage unique-owner evidence unless the explicit line scope matches the descriptor exactly', () => {
+    const rows = buildLookupV2ManualTargetFamilyReviewPacketRows({
+      draftRows: [
+        {
+          surface: '폴 로저 윈스턴 처칠',
+          locale: 'ko',
+          suggestedAliasType: 'canonical',
+          holeClass: 'realworld_brand_suffix',
+          observedStatus: 'failed',
+          benchmarkGoldHint: 'pol roger',
+          semanticScopeKey: 'family::pol roger::::::::::bare::ko',
+          scopeAxis: 'family',
+          familyKey: 'pol roger',
+          surfaceFormKind: 'bare',
+          triageBucket: 'scope_target_review',
+          sourceArtifact: '/tmp/coverage.json',
+          sourceEvidence: 'brand suffix gap',
+          reviewedAt: '2026-06-07T00:00:00.000Z',
+        },
+        {
+          surface: '폴 로저 18',
+          locale: 'ko',
+          suggestedAliasType: 'canonical',
+          holeClass: 'realworld_vintage_suffix',
+          observedStatus: 'failed',
+          benchmarkGoldHint: 'pol roger',
+          semanticScopeKey: 'line::pol roger::::::::2018::qualified::ko',
+          scopeAxis: 'line',
+          familyKey: 'pol roger',
+          vintage: 2018,
+          surfaceFormKind: 'qualified',
+          triageBucket: 'scope_target_review',
+          sourceArtifact: '/tmp/coverage.json',
+          sourceEvidence: 'vintage gap',
+          reviewedAt: '2026-06-07T00:01:00.000Z',
+        },
+        {
+          surface: '솔라이아 2018',
+          locale: 'ko',
+          suggestedAliasType: 'canonical',
+          holeClass: 'realworld_exact_vintage',
+          observedStatus: 'failed',
+          benchmarkGoldHint: 'solaia',
+          semanticScopeKey: 'line::solaia::::::::2018::qualified::ko',
+          scopeAxis: 'line',
+          familyKey: 'solaia',
+          vintage: 2018,
+          surfaceFormKind: 'qualified',
+          triageBucket: 'scope_target_review',
+          sourceArtifact: '/tmp/coverage.json',
+          sourceEvidence: 'exact vintage gap',
+          reviewedAt: '2026-06-07T00:02:00.000Z',
+        },
+      ],
+      runtimeOwnerEvidence: {
+        uniqueOwners: new Map([
+          ['pol roger', 'wine-ce-pol-roger-2020'],
+          ['solaia', 'wine-ce-solaia-2018'],
+        ]),
+        collidingOwners: new Map(),
+        uniqueOwnerWitnesses: new Map(),
+        collidingOwnerWitnesses: new Map(),
+        entityLabels: new Map([
+          ['wine-ce-pol-roger-2020', '2020 Pol Roger Champagne'],
+          ['wine-ce-solaia-2018', '2018 Solaia'],
+        ]),
+        entityProducers: new Map(),
+        entityRegions: new Map(),
+        entityAppellations: new Map(),
+      },
+      runtimeDescriptorMap: new Map([
+        ['wine-ce-pol-roger-2020', {
+          entityId: 'wine-ce-pol-roger-2020',
+          canonicalLabel: '2020 Pol Roger Champagne',
+          familyKey: 'pol roger',
+          vintage: 2020,
+        }],
+        ['wine-ce-solaia-2018', {
+          entityId: 'wine-ce-solaia-2018',
+          canonicalLabel: '2018 Solaia',
+          familyKey: 'solaia',
+          vintage: 2018,
+        }],
+      ]),
+    });
+
+    expect(rows).toEqual([
+      expect.objectContaining({
+        semanticScopeKey: 'family::pol roger::::::::::bare::ko',
+        scopeRisk: 'mixed_vintage_family',
+        runtimeEvidenceStatus: 'missing_runtime_owner',
+      }),
+      expect.objectContaining({
+        semanticScopeKey: 'line::pol roger::::::::2018::qualified::ko',
+        scopeRisk: 'mixed_vintage_family',
+        runtimeEvidenceStatus: 'missing_runtime_owner',
+      }),
+      expect.objectContaining({
+        semanticScopeKey: 'line::solaia::::::::2018::qualified::ko',
+        scopeRisk: 'mixed_vintage_family',
+        runtimeEvidenceStatus: 'candidate_unique_owner',
+        runtimeEvidenceEntityId: 'wine-ce-solaia-2018',
       }),
     ]);
   });

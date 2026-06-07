@@ -1,8 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildLookupV2CurationDraftRows,
+  buildLookupV2CurationDraftRowsWithRuntimeDescriptors,
   inferDraftLocale,
 } from '../../../scripts/eval/export-lookup-v2-curation-drafts.js';
+import type { LookupV2RuntimeSemanticDescriptor } from '../../../scripts/eval/lookup-v2-runtime-semantic-descriptors.js';
+
+function buildRuntimeDescriptorMap(
+  entries: readonly [string, LookupV2RuntimeSemanticDescriptor][],
+): ReadonlyMap<string, LookupV2RuntimeSemanticDescriptor> {
+  return new Map(entries);
+}
 
 describe('inferDraftLocale', () => {
   it('classifies Hangul surfaces as ko', () => {
@@ -16,7 +23,7 @@ describe('inferDraftLocale', () => {
 
 describe('buildLookupV2CurationDraftRows', () => {
   it('projects coverage curation tasks into deterministic draft rows', () => {
-    const rows = buildLookupV2CurationDraftRows(
+    const rows = buildLookupV2CurationDraftRowsWithRuntimeDescriptors(
       [
         {
           surfaceForm: '샤또 무통 로쉴드',
@@ -39,6 +46,22 @@ describe('buildLookupV2CurationDraftRows', () => {
       ],
       '/tmp/sample-coverage.json',
       '2026-06-05T00:00:00.000Z',
+      buildRuntimeDescriptorMap([
+        ['wine-ce-7ad85be72e30da173b87702175d8423ebfad6b8834d0b6ff794d2d4a62573e0e', {
+          entityId: 'wine-ce-7ad85be72e30da173b87702175d8423ebfad6b8834d0b6ff794d2d4a62573e0e',
+          canonicalLabel: 'Chateau Mouton Rothschild',
+          familyKey: 'mouton rothschild',
+          producerKey: 'chateau mouton rothschild',
+        }],
+        ['w-dom-perignon-2013', {
+          entityId: 'w-dom-perignon-2013',
+          canonicalLabel: 'Dom Perignon',
+          familyKey: 'moet chandon',
+          producerKey: 'moet chandon',
+          lineKey: 'dom perignon',
+          vintage: 2013,
+        }],
+      ]),
       new Map([['mouton', 'wine-ce-7ad85be72e30da173b87702175d8423ebfad6b8834d0b6ff794d2d4a62573e0e']]),
       new Map(),
       new Map(),
@@ -85,16 +108,17 @@ describe('buildLookupV2CurationDraftRows', () => {
         benchmarkGoldEntityId: 'w-dom-perignon-2013',
         benchmarkGoldEntityIdSource: 'fixture_exact',
         familyKey: 'moet chandon',
-        scopeAxis: 'family',
-        semanticScopeKey: 'family::moet chandon::::::::::bare::global',
-        surfaceFormKind: 'bare',
+        lineKey: 'dom perignon',
+        scopeAxis: 'line',
+        semanticScopeKey: 'line::moet chandon::dom perignon::::::::qualified::global',
+        surfaceFormKind: 'qualified',
         triageBucket: 'auto_targetable',
       }),
     ]);
   }, 10_000);
 
   it('normalizes benchmark hints before lookup and policy triage', () => {
-    const [row] = buildLookupV2CurationDraftRows(
+    const [row] = buildLookupV2CurationDraftRowsWithRuntimeDescriptors(
       [
         {
           surfaceForm: 'LATOUR 2018',
@@ -108,6 +132,7 @@ describe('buildLookupV2CurationDraftRows', () => {
       ],
       '/tmp/sample-coverage.json',
       '2026-06-05T00:00:00.000Z',
+      buildRuntimeDescriptorMap([]),
       new Map([['latour', 'wine-ce-latour']]),
       new Map(),
       new Map(),
@@ -139,7 +164,7 @@ describe('buildLookupV2CurationDraftRows', () => {
   });
 
   it('keeps policy conflict families in policy_review until a reviewed decision exists', () => {
-    const [row] = buildLookupV2CurationDraftRows(
+    const [row] = buildLookupV2CurationDraftRowsWithRuntimeDescriptors(
       [
         {
           surfaceForm: '베가 시실리아 우니꼬 2011',
@@ -153,6 +178,7 @@ describe('buildLookupV2CurationDraftRows', () => {
       ],
       '/tmp/sample-coverage.json',
       '2026-06-05T00:00:00.000Z',
+      buildRuntimeDescriptorMap([]),
       new Map(),
       new Map(),
       new Map(),
@@ -184,7 +210,7 @@ describe('buildLookupV2CurationDraftRows', () => {
   });
 
   it('promotes family target registry authority into auto_targetable rows', () => {
-    const [row] = buildLookupV2CurationDraftRows(
+    const [row] = buildLookupV2CurationDraftRowsWithRuntimeDescriptors(
       [
         {
           surfaceForm: '페트뤼스',
@@ -198,6 +224,7 @@ describe('buildLookupV2CurationDraftRows', () => {
       ],
       '/tmp/sample-coverage.json',
       '2026-06-05T00:00:00.000Z',
+      buildRuntimeDescriptorMap([]),
       new Map(),
       new Map([
         ['family::petrus::::::::::compact::ko', {
@@ -230,7 +257,7 @@ describe('buildLookupV2CurationDraftRows', () => {
   });
 
   it('promotes reviewed policy family decisions into auto_targetable rows', () => {
-    const [row] = buildLookupV2CurationDraftRows(
+    const [row] = buildLookupV2CurationDraftRowsWithRuntimeDescriptors(
       [
         {
           surfaceForm: '라뚜르 2009',
@@ -244,6 +271,7 @@ describe('buildLookupV2CurationDraftRows', () => {
       ],
       '/tmp/sample-coverage.json',
       '2026-06-05T00:00:00.000Z',
+      buildRuntimeDescriptorMap([]),
       new Map([['latour', 'wine-ce-latour']]),
       new Map(),
       new Map(),
@@ -281,7 +309,7 @@ describe('buildLookupV2CurationDraftRows', () => {
   });
 
   it('downgrades hint-only target resolution to manual_target and preserves it as a suggestion', () => {
-    const [row] = buildLookupV2CurationDraftRows(
+    const [row] = buildLookupV2CurationDraftRowsWithRuntimeDescriptors(
       [
         {
           surfaceForm: 'Opus 원 2019',
@@ -295,6 +323,7 @@ describe('buildLookupV2CurationDraftRows', () => {
       ],
       '/tmp/sample-coverage.json',
       '2026-06-05T00:00:00.000Z',
+      buildRuntimeDescriptorMap([]),
       new Map([['opus one', 'opus-one-2018']]),
       new Map(),
       new Map(),
@@ -306,14 +335,16 @@ describe('buildLookupV2CurationDraftRows', () => {
       benchmarkGoldHint: 'opus one',
       benchmarkGoldEntityIdSuggestion: 'opus-one-2018',
       benchmarkGoldEntityIdSuggestionSource: 'hint_resolution',
-      semanticScopeKey: 'family::opus one::::::::::mixed_script::ko',
+      semanticScopeKey: 'line::opus one::::::::2019::mixed_script::ko',
+      scopeAxis: 'line',
+      vintage: 2019,
       triageBucket: 'scope_target_review',
     }));
     expect(row).not.toHaveProperty('benchmarkGoldEntityId');
   });
 
   it('routes reviewed rejected family-target scopes out of the blind manual_target queue', () => {
-    const [row] = buildLookupV2CurationDraftRows(
+    const [row] = buildLookupV2CurationDraftRowsWithRuntimeDescriptors(
       [
         {
           surfaceForm: '샤또 오존',
@@ -327,6 +358,7 @@ describe('buildLookupV2CurationDraftRows', () => {
       ],
       '/tmp/sample-coverage.json',
       '2026-06-06T00:00:00.000Z',
+      buildRuntimeDescriptorMap([]),
       new Map(),
       new Map(),
       new Map([
@@ -358,7 +390,7 @@ describe('buildLookupV2CurationDraftRows', () => {
   });
 
   it('routes reviewed scope-support absent families into catalog_support_review instead of scope_target_review', () => {
-    const [row] = buildLookupV2CurationDraftRows(
+    const [row] = buildLookupV2CurationDraftRowsWithRuntimeDescriptors(
       [
         {
           surfaceForm: '살롱 샴페인',
@@ -372,6 +404,7 @@ describe('buildLookupV2CurationDraftRows', () => {
       ],
       '/tmp/sample-coverage.json',
       '2026-06-07T00:00:00.000Z',
+      buildRuntimeDescriptorMap([]),
       new Map(),
       new Map(),
       new Map(),
@@ -399,7 +432,7 @@ describe('buildLookupV2CurationDraftRows', () => {
   });
 
   it('routes reviewed family collisions into reviewed_collision instead of manual_target', () => {
-    const [row] = buildLookupV2CurationDraftRows(
+    const [row] = buildLookupV2CurationDraftRowsWithRuntimeDescriptors(
       [
         {
           surfaceForm: '실버 오크 카베르네',
@@ -413,6 +446,7 @@ describe('buildLookupV2CurationDraftRows', () => {
       ],
       '/tmp/sample-coverage.json',
       '2026-06-07T00:00:00.000Z',
+      buildRuntimeDescriptorMap([]),
       new Map(),
       new Map(),
       new Map(),
@@ -441,7 +475,7 @@ describe('buildLookupV2CurationDraftRows', () => {
   });
 
   it('allows scope-reviewed family targets inside reviewed_collision families', () => {
-    const [row] = buildLookupV2CurationDraftRows(
+    const [row] = buildLookupV2CurationDraftRowsWithRuntimeDescriptors(
       [
         {
           surfaceForm: '실버 오크 17',
@@ -455,6 +489,7 @@ describe('buildLookupV2CurationDraftRows', () => {
       ],
       '/tmp/sample-coverage.json',
       '2026-06-07T00:00:00.000Z',
+      buildRuntimeDescriptorMap([]),
       new Map(),
       new Map([
         ['line::silver oak::::::::2017::qualified::ko', {
@@ -498,6 +533,97 @@ describe('buildLookupV2CurationDraftRows', () => {
       semanticScopeKey: 'line::silver oak::::::::2017::qualified::ko',
       triageBucket: 'auto_targetable',
       collisionStatus: 'active_entity_collision',
+    }));
+  });
+
+  it('drops stale localized-surface review rows once the reviewed family surface already exists', () => {
+    const rows = buildLookupV2CurationDraftRowsWithRuntimeDescriptors(
+      [
+        {
+          surfaceForm: 'Opus 원 2019',
+          holeClass: 'realworld_mixed_script_alias',
+          observedStatus: 'ambiguous',
+          suggestedAliasType: 'canonical',
+          status: 'needs_target',
+          benchmarkGoldHint: 'opus one',
+          reason: 'Hot-entity coverage hole',
+          operatorBucket: 'family_surface_gap',
+        },
+      ],
+      '/tmp/sample-coverage.json',
+      '2026-06-08T00:00:00.000Z',
+      buildRuntimeDescriptorMap([]),
+      new Map([['opus one', 'opus-one-2018']]),
+      new Map(),
+      new Map(),
+      new Map(),
+      new Map(),
+      new Map(),
+      new Map(),
+      new Map([
+        ['family::opus one::ko', new Set(['opus 원'])],
+      ]),
+    );
+
+    expect(rows).toEqual([]);
+  });
+
+  it('keeps localized surface gaps visible even when the family stays policy-owned ambiguous', () => {
+    const [row] = buildLookupV2CurationDraftRowsWithRuntimeDescriptors(
+      [
+        {
+          surfaceForm: '그랜지 2016',
+          holeClass: 'realworld_exact_vintage',
+          observedStatus: 'ambiguous',
+          suggestedAliasType: 'canonical',
+          status: 'needs_target',
+          benchmarkGoldHint: 'grange',
+          reason: 'Hot-entity coverage hole',
+          operatorBucket: 'family_surface_gap',
+        },
+      ],
+      '/tmp/sample-coverage.json',
+      '2026-06-08T00:00:00.000Z',
+      buildRuntimeDescriptorMap([]),
+      new Map([['grange', 'wine-ce-grange']]),
+      new Map(),
+      new Map(),
+      new Map([
+        ['grange', {
+          surface: '그랜지',
+          locale: 'ko',
+          stretchExpectedStatus: 'ambiguous',
+          authorityStatus: 'resolved',
+          authorityEntityId: 'wine-ce-grange',
+          conflictType: 'short_form_collision',
+          conflictBenchmarkHints: ['grange'],
+          sourceEvidence: 'seed',
+          reviewedAt: '2026-06-08T00:00:00.000Z',
+        }],
+      ]),
+      new Map([
+        ['line::grange::::::::2016::qualified::ko::wine-ce-grange', {
+          semanticConflictKey: 'line::grange::::::::2016::qualified::ko',
+          conflictClass: 'short_form_collision',
+          entityId: 'wine-ce-grange',
+          decision: 'keep_ambiguous',
+          reviewedBy: 'codex',
+          reviewedAt: '2026-06-08T00:00:00.000Z',
+          decisionReason: 'short-form broad surface stays ambiguity-owned',
+        }],
+      ]),
+      new Map(),
+      new Map(),
+      new Map(),
+    );
+
+    expect(row).toEqual(expect.objectContaining({
+      benchmarkGoldHint: 'grange',
+      benchmarkGoldEntityIdSource: 'policy_registry_authority',
+      benchmarkGoldEntityIdSuggestion: 'wine-ce-grange',
+      benchmarkGoldEntityIdSuggestionSource: 'hint_resolution',
+      triageBucket: 'localized_surface_review',
+      operatorBucket: 'family_surface_gap',
     }));
   });
 });

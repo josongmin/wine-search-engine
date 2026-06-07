@@ -330,7 +330,14 @@ export async function createContainer(
     };
   })();
 
-  const lookupAuthority = await createLookupAuthorityServices(config, runtimeHandles);
+  const lookupAuthority = await createLookupAuthorityServices(
+    config,
+    runtimeHandles,
+    {
+      calibrationStore: core.calibrationStore,
+      entityResolver: core.entityResolver,
+    },
+  );
   const features = buildFeatureContainerServices(
     config,
     core,

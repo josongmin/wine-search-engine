@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import type { LookupExactSafeProposalPacketRow } from './export-lookup-v2-exact-safe-proposal-packet.js';
+import { resolveCliDataPathArg } from './cli-data-path.js';
 import {
   buildLookupV2ExactSafeReviewScopeKey,
   type LookupExactSafeFamilyReviewPacketRow,
@@ -98,7 +99,9 @@ async function main(): Promise<void> {
   });
 
   const familiesPath = values.families ?? '/tmp/lookup-v2-korean-realworld-stretch-exact-safe-family-review-reviewed.jsonl';
-  const rowsPath = values.rows ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl';
+  const rowsPath = resolveCliDataPathArg(
+    values.rows ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl',
+  );
   const outputPath = values.output ?? '/tmp/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals-reviewed-from-family.jsonl';
   const familyRows = parsePacketJsonl(familiesPath, isLookupExactSafeFamilyReviewPacketRow);
   const rowPacketRows = parsePacketJsonl(rowsPath, isLookupExactSafeProposalPacketRow);

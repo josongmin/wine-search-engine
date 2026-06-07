@@ -1,13 +1,10 @@
 import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
-import {
-  loadLookupV2RuntimeSurfaceOwnerEvidenceSync,
-  type LookupV2RuntimeSurfaceOwnerWitness,
-} from './lookup-v2-runtime-surface-owner-evidence.js';
+import type { LookupV2RuntimeSurfaceOwnerWitness } from './lookup-v2-runtime-surface-owner-evidence.js';
 import type { LookupV2ManualTargetFamilyReviewDecisionRow } from './review-lookup-v2-manual-target-family-review-packet.js';
 import type { LookupV2ManualTargetFamilyReviewPacketRow } from './export-lookup-v2-manual-target-family-review-packet.js';
+import { resolveCliDataPathArg } from './cli-data-path.js';
 
 export interface LookupV2ManualTargetFamilySuggestionRow {
   readonly reviewScopeKey: string;
@@ -51,13 +48,9 @@ function parsePacketJsonl(filePath: string): readonly LookupV2ManualTargetFamily
 
 export function buildLookupV2ManualTargetFamilySuggestions(
   packetRows: readonly LookupV2ManualTargetFamilyReviewPacketRow[],
-  evidence = loadLookupV2RuntimeSurfaceOwnerEvidenceSync(),
 ): readonly LookupV2ManualTargetFamilySuggestionRow[] {
   return packetRows.map((row) => {
-    const normalizedHint = normalizeForMatch(row.benchmarkGoldHint);
-    const uniqueOwner = evidence.uniqueOwners.get(normalizedHint);
-    if (uniqueOwner !== undefined) {
-      const uniqueOwnerWitnesses = evidence.uniqueOwnerWitnesses.get(normalizedHint);
+    if (row.runtimeEvidenceStatus === 'candidate_unique_owner' && row.runtimeEvidenceEntityId !== undefined) {
       return {
         reviewScopeKey: row.reviewScopeKey,
         benchmarkGoldHint: row.benchmarkGoldHint,
@@ -66,19 +59,17 @@ export function buildLookupV2ManualTargetFamilySuggestions(
         scopeSuggestedAliasType: row.scopeSuggestedAliasType,
         scopeRisk: row.scopeRisk,
         suggestionStatus: 'candidate_unique_owner',
-        recommendedEntityId: uniqueOwner,
-        ...(evidence.entityLabels.get(uniqueOwner) !== undefined
-          ? { recommendedEntityLabel: evidence.entityLabels.get(uniqueOwner)! }
+        recommendedEntityId: row.runtimeEvidenceEntityId,
+        ...(row.runtimeEvidenceEntityLabel !== undefined
+          ? { recommendedEntityLabel: row.runtimeEvidenceEntityLabel }
           : {}),
-        ...(uniqueOwnerWitnesses !== undefined && uniqueOwnerWitnesses.length > 0
-          ? { recommendedWitnesses: uniqueOwnerWitnesses }
+        ...(row.runtimeEvidenceWitnesses !== undefined && row.runtimeEvidenceWitnesses.length > 0
+          ? { recommendedWitnesses: row.runtimeEvidenceWitnesses }
           : {}),
         sourceEvidence: 'runtime_unique_surface_owner',
       };
     }
-    const collidingOwners = evidence.collidingOwners.get(normalizedHint);
-    const collidingOwnerWitnesses = evidence.collidingOwnerWitnesses.get(normalizedHint);
-    if (collidingOwners !== undefined) {
+    if (row.runtimeEvidenceStatus === 'collision_candidates' && row.runtimeCollisionEntityIds !== undefined) {
       return {
         reviewScopeKey: row.reviewScopeKey,
         benchmarkGoldHint: row.benchmarkGoldHint,
@@ -87,10 +78,10 @@ export function buildLookupV2ManualTargetFamilySuggestions(
         scopeSuggestedAliasType: row.scopeSuggestedAliasType,
         scopeRisk: row.scopeRisk,
         suggestionStatus: 'collision_candidates',
-        candidateEntityIds: collidingOwners,
-        candidateEntityLabels: collidingOwners.map((entityId) => evidence.entityLabels.get(entityId) ?? entityId),
-        ...(collidingOwnerWitnesses !== undefined && collidingOwnerWitnesses.length > 0
-          ? { candidateWitnesses: collidingOwnerWitnesses }
+        candidateEntityIds: row.runtimeCollisionEntityIds,
+        candidateEntityLabels: row.runtimeCollisionEntityLabels ?? row.runtimeCollisionEntityIds,
+        ...(row.runtimeCollisionWitnesses !== undefined && row.runtimeCollisionWitnesses.length > 0
+          ? { candidateWitnesses: row.runtimeCollisionWitnesses }
           : {}),
         sourceEvidence: 'runtime_colliding_surface_owner',
       };
@@ -125,9 +116,9 @@ function main(): void {
     },
   });
 
-  const inputPath = values.input ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-manual-target-family-review-packet.jsonl';
-  const outputPath = values.output ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-manual-target-family-suggestions.jsonl';
-  const decisionsOutputPath = values.decisionsOutput ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-manual-target-family.suggested-decisions.jsonl';
+  const inputPath = resolveCliDataPathArg(values.input ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-manual-target-family-review-packet.jsonl');
+  const outputPath = resolveCliDataPathArg(values.output ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-manual-target-family-suggestions.jsonl');
+  const decisionsOutputPath = resolveCliDataPathArg(values.decisionsOutput ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-manual-target-family.suggested-decisions.jsonl');
   const packetRows = parsePacketJsonl(inputPath);
   const suggestionRows = buildLookupV2ManualTargetFamilySuggestions(packetRows);
   const decisionRows = buildLookupV2ManualTargetSuggestedDecisionRows(suggestionRows);

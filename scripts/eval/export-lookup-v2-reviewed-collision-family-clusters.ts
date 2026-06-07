@@ -5,6 +5,7 @@ import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
 import type { LookupV2CurationDraftRow } from './export-lookup-v2-curation-drafts.js';
 import type { LookupV2RuntimeSurfaceOwnerEvidence } from './lookup-v2-runtime-surface-owner-evidence.js';
 import { loadLookupV2RuntimeSurfaceOwnerEvidenceSync } from './lookup-v2-runtime-surface-owner-evidence.js';
+import { resolveCliDataPathArg } from './cli-data-path.js';
 
 export type LookupV2ReviewedCollisionProducerTopology =
   | 'single_producer'
@@ -333,8 +334,12 @@ function main(): void {
     },
   });
 
-  const inputPath = values.input ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl';
-  const outputPath = values.output ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-reviewed-collision-family-clusters.jsonl';
+  const inputPath = resolveCliDataPathArg(
+    values.input ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl',
+  );
+  const outputPath = resolveCliDataPathArg(
+    values.output ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-reviewed-collision-family-clusters.jsonl',
+  );
   const generatedAt = values.generatedAt ?? new Date().toISOString();
   const draftRows = parseDraftJsonl(inputPath);
   const index = writeLookupV2ReviewedCollisionFamilyClusters({

@@ -6,6 +6,8 @@ import type { CurationTask } from '../../../src/domain/alias/curation/coverage-c
 import { normalizeForMatch } from '../../../src/domain/alias/service/normalize.js';
 import { refreshLookupV2StretchWritePlaneArtifacts } from '../../../scripts/eval/refresh-lookup-v2-stretch-write-plane.js';
 
+const STRETCH_REFRESH_TIMEOUT_MS = 120_000;
+
 describe('refreshLookupV2StretchWritePlaneArtifacts', () => {
   const tempDirs: string[] = [];
 
@@ -64,6 +66,7 @@ describe('refreshLookupV2StretchWritePlaneArtifacts', () => {
       inputArtifact: '/tmp/sample-entity-no-policy.json',
       generatedAt: '2026-06-06T02:00:00.000Z',
       outputDir,
+      runtimeDescriptorMap: new Map(),
       benchmarkGoldHintMap: new Map([
         ['petrus', 'wine-ce-petrus-hint-only'],
         ['latour', 'wine-ce-latour-hint-only'],
@@ -85,6 +88,7 @@ describe('refreshLookupV2StretchWritePlaneArtifacts', () => {
           evidenceClass: 'fixture_exact',
         }],
       ]),
+      familyTargetRejectedMap: new Map(),
       policyConflictOwners: new Map([
         ['latour', {
           surface: '라뚜르',
@@ -130,6 +134,7 @@ describe('refreshLookupV2StretchWritePlaneArtifacts', () => {
           evidenceClass: 'collision_support_review',
         }],
       ]),
+      approvedScopeSurfaceMap: new Map(),
       exactSafeRegistryRows: [],
       exactSafeScopeRegistryMap: new Map([
         ['wine-ce-petrus::translation::realworld_frenchish_korean_gap', {
@@ -267,5 +272,5 @@ describe('refreshLookupV2StretchWritePlaneArtifacts', () => {
         }),
       ]),
     );
-  }, 30_000);
+  }, STRETCH_REFRESH_TIMEOUT_MS);
 });

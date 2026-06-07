@@ -1,10 +1,12 @@
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { parseArgs } from 'node:util';
 import {
   loadLookupV2StretchCorpusSync,
   summarizeLookupV2StretchCorpus,
   type LookupV2StretchRow,
 } from './lookup-v2-stretch-corpus.js';
+import { resolveCliDataPathArg } from './cli-data-path.js';
 
 function sampleQueriesByStatus(rows: readonly LookupV2StretchRow[], status: LookupV2StretchRow['expected_status'], limit: number): readonly string[] {
   return rows
@@ -48,16 +50,18 @@ Goal:
 - keep this corpus entity-lookup focused; discovery rows are allowed but should stay explicit redirect_discovery, not fake resolved rows
 
 Required output schema:
-{"query":"...","expected_status":"resolved|ambiguous|failed|redirect_discovery","expected_entity_hint":"... optional only for resolved","accepted_statuses":["... optional"],"class":"...","note":"..."}
+{"query":"...","expected_status":"resolved|ambiguous|failed|redirect_discovery","expected_entity_hint":"... optional for entity-intended rows","accepted_statuses":["... optional"],"class":"...","note":"..."}
 
 Hard rules:
 1. resolved rows MUST include expected_entity_hint
-2. non-resolved rows MUST NOT include expected_entity_hint or expected_entity_id
-3. keep note short and concrete
-4. no markdown, no prose, no numbering, JSONL only
-5. no duplicate queries inside the output
-6. queries must look like Korean real search input, not catalog labels
-7. bias toward hard Korean long-tail behavior:
+2. ambiguous / failed rows MAY include expected_entity_hint when the query is clearly entity-intended
+3. redirect_discovery rows MUST NOT include expected_entity_hint or expected_entity_id
+4. if expected_entity_id is present, expected_entity_hint must also be present
+5. keep note short and concrete
+6. no markdown, no prose, no numbering, JSONL only
+7. no duplicate queries inside the output
+8. queries must look like Korean real search input, not catalog labels
+9. bias toward hard Korean long-tail behavior:
    - producer/family variants
    - compact Hangul spellings
    - mixed-script queries
@@ -65,7 +69,7 @@ Hard rules:
    - vintage suffix forms
    - fake-but-plausible no-match labels
    - short-form policy collisions
-8. do NOT output generic discovery slop unless expected_status=redirect_discovery
+10. do NOT output generic discovery slop unless expected_status=redirect_discovery
 
 Target distribution:
 - resolved=${args.resolvedRows}
@@ -122,7 +126,7 @@ ${failedExamples.map((query) => `- ${query}`).join('\n')}
 
 Important:
 - Do not output qid
-- Do not output expected_entity_id
+- Only output expected_entity_id when you are confident the row should pin to one concrete entity
 - If uncertain, prefer ambiguous or failed over resolved
 - Keep responses realistic for Korean users who type messy wine searches
 `;
@@ -142,7 +146,7 @@ async function main(): Promise<void> {
     },
   });
   const inputPath = values.input ?? 'test/fixtures/lookup-v2-korean-realworld-stretch.jsonl';
-  const outputPath = values.output ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-expansion-prompt.txt';
+  const outputPath = resolveCliDataPathArg(values.output ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-expansion-prompt.txt');
   const rows = loadLookupV2StretchCorpusSync(inputPath);
   const prompt = buildPrompt({
     baseRows: rows,
@@ -152,6 +156,7 @@ async function main(): Promise<void> {
     redirectRows: Number.parseInt(values.redirect ?? '100', 10),
     failedRows: Number.parseInt(values.failed ?? '100', 10),
   });
+  mkdirSync(path.dirname(outputPath), { recursive: true });
   writeFileSync(outputPath, prompt, 'utf8');
   console.log(`[stretch-corpus-prompt] input=${inputPath}`);
   console.log(`[stretch-corpus-prompt] output=${outputPath}`);
@@ -161,4 +166,3 @@ main().catch((error: unknown) => {
   console.error('[stretch-corpus-prompt] FATAL', error);
   process.exit(2);
 });
-

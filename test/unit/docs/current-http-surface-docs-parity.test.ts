@@ -61,6 +61,10 @@ describe('current HTTP surface docs parity', () => {
   const deployRunbook = readWorkspaceFile('docs/runbook-github-actions-aws-deploy.md');
   const agenticOverview = readWorkspaceFile('docs/system-overview/agentic-process.md');
   const doc2queryIntegration = readWorkspaceFile('docs/system-overview/doc2query-cohere-integration.md');
+  const benchStatus = readWorkspaceFile('docs/bench/STATUS.md');
+  const lookupPlan = readWorkspaceFile('docs/plans/jun-2-genearl/entity-lookup-v2/IMPROVEMENT-PLAN-2026-06-03.md');
+  const lookupChecklist = readWorkspaceFile('docs/plans/jun-2-genearl/entity-lookup-v2/cutover-checklist.md');
+  const lookupBuildStatus = readWorkspaceFile('docs/plans/jun-2-genearl/entity-lookup-v2/STATUS.md');
   const justfile = readWorkspaceFile('justfile');
   const featureCatalogFiles = listFeatureCatalogFiles('tools/feature-catalog/features');
 
@@ -110,6 +114,14 @@ describe('current HTTP surface docs parity', () => {
     expect(contractSurface).not.toContain('export-http-openapi-bridge.ts');
     expect(contractSurface).not.toContain('http-route-contract-openapi.ts');
     expect(contractSurface).not.toContain('/v1/search/replay');
+  });
+
+  it('lookup authority current docs and archive docs are clearly separated', () => {
+    expect(benchStatus).toContain('이 폴더의 current SSOT는 이 문서다.');
+    expect(benchStatus).not.toContain('lookup authority 품질 판단은 `docs/plans/jun-2-genearl/entity-lookup-v2/cutover-checklist.md`');
+    expect(lookupPlan).toContain('Historical / audit-only document.');
+    expect(lookupChecklist).toContain('Historical / audit-only document.');
+    expect(lookupBuildStatus).toContain('Current authority truth moved to `docs/bench/STATUS.md`');
   });
 
   it('developer smoke commands point at the canonical hybrid path', () => {

@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import type { LookupV2ManualTargetFamilyReviewPacketRow } from './export-lookup-v2-manual-target-family-review-packet.js';
+import { resolveCliDataPathArg } from './cli-data-path.js';
 
 export interface LookupV2ManualTargetOwnerEvidenceFamilyClusterRow {
   readonly benchmarkGoldHint: string;
@@ -161,8 +162,10 @@ function main(): void {
     },
   });
 
-  const inputPath = values.input ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-manual-target-family-review-packet.jsonl';
-  const outputDir = values.outputDir ?? 'data/lookup-v2/drafts/manual-target-owner-evidence';
+  const inputPath = resolveCliDataPathArg(
+    values.input ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-manual-target-family-review-packet.jsonl',
+  );
+  const outputDir = resolveCliDataPathArg(values.outputDir ?? 'data/lookup-v2/drafts/manual-target-owner-evidence');
   const generatedAt = values.generatedAt ?? new Date().toISOString();
   const packetRows = parsePacketJsonl(inputPath);
   const index = writeLookupV2ManualTargetOwnerFamilyClusters({

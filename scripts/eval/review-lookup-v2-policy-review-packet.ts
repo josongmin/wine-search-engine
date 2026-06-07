@@ -3,6 +3,7 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
 import type { LookupV2PolicyReviewPacketRow } from './export-lookup-v2-policy-review-packet.js';
+import { resolveCliDataPathArg } from './cli-data-path.js';
 
 export interface LookupV2PolicyReviewDecisionRow {
   readonly surface: string;
@@ -144,8 +145,8 @@ async function main(): Promise<void> {
     allowPositionals: false,
   });
 
-  const inputPath = values.input ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-policy-review-packet.jsonl';
-  const decisionsPath = values.decisions;
+  const inputPath = resolveCliDataPathArg(values.input ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-policy-review-packet.jsonl');
+  const decisionsPath = values.decisions !== undefined ? resolveCliDataPathArg(values.decisions) : undefined;
   if (decisionsPath === undefined || decisionsPath.length === 0) {
     throw new Error('--decisions is required');
   }

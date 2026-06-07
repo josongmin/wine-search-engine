@@ -35,6 +35,10 @@ import {
   loadLookupV2FamilyCollisionRegistrySync,
   type LookupV2FamilyCollisionRegistryRow,
 } from './lookup-v2-family-collision-registry.js';
+import {
+  buildLookupV2ApprovedScopeSurfaceMap,
+  loadLookupV2LocalizedScopeSurfaceRegistrySync,
+} from './lookup-v2-localized-scope-surface-registry.js';
 import type { LookupExactSafeRegistryRow } from '../etl/lookup-exact-safe-registry.js';
 import {
   DEFAULT_LOOKUP_EXACT_SAFE_REGISTRY_PATH,
@@ -48,6 +52,8 @@ import {
 import type { LookupV2RuntimeSurfaceOwnerEvidence } from './lookup-v2-runtime-surface-owner-evidence.js';
 import { loadLookupV2RuntimeSurfaceOwnerEvidenceSync } from './lookup-v2-runtime-surface-owner-evidence.js';
 import { loadLookupV2RuntimeKnownEntityIdsSync } from './lookup-v2-runtime-known-entity-ids.js';
+import { loadLookupV2RuntimeSemanticDescriptorMapSync } from './lookup-v2-runtime-semantic-descriptors.js';
+import { resolveCliDataPathArg } from './cli-data-path.js';
 
 interface LookupV2StretchCoverageArtifact {
   readonly generatedAt?: string;
@@ -184,8 +190,11 @@ export async function verifyLookupV2StretchReviewedRegistryOverlay(args: {
     readonly appellationKey?: string | undefined;
     readonly vintage?: number | undefined;
   }>;
+  readonly approvedScopeSurfaceMap?: ReadonlyMap<string, ReadonlySet<string>>;
   readonly policyConflictOwners?: ReadonlyMap<string, LookupPolicyConflictRegistryRow>;
 }): Promise<LookupV2StretchReviewedRegistryOverlaySummary> {
+  const familyReviewRows = args.familyReviewRows ?? [];
+  const policyFamilyReviewRows = args.policyFamilyReviewRows ?? [];
   const benchmarkGoldHintMap = args.benchmarkGoldHintMap ?? loadLookupV2BenchmarkGoldHintMapSync();
   const baselineFamilyTargetRegistryRows = args.baselineFamilyTargetRegistryRows ?? args.existingFamilyTargetRegistryRows ?? [];
   const baselinePolicyFamilyDecisionRegistryRows =
@@ -201,7 +210,13 @@ export async function verifyLookupV2StretchReviewedRegistryOverlay(args: {
   const exactSafeRegistryRows = args.exactSafeRegistryRows ?? [];
   const exactSafeScopeRegistryMap = args.exactSafeScopeRegistryMap ?? new Map();
   const runtimeOwnerEvidence = args.runtimeOwnerEvidence ?? loadLookupV2RuntimeSurfaceOwnerEvidenceSync();
-  const knownEntityIds = args.knownEntityIds ?? loadLookupV2RuntimeKnownEntityIdsSync();
+  const runtimeDescriptorMap = args.runtimeDescriptorMap ?? loadLookupV2RuntimeSemanticDescriptorMapSync();
+  const approvedScopeSurfaceMap = args.approvedScopeSurfaceMap
+    ?? buildLookupV2ApprovedScopeSurfaceMap(loadLookupV2LocalizedScopeSurfaceRegistrySync());
+  const knownEntityIds = args.knownEntityIds
+    ?? (args.runtimeDescriptorMap !== undefined
+      ? new Set<string>(args.runtimeDescriptorMap.keys())
+      : loadLookupV2RuntimeKnownEntityIdsSync());
   const policyConflictOwners = args.policyConflictOwners ?? loadLookupPolicyConflictBenchmarkHintOwnerMapSync();
 
   const baselineOutputDir = args.baselineOutputDir ?? path.join(args.workDir, 'baseline');
@@ -224,20 +239,22 @@ export async function verifyLookupV2StretchReviewedRegistryOverlay(args: {
     exactSafeRegistryRows,
     exactSafeScopeRegistryMap,
     runtimeOwnerEvidence,
+    runtimeDescriptorMap,
+    approvedScopeSurfaceMap,
   });
 
   const familyTargetRegistryApply = applyLookupV2SemanticScopeTargetRegistry({
-    familyRows: args.familyReviewRows ?? [],
+    familyRows: familyReviewRows,
     existingRegistryRows: existingFamilyTargetRegistryRows,
     knownEntityIds,
-    runtimeDescriptorMap: args.runtimeDescriptorMap,
+    runtimeDescriptorMap,
   });
   if (familyTargetRegistryApply.registryConflictRows > 0) {
     throw new Error(`family-target registry overlay has registry_conflict_rows=${familyTargetRegistryApply.registryConflictRows}`);
   }
 
   const policyFamilyDecisionRegistryApply = applyLookupV2PolicyFamilyDecisionRegistry({
-    familyRows: args.policyFamilyReviewRows ?? [],
+    familyRows: policyFamilyReviewRows,
     existingRegistryRows: existingPolicyFamilyDecisionRegistryRows,
   });
   if (policyFamilyDecisionRegistryApply.registryConflictRows > 0) {
@@ -259,10 +276,12 @@ export async function verifyLookupV2StretchReviewedRegistryOverlay(args: {
     exactSafeRegistryRows,
     exactSafeScopeRegistryMap,
     runtimeOwnerEvidence,
+    runtimeDescriptorMap,
+    approvedScopeSurfaceMap,
   });
 
   const hasReviewedCollisionFamilyReview =
-    (args.familyReviewRows ?? []).some((row) => row.reviewTarget === 'lookup_reviewed_collision_resolution_v1');
+    familyReviewRows.some((row) => row.reviewTarget === 'lookup_reviewed_collision_resolution_v1');
   const invariants: LookupV2StretchReviewedRegistryOverlayInvariants = {
     autoTargetableNonDecreasing: overlay.draft.autoTargetable >= baseline.draft.autoTargetable,
     catalogSupportReviewNonDecreasing: overlay.draft.catalogSupportReview >= baseline.draft.catalogSupportReview,
@@ -348,10 +367,10 @@ async function main(): Promise<void> {
   const familyCollisionRegistryPath = values.familyCollisionRegistry ?? DEFAULT_LOOKUP_V2_FAMILY_COLLISION_REGISTRY_PATH;
   const exactSafeRegistryPath = values.exactSafeRegistry ?? DEFAULT_LOOKUP_EXACT_SAFE_REGISTRY_PATH;
   const exactSafeScopeRegistryPath = values.exactSafeScopeRegistry ?? DEFAULT_LOOKUP_V2_EXACT_SAFE_SCOPE_REGISTRY_PATH;
-  const workDir = values.workDir ?? '/tmp/lookup-v2-stretch-reviewed-registry-overlay';
-  const baselineOutputDir = values.baselineOutputDir;
-  const overlayOutputDir = values.overlayOutputDir;
-  const outputPath = values.output ?? '/tmp/lookup-v2-stretch-reviewed-registry-overlay-summary.json';
+  const workDir = resolveCliDataPathArg(values.workDir ?? '/tmp/lookup-v2-stretch-reviewed-registry-overlay');
+  const baselineOutputDir = values.baselineOutputDir !== undefined ? resolveCliDataPathArg(values.baselineOutputDir) : undefined;
+  const overlayOutputDir = values.overlayOutputDir !== undefined ? resolveCliDataPathArg(values.overlayOutputDir) : undefined;
+  const outputPath = resolveCliDataPathArg(values.output ?? '/tmp/lookup-v2-stretch-reviewed-registry-overlay-summary.json');
 
   const artifact = readCoverageArtifact(inputPath);
   const familyReviewRows = readJsonlRows(familyReviewPath, isManualTargetFamilyReviewPacketRow);
@@ -387,6 +406,9 @@ async function main(): Promise<void> {
     exactSafeRegistryRows: await loadLookupExactSafeRegistry(exactSafeRegistryPath),
     exactSafeScopeRegistryMap: loadLookupV2ExactSafeScopeRegistryMapSync(exactSafeScopeRegistryPath),
     runtimeOwnerEvidence: loadLookupV2RuntimeSurfaceOwnerEvidenceSync(),
+    runtimeDescriptorMap: loadLookupV2RuntimeSemanticDescriptorMapSync(),
+    approvedScopeSurfaceMap: buildLookupV2ApprovedScopeSurfaceMap(loadLookupV2LocalizedScopeSurfaceRegistrySync()),
+    knownEntityIds: loadLookupV2RuntimeKnownEntityIdsSync(),
   });
 
   console.log(`[elv2-reviewed-registry-overlay-verify] baseline_auto_targetable=${summary.baseline.draft.autoTargetable}`);

@@ -8,6 +8,11 @@ import type {
   LookupV2RuntimeSurfaceOwnerWitness,
 } from './lookup-v2-runtime-surface-owner-evidence.js';
 import { loadLookupV2RuntimeSurfaceOwnerEvidenceSync } from './lookup-v2-runtime-surface-owner-evidence.js';
+import {
+  loadLookupV2RuntimeSemanticDescriptorMapSync,
+  type LookupV2RuntimeSemanticDescriptor,
+} from './lookup-v2-runtime-semantic-descriptors.js';
+import { resolveCliDataPathArg } from './cli-data-path.js';
 
 export interface LookupV2ManualTargetFamilyReviewPacketRow {
   readonly semanticScopeKey: string;
@@ -104,13 +109,67 @@ function sameOptionalNumber(left: number | undefined, right: number | undefined)
   return (left ?? undefined) === (right ?? undefined);
 }
 
+function runtimeDescriptorMatchesScope(args: {
+  readonly row: LookupV2CurationDraftRow;
+  readonly descriptor: LookupV2RuntimeSemanticDescriptor | undefined;
+}): boolean {
+  const { row, descriptor } = args;
+  if (descriptor === undefined) {
+    return false;
+  }
+  return (
+    descriptor.familyKey === row.familyKey
+    && sameOptionalString(descriptor.lineKey, row.lineKey)
+    && sameOptionalString(descriptor.regionKey, row.regionKey)
+    && sameOptionalString(descriptor.appellationKey, row.appellationKey)
+    && sameOptionalNumber(descriptor.vintage, row.vintage)
+  );
+}
+
+function resolveRuntimeEvidenceStatus(args: {
+  readonly exemplar: LookupV2CurationDraftRow;
+  readonly familyScopeRisk: LookupV2ManualTargetFamilyReviewPacketRow['scopeRisk'];
+  readonly uniqueOwner: string | undefined;
+  readonly collidingOwners: readonly string[] | undefined;
+  readonly runtimeDescriptorMap: ReadonlyMap<string, LookupV2RuntimeSemanticDescriptor>;
+}): LookupV2ManualTargetFamilyReviewPacketRow['runtimeEvidenceStatus'] {
+  const { exemplar, familyScopeRisk, uniqueOwner, collidingOwners, runtimeDescriptorMap } = args;
+  if (uniqueOwner !== undefined) {
+    if (familyScopeRisk === 'family_only') {
+      return runtimeDescriptorMatchesScope({
+        row: exemplar,
+        descriptor: runtimeDescriptorMap.get(uniqueOwner),
+      })
+        ? 'candidate_unique_owner'
+        : 'missing_runtime_owner';
+    }
+    if (
+      exemplar.scopeAxis === 'line'
+      && exemplar.vintage !== undefined
+      && runtimeDescriptorMatchesScope({
+        row: exemplar,
+        descriptor: runtimeDescriptorMap.get(uniqueOwner),
+      })
+    ) {
+      return 'candidate_unique_owner';
+    }
+    return 'missing_runtime_owner';
+  }
+  if (collidingOwners !== undefined) {
+    return 'collision_candidates';
+  }
+  return 'missing_runtime_owner';
+}
+
 function buildLookupV2FamilyTargetReviewPacketRows(args: {
   readonly draftRows: readonly LookupV2CurationDraftRow[];
   readonly triageBucket: LookupV2CurationDraftRow['triageBucket'];
   readonly reviewTarget: LookupV2ManualTargetFamilyReviewPacketRow['reviewTarget'];
   readonly runtimeOwnerEvidence?: LookupV2RuntimeSurfaceOwnerEvidence;
+  readonly runtimeDescriptorMap?: ReadonlyMap<string, LookupV2RuntimeSemanticDescriptor>;
 }): readonly LookupV2ManualTargetFamilyReviewPacketRow[] {
   const runtimeOwnerEvidence = args.runtimeOwnerEvidence ?? loadLookupV2RuntimeSurfaceOwnerEvidenceSync();
+  const runtimeDescriptorMap = args.runtimeDescriptorMap ?? loadLookupV2RuntimeSemanticDescriptorMapSync();
   const familyRowsByHint = new Map<string, LookupV2CurationDraftRow[]>();
   const groups = new Map<string, LookupV2CurationDraftRow[]>();
   const hintVariantsByScope = new Map<string, Set<string>>();
@@ -190,6 +249,13 @@ function buildLookupV2FamilyTargetReviewPacketRows(args: {
       const collidingOwners = runtimeOwnerEvidence.collidingOwners.get(normalizedBenchmarkGoldHint);
       const uniqueOwnerWitnesses = runtimeOwnerEvidence.uniqueOwnerWitnesses.get(normalizedBenchmarkGoldHint);
       const collidingOwnerWitnesses = runtimeOwnerEvidence.collidingOwnerWitnesses.get(normalizedBenchmarkGoldHint);
+      const runtimeEvidenceStatus = resolveRuntimeEvidenceStatus({
+        exemplar,
+        familyScopeRisk,
+        uniqueOwner,
+        collidingOwners,
+        runtimeDescriptorMap,
+      });
       const proposedAt = [...rows]
         .map((row) => row.reviewedAt)
         .sort((left, right) => left.localeCompare(right))
@@ -220,27 +286,33 @@ function buildLookupV2FamilyTargetReviewPacketRows(args: {
         rowCount: rows.length,
         sourceArtifacts: sortUnique(rows.map((row) => row.sourceArtifact)),
         sourceEvidenceSamples: sortUnique(rows.map((row) => row.sourceEvidence)),
-        runtimeEvidenceStatus: uniqueOwner !== undefined
-          ? 'candidate_unique_owner'
-          : collidingOwners !== undefined
-            ? 'collision_candidates'
-            : 'missing_runtime_owner',
-        ...(uniqueOwner !== undefined ? { runtimeEvidenceEntityId: uniqueOwner } : {}),
-        ...(uniqueOwner !== undefined && runtimeOwnerEvidence.entityLabels.get(uniqueOwner) !== undefined
+        runtimeEvidenceStatus,
+        ...(runtimeEvidenceStatus === 'candidate_unique_owner' && uniqueOwner !== undefined
+          ? { runtimeEvidenceEntityId: uniqueOwner }
+          : {}),
+        ...(runtimeEvidenceStatus === 'candidate_unique_owner'
+          && uniqueOwner !== undefined
+          && runtimeOwnerEvidence.entityLabels.get(uniqueOwner) !== undefined
           ? { runtimeEvidenceEntityLabel: runtimeOwnerEvidence.entityLabels.get(uniqueOwner)! }
           : {}),
-        ...(uniqueOwnerWitnesses !== undefined && uniqueOwnerWitnesses.length > 0
+        ...(runtimeEvidenceStatus === 'candidate_unique_owner'
+          && uniqueOwnerWitnesses !== undefined
+          && uniqueOwnerWitnesses.length > 0
           ? { runtimeEvidenceWitnesses: uniqueOwnerWitnesses }
           : {}),
-        ...(collidingOwners !== undefined ? { runtimeCollisionEntityIds: collidingOwners } : {}),
-        ...(collidingOwners !== undefined
+        ...(runtimeEvidenceStatus === 'collision_candidates' && collidingOwners !== undefined
+          ? { runtimeCollisionEntityIds: collidingOwners }
+          : {}),
+        ...(runtimeEvidenceStatus === 'collision_candidates' && collidingOwners !== undefined
           ? {
               runtimeCollisionEntityLabels: collidingOwners.map((entityId) =>
                 runtimeOwnerEvidence.entityLabels.get(entityId) ?? entityId,
               ),
             }
           : {}),
-        ...(collidingOwnerWitnesses !== undefined && collidingOwnerWitnesses.length > 0
+        ...(runtimeEvidenceStatus === 'collision_candidates'
+          && collidingOwnerWitnesses !== undefined
+          && collidingOwnerWitnesses.length > 0
           ? { runtimeCollisionWitnesses: collidingOwnerWitnesses }
           : {}),
         proposedAt,
@@ -252,6 +324,7 @@ function buildLookupV2FamilyTargetReviewPacketRows(args: {
 export function buildLookupV2ManualTargetFamilyReviewPacketRows(args: {
   readonly draftRows: readonly LookupV2CurationDraftRow[];
   readonly runtimeOwnerEvidence?: LookupV2RuntimeSurfaceOwnerEvidence;
+  readonly runtimeDescriptorMap?: ReadonlyMap<string, LookupV2RuntimeSemanticDescriptor>;
 }): readonly LookupV2ManualTargetFamilyReviewPacketRow[] {
   return buildLookupV2FamilyTargetReviewPacketRows({
     ...args,
@@ -263,6 +336,7 @@ export function buildLookupV2ManualTargetFamilyReviewPacketRows(args: {
 export function buildLookupV2ReviewedCollisionFamilyReviewPacketRows(args: {
   readonly draftRows: readonly LookupV2CurationDraftRow[];
   readonly runtimeOwnerEvidence?: LookupV2RuntimeSurfaceOwnerEvidence;
+  readonly runtimeDescriptorMap?: ReadonlyMap<string, LookupV2RuntimeSemanticDescriptor>;
 }): readonly LookupV2ManualTargetFamilyReviewPacketRow[] {
   return buildLookupV2FamilyTargetReviewPacketRows({
     ...args,
@@ -280,8 +354,8 @@ function main(): void {
     },
   });
 
-  const inputPath = values.input ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl';
-  const outputPath = values.output ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-manual-target-family-review-packet.jsonl';
+  const inputPath = resolveCliDataPathArg(values.input ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl');
+  const outputPath = resolveCliDataPathArg(values.output ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-manual-target-family-review-packet.jsonl');
   const draftRows = parseDraftJsonl(inputPath);
   const familyRows = buildLookupV2ManualTargetFamilyReviewPacketRows({ draftRows });
 

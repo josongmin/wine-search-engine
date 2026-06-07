@@ -50,8 +50,8 @@ vi.mock('../container-features.js', () => ({
 }));
 
 vi.mock('../lookup-authority.js', () => ({
-  createLookupAuthorityServices: vi.fn(async (_config, runtime) => {
-    builderCalls.authority(runtime);
+  createLookupAuthorityServices: vi.fn(async (_config, runtime, prebuilt) => {
+    builderCalls.authority(runtime, prebuilt);
     return {
       entityLookupV2UseCase: {} as never,
       bootstrapProfile: {} as never,
@@ -89,11 +89,17 @@ describe('createContainer runtime normalization', () => {
       searchSnapshotId: 'search-snapshot:v1:active',
       searchSnapshotManifestPath: '/tmp/search-snapshot:v1:active/manifest.json',
     });
-    expect(builderCalls.authority).toHaveBeenCalledWith({
-      pool,
-      searchSnapshotId: 'search-snapshot:v1:active',
-      searchSnapshotManifestPath: '/tmp/search-snapshot:v1:active/manifest.json',
-    });
+    expect(builderCalls.authority).toHaveBeenCalledWith(
+      {
+        pool,
+        searchSnapshotId: 'search-snapshot:v1:active',
+        searchSnapshotManifestPath: '/tmp/search-snapshot:v1:active/manifest.json',
+      },
+      {
+        calibrationStore: mockCore.calibrationStore,
+        entityResolver: mockCore.entityResolver,
+      },
+    );
     expect(builderCalls.features).toHaveBeenCalledWith({
       pool,
       searchSnapshotId: 'search-snapshot:v1:active',

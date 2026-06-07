@@ -3,6 +3,7 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
 import type { LookupExactSafeProposalPacketRow } from './export-lookup-v2-exact-safe-proposal-packet.js';
+import { resolveCliDataPathArg } from './cli-data-path.js';
 
 export interface LookupExactSafeProposalReviewDecisionRow {
   readonly surface: string;
@@ -134,8 +135,8 @@ async function main(): Promise<void> {
     allowPositionals: false,
   });
 
-  const inputPath = values.input ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl';
-  const decisionsPath = values.decisions;
+  const inputPath = resolveCliDataPathArg(values.input ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl');
+  const decisionsPath = values.decisions !== undefined ? resolveCliDataPathArg(values.decisions) : undefined;
   if (decisionsPath === undefined || decisionsPath.length === 0) {
     throw new Error('--decisions is required');
   }

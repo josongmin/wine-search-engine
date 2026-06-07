@@ -1,6 +1,8 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { parseArgs } from 'node:util';
 import type { LookupExactSafeProposalPacketRow } from './export-lookup-v2-exact-safe-proposal-packet.js';
+import { resolveCliDataPathArg } from './cli-data-path.js';
 
 const REVIEWED_AUTHORITY_SOURCES = new Set([
   'fixture_exact',
@@ -87,7 +89,7 @@ async function main(): Promise<void> {
     },
   });
 
-  const inputPath = values.input ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl';
+  const inputPath = resolveCliDataPathArg(values.input ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl');
   const outputPath = values.output ?? '/tmp/lookup-v2-reviewed-authority-exact-safe-proposals-approved.jsonl';
   const packetRows = parsePacketJsonl(inputPath);
   const approvedRows = approveLookupV2ReviewedAuthorityExactSafeProposalPacket({
@@ -97,6 +99,7 @@ async function main(): Promise<void> {
     decisionReason: values.decisionReason ?? 'approved upstream reviewed authority source',
   });
 
+  mkdirSync(path.dirname(outputPath), { recursive: true });
   writeFileSync(outputPath, serializeRows(approvedRows), 'utf8');
   const approvedCount = approvedRows.filter((row) => row.proposalStatus === 'approved').length;
   const pendingCount = approvedRows.filter((row) => row.proposalStatus === 'needs_review').length;

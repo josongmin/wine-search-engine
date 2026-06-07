@@ -15,6 +15,9 @@ import { RuntimeLookupPlanner } from '../application/search/entity-lookup-v2/run
 import type { EntityLookupV2UseCasePort } from '../application/search/port/search-route-usecases.port.js';
 import { loadLookupRuntimeBundle, type LookupRuntimeBundleLoadProfile } from './lookup-runtime-bundle.js';
 import { QUERY_CLASSES } from '../domain/shared/types/query-class.js';
+import type { CalibrationStore } from '../domain/resolver/port/calibration-store.port.js';
+import type { Resolver } from '../domain/resolver/service/resolver.js';
+import type { SearchSnapshotAliasMatcher } from '../infrastructure/adapter/search-snapshot-alias-matcher.js';
 
 export interface LookupAuthorityBootstrapProfile {
   readonly runtimeBundleMs: number;
@@ -33,15 +36,25 @@ export interface LookupAuthorityRuntimeMetadata {
   readonly searchSnapshotId?: string | undefined;
 }
 
+export interface LookupAuthorityRuntimeProbe {
+  readonly aliasMatcher: SearchSnapshotAliasMatcher;
+}
+
 export interface LookupAuthorityServices {
   readonly entityLookupV2UseCase: EntityLookupV2UseCasePort;
   readonly bootstrapProfile: LookupAuthorityBootstrapProfile;
   readonly metadata: LookupAuthorityRuntimeMetadata;
+  readonly runtimeProbe: LookupAuthorityRuntimeProbe;
 }
 
 export interface LookupV2LtrSupportState {
   readonly status: 'unsupported';
   readonly reason: 'lookup_domain_model_absent';
+}
+
+export interface LookupAuthorityPrebuiltDeps {
+  readonly calibrationStore?: CalibrationStore | undefined;
+  readonly entityResolver?: Resolver | undefined;
 }
 
 export function startCalibrationPreload(
@@ -88,6 +101,7 @@ export function resolveLookupV2LtrSupportState(
 export async function createLookupAuthorityServices(
   config: Config,
   runtime: RuntimeHandles,
+  prebuilt: LookupAuthorityPrebuiltDeps = {},
 ): Promise<LookupAuthorityServices> {
   const bootstrapStartedAt = performance.now();
   const manifestPath = runtime.searchSnapshotManifestPath;
@@ -99,9 +113,12 @@ export async function createLookupAuthorityServices(
   const runtimeBundleCacheKey = runtime.searchSnapshotId ?? manifestPath;
 
   const querySanitizer = new QuerySanitizer();
-  const calibrationStore = runtime.pool !== undefined
-    ? new MemoizedCalibrationStore(new PgCalibrationStore(runtime.pool))
-    : new StubCalibrationStore();
+  const calibrationStore = prebuilt.calibrationStore instanceof MemoizedCalibrationStore
+    || prebuilt.calibrationStore instanceof StubCalibrationStore
+    ? prebuilt.calibrationStore
+    : runtime.pool !== undefined
+      ? new MemoizedCalibrationStore(new PgCalibrationStore(runtime.pool))
+      : new StubCalibrationStore();
   const ltrSupportStartedAt = performance.now();
   const ltrSupportState = resolveLookupV2LtrSupportState(config);
   const ltrModelsMs = roundMs(performance.now() - ltrSupportStartedAt);
@@ -128,7 +145,7 @@ export async function createLookupAuthorityServices(
     exactSafeRegistry,
   } = runtimeBundle;
 
-  const entityResolver = buildEntityResolver(
+  const entityResolver = prebuilt.entityResolver ?? buildEntityResolver(
     {
       blockingPort: runtime.pool !== undefined
         ? new PgBlockingAdapter(runtime.pool, runtime.searchSnapshotId)
@@ -186,6 +203,9 @@ export async function createLookupAuthorityServices(
       searchSnapshotManifestPath: manifestPath,
       runtimeBundleCacheKey,
       ...(runtime.searchSnapshotId !== undefined ? { searchSnapshotId: runtime.searchSnapshotId } : {}),
+    },
+    runtimeProbe: {
+      aliasMatcher,
     },
   };
 }

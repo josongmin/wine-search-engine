@@ -140,6 +140,17 @@ export function applyLookupV2SemanticScopeTargetRegistry(args: {
   readonly knownEntityIds?: ReadonlySet<string>;
   readonly runtimeDescriptorMap?: ReadonlyMap<string, unknown>;
 }): SemanticScopeTargetRegistryApplyResult {
+  if (args.familyRows.length === 0) {
+    return {
+      mergedRows: args.existingRegistryRows.slice(),
+      pendingRows: 0,
+      approvedRows: 0,
+      rejectedRows: 0,
+      registryInsertedRows: 0,
+      registrySkippedExistingRows: 0,
+      registryConflictRows: 0,
+    };
+  }
   const runtimeDescriptorMap = args.runtimeDescriptorMap ?? loadLookupV2RuntimeSemanticDescriptorMapSync();
   const knownEntityIds = args.knownEntityIds
     ?? new Set<string>(runtimeDescriptorMap.keys());

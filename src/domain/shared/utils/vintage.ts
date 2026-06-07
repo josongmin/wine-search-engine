@@ -122,7 +122,11 @@ export function extractQueryVintageYear(text: string, referenceYear?: number): n
   if (shorthandMatches.length !== 1) {
     return null;
   }
-  const canonicalYear = canonicalizeVintageToken(shorthandMatches[0], referenceYear);
+  const shorthandToken = shorthandMatches[0];
+  if (shorthandToken === undefined) {
+    return null;
+  }
+  const canonicalYear = canonicalizeVintageToken(shorthandToken, referenceYear);
   const numericYear = Number.parseInt(canonicalYear, 10);
   return Number.isFinite(numericYear) ? numericYear : null;
 }

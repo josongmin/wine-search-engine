@@ -1,13 +1,10 @@
-# Entity Lookup V2 — Cutover Checklist (T-ELV2-08)
+# Entity Lookup V2 — Cutover Checklist (Historical Audit Snapshot)
 
-> 하드 게이트: **shadow compare + hotset eval + live smoke 없이 cutover 금지** (RFC §4.7, DoD §7).
-> 2026-06-03 update: compatibility-backed cutover가 완료되어 `/v1/lookup/wine`,
-> local CLI `lookupWine`, agent `lookup_wine`는 모두 V2 authority를 탄다.
-> `/v2/entity-lookup`는 dedicated V2 surface로 계속 유지된다.
->
-> Current authority docs:
-> - this checklist
-> - `IMPROVEMENT-PLAN-2026-06-03.md`
+> Historical / audit-only document.
+> Current authority truth moved to `docs/bench/STATUS.md` and
+> `tools/feature-catalog/features/retrieval/entity-lookup-v2.yaml`.
+> This file intentionally preserves pre-parity cutover context and stale shadow
+> terminology for RCA only. Do not use it as the current execution or cutover SSOT.
 >
 > Historical diagnostics (`entity-resolution-validation-2026-06-02.md`,
 > `shadow-results-2026-06-02.md`) are retained for RCA/audit, not for current

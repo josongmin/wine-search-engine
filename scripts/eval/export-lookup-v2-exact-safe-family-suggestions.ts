@@ -3,6 +3,7 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import type { LookupExactSafeFamilyReviewDecisionRow } from './review-lookup-v2-exact-safe-family-review-packet.js';
 import type { LookupExactSafeFamilyReviewPacketRow } from './export-lookup-v2-exact-safe-family-review-packet.js';
+import { resolveCliDataPathArg } from './cli-data-path.js';
 
 export interface LookupV2ExactSafeFamilySuggestionRow {
   readonly reviewScopeKey: string;
@@ -92,9 +93,9 @@ function main(): void {
     },
   });
 
-  const inputPath = values.input ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-exact-safe-family-review-packet.jsonl';
-  const outputPath = values.output ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-exact-safe-family-suggestions.jsonl';
-  const decisionsOutputPath = values.decisionsOutput ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-exact-safe-family.suggested-decisions.jsonl';
+  const inputPath = resolveCliDataPathArg(values.input ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-exact-safe-family-review-packet.jsonl');
+  const outputPath = resolveCliDataPathArg(values.output ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-exact-safe-family-suggestions.jsonl');
+  const decisionsOutputPath = resolveCliDataPathArg(values.decisionsOutput ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-exact-safe-family.suggested-decisions.jsonl');
   const packetRows = parsePacketJsonl(inputPath);
   const suggestionRows = buildLookupV2ExactSafeFamilySuggestions(packetRows);
   const decisionRows = buildLookupV2ExactSafeSuggestedDecisionRows(suggestionRows);

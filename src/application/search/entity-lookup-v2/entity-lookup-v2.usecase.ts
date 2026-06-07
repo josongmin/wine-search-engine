@@ -57,6 +57,8 @@ import { clamp01 } from '../../../domain/shared/utils/clamp.js';
 import { LOOKUP_RETRIEVAL_CHANNELS } from '../../../domain/resolver/v2/lookup-v2-types.js';
 import type { LookupRetrievalChannel } from '../../../domain/resolver/v2/lookup-v2-types.js';
 import { buildNormalizedQueryViews } from '../../../domain/query/service/query-normalizer.js';
+import { normalizeForMatch } from '../../../domain/alias/service/normalize.js';
+import { compactForLookup } from '../../../domain/query/service/phonetic-skeleton.js';
 import { buildResolverCandidatesFromGenerator } from '../search-usecase-resolver-candidates.js';
 import {
   findRawQueryExactSafeSingletonAliasWitness,
@@ -109,6 +111,22 @@ const REVIEWED_FAMILY_COLLISION_REASON_CODE = 'reviewed_family_collision_require
 // [[project_elv2_scope_target_recall_only_runtime]].
 const REVIEWED_SCOPE_TARGET_RESOLVED_REASON_CODE = 'reviewed_scope_target_resolved';
 const NON_IDENTITY_STRATEGY_MARKER = /fuzzy|ngram|trigram|edit|prefix|inexact|lexical|phonetic|fallback/u;
+
+function rawQueryMatchesExactSafeSurface(
+  rawQuery: string,
+  lookupVariants: readonly string[] | undefined,
+): boolean {
+  if (lookupVariants === undefined || lookupVariants.length === 0) {
+    return false;
+  }
+  const normalizedRawQuery = normalizeForMatch(rawQuery);
+  const compactRawQuery = compactForLookup(rawQuery);
+  return lookupVariants.some((surface) => (
+    normalizedRawQuery.length > 0 && normalizeForMatch(surface) === normalizedRawQuery
+  ) || (
+    compactRawQuery.length > 0 && compactForLookup(surface) === compactRawQuery
+  ));
+}
 
 export interface EntityLookupV2UseCaseDeps {
   readonly admissionGate: LookupAdmissionGatePort;
@@ -667,12 +685,27 @@ export class EntityLookupV2UseCase {
     // Authority order: a forced status (admission/SAT) wins; otherwise the
     // calibrated-abstain decision; otherwise the resolver's advisory status.
     let status = forcedStatus ?? decision?.status ?? mapResolverStatusToLookupStatus(result?.status ?? 'failed');
+    const topCandidateEntityId = result?.candidates[0]?.entityId;
+    const exactSafeSingletonWitness = findRawQueryExactSafeSingletonAliasWitness(
+      plan.rawQuery,
+      plan.normalizedQuery,
+      plan.anchors,
+    );
+    const shouldBypassVintageMismatchDowngrade =
+      exactSafeSingletonWitness !== undefined
+      && topCandidateEntityId !== undefined
+      && String(exactSafeSingletonWitness.entityId) === String(topCandidateEntityId)
+      && rawQueryMatchesExactSafeSurface(
+        plan.rawQuery,
+        exactSafeSingletonWitness.anchor.lookupVariants,
+      );
     // Precision-first vintage guard: a resolve to an entity whose vintage differs
     // from the query's EXPLICIT vintage token is NOT a confident single resolve —
     // downgrade to ambiguous (multi-vintage). Exact year compare, downgrade-only.
     // Closes the 2026-06-02 shadow cutover blocker (오퍼스원 2019 → Opus One 2018).
     const vintageMismatch =
       status === 'resolved'
+      && !shouldBypassVintageMismatchDowngrade
       && shouldDowngradeForVintageMismatch(command.query, result?.candidates[0]?.canonicalLabel);
     if (vintageMismatch) {
       status = 'ambiguous';

@@ -1,7 +1,7 @@
 {
   "sourceDraftPath": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl",
-  "generatedAt": "2026-06-07T14:11:43.867Z",
-  "totalRows": 22,
+  "generatedAt": "2026-06-07T16:36:40.029Z",
+  "totalRows": 23,
   "batches": [
     {
       "holeClass": "realworld_brand_suffix",
@@ -15,7 +15,7 @@
     },
     {
       "holeClass": "realworld_exact_vintage",
-      "rowCount": 10,
+      "rowCount": 11,
       "outputPath": "data/lookup-v2/drafts/manual-target-batches/realworld-exact-vintage.jsonl"
     },
     {

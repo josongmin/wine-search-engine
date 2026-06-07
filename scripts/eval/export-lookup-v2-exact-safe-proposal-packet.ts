@@ -5,6 +5,7 @@ import type { LookupExactSafePromotionClass, LookupExactSafeRegistryRow } from '
 import { loadLookupExactSafeRegistry } from '../etl/lookup-exact-safe-registry.js';
 import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
 import type { LookupV2CurationDraftRow } from './export-lookup-v2-curation-drafts.js';
+import { resolveCliDataPathArg } from './cli-data-path.js';
 
 export type LookupExactSafeProposalEntityIdSource =
   | 'fixture_exact'
@@ -196,8 +197,8 @@ async function main(): Promise<void> {
     allowPositionals: false,
   });
 
-  const inputPath = values.input ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl';
-  const outputPath = values.output ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl';
+  const inputPath = resolveCliDataPathArg(values.input ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl');
+  const outputPath = resolveCliDataPathArg(values.output ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl');
   const draftRows = parseDraftJsonl(inputPath);
   const existingRegistryRows = await loadLookupExactSafeRegistry(values.registry);
   const packetRows = buildLookupExactSafeProposalPacketRows({
