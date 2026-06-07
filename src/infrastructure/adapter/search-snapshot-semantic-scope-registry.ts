@@ -20,9 +20,19 @@ function specificityScore(entry: LookupSemanticScopeRuntimeEntry): number {
 }
 
 export class SearchSnapshotSemanticScopeRegistry implements LookupSemanticScopeRegistryPort {
+  private readonly reviewedTargetEntityIds: ReadonlySet<string>;
+
   constructor(
     private readonly entries: readonly LookupSemanticScopeRuntimeEntry[],
-  ) {}
+  ) {
+    // Every runtime scope entry is a reviewed approved target (rejected rows
+    // never reach the runtime artifact), so the anchor set is just their ids.
+    this.reviewedTargetEntityIds = new Set(entries.map((entry) => entry.entityId));
+  }
+
+  getReviewedTargetEntityIds(): ReadonlySet<string> {
+    return this.reviewedTargetEntityIds;
+  }
 
   findMatches(args: {
     readonly query: string;

@@ -38,6 +38,13 @@ export interface LookupSemanticScopeRegistryPort {
     readonly views: NormalizedQueryViews;
     readonly locale: 'ko' | 'global';
   }): readonly LookupSemanticScopeMatch[];
+  /**
+   * The set of entityIds that are reviewed APPROVED scope-target anchors. Used
+   * to break a reviewed family collision by candidate identity when the query
+   * surface (e.g. Korean) cannot be text-matched to the latin-keyed scope:
+   * if exactly one colliding candidate is a reviewed anchor, it is the answer.
+   */
+  getReviewedTargetEntityIds(): ReadonlySet<string>;
 }
 
 export interface LookupSemanticEntityDescriptor {

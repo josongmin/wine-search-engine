@@ -100,6 +100,13 @@ const LOOKUP_V2_MAX_CLARIFICATION_OPTIONS = 8;
 const PERSISTED_AMBIGUITY_SURFACE_REASON_CODE = 'persisted_ambiguity_surface';
 const RECALL_ONLY_NO_MATCH_REASON_CODE = 'recall_only_no_match';
 const REVIEWED_FAMILY_COLLISION_REASON_CODE = 'reviewed_family_collision_requires_clarification';
+// A reviewed, APPROVED semantic-scope-target that pins the query scope to a
+// SINGLE catalog entity is identity-bearing authority — it resolves a reviewed
+// family collision to that anchor instead of demanding clarification. Without
+// this, an approved scope-target is only a recall seed and the surface stays
+// ambiguous forever (collision never breaks). See
+// [[project_elv2_scope_target_recall_only_runtime]].
+const REVIEWED_SCOPE_TARGET_RESOLVED_REASON_CODE = 'reviewed_scope_target_resolved';
 const NON_IDENTITY_STRATEGY_MARKER = /fuzzy|ngram|trigram|edit|prefix|inexact|lexical|phonetic|fallback/u;
 
 export interface EntityLookupV2UseCaseDeps {
@@ -576,6 +583,50 @@ export class EntityLookupV2UseCase {
     };
   }
 
+  /**
+   * Breaks a reviewed family collision by candidate identity: if EXACTLY ONE of
+   * the colliding candidates is a reviewed APPROVED scope-target anchor (the
+   * grand vin / sole catalog entity for its family), that anchor is the answer.
+   *
+   * This is identity-by-candidate, not by query text — Korean surfaces like
+   * "샤또 앙젤뤼스" cannot be text-matched to the latin-keyed scope, but the
+   * reviewed_family_recall channel already surfaces the family's entities as
+   * candidates, so we pick the reviewed anchor among them.
+   *
+   * Precision-first: returns undefined unless there is exactly one anchor
+   * candidate, and never resolves to an anchor whose vintage contradicts the
+   * query's explicit vintage token.
+   */
+  private resolveReviewedScopeTargetIdentity(args: {
+    readonly command: EntityLookupV2Command;
+    readonly allCandidates: readonly LookupV2CandidateView[];
+  }): string | undefined {
+    const registry = this.deps.semanticScopeRegistry;
+    if (registry === undefined) {
+      return undefined;
+    }
+    const anchorIds = registry.getReviewedTargetEntityIds();
+    if (anchorIds.size === 0) {
+      return undefined;
+    }
+    const anchorCandidates = args.allCandidates.filter((c) => anchorIds.has(c.entityId));
+    const anchor = anchorCandidates.length === 1 ? anchorCandidates[0] : undefined;
+    if (anchor === undefined) {
+      return undefined;
+    }
+    // Require multi-channel corroboration: a genuine family-core match fires
+    // dense + family/line graph channels, whereas a collapsed typo only fuzzily
+    // recalls on a single channel. Snapping a single-channel fuzzy hit to the
+    // anchor would resurrect typo/no-match queries the gold expects to fail.
+    if (anchor.channelAgreement < 2) {
+      return undefined;
+    }
+    if (shouldDowngradeForVintageMismatch(args.command.query, anchor.canonicalLabel)) {
+      return undefined;
+    }
+    return anchor.entityId;
+  }
+
   private finishResult(args: {
     command: EntityLookupV2Command;
     plan: LookupQueryPlan;
@@ -667,9 +718,30 @@ export class EntityLookupV2UseCase {
       status = 'ambiguous';
       effectiveDecisionReasonCode = PERSISTED_AMBIGUITY_SURFACE_REASON_CODE;
     }
+    // Reviewed semantic-scope-target authority resolves BEFORE the collision
+    // gate: an approved scope-target that pins this query scope to a single
+    // catalog entity present in the pool is identity-bearing and breaks the
+    // reviewed family collision (precision-first: abstain if the matches span
+    // more than one entity, or the target is not actually a candidate).
+    // Only RESCUE an ambiguous (collision) decision — never override a `failed`
+    // verdict. `failed` means the resolver rejected every candidate (e.g. a
+    // typo too far from any alias); promoting a fuzzily-recalled anchor there
+    // would resurrect no-match/typo queries the gold expects to fail.
+    const reviewedScopeTargetEntityId =
+      forcedStatus === undefined
+      && persistedAmbiguity === undefined
+      && !vintageMismatch
+      && status === 'ambiguous'
+        ? this.resolveReviewedScopeTargetIdentity({ command, allCandidates })
+        : undefined;
+    if (reviewedScopeTargetEntityId !== undefined) {
+      status = 'resolved';
+      effectiveDecisionReasonCode = REVIEWED_SCOPE_TARGET_RESOLVED_REASON_CODE;
+    }
     if (
       forcedStatus === undefined
       && persistedAmbiguity === undefined
+      && reviewedScopeTargetEntityId === undefined
       && hasReviewedFamilyCollisionClarificationEvidence(allCandidates)
       && !hasAnyIdentityBearingEvidence(result, plan)
       && (status === 'failed' || status === 'ambiguous')
@@ -692,7 +764,15 @@ export class EntityLookupV2UseCase {
     }
 
     // The resolver orders by rank, so slicing keeps the strongest candidates.
-    const candidates = allCandidates.slice(0, command.maxCandidates);
+    // When a reviewed scope-target resolved the collision, surface that anchor
+    // first so it becomes the top candidate.
+    const orderedCandidates = reviewedScopeTargetEntityId !== undefined
+      ? [
+          ...allCandidates.filter((c) => c.entityId === reviewedScopeTargetEntityId),
+          ...allCandidates.filter((c) => c.entityId !== reviewedScopeTargetEntityId),
+        ]
+      : allCandidates;
+    const candidates = orderedCandidates.slice(0, command.maxCandidates);
     const topCandidate = status === 'resolved' ? (candidates[0] ?? null) : null;
     // T-ELV2-06: graph-backed clarification (kind + distinguishing features) for
     // ambiguous outcomes; ambiguity types/severity prefer the persisted graph.
