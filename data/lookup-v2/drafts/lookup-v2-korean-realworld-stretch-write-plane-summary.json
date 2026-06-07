@@ -1,6 +1,6 @@
 {
   "inputArtifact": "/tmp/lookup-v2-coverage-korean-realworld-stretch-entity-no-policy.json",
-  "generatedAt": "2026-06-06T22:23:38.236Z",
+  "generatedAt": "2026-06-07T00:08:14.829Z",
   "outputPaths": {
     "draft": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl",
     "exactSafePacket": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl",
@@ -22,16 +22,16 @@
     "summary": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-write-plane-summary.json"
   },
   "draft": {
-    "rows": 150,
+    "rows": 149,
     "autoTargetable": 7,
-    "scopePolicyReview": 1,
-    "localizedSurfaceReview": 20,
+    "scopePolicyReview": 0,
+    "localizedSurfaceReview": 0,
     "reviewedRejected": 21,
     "catalogSupportReview": 0,
     "catalogAbsent": 0,
     "reviewedCollision": 101,
     "reviewedScopeCollision": 101,
-    "scopeTargetReview": 0
+    "scopeTargetReview": 20
   },
   "exactSafe": {
     "packetRows": 7,
@@ -51,26 +51,67 @@
     }
   },
   "policy": {
-    "reviewRows": 1,
-    "familyReviewRows": 1,
+    "reviewRows": 0,
+    "familyReviewRows": 0,
     "suggestions": {
-      "keepAmbiguous": 1,
+      "keepAmbiguous": 0,
       "manualReview": 0
     }
   },
   "manualTarget": {
     "batchIndex": {
       "sourceDraftPath": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl",
-      "generatedAt": "2026-06-06T22:23:38.236Z",
-      "totalRows": 0,
-      "batches": []
+      "generatedAt": "2026-06-07T00:08:14.829Z",
+      "totalRows": 20,
+      "batches": [
+        {
+          "holeClass": "realworld_brand_suffix",
+          "rowCount": 1,
+          "outputPath": "data/lookup-v2/drafts/manual-target-batches/realworld-brand-suffix.jsonl"
+        },
+        {
+          "holeClass": "realworld_compact_alias",
+          "rowCount": 1,
+          "outputPath": "data/lookup-v2/drafts/manual-target-batches/realworld-compact-alias.jsonl"
+        },
+        {
+          "holeClass": "realworld_exact_vintage",
+          "rowCount": 8,
+          "outputPath": "data/lookup-v2/drafts/manual-target-batches/realworld-exact-vintage.jsonl"
+        },
+        {
+          "holeClass": "realworld_frenchish_korean_gap",
+          "rowCount": 1,
+          "outputPath": "data/lookup-v2/drafts/manual-target-batches/realworld-frenchish-korean-gap.jsonl"
+        },
+        {
+          "holeClass": "realworld_mixed_script_alias",
+          "rowCount": 2,
+          "outputPath": "data/lookup-v2/drafts/manual-target-batches/realworld-mixed-script-alias.jsonl"
+        },
+        {
+          "holeClass": "realworld_producer_prefixed",
+          "rowCount": 1,
+          "outputPath": "data/lookup-v2/drafts/manual-target-batches/realworld-producer-prefixed.jsonl"
+        },
+        {
+          "holeClass": "realworld_spaced_alias",
+          "rowCount": 2,
+          "outputPath": "data/lookup-v2/drafts/manual-target-batches/realworld-spaced-alias.jsonl"
+        },
+        {
+          "holeClass": "realworld_vintage_suffix",
+          "rowCount": 4,
+          "outputPath": "data/lookup-v2/drafts/manual-target-batches/realworld-vintage-suffix.jsonl"
+        }
+      ]
     },
     "ownerEvidenceIndex": {
       "sourcePacketPath": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-manual-target-family-review-packet.jsonl",
-      "generatedAt": "2026-06-06T22:23:38.236Z",
-      "totalRows": 0,
-      "candidateUniqueOwnerRows": 0,
-      "collisionCandidateRows": 0,
+      "generatedAt": "2026-06-07T00:08:14.829Z",
+      "totalRows": 14,
+      "candidateUniqueOwnerRows": 11,
+      "collisionCandidateRows": 3,
       "missingRuntimeOwnerRows": 0,
       "outputPaths": {
         "candidateUniqueOwner": "data/lookup-v2/drafts/manual-target-owner-evidence/candidate-unique-owner.jsonl",
@@ -80,11 +121,11 @@
     },
     "ownerEvidenceFamilyIndex": {
       "sourcePacketPath": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-manual-target-family-review-packet.jsonl",
-      "generatedAt": "2026-06-06T22:23:38.236Z",
-      "totalFamilies": 0,
-      "totalScopeRows": 0,
-      "candidateUniqueOwnerFamilies": 0,
-      "collisionCandidateFamilies": 0,
+      "generatedAt": "2026-06-07T00:08:14.829Z",
+      "totalFamilies": 7,
+      "totalScopeRows": 14,
+      "candidateUniqueOwnerFamilies": 4,
+      "collisionCandidateFamilies": 3,
       "missingRuntimeOwnerFamilies": 0,
       "outputPaths": {
         "candidateUniqueOwnerFamilies": "data/lookup-v2/drafts/manual-target-owner-evidence/candidate-unique-owner-families.jsonl",
@@ -92,17 +133,17 @@
         "missingRuntimeOwnerFamilies": "data/lookup-v2/drafts/manual-target-owner-evidence/missing-runtime-owner-families.jsonl"
       }
     },
-    "familyReviewRows": 0,
+    "familyReviewRows": 14,
     "suggestions": {
-      "candidateUniqueOwner": 0,
-      "collisionCandidates": 0,
+      "candidateUniqueOwner": 11,
+      "collisionCandidates": 3,
       "missingRuntimeOwner": 0
     }
   },
   "catalogAbsent": {
     "familyClusterIndex": {
       "sourceDraftPath": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl",
-      "generatedAt": "2026-06-06T22:23:38.236Z",
+      "generatedAt": "2026-06-07T00:08:14.829Z",
       "totalRows": 0,
       "totalFamilies": 0,
       "outputPath": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-catalog-absent-family-clusters.jsonl"
@@ -111,7 +152,7 @@
   "reviewedCollision": {
     "familyClusterIndex": {
       "sourceDraftPath": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl",
-      "generatedAt": "2026-06-06T22:23:38.236Z",
+      "generatedAt": "2026-06-07T00:08:14.829Z",
       "totalRows": 101,
       "totalFamilies": 17,
       "outputPath": "data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-reviewed-collision-family-clusters.jsonl",
