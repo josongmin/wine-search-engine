@@ -202,6 +202,61 @@ describe('applyLookupV2SemanticScopeTargetRegistry', () => {
     ]);
   });
 
+  it('allows reviewed-collision line-vintage authority rows to bind an iconic family target across runtime vintage drift', () => {
+    const result = applyLookupV2SemanticScopeTargetRegistry({
+      familyRows: [
+        {
+          semanticScopeKey: 'line::montrose::::::::2019::qualified::ko',
+          scopeAxis: 'line',
+          familyKey: 'montrose',
+          vintage: 2019,
+          surfaceFormKind: 'qualified',
+          reviewScopeKey: 'line::montrose::::::::2019::qualified::ko',
+          legacyReviewScopeKeys: ['montrose::canonical::realworld_exact_vintage'],
+          benchmarkGoldHint: 'montrose',
+          normalizedBenchmarkGoldHint: 'montrose',
+          benchmarkGoldHintVariants: ['montrose'],
+          proposalStatus: 'target_assigned',
+          reviewTarget: 'lookup_reviewed_collision_resolution_v1',
+          scopeHoleClass: 'realworld_exact_vintage',
+          scopeSuggestedAliasType: 'canonical',
+          scopeRisk: 'mixed_vintage_family',
+          locales: ['ko'],
+          surfaces: ['몽로즈 2019'],
+          holeClasses: ['realworld_exact_vintage'],
+          suggestedAliasTypes: ['canonical'],
+          rowCount: 1,
+          sourceArtifacts: ['/tmp/montrose.json'],
+          sourceEvidenceSamples: ['coverage hole'],
+          runtimeEvidenceStatus: 'collision_candidates',
+          runtimeCollisionEntityIds: ['wine-ce-montrose-grand-vin', 'wine-ce-la-dame-de-montrose'],
+          runtimeCollisionEntityLabels: ['1989 Chateau Montrose', '2015 La Dame de Montrose'],
+          proposedAt: '2026-06-08T00:00:00.000Z',
+          targetEntityId: 'wine-ce-montrose-grand-vin',
+          reviewedAt: '2026-06-08T00:10:00.000Z',
+          reviewedBy: 'codex',
+          decisionReason: 'iconic Montrose vintage query resolves to the reviewed grand-vin family anchor despite runtime vintage drift',
+        },
+      ],
+      existingRegistryRows: [],
+      knownEntityIds: new Set(['wine-ce-montrose-grand-vin', 'wine-ce-la-dame-de-montrose']),
+      runtimeDescriptorMap: new Map([
+        ['wine-ce-montrose-grand-vin', { familyKey: 'montrose', vintage: 1989 }],
+        ['wine-ce-la-dame-de-montrose', { familyKey: 'montrose', vintage: 2015 }],
+      ]),
+    });
+
+    expect(result.registryInsertedRows).toBe(1);
+    expect(result.registryConflictRows).toBe(0);
+    expect(result.mergedRows).toEqual([
+      expect.objectContaining({
+        semanticScopeKey: 'line::montrose::::::::2019::qualified::ko',
+        entityId: 'wine-ce-montrose-grand-vin',
+        evidenceClass: 'reviewed_collision_family_review',
+      }),
+    ]);
+  });
+
   it('fails closed when the reviewed row family scope does not match the runtime descriptor owner', () => {
     const result = applyLookupV2SemanticScopeTargetRegistry({
       familyRows: [

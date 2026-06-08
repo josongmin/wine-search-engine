@@ -14,6 +14,29 @@ import {
 } from './lookup-v2-runtime-semantic-descriptors.js';
 import { lookupV2DraftCliPath, resolveCliDataPathArg } from './cli-data-path.js';
 
+export type LookupV2ManualTargetRuntimeGapReason =
+  | 'runtime_family_missing'
+  | 'requested_vintage_missing'
+  | 'requested_line_missing'
+  | 'family_surface_needs_specific_line'
+  | 'runtime_scope_mismatch';
+
+export type LookupV2RuntimeCollisionClarificationAxis =
+  | 'line'
+  | 'region'
+  | 'appellation'
+  | 'vintage';
+
+export interface LookupV2RuntimeCollisionScopeDescriptor {
+  readonly entityId: string;
+  readonly entityLabel: string;
+  readonly familyKey: string;
+  readonly lineKey?: string | undefined;
+  readonly regionKey?: string | undefined;
+  readonly appellationKey?: string | undefined;
+  readonly vintage?: number | undefined;
+}
+
 export interface LookupV2ManualTargetFamilyReviewPacketRow {
   readonly semanticScopeKey: string;
   readonly scopeAxis: LookupV2CurationDraftRow['scopeAxis'];
@@ -47,6 +70,15 @@ export interface LookupV2ManualTargetFamilyReviewPacketRow {
   readonly runtimeCollisionEntityIds?: readonly string[] | undefined;
   readonly runtimeCollisionEntityLabels?: readonly string[] | undefined;
   readonly runtimeCollisionWitnesses?: readonly LookupV2RuntimeSurfaceOwnerWitness[] | undefined;
+  readonly runtimeGapReason?: LookupV2ManualTargetRuntimeGapReason | undefined;
+  readonly runtimeGapEntityIds?: readonly string[] | undefined;
+  readonly runtimeGapEntityLabels?: readonly string[] | undefined;
+  readonly runtimeGapAvailableVintages?: readonly number[] | undefined;
+  readonly runtimeGapAvailableLineKeys?: readonly string[] | undefined;
+  readonly runtimeGapAvailableRegionKeys?: readonly string[] | undefined;
+  readonly runtimeGapAvailableAppellationKeys?: readonly string[] | undefined;
+  readonly runtimeClarificationAxes?: readonly LookupV2RuntimeCollisionClarificationAxis[] | undefined;
+  readonly runtimeCollisionScopeDescriptors?: readonly LookupV2RuntimeCollisionScopeDescriptor[] | undefined;
   readonly proposedAt: string;
   readonly targetEntityId?: string | undefined;
   readonly reviewedAt?: string | undefined;
@@ -84,6 +116,10 @@ function sortUnique(values: readonly string[]): readonly string[] {
   return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
 
+function sortUniqueNumbers(values: readonly number[]): readonly number[] {
+  return [...new Set(values)].sort((left, right) => left - right);
+}
+
 function normalizeBenchmarkHint(value: string): string {
   return normalizeForMatch(value);
 }
@@ -109,6 +145,18 @@ function sameOptionalNumber(left: number | undefined, right: number | undefined)
   return (left ?? undefined) === (right ?? undefined);
 }
 
+function buildFamilyRuntimeDescriptors(args: {
+  readonly familyKey: string;
+  readonly runtimeDescriptorMap: ReadonlyMap<string, LookupV2RuntimeSemanticDescriptor>;
+}): readonly LookupV2RuntimeSemanticDescriptor[] {
+  return [...args.runtimeDescriptorMap.values()]
+    .filter((descriptor) => descriptor.familyKey === args.familyKey)
+    .sort((left, right) =>
+      left.entityId.localeCompare(right.entityId)
+      || left.canonicalLabel.localeCompare(right.canonicalLabel),
+    );
+}
+
 function runtimeDescriptorMatchesScope(args: {
   readonly row: LookupV2CurationDraftRow;
   readonly descriptor: LookupV2RuntimeSemanticDescriptor | undefined;
@@ -126,6 +174,38 @@ function runtimeDescriptorMatchesScope(args: {
   );
 }
 
+function runtimeDescriptorMatchesFamilySurfaceScope(args: {
+  readonly row: LookupV2CurationDraftRow;
+  readonly descriptor: LookupV2RuntimeSemanticDescriptor | undefined;
+}): boolean {
+  const { row, descriptor } = args;
+  if (descriptor === undefined) {
+    return false;
+  }
+  return (
+    descriptor.familyKey === row.familyKey
+    && sameOptionalString(descriptor.lineKey, row.lineKey)
+    && sameOptionalString(descriptor.regionKey, row.regionKey)
+    && sameOptionalString(descriptor.appellationKey, row.appellationKey)
+  );
+}
+
+function resolveExactScopeCollisionOwners(args: {
+  readonly row: LookupV2CurationDraftRow;
+  readonly collidingOwners: readonly string[];
+  readonly runtimeDescriptorMap: ReadonlyMap<string, LookupV2RuntimeSemanticDescriptor>;
+}): readonly string[] | undefined {
+  if (args.row.scopeAxis !== 'line') {
+    return undefined;
+  }
+  return args.collidingOwners.filter((entityId) =>
+    runtimeDescriptorMatchesScope({
+      row: args.row,
+      descriptor: args.runtimeDescriptorMap.get(entityId),
+    }),
+  );
+}
+
 function resolveRuntimeEvidenceStatus(args: {
   readonly exemplar: LookupV2CurationDraftRow;
   readonly familyScopeRisk: LookupV2ManualTargetFamilyReviewPacketRow['scopeRisk'];
@@ -135,8 +215,8 @@ function resolveRuntimeEvidenceStatus(args: {
 }): LookupV2ManualTargetFamilyReviewPacketRow['runtimeEvidenceStatus'] {
   const { exemplar, familyScopeRisk, uniqueOwner, collidingOwners, runtimeDescriptorMap } = args;
   if (uniqueOwner !== undefined) {
-    if (familyScopeRisk === 'family_only') {
-      return runtimeDescriptorMatchesScope({
+    if (exemplar.scopeAxis === 'family') {
+      return runtimeDescriptorMatchesFamilySurfaceScope({
         row: exemplar,
         descriptor: runtimeDescriptorMap.get(uniqueOwner),
       })
@@ -159,6 +239,176 @@ function resolveRuntimeEvidenceStatus(args: {
     return 'collision_candidates';
   }
   return 'missing_runtime_owner';
+}
+
+function buildRuntimeGapContext(args: {
+  readonly familyRuntimeDescriptors: readonly LookupV2RuntimeSemanticDescriptor[];
+}): Pick<
+  LookupV2ManualTargetFamilyReviewPacketRow,
+  | 'runtimeGapEntityIds'
+  | 'runtimeGapEntityLabels'
+  | 'runtimeGapAvailableVintages'
+  | 'runtimeGapAvailableLineKeys'
+  | 'runtimeGapAvailableRegionKeys'
+  | 'runtimeGapAvailableAppellationKeys'
+> {
+  const runtimeGapEntityIds = args.familyRuntimeDescriptors.map((descriptor) => descriptor.entityId);
+  const runtimeGapEntityLabels = args.familyRuntimeDescriptors.map((descriptor) => descriptor.canonicalLabel);
+  const runtimeGapAvailableVintages = sortUniqueNumbers(
+    args.familyRuntimeDescriptors
+      .map((descriptor) => descriptor.vintage)
+      .filter((value): value is number => value !== undefined),
+  );
+  const runtimeGapAvailableLineKeys = sortUnique(
+    args.familyRuntimeDescriptors
+      .map((descriptor) => descriptor.lineKey)
+      .filter((value): value is string => value !== undefined),
+  );
+  const runtimeGapAvailableRegionKeys = sortUnique(
+    args.familyRuntimeDescriptors
+      .map((descriptor) => descriptor.regionKey)
+      .filter((value): value is string => value !== undefined),
+  );
+  const runtimeGapAvailableAppellationKeys = sortUnique(
+    args.familyRuntimeDescriptors
+      .map((descriptor) => descriptor.appellationKey)
+      .filter((value): value is string => value !== undefined),
+  );
+  return {
+    ...(runtimeGapEntityIds.length > 0 ? { runtimeGapEntityIds } : {}),
+    ...(runtimeGapEntityLabels.length > 0 ? { runtimeGapEntityLabels } : {}),
+    ...(runtimeGapAvailableVintages.length > 0 ? { runtimeGapAvailableVintages } : {}),
+    ...(runtimeGapAvailableLineKeys.length > 0 ? { runtimeGapAvailableLineKeys } : {}),
+    ...(runtimeGapAvailableRegionKeys.length > 0 ? { runtimeGapAvailableRegionKeys } : {}),
+    ...(runtimeGapAvailableAppellationKeys.length > 0 ? { runtimeGapAvailableAppellationKeys } : {}),
+  };
+}
+
+function resolveRuntimeGapDetails(args: {
+  readonly exemplar: LookupV2CurationDraftRow;
+  readonly familyRuntimeDescriptors: readonly LookupV2RuntimeSemanticDescriptor[];
+}): Pick<
+  LookupV2ManualTargetFamilyReviewPacketRow,
+  | 'runtimeGapReason'
+  | 'runtimeGapEntityIds'
+  | 'runtimeGapEntityLabels'
+  | 'runtimeGapAvailableVintages'
+  | 'runtimeGapAvailableLineKeys'
+  | 'runtimeGapAvailableRegionKeys'
+  | 'runtimeGapAvailableAppellationKeys'
+> {
+  const runtimeGapContext = buildRuntimeGapContext({
+    familyRuntimeDescriptors: args.familyRuntimeDescriptors,
+  });
+  if (args.familyRuntimeDescriptors.length === 0) {
+    return {
+      runtimeGapReason: 'runtime_family_missing',
+    };
+  }
+  if (
+    args.exemplar.scopeAxis === 'family'
+    && args.familyRuntimeDescriptors.some((descriptor) =>
+      descriptor.lineKey !== undefined
+      || descriptor.regionKey !== undefined
+      || descriptor.appellationKey !== undefined
+      || descriptor.vintage !== undefined,
+    )
+  ) {
+    return {
+      runtimeGapReason: 'family_surface_needs_specific_line',
+      ...runtimeGapContext,
+    };
+  }
+  if (args.exemplar.vintage !== undefined) {
+    const sameVintageDescriptors = args.familyRuntimeDescriptors.filter((descriptor) => descriptor.vintage === args.exemplar.vintage);
+    if (sameVintageDescriptors.length === 0) {
+      return {
+        runtimeGapReason: 'requested_vintage_missing',
+        ...runtimeGapContext,
+      };
+    }
+    if (
+      args.exemplar.lineKey !== undefined
+      && sameVintageDescriptors.every((descriptor) => !sameOptionalString(descriptor.lineKey, args.exemplar.lineKey))
+    ) {
+      return {
+        runtimeGapReason: 'requested_line_missing',
+        ...runtimeGapContext,
+      };
+    }
+    return {
+      runtimeGapReason: 'runtime_scope_mismatch',
+      ...runtimeGapContext,
+    };
+  }
+  if (
+    args.exemplar.lineKey !== undefined
+    && args.familyRuntimeDescriptors.every((descriptor) => !sameOptionalString(descriptor.lineKey, args.exemplar.lineKey))
+  ) {
+    return {
+      runtimeGapReason: 'requested_line_missing',
+      ...runtimeGapContext,
+    };
+  }
+  return {
+    runtimeGapReason: 'runtime_scope_mismatch',
+    ...runtimeGapContext,
+  };
+}
+
+function buildRuntimeCollisionScopeDescriptors(args: {
+  readonly entityIds: readonly string[];
+  readonly runtimeDescriptorMap: ReadonlyMap<string, LookupV2RuntimeSemanticDescriptor>;
+  readonly runtimeOwnerEvidence: LookupV2RuntimeSurfaceOwnerEvidence;
+}): readonly LookupV2RuntimeCollisionScopeDescriptor[] {
+  return args.entityIds
+    .map((entityId) => {
+      const descriptor = args.runtimeDescriptorMap.get(entityId);
+      return {
+        entityId,
+        entityLabel:
+          args.runtimeOwnerEvidence.entityLabels.get(entityId)
+          ?? descriptor?.canonicalLabel
+          ?? entityId,
+        familyKey: descriptor?.familyKey ?? '',
+        ...(descriptor?.lineKey !== undefined ? { lineKey: descriptor.lineKey } : {}),
+        ...(descriptor?.regionKey !== undefined ? { regionKey: descriptor.regionKey } : {}),
+        ...(descriptor?.appellationKey !== undefined ? { appellationKey: descriptor.appellationKey } : {}),
+        ...(descriptor?.vintage !== undefined ? { vintage: descriptor.vintage } : {}),
+      };
+    })
+    .sort((left, right) =>
+      left.entityId.localeCompare(right.entityId)
+      || left.entityLabel.localeCompare(right.entityLabel),
+    );
+}
+
+function buildRuntimeClarificationAxes(
+  descriptors: readonly LookupV2RuntimeCollisionScopeDescriptor[],
+): readonly LookupV2RuntimeCollisionClarificationAxis[] {
+  if (descriptors.length <= 1) {
+    return [];
+  }
+  const axes: LookupV2RuntimeCollisionClarificationAxis[] = [];
+  const axisValues = {
+    line: new Set(descriptors.map((descriptor) => descriptor.lineKey ?? '__missing__')),
+    region: new Set(descriptors.map((descriptor) => descriptor.regionKey ?? '__missing__')),
+    appellation: new Set(descriptors.map((descriptor) => descriptor.appellationKey ?? '__missing__')),
+    vintage: new Set(descriptors.map((descriptor) => String(descriptor.vintage ?? '__missing__'))),
+  };
+  if (axisValues.line.size > 1) {
+    axes.push('line');
+  }
+  if (axisValues.region.size > 1) {
+    axes.push('region');
+  }
+  if (axisValues.appellation.size > 1) {
+    axes.push('appellation');
+  }
+  if (axisValues.vintage.size > 1) {
+    axes.push('vintage');
+  }
+  return axes;
 }
 
 function buildLookupV2FamilyTargetReviewPacketRows(args: {
@@ -247,15 +497,65 @@ function buildLookupV2FamilyTargetReviewPacketRows(args: {
       const familyScopeRisk = inferFamilyScopeRisk(familyRowsByHint.get(normalizedBenchmarkGoldHint) ?? rows);
       const uniqueOwner = runtimeOwnerEvidence.uniqueOwners.get(normalizedBenchmarkGoldHint);
       const collidingOwners = runtimeOwnerEvidence.collidingOwners.get(normalizedBenchmarkGoldHint);
-      const uniqueOwnerWitnesses = runtimeOwnerEvidence.uniqueOwnerWitnesses.get(normalizedBenchmarkGoldHint);
-      const collidingOwnerWitnesses = runtimeOwnerEvidence.collidingOwnerWitnesses.get(normalizedBenchmarkGoldHint);
+      const scopedCollisionOwners = collidingOwners !== undefined
+        ? resolveExactScopeCollisionOwners({
+            row: exemplar,
+            collidingOwners,
+            runtimeDescriptorMap,
+          })
+        : undefined;
+      const effectiveCollisionOwners =
+        uniqueOwner !== undefined
+          ? undefined
+          : scopedCollisionOwners !== undefined
+            ? scopedCollisionOwners.length > 1
+              ? scopedCollisionOwners
+              : undefined
+            : collidingOwners;
+      const resolvedOwner = uniqueOwner
+        ?? (scopedCollisionOwners?.length === 1 ? scopedCollisionOwners[0] : undefined);
+      const uniqueOwnerWitnesses = scopedCollisionOwners?.length === 1
+        ? runtimeOwnerEvidence
+            .collidingOwnerWitnesses
+            .get(normalizedBenchmarkGoldHint)
+            ?.filter((witness) => witness.entityId === scopedCollisionOwners[0])
+        : runtimeOwnerEvidence.uniqueOwnerWitnesses.get(normalizedBenchmarkGoldHint);
+      const collidingOwnerWitnesses =
+        effectiveCollisionOwners !== undefined
+          ? runtimeOwnerEvidence
+              .collidingOwnerWitnesses
+              .get(normalizedBenchmarkGoldHint)
+              ?.filter((witness) => effectiveCollisionOwners.includes(witness.entityId))
+          : undefined;
       const runtimeEvidenceStatus = resolveRuntimeEvidenceStatus({
         exemplar,
         familyScopeRisk,
-        uniqueOwner,
-        collidingOwners,
+        uniqueOwner: resolvedOwner,
+        collidingOwners: effectiveCollisionOwners,
         runtimeDescriptorMap,
       });
+      const familyRuntimeDescriptors = buildFamilyRuntimeDescriptors({
+        familyKey: exemplar.familyKey,
+        runtimeDescriptorMap,
+      });
+      const runtimeGapDetails = runtimeEvidenceStatus === 'missing_runtime_owner'
+        ? resolveRuntimeGapDetails({
+            exemplar,
+            familyRuntimeDescriptors,
+          })
+        : undefined;
+      const runtimeCollisionScopeDescriptors =
+        runtimeEvidenceStatus === 'collision_candidates' && effectiveCollisionOwners !== undefined
+          ? buildRuntimeCollisionScopeDescriptors({
+              entityIds: effectiveCollisionOwners,
+              runtimeDescriptorMap,
+              runtimeOwnerEvidence,
+            })
+          : undefined;
+      const runtimeClarificationAxes =
+        runtimeEvidenceStatus === 'collision_candidates' && runtimeCollisionScopeDescriptors !== undefined
+          ? buildRuntimeClarificationAxes(runtimeCollisionScopeDescriptors)
+          : undefined;
       const proposedAt = [...rows]
         .map((row) => row.reviewedAt)
         .sort((left, right) => left.localeCompare(right))
@@ -287,25 +587,25 @@ function buildLookupV2FamilyTargetReviewPacketRows(args: {
         sourceArtifacts: sortUnique(rows.map((row) => row.sourceArtifact)),
         sourceEvidenceSamples: sortUnique(rows.map((row) => row.sourceEvidence)),
         runtimeEvidenceStatus,
-        ...(runtimeEvidenceStatus === 'candidate_unique_owner' && uniqueOwner !== undefined
-          ? { runtimeEvidenceEntityId: uniqueOwner }
+        ...(runtimeEvidenceStatus === 'candidate_unique_owner' && resolvedOwner !== undefined
+          ? { runtimeEvidenceEntityId: resolvedOwner }
           : {}),
         ...(runtimeEvidenceStatus === 'candidate_unique_owner'
-          && uniqueOwner !== undefined
-          && runtimeOwnerEvidence.entityLabels.get(uniqueOwner) !== undefined
-          ? { runtimeEvidenceEntityLabel: runtimeOwnerEvidence.entityLabels.get(uniqueOwner)! }
+          && resolvedOwner !== undefined
+          && runtimeOwnerEvidence.entityLabels.get(resolvedOwner) !== undefined
+          ? { runtimeEvidenceEntityLabel: runtimeOwnerEvidence.entityLabels.get(resolvedOwner)! }
           : {}),
         ...(runtimeEvidenceStatus === 'candidate_unique_owner'
           && uniqueOwnerWitnesses !== undefined
           && uniqueOwnerWitnesses.length > 0
           ? { runtimeEvidenceWitnesses: uniqueOwnerWitnesses }
           : {}),
-        ...(runtimeEvidenceStatus === 'collision_candidates' && collidingOwners !== undefined
-          ? { runtimeCollisionEntityIds: collidingOwners }
+        ...(runtimeEvidenceStatus === 'collision_candidates' && effectiveCollisionOwners !== undefined
+          ? { runtimeCollisionEntityIds: effectiveCollisionOwners }
           : {}),
-        ...(runtimeEvidenceStatus === 'collision_candidates' && collidingOwners !== undefined
+        ...(runtimeEvidenceStatus === 'collision_candidates' && effectiveCollisionOwners !== undefined
           ? {
-              runtimeCollisionEntityLabels: collidingOwners.map((entityId) =>
+              runtimeCollisionEntityLabels: effectiveCollisionOwners.map((entityId) =>
                 runtimeOwnerEvidence.entityLabels.get(entityId) ?? entityId,
               ),
             }
@@ -314,6 +614,13 @@ function buildLookupV2FamilyTargetReviewPacketRows(args: {
           && collidingOwnerWitnesses !== undefined
           && collidingOwnerWitnesses.length > 0
           ? { runtimeCollisionWitnesses: collidingOwnerWitnesses }
+          : {}),
+        ...(runtimeGapDetails !== undefined ? runtimeGapDetails : {}),
+        ...(runtimeClarificationAxes !== undefined && runtimeClarificationAxes.length > 0
+          ? { runtimeClarificationAxes }
+          : {}),
+        ...(runtimeCollisionScopeDescriptors !== undefined && runtimeCollisionScopeDescriptors.length > 0
+          ? { runtimeCollisionScopeDescriptors }
           : {}),
         proposedAt,
       };

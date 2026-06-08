@@ -58,6 +58,14 @@ import { resolveCliDataPathArg } from './cli-data-path.js';
 interface LookupV2StretchCoverageArtifact {
   readonly generatedAt?: string;
   readonly curationTasks?: readonly CurationTask[];
+  readonly report?: {
+    readonly hotEntityCount?: number;
+    readonly coveredCount?: number;
+    readonly holes?: readonly Array<{
+      readonly operatorBucket?: string;
+      readonly observedReasonCode?: string;
+    }>;
+  };
 }
 
 interface LookupV2StretchReviewedRegistryOverlayInvariants {
@@ -164,6 +172,7 @@ export async function verifyLookupV2StretchReviewedRegistryOverlay(args: {
   readonly tasks: readonly CurationTask[];
   readonly inputArtifact: string;
   readonly generatedAt: string;
+  readonly coverageReport?: LookupV2StretchCoverageArtifact['report'];
   readonly workDir: string;
   readonly outputSummaryPath: string;
   readonly baselineOutputDir?: string;
@@ -229,6 +238,7 @@ export async function verifyLookupV2StretchReviewedRegistryOverlay(args: {
     inputArtifact: args.inputArtifact,
     generatedAt: args.generatedAt,
     outputDir: baselineOutputDir,
+    coverageReport: args.coverageReport,
     benchmarkGoldHintMap,
     familyTargetApprovedMap: buildLookupV2SemanticScopeTargetApprovedMap(baselineFamilyTargetRegistryRows),
     familyTargetRejectedMap: buildLookupV2SemanticScopeTargetRejectedMap(baselineFamilyTargetRegistryRows),
@@ -266,6 +276,7 @@ export async function verifyLookupV2StretchReviewedRegistryOverlay(args: {
     inputArtifact: args.inputArtifact,
     generatedAt: args.generatedAt,
     outputDir: overlayOutputDir,
+    coverageReport: args.coverageReport,
     benchmarkGoldHintMap,
     familyTargetApprovedMap: buildLookupV2SemanticScopeTargetApprovedMap(familyTargetRegistryApply.mergedRows),
     familyTargetRejectedMap: buildLookupV2SemanticScopeTargetRejectedMap(familyTargetRegistryApply.mergedRows),
@@ -380,6 +391,7 @@ async function main(): Promise<void> {
     tasks: artifact.curationTasks ?? [],
     inputArtifact: inputPath,
     generatedAt: artifact.generatedAt ?? new Date().toISOString(),
+    coverageReport: artifact.report,
     workDir,
     outputSummaryPath: outputPath,
     baselineOutputDir,

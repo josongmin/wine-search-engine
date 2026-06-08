@@ -66,6 +66,10 @@ import {
   type LookupV2ReviewedCollisionFamilyClusterIndex,
 } from './export-lookup-v2-reviewed-collision-family-clusters.js';
 import {
+  writeLookupV2StretchOwnerDispatchManifest,
+  type LookupV2StretchOwnerDispatchManifest,
+} from './export-lookup-v2-stretch-owner-dispatch-manifest.js';
+import {
   loadLookupV2BenchmarkGoldHintMapSync,
 } from './lookup-v2-benchmark-gold-map.js';
 import {
@@ -119,6 +123,14 @@ import { loadLookupV2RuntimeSemanticDescriptorMapSync } from './lookup-v2-runtim
 interface LookupV2StretchCoverageArtifact {
   readonly generatedAt?: string;
   readonly curationTasks?: readonly CurationTask[];
+  readonly report?: {
+    readonly hotEntityCount?: number;
+    readonly coveredCount?: number;
+    readonly holes?: readonly Array<{
+      readonly operatorBucket?: string;
+      readonly observedReasonCode?: string;
+    }>;
+  };
 }
 
 interface LookupV2StretchWritePlaneOutputPaths {
@@ -139,6 +151,8 @@ interface LookupV2StretchWritePlaneOutputPaths {
   readonly manualTargetFamilySuggestedDecisions: string;
   readonly manualTargetBatchDir: string;
   readonly manualTargetOwnerEvidenceDir: string;
+  readonly ownerDispatchManifest: string;
+  readonly ownerDispatchPacketsDir: string;
   readonly summary: string;
 }
 
@@ -146,6 +160,15 @@ export interface LookupV2StretchWritePlaneRefreshSummary {
   readonly inputArtifact: string;
   readonly generatedAt: string;
   readonly outputPaths: LookupV2StretchWritePlaneOutputPaths;
+  readonly coverageResidue: {
+    readonly hotEntityCount: number;
+    readonly coveredCount: number;
+    readonly uncoveredCount: number;
+    readonly activeCoverageRatio: number;
+    readonly activeCoveragePercent: number;
+    readonly operatorBucketCounts: Readonly<Record<string, number>>;
+    readonly observedReasonCodeCounts: Readonly<Record<string, number>>;
+  };
   readonly draft: {
     readonly rows: number;
     readonly autoTargetable: number;
@@ -197,6 +220,40 @@ export interface LookupV2StretchWritePlaneRefreshSummary {
     readonly familyClusterIndex: LookupV2ReviewedCollisionFamilyClusterIndex;
     readonly familyReviewRows: number;
   };
+  readonly ownerDispatch: {
+    readonly manifest: LookupV2StretchOwnerDispatchManifest;
+  };
+  readonly remainingWork: {
+    readonly ownerDispatchPackets: number;
+    readonly ownerDispatchFamilies: number;
+    readonly ownerDispatchRows: number;
+    readonly exactSafePendingFamilyRows: number;
+    readonly runtimeBackfill: {
+      readonly packetCount: number;
+      readonly familyCount: number;
+      readonly rowCount: number;
+      readonly byGapReason: Readonly<Record<string, {
+        readonly packetCount: number;
+        readonly familyCount: number;
+        readonly rowCount: number;
+      }>>;
+    };
+    readonly manualTargetCollision: {
+      readonly packetCount: number;
+      readonly familyCount: number;
+      readonly rowCount: number;
+    };
+    readonly reviewedCollisionScope: {
+      readonly packetCount: number;
+      readonly familyCount: number;
+      readonly rowCount: number;
+      readonly byClarificationAxis: Readonly<Record<string, {
+        readonly packetCount: number;
+        readonly familyCount: number;
+        readonly rowCount: number;
+      }>>;
+    };
+  };
 }
 
 function serializeJsonl(rows: readonly unknown[]): string {
@@ -227,6 +284,8 @@ function buildOutputPaths(outputDir: string): LookupV2StretchWritePlaneOutputPat
     manualTargetFamilySuggestedDecisions: path.join(outputDir, 'lookup-v2-korean-realworld-stretch-manual-target-family.suggested-decisions.jsonl'),
     manualTargetBatchDir: path.join(outputDir, 'manual-target-batches'),
     manualTargetOwnerEvidenceDir: path.join(outputDir, 'manual-target-owner-evidence'),
+    ownerDispatchManifest: path.join(outputDir, 'lookup-v2-korean-realworld-stretch-owner-dispatch-manifest.json'),
+    ownerDispatchPacketsDir: path.join(outputDir, 'lookup-v2-korean-realworld-stretch-owner-dispatch-packets'),
     summary: path.join(outputDir, 'lookup-v2-korean-realworld-stretch-write-plane-summary.json'),
   };
 }
@@ -240,11 +299,108 @@ function countBy<T>(rows: readonly T[], keyFn: (row: T) => string): Record<strin
   return Object.fromEntries([...counts.entries()].sort((a, b) => a[0].localeCompare(b[0])));
 }
 
+function buildCoverageResidueSummary(report: LookupV2StretchCoverageArtifact['report'] | undefined): LookupV2StretchWritePlaneRefreshSummary['coverageResidue'] {
+  const hotEntityCount = report?.hotEntityCount ?? 0;
+  const coveredCount = report?.coveredCount ?? 0;
+  const uncoveredCount = Math.max(0, hotEntityCount - coveredCount);
+  const activeCoverageRatio = hotEntityCount > 0 ? coveredCount / hotEntityCount : 0;
+  const activeCoveragePercent = hotEntityCount > 0
+    ? Number((activeCoverageRatio * 100).toFixed(1))
+    : 0;
+  const holes = report?.holes ?? [];
+  const operatorBucketCounts = countBy(
+    holes.filter((hole) => typeof hole.operatorBucket === 'string' && hole.operatorBucket.length > 0),
+    (hole) => hole.operatorBucket!,
+  );
+  const observedReasonCodeCounts = countBy(
+    holes.filter((hole) => typeof hole.observedReasonCode === 'string' && hole.observedReasonCode.length > 0),
+    (hole) => hole.observedReasonCode!,
+  );
+
+  return {
+    hotEntityCount,
+    coveredCount,
+    uncoveredCount,
+    activeCoverageRatio,
+    activeCoveragePercent,
+    operatorBucketCounts,
+    observedReasonCodeCounts,
+  };
+}
+
+function buildDispatchSignatureCounts(
+  packets: readonly LookupV2StretchOwnerDispatchManifest['packets'][number][],
+): Readonly<Record<string, {
+  readonly packetCount: number;
+  readonly familyCount: number;
+  readonly rowCount: number;
+}>> {
+  const counts = new Map<string, {
+    packetCount: number;
+    familyCount: number;
+    rowCount: number;
+  }>();
+
+  for (const packet of packets) {
+    const current = counts.get(packet.dispatchSignature) ?? {
+      packetCount: 0,
+      familyCount: 0,
+      rowCount: 0,
+    };
+    current.packetCount += 1;
+    current.familyCount += packet.familyCount;
+    current.rowCount += packet.rowCount;
+    counts.set(packet.dispatchSignature, current);
+  }
+
+  return Object.fromEntries(
+    [...counts.entries()]
+      .sort((left, right) => left[0].localeCompare(right[0]))
+      .map(([signature, current]) => [signature, current]),
+  );
+}
+
+function buildPacketClassSummary(
+  packets: readonly LookupV2StretchOwnerDispatchManifest['packets'][number][],
+) {
+  return {
+    packetCount: packets.length,
+    familyCount: packets.reduce((sum, packet) => sum + packet.familyCount, 0),
+    rowCount: packets.reduce((sum, packet) => sum + packet.rowCount, 0),
+  };
+}
+
+function buildRemainingWorkSummary(args: {
+  readonly manifest: LookupV2StretchOwnerDispatchManifest;
+  readonly exactSafePendingFamilyRows: number;
+}): LookupV2StretchWritePlaneRefreshSummary['remainingWork'] {
+  const runtimeBackfillPackets = args.manifest.packets.filter((packet) => packet.packetClass === 'runtime_backfill');
+  const manualTargetCollisionPackets = args.manifest.packets.filter((packet) => packet.packetClass === 'manual_target_collision');
+  const reviewedCollisionPackets = args.manifest.packets.filter((packet) => packet.packetClass === 'reviewed_collision_scope');
+
+  return {
+    ownerDispatchPackets: args.manifest.totalPackets,
+    ownerDispatchFamilies: args.manifest.packets.reduce((sum, packet) => sum + packet.familyCount, 0),
+    ownerDispatchRows: args.manifest.packets.reduce((sum, packet) => sum + packet.rowCount, 0),
+    exactSafePendingFamilyRows: args.exactSafePendingFamilyRows,
+    runtimeBackfill: {
+      ...buildPacketClassSummary(runtimeBackfillPackets),
+      byGapReason: buildDispatchSignatureCounts(runtimeBackfillPackets),
+    },
+    manualTargetCollision: buildPacketClassSummary(manualTargetCollisionPackets),
+    reviewedCollisionScope: {
+      ...buildPacketClassSummary(reviewedCollisionPackets),
+      byClarificationAxis: buildDispatchSignatureCounts(reviewedCollisionPackets),
+    },
+  };
+}
+
 export async function refreshLookupV2StretchWritePlaneArtifacts(args: {
   readonly tasks: readonly CurationTask[];
   readonly inputArtifact: string;
   readonly generatedAt: string;
   readonly outputDir: string;
+  readonly coverageReport?: LookupV2StretchCoverageArtifact['report'];
   readonly runtimeDescriptorMap?: ReadonlyMap<string, LookupV2RuntimeSemanticDescriptor>;
   readonly benchmarkGoldHintMap?: ReadonlyMap<string, string>;
   readonly familyTargetApprovedMap?: ReadonlyMap<string, LookupV2SemanticScopeTargetRegistryRow>;
@@ -280,6 +436,8 @@ export async function refreshLookupV2StretchWritePlaneArtifacts(args: {
   const exactSafePacketRows = buildLookupExactSafeProposalPacketRows({
     draftRows,
     existingRegistryRows: exactSafeRegistryRows,
+    exactSafeScopeRegistryMap: args.exactSafeScopeRegistryMap,
+    semanticScopeTargetApprovedMap: args.familyTargetApprovedMap,
   });
   writeJsonl(outputPaths.exactSafePacket, exactSafePacketRows);
 
@@ -370,16 +528,31 @@ export async function refreshLookupV2StretchWritePlaneArtifacts(args: {
   });
   const reviewedCollisionFamilyClusterIndex = writeLookupV2ReviewedCollisionFamilyClusters({
     draftRows,
+    packetRows: reviewedCollisionFamilyReviewRows,
     runtimeOwnerEvidence,
     sourceDraftPath: outputPaths.draft,
+    sourcePacketPath: outputPaths.reviewedCollisionFamilyReviewPacket,
     outputPath: path.join(args.outputDir, 'lookup-v2-korean-realworld-stretch-reviewed-collision-family-clusters.jsonl'),
     generatedAt: args.generatedAt,
+  });
+  const ownerDispatchManifest = writeLookupV2StretchOwnerDispatchManifest({
+    inputArtifact: args.inputArtifact,
+    outputDir: args.outputDir,
+    generatedAt: args.generatedAt,
+    manualTargetCollisionSourcePath: manualTargetOwnerEvidenceFamilyIndex.outputPaths.collisionCandidateFamilies,
+    manualTargetCollisionPacketPath: outputPaths.manualTargetFamilyReviewPacket,
+    runtimeBackfillByGapReasonDir: manualTargetOwnerEvidenceFamilyIndex.outputPaths.gapReasonDir,
+    reviewedCollisionByClarificationAxisDir: reviewedCollisionFamilyClusterIndex.clarificationOutputDir,
+    reviewedCollisionPacketPath: outputPaths.reviewedCollisionFamilyReviewPacket,
+    manifestPath: outputPaths.ownerDispatchManifest,
+    packetsDir: outputPaths.ownerDispatchPacketsDir,
   });
 
   const summary: LookupV2StretchWritePlaneRefreshSummary = {
     inputArtifact: args.inputArtifact,
     generatedAt: args.generatedAt,
     outputPaths,
+    coverageResidue: buildCoverageResidueSummary(args.coverageReport),
     draft: {
       rows: draftRows.length,
       autoTargetable: draftRows.filter((row) => row.triageBucket === 'auto_targetable').length,
@@ -431,6 +604,13 @@ export async function refreshLookupV2StretchWritePlaneArtifacts(args: {
       familyClusterIndex: reviewedCollisionFamilyClusterIndex,
       familyReviewRows: reviewedCollisionFamilyReviewRows.length,
     },
+    ownerDispatch: {
+      manifest: ownerDispatchManifest,
+    },
+    remainingWork: buildRemainingWorkSummary({
+      manifest: ownerDispatchManifest,
+      exactSafePendingFamilyRows: exactSafeFamilyReviewRows.filter((row) => row.proposalStatus === 'needs_review').length,
+    }),
   };
 
   writeFileSync(outputPaths.summary, JSON.stringify(summary, null, 2) + '\n', 'utf8');
@@ -467,6 +647,7 @@ async function main(): Promise<void> {
     inputArtifact: inputPath,
     generatedAt: parsed.generatedAt ?? new Date().toISOString(),
     outputDir,
+    coverageReport: parsed.report,
     benchmarkGoldHintMap: loadLookupV2BenchmarkGoldHintMapSync(),
     familyTargetApprovedMap: loadLookupV2SemanticScopeTargetApprovedMapSync(familyTargetRegistryPath),
     familyTargetRejectedMap: loadLookupV2SemanticScopeTargetRejectedMapSync(familyTargetRegistryPath),
@@ -480,6 +661,7 @@ async function main(): Promise<void> {
   });
 
   console.log(`[elv2-stretch-write-plane-refresh] draft_rows=${summary.draft.rows}`);
+  console.log(`[elv2-stretch-write-plane-refresh] active_coverage=${summary.coverageResidue.coveredCount}/${summary.coverageResidue.hotEntityCount} (${summary.coverageResidue.activeCoveragePercent}%)`);
   console.log(`[elv2-stretch-write-plane-refresh] auto_targetable=${summary.draft.autoTargetable}`);
   console.log(`[elv2-stretch-write-plane-refresh] scope_policy_review=${summary.draft.scopePolicyReview}`);
   console.log(`[elv2-stretch-write-plane-refresh] localized_surface_review=${summary.draft.localizedSurfaceReview}`);
@@ -494,6 +676,8 @@ async function main(): Promise<void> {
   console.log(`[elv2-stretch-write-plane-refresh] manual_target_family_rows=${summary.manualTarget.familyReviewRows}`);
   console.log(`[elv2-stretch-write-plane-refresh] manual_target_collision_families=${summary.manualTarget.ownerEvidenceFamilyIndex.collisionCandidateFamilies}`);
   console.log(`[elv2-stretch-write-plane-refresh] manual_target_missing_families=${summary.manualTarget.ownerEvidenceFamilyIndex.missingRuntimeOwnerFamilies}`);
+  console.log(`[elv2-stretch-write-plane-refresh] runtime_backfill_packets=${summary.remainingWork.runtimeBackfill.packetCount}`);
+  console.log(`[elv2-stretch-write-plane-refresh] reviewed_collision_scope_packets=${summary.remainingWork.reviewedCollisionScope.packetCount}`);
   console.log(`[elv2-stretch-write-plane-refresh] summary=${summary.outputPaths.summary}`);
 }
 

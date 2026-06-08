@@ -68,6 +68,23 @@ describe('manual-target family suggestions', () => {
             witnessSource: 'aliases_noisy_recall',
           },
         ],
+        runtimeClarificationAxes: ['vintage', 'line'],
+        runtimeCollisionScopeDescriptors: [
+          {
+            entityId: 'wine-b',
+            entityLabel: 'Angelus 2012',
+            familyKey: 'angelus',
+            lineKey: 'grand vin',
+            vintage: 2012,
+          },
+          {
+            entityId: 'wine-c',
+            entityLabel: 'Angelus 2015',
+            familyKey: 'angelus',
+            lineKey: 'grand vin',
+            vintage: 2015,
+          },
+        ],
         proposedAt: '2026-06-06T00:00:00.000Z',
       },
       {
@@ -88,6 +105,11 @@ describe('manual-target family suggestions', () => {
         sourceArtifacts: ['/tmp/c.json'],
         sourceEvidenceSamples: ['coverage hole'],
         runtimeEvidenceStatus: 'missing_runtime_owner',
+        runtimeGapReason: 'requested_vintage_missing',
+        runtimeGapEntityIds: ['wine-salon-2008'],
+        runtimeGapEntityLabels: ['2008 Salon'],
+        runtimeGapAvailableVintages: [2008],
+        runtimeGapAvailableLineKeys: ['salon'],
         proposedAt: '2026-06-06T00:00:00.000Z',
       },
     ] as const;
@@ -117,7 +139,25 @@ describe('manual-target family suggestions', () => {
             witnessSource: 'aliases_noisy_recall',
           },
         ],
+        runtimeClarificationAxes: ['vintage', 'line'],
+        runtimeCollisionScopeDescriptors: [
+          {
+            entityId: 'wine-b',
+            entityLabel: 'Angelus 2012',
+            familyKey: 'angelus',
+            lineKey: 'grand vin',
+            vintage: 2012,
+          },
+          {
+            entityId: 'wine-c',
+            entityLabel: 'Angelus 2015',
+            familyKey: 'angelus',
+            lineKey: 'grand vin',
+            vintage: 2015,
+          },
+        ],
         sourceEvidence: 'runtime_colliding_surface_owner',
+        proposedAt: '2026-06-06T00:00:00.000Z',
       },
       {
         reviewScopeKey: 'calon segur::translation::realworld_korean_orthography',
@@ -137,6 +177,7 @@ describe('manual-target family suggestions', () => {
           },
         ],
         sourceEvidence: 'runtime_unique_surface_owner',
+        proposedAt: '2026-06-06T00:00:00.000Z',
       },
       {
         reviewScopeKey: 'salon::canonical::realworld_exact_vintage',
@@ -146,10 +187,26 @@ describe('manual-target family suggestions', () => {
         scopeSuggestedAliasType: 'canonical',
         scopeRisk: 'mixed_vintage_family',
         suggestionStatus: 'missing_runtime_owner',
+        runtimeGapReason: 'requested_vintage_missing',
+        runtimeGapEntityIds: ['wine-salon-2008'],
+        runtimeGapEntityLabels: ['2008 Salon'],
+        runtimeGapAvailableVintages: [2008],
+        runtimeGapAvailableLineKeys: ['salon'],
         sourceEvidence: 'runtime_owner_missing',
+        proposedAt: '2026-06-06T00:00:00.000Z',
       },
     ]);
 
-    expect(buildLookupV2ManualTargetSuggestedDecisionRows(suggestions)).toEqual([]);
+    expect(buildLookupV2ManualTargetSuggestedDecisionRows(suggestions)).toEqual([
+      {
+        reviewScopeKey: 'calon segur::translation::realworld_korean_orthography',
+        benchmarkGoldHint: 'calon segur',
+        decision: 'assign_target',
+        entityId: 'wine-a',
+        reviewedBy: 'codex:auto-suggest',
+        decisionReason: 'deterministic runtime unique surface owner candidate',
+        reviewedAt: '2026-06-06T00:00:00.000Z',
+      },
+    ]);
   });
 });

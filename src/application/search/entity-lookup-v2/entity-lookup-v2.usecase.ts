@@ -44,7 +44,12 @@ import type {
 } from '../../../domain/resolver/v2/lookup-v2-types.js';
 import { CalibratedAbstainDecider } from '../../../domain/resolver/v2/calibrated-abstain-decider.js';
 import { ambiguityClusterMembershipScore, extractLookupFeatures } from '../../../domain/resolver/v2/lookup-feature-extractor.js';
-import { shouldDowngradeForVintageMismatch, VINTAGE_MISMATCH_REASON_CODE } from '../../../domain/resolver/v2/vintage-guard.js';
+import {
+  shouldDowngradeForVintageMismatch,
+  selectExplicitVintageFamilyMember,
+  VINTAGE_MISMATCH_REASON_CODE,
+  VINTAGE_FAMILY_MEMBER_RESOLVED_REASON_CODE,
+} from '../../../domain/resolver/v2/vintage-guard.js';
 import type { AliasRegistryVersion } from '../../../domain/alias/model/alias-registry-version.js';
 import {
   anchorsHaveExactIdentityEvidence,
@@ -279,6 +284,35 @@ export class EntityLookupV2UseCase {
         });
       }
 
+    // Pool-narrowing gate: an exact-safe singleton witness normally collapses the
+    // candidate pool to that single entity (max precision for a bare iconic alias).
+    // But when the query carries an EXPLICIT vintage the witness entity does NOT
+    // satisfy, the witness is the wrong answer — collapsing to it would strand the
+    // requested vintage. Widen back to the full family so vintage-aware selection can
+    // pick the matching sibling. Bare / matching-vintage queries keep the narrowed,
+    // witness-pinned pool unchanged (no behaviour change for the iconic singleton path).
+      let poolNarrowingWitnessEntityId = exactSafeSingletonWitness?.entityId;
+      if (
+        exactSafeSingletonWitness !== undefined
+        && extractQueryVintageYear(command.query) !== null
+        && this.deps.resolverProjectionLookup !== undefined
+      ) {
+        const witnessProjection = (
+          await this.deps.resolverProjectionLookup.getResolverProjections([
+            exactSafeSingletonWitness.entityId,
+          ])
+        ).get(exactSafeSingletonWitness.entityId);
+        if (shouldDowngradeForVintageMismatch(command.query, witnessProjection?.canonicalLabel)) {
+          poolNarrowingWitnessEntityId = undefined;
+        }
+      }
+      // When the witness was widened away for a vintage conflict, the family graph
+      // expansion (normally suppressed under a singleton witness for precision) is
+      // exactly what surfaces the requested-vintage sibling from the wrong-vintage
+      // anchor — re-enable it for this query only.
+      const widenFamilyForVintageConflict =
+        exactSafeSingletonWitness !== undefined && poolNarrowingWitnessEntityId === undefined;
+
     // T-ELV2-04: run the independent timed multi-channel retrieval engine (when
     // wired) for REAL per-channel coverage + provenance, alongside the resolver
     // which scores/calibrates. Channel failures are isolated inside the engine.
@@ -287,7 +321,8 @@ export class EntityLookupV2UseCase {
           this.deps.candidateRetrieval,
           plan,
           command,
-          exactSafeSingletonWitness?.entityId,
+          poolNarrowingWitnessEntityId,
+          widenFamilyForVintageConflict,
           options,
         )
         : undefined;
@@ -295,7 +330,7 @@ export class EntityLookupV2UseCase {
       const result = await this.resolveCandidatePool(
         plan,
         retrieval,
-        exactSafeSingletonWitness?.entityId,
+        poolNarrowingWitnessEntityId,
         command.locale,
         options,
       );
@@ -416,6 +451,7 @@ export class EntityLookupV2UseCase {
     plan: LookupQueryPlan,
     command: EntityLookupV2Command,
     exactSafeWitnessEntityId: CanonicalEntityId | undefined,
+    widenFamilyForVintageConflict: boolean,
     options?: RequestExecutionContext,
   ): Promise<LookupRetrievalResult | undefined> {
     try {
@@ -426,9 +462,12 @@ export class EntityLookupV2UseCase {
           views: plan.normalizedQueryViews ?? buildNormalizedQueryViews(plan.rawQuery),
           queryClass: plan.queryClass,
           maxCandidates: command.maxCandidates,
+          // A vintage-conflicting query under a singleton witness NEEDS the family
+          // graph expansion to surface the requested-vintage sibling — do not suppress.
           suppressFamilyGraphExpansion:
-            exactSafeWitnessEntityId !== undefined
-            || hasDeterministicSingletonAliasWitness(plan.anchors),
+            !widenFamilyForVintageConflict
+            && (exactSafeWitnessEntityId !== undefined
+              || hasDeterministicSingletonAliasWitness(plan.anchors)),
           ...(command.locale !== undefined ? { locale: command.locale } : {}),
           ...(options?.stageTimer !== undefined ? { stageTimer: options.stageTimer } : {}),
         },
@@ -795,6 +834,27 @@ export class EntityLookupV2UseCase {
           };
         });
     let effectiveDecisionReasonCode = vintageMismatch ? VINTAGE_MISMATCH_REASON_CODE : decisionReasonCode;
+    // Vintage-aware family-member selection (dual of the vintage-mismatch guard):
+    // an `ambiguous` verdict on an EXPLICIT-vintage query — whether a vintage-
+    // mismatch downgrade against a vintage-blind incumbent OR a multi-vintage family
+    // collision — is answerable when the pool hosts the EXACT requested vintage as a
+    // unique, multi-channel-corroborated sibling. Promote it instead of abstaining.
+    // Precision-first (unique-or-abstain, ≥2 channels); only RESCUES ambiguous, so a
+    // confident resolve or a `failed` typo/no-match is never overridden. Additionally
+    // gated on identity-bearing evidence: the vintage-stripped query must EXACTLY match
+    // a family member (not a fuzzy/typo recall), so near-misses like "오푸스투 2018"
+    // that merely recall a vintage-matching entity stay ambiguous → recall-only failed.
+    const vintagePromotedEntityId =
+      status === 'ambiguous' && hasAnyIdentityBearingEvidence(result, plan)
+        ? selectExplicitVintageFamilyMember({
+            query: command.query,
+            candidates: allCandidates,
+          })
+        : undefined;
+    if (vintagePromotedEntityId !== undefined) {
+      status = 'resolved';
+      effectiveDecisionReasonCode = VINTAGE_FAMILY_MEMBER_RESOLVED_REASON_CODE;
+    }
     if (
       status === 'failed'
       && forcedStatus === undefined
@@ -860,12 +920,13 @@ export class EntityLookupV2UseCase {
     }
 
     // The resolver orders by rank, so slicing keeps the strongest candidates.
-    // When a reviewed scope-target resolved the collision, surface that anchor
-    // first so it becomes the top candidate.
-    const orderedCandidates = resolvedReviewedScopeTargetEntityId !== undefined
+    // When a reviewed scope-target OR a vintage-matching family sibling resolved the
+    // verdict, surface that entity first so it becomes the top candidate.
+    const frontPromotedEntityId = resolvedReviewedScopeTargetEntityId ?? vintagePromotedEntityId;
+    const orderedCandidates = frontPromotedEntityId !== undefined
       ? [
-          ...allCandidates.filter((c) => c.entityId === resolvedReviewedScopeTargetEntityId),
-          ...allCandidates.filter((c) => c.entityId !== resolvedReviewedScopeTargetEntityId),
+          ...allCandidates.filter((c) => c.entityId === frontPromotedEntityId),
+          ...allCandidates.filter((c) => c.entityId !== frontPromotedEntityId),
         ]
       : allCandidates;
     const candidates = orderedCandidates.slice(0, command.maxCandidates);

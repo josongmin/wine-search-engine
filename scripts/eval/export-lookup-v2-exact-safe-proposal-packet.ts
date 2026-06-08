@@ -5,6 +5,17 @@ import type { LookupExactSafePromotionClass, LookupExactSafeRegistryRow } from '
 import { loadLookupExactSafeRegistry } from '../etl/lookup-exact-safe-registry.js';
 import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
 import type { LookupV2CurationDraftRow } from './export-lookup-v2-curation-drafts.js';
+import {
+  DEFAULT_LOOKUP_V2_EXACT_SAFE_SCOPE_REGISTRY_PATH,
+  loadLookupV2ExactSafeScopeRegistryMapSync,
+  type LookupV2ExactSafeScopeRegistryRow,
+} from './lookup-v2-exact-safe-scope-registry.js';
+import {
+  DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_TARGET_REGISTRY_PATH,
+  loadLookupV2SemanticScopeTargetApprovedMapSync,
+  lookupV2SemanticScopeTargetRowAllowsDetachedVintageAuthority,
+  type LookupV2SemanticScopeTargetRegistryRow,
+} from './lookup-v2-semantic-scope-target-registry.js';
 import { lookupV2DraftCliPath, resolveCliDataPathArg } from './cli-data-path.js';
 
 export type LookupExactSafeProposalEntityIdSource =
@@ -22,6 +33,7 @@ export interface LookupExactSafeProposalCandidateRow {
   readonly locale: 'ko' | 'global';
   readonly suggestedAliasType: LookupV2CurationDraftRow['suggestedAliasType'];
   readonly holeClass: string;
+  readonly semanticScopeKey?: string | undefined;
   readonly benchmarkGoldHint?: string | undefined;
   readonly benchmarkGoldEntityIdSource: LookupExactSafeProposalEntityIdSource;
   readonly sourceArtifact: string;
@@ -46,6 +58,31 @@ export interface LookupExactSafeProposalPacketRow {
   readonly reviewedAt?: string | undefined;
   readonly reviewedBy?: string | undefined;
   readonly decisionReason?: string | undefined;
+}
+
+function candidateRowPromotesExactSafeFromSemanticScopeTarget(args: {
+  readonly row: LookupExactSafeProposalCandidateRow;
+  readonly semanticScopeTargetApprovedMap?: ReadonlyMap<string, LookupV2SemanticScopeTargetRegistryRow>;
+}): boolean {
+  if (args.row.benchmarkGoldEntityIdSource !== 'semantic_scope_target_registry') {
+    return true;
+  }
+  if (args.row.semanticScopeKey === undefined || args.row.semanticScopeKey.trim().length === 0) {
+    throw new Error(`semantic-scope-target exact-safe proposal is missing semanticScopeKey for surface=${JSON.stringify(args.row.surface)}`);
+  }
+  if (args.semanticScopeTargetApprovedMap === undefined) {
+    throw new Error(`semantic-scope-target exact-safe proposal requires approved semantic scope target map for semanticScopeKey=${JSON.stringify(args.row.semanticScopeKey)}`);
+  }
+  const registryRow = args.semanticScopeTargetApprovedMap.get(args.row.semanticScopeKey);
+  if (registryRow === undefined) {
+    throw new Error(`semantic-scope-target exact-safe proposal has no approved semantic scope target for semanticScopeKey=${JSON.stringify(args.row.semanticScopeKey)}`);
+  }
+  if (registryRow.entityId !== args.row.entityId) {
+    throw new Error(
+      `semantic-scope-target exact-safe proposal entity mismatch for semanticScopeKey=${JSON.stringify(args.row.semanticScopeKey)} approved=${JSON.stringify(registryRow.entityId)} proposed=${JSON.stringify(args.row.entityId)}`,
+    );
+  }
+  return !lookupV2SemanticScopeTargetRowAllowsDetachedVintageAuthority(registryRow);
 }
 
 function isLookupV2CurationDraftRow(value: unknown): value is LookupV2CurationDraftRow {
@@ -85,15 +122,54 @@ function buildExistingRegistryOwnerMap(
   return byNormalizedSurface;
 }
 
+function buildLookupV2ExactSafeReviewScopeKey(args: {
+  readonly entityId: string;
+  readonly holeClass: LookupExactSafeProposalCandidateRow['holeClass'];
+  readonly suggestedAliasType: LookupExactSafeProposalCandidateRow['suggestedAliasType'];
+}): string {
+  return `${args.entityId}::${args.suggestedAliasType}::${args.holeClass}`;
+}
+
+export function applyLookupV2ExactSafeScopeRegistryToProposalPacketRows(args: {
+  readonly packetRows: readonly LookupExactSafeProposalPacketRow[];
+  readonly exactSafeScopeRegistryMap: ReadonlyMap<string, LookupV2ExactSafeScopeRegistryRow>;
+}): readonly LookupExactSafeProposalPacketRow[] {
+  return args.packetRows.map((row) => {
+    const registryRow = args.exactSafeScopeRegistryMap.get(buildLookupV2ExactSafeReviewScopeKey({
+      entityId: row.entityId,
+      holeClass: row.holeClass,
+      suggestedAliasType: row.suggestedAliasType,
+    }));
+    if (registryRow === undefined) {
+      return row;
+    }
+    return {
+      ...row,
+      proposalStatus: registryRow.decisionStatus === 'approved' ? 'approved' : 'rejected',
+      reviewedAt: registryRow.reviewedAt,
+      reviewedBy: registryRow.reviewedBy,
+      decisionReason: registryRow.decisionReason,
+    };
+  });
+}
+
 export function buildLookupExactSafeProposalPacketRowsFromCandidates(args: {
   readonly candidateRows: readonly LookupExactSafeProposalCandidateRow[];
   readonly existingRegistryRows?: readonly LookupExactSafeRegistryRow[];
+  readonly exactSafeScopeRegistryMap?: ReadonlyMap<string, LookupV2ExactSafeScopeRegistryRow>;
+  readonly semanticScopeTargetApprovedMap?: ReadonlyMap<string, LookupV2SemanticScopeTargetRegistryRow>;
 }): readonly LookupExactSafeProposalPacketRow[] {
   const existingOwnerByNormalizedSurface = buildExistingRegistryOwnerMap(args.existingRegistryRows ?? []);
   const packetRows: LookupExactSafeProposalPacketRow[] = [];
   const packetOwnerByNormalizedSurface = new Map<string, string>();
 
   for (const row of args.candidateRows) {
+    if (!candidateRowPromotesExactSafeFromSemanticScopeTarget({
+      row,
+      semanticScopeTargetApprovedMap: args.semanticScopeTargetApprovedMap,
+    })) {
+      continue;
+    }
     if (row.suggestedAliasType !== 'canonical' && row.suggestedAliasType !== 'translation') {
       throw new Error(
         `unsupported exact-safe proposal alias type=${JSON.stringify(row.suggestedAliasType)} for surface=${JSON.stringify(row.surface)}`,
@@ -143,16 +219,25 @@ export function buildLookupExactSafeProposalPacketRowsFromCandidates(args: {
     });
   }
 
-  return packetRows.sort((left, right) =>
+  const sortedPacketRows = packetRows.sort((left, right) =>
     left.locale.localeCompare(right.locale)
     || left.surface.localeCompare(right.surface)
     || left.entityId.localeCompare(right.entityId),
   );
+  if (args.exactSafeScopeRegistryMap === undefined || args.exactSafeScopeRegistryMap.size === 0) {
+    return sortedPacketRows;
+  }
+  return applyLookupV2ExactSafeScopeRegistryToProposalPacketRows({
+    packetRows: sortedPacketRows,
+    exactSafeScopeRegistryMap: args.exactSafeScopeRegistryMap,
+  });
 }
 
 export function buildLookupExactSafeProposalPacketRows(args: {
   readonly draftRows: readonly LookupV2CurationDraftRow[];
   readonly existingRegistryRows?: readonly LookupExactSafeRegistryRow[];
+  readonly exactSafeScopeRegistryMap?: ReadonlyMap<string, LookupV2ExactSafeScopeRegistryRow>;
+  readonly semanticScopeTargetApprovedMap?: ReadonlyMap<string, LookupV2SemanticScopeTargetRegistryRow>;
 }): readonly LookupExactSafeProposalPacketRow[] {
   const candidateRows: LookupExactSafeProposalCandidateRow[] = [];
 
@@ -172,6 +257,7 @@ export function buildLookupExactSafeProposalPacketRows(args: {
       locale: row.locale,
       suggestedAliasType: row.suggestedAliasType,
       holeClass: row.holeClass,
+      semanticScopeKey: row.semanticScopeKey,
       ...(row.benchmarkGoldHint !== undefined ? { benchmarkGoldHint: row.benchmarkGoldHint } : {}),
       benchmarkGoldEntityIdSource: row.benchmarkGoldEntityIdSource,
       sourceArtifact: row.sourceArtifact,
@@ -183,6 +269,8 @@ export function buildLookupExactSafeProposalPacketRows(args: {
   return buildLookupExactSafeProposalPacketRowsFromCandidates({
     candidateRows,
     existingRegistryRows: args.existingRegistryRows,
+    exactSafeScopeRegistryMap: args.exactSafeScopeRegistryMap,
+    semanticScopeTargetApprovedMap: args.semanticScopeTargetApprovedMap,
   });
 }
 
@@ -193,6 +281,8 @@ async function main(): Promise<void> {
       input: { type: 'string', default: lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl') },
       output: { type: 'string', default: lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl') },
       registry: { type: 'string', default: undefined },
+      exactSafeScopeRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_EXACT_SAFE_SCOPE_REGISTRY_PATH },
+      semanticScopeTargetRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_TARGET_REGISTRY_PATH },
     },
     allowPositionals: false,
   });
@@ -201,9 +291,14 @@ async function main(): Promise<void> {
   const outputPath = resolveCliDataPathArg(values.output ?? lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl'));
   const draftRows = parseDraftJsonl(inputPath);
   const existingRegistryRows = await loadLookupExactSafeRegistry(values.registry);
+  const exactSafeScopeRegistryPath = values.exactSafeScopeRegistry ?? DEFAULT_LOOKUP_V2_EXACT_SAFE_SCOPE_REGISTRY_PATH;
+  const semanticScopeTargetRegistryPath =
+    values.semanticScopeTargetRegistry ?? DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_TARGET_REGISTRY_PATH;
   const packetRows = buildLookupExactSafeProposalPacketRows({
     draftRows,
     existingRegistryRows,
+    exactSafeScopeRegistryMap: loadLookupV2ExactSafeScopeRegistryMapSync(exactSafeScopeRegistryPath),
+    semanticScopeTargetApprovedMap: loadLookupV2SemanticScopeTargetApprovedMapSync(semanticScopeTargetRegistryPath),
   });
 
   mkdirSync(path.dirname(outputPath), { recursive: true });

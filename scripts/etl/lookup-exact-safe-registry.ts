@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import type { CanonicalEntityId } from '../../src/domain/shared/types/entity-id.js';
 import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
 import { compactForLookup } from '../../src/domain/query/service/phonetic-skeleton.js';
+import { extractQueryVintageYear } from '../../src/domain/shared/utils/vintage.js';
 import type { LookupIdentityCertificate } from '../../src/domain/shared/types/search-snapshot-lookup-runtime.js';
 import type { AliasSnapshotRecord } from './search-snapshot-schema.js';
 
@@ -28,6 +29,17 @@ export interface LookupRuntimeOverlayAlias {
   readonly source: 'registry:lookup_exact_safe_v1';
   readonly sourceTrust: 1;
   readonly confidencePrior: 0.98;
+}
+
+export type LookupExactSafeRegistryVintageIssueReason =
+  | 'missing_entity_vintages'
+  | 'entity_vintage_mismatch';
+
+export interface LookupExactSafeRegistryVintageIssue {
+  readonly row: LookupExactSafeRegistryRow;
+  readonly surfaceVintage: number;
+  readonly entityVintages: readonly number[];
+  readonly reason: LookupExactSafeRegistryVintageIssueReason;
 }
 
 export const DEFAULT_LOOKUP_EXACT_SAFE_REGISTRY_PATH = path.resolve(
@@ -141,6 +153,90 @@ export function assertLookupExactSafeRegistryRowsValid(
       compactOwners.set(compact, row.entityId);
     }
   }
+}
+
+export function assertLookupExactSafeRegistryVintageConsistency(args: {
+  readonly rows: readonly LookupExactSafeRegistryRow[];
+  readonly entityVintagesById: ReadonlyMap<CanonicalEntityId, readonly number[]>;
+}): void {
+  const issues = collectLookupExactSafeRegistryVintageIssues(args);
+  for (const issue of issues) {
+    if (issue.reason === 'missing_entity_vintages') {
+      throw new Error(
+        `lookup exact-safe registry vintage-bearing surface is missing snapshot entity vintage `
+        + `for surface=${JSON.stringify(issue.row.surface)} entityId=${JSON.stringify(issue.row.entityId)} `
+        + `surfaceVintage=${issue.surfaceVintage}`,
+      );
+    }
+    throw new Error(
+      `lookup exact-safe registry vintage mismatch `
+      + `for surface=${JSON.stringify(issue.row.surface)} entityId=${JSON.stringify(issue.row.entityId)} `
+      + `surfaceVintage=${issue.surfaceVintage} entityVintages=${JSON.stringify(issue.entityVintages)}`,
+    );
+  }
+}
+
+export function collectLookupExactSafeRegistryVintageIssues(args: {
+  readonly rows: readonly LookupExactSafeRegistryRow[];
+  readonly entityVintagesById: ReadonlyMap<CanonicalEntityId, readonly number[]>;
+}): readonly LookupExactSafeRegistryVintageIssue[] {
+  const issues: LookupExactSafeRegistryVintageIssue[] = [];
+  for (const row of args.rows) {
+    const surfaceVintage = extractQueryVintageYear(row.surface);
+    if (surfaceVintage === null) {
+      continue;
+    }
+    const entityVintages = args.entityVintagesById.get(row.entityId);
+    if (entityVintages === undefined) {
+      continue;
+    }
+    if (entityVintages.length === 0) {
+      issues.push({
+        row,
+        surfaceVintage,
+        entityVintages,
+        reason: 'missing_entity_vintages',
+      });
+      continue;
+    }
+    let hasMatch = false;
+    for (const entityVintage of entityVintages) {
+      if (entityVintage === surfaceVintage) {
+        hasMatch = true;
+        break;
+      }
+    }
+    if (!hasMatch) {
+      issues.push({
+        row,
+        surfaceVintage,
+        entityVintages,
+        reason: 'entity_vintage_mismatch',
+      });
+    }
+  }
+  return issues;
+}
+
+export function pruneLookupExactSafeRegistryRowsByVintageConsistency(args: {
+  readonly rows: readonly LookupExactSafeRegistryRow[];
+  readonly entityVintagesById: ReadonlyMap<CanonicalEntityId, readonly number[]>;
+}): {
+  readonly keptRows: readonly LookupExactSafeRegistryRow[];
+  readonly removedIssues: readonly LookupExactSafeRegistryVintageIssue[];
+} {
+  const removedIssues = collectLookupExactSafeRegistryVintageIssues(args);
+  const removedIssueKeys = new Set(
+    removedIssues.map((issue) =>
+      `${issue.row.entityId}\u0000${issue.row.surface}\u0000${issue.row.promotionClass}\u0000${issue.row.locale}`,
+    ),
+  );
+  return {
+    keptRows: args.rows.filter((row) =>
+      !removedIssueKeys.has(`${row.entityId}\u0000${row.surface}\u0000${row.promotionClass}\u0000${row.locale}`),
+    ),
+    removedIssues,
+  };
 }
 
 export function sortLookupExactSafeRegistryRows(

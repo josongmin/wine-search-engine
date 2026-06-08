@@ -74,9 +74,6 @@ export function buildLookupV2ExactSafeFamilyReviewPacketRows(args: {
   const groups = new Map<string, LookupExactSafeProposalPacketRow[]>();
 
   for (const row of args.packetRows) {
-    if (row.proposalStatus !== 'needs_review') {
-      throw new Error(`exact-safe family review packet expects pending row status, got=${row.proposalStatus} surface=${JSON.stringify(row.surface)}`);
-    }
     const groupKey = buildLookupV2ExactSafeReviewScopeKey({
       entityId: row.entityId,
       holeClass: row.holeClass,
@@ -104,17 +101,42 @@ export function buildLookupV2ExactSafeFamilyReviewPacketRows(args: {
           throw new Error(`exact-safe family review packet invariant mismatch for reviewScopeKey=${reviewScopeKey}`);
         }
       }
+      const proposalStatuses = sortUnique(rows.map((row) => row.proposalStatus));
+      if (proposalStatuses.length !== 1) {
+        throw new Error(`exact-safe family review packet status mismatch for reviewScopeKey=${reviewScopeKey}`);
+      }
+      const proposalStatus = proposalStatuses[0] as LookupExactSafeProposalPacketRow['proposalStatus'];
       const proposedAt = [...rows]
         .map((row) => row.proposedAt)
         .sort((left, right) => left.localeCompare(right))
         .at(-1) ?? exemplar.proposedAt;
+      const reviewedAts = sortUnique(
+        rows
+          .map((row) => row.reviewedAt)
+          .filter((value): value is string => value !== undefined),
+      );
+      const reviewedBys = sortUnique(
+        rows
+          .map((row) => row.reviewedBy)
+          .filter((value): value is string => value !== undefined),
+      );
+      const decisionReasons = sortUnique(
+        rows
+          .map((row) => row.decisionReason)
+          .filter((value): value is string => value !== undefined),
+      );
+      if (proposalStatus !== 'needs_review') {
+        if (reviewedAts.length !== 1 || reviewedBys.length !== 1 || decisionReasons.length !== 1) {
+          throw new Error(`exact-safe family review packet reviewed metadata mismatch for reviewScopeKey=${reviewScopeKey}`);
+        }
+      }
       return {
         reviewScopeKey,
         entityId: exemplar.entityId,
         locale: exemplar.locale,
         candidatePromotionClass: exemplar.candidatePromotionClass,
         benchmarkGoldEntityIdSources: sortUnique(rows.map((row) => row.benchmarkGoldEntityIdSource)) as readonly LookupExactSafeProposalPacketRow['benchmarkGoldEntityIdSource'][],
-        proposalStatus: 'needs_review',
+        proposalStatus,
         reviewTarget: exemplar.reviewTarget,
         scopeHoleClass: exemplar.holeClass,
         scopeSuggestedAliasType: exemplar.suggestedAliasType,
@@ -128,6 +150,9 @@ export function buildLookupV2ExactSafeFamilyReviewPacketRows(args: {
         sourceArtifacts: sortUnique(rows.map((row) => row.sourceArtifact)),
         sourceEvidenceSamples: sortUnique(rows.map((row) => row.sourceEvidence)),
         proposedAt,
+        ...(proposalStatus !== 'needs_review' ? { reviewedAt: reviewedAts[0]! } : {}),
+        ...(proposalStatus !== 'needs_review' ? { reviewedBy: reviewedBys[0]! } : {}),
+        ...(proposalStatus !== 'needs_review' ? { decisionReason: decisionReasons[0]! } : {}),
       };
     })
     .sort((left, right) => left.reviewScopeKey.localeCompare(right.reviewScopeKey));

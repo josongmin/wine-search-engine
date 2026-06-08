@@ -256,6 +256,49 @@ describe('buildLookupV2CurationDraftRows', () => {
     }));
   });
 
+  it('preserves an explicit vintage-qualified fallback scope when the hinted runtime descriptor only matches at family scope', () => {
+    const [row] = buildLookupV2CurationDraftRowsWithRuntimeDescriptors(
+      [
+        {
+          surfaceForm: 'Opus 원 2019',
+          holeClass: 'realworld_mixed_script_alias',
+          observedStatus: 'failed',
+          suggestedAliasType: 'canonical',
+          status: 'needs_target',
+          benchmarkGoldHint: 'opus one',
+          reason: 'Hot-entity coverage hole',
+        },
+      ],
+      '/tmp/sample-coverage.json',
+      '2026-06-08T00:00:00.000Z',
+      buildRuntimeDescriptorMap([
+        ['opus-one-2018', {
+          entityId: 'opus-one-2018',
+          canonicalLabel: 'Opus One 2018',
+          familyKey: 'opus one',
+          lineKey: '오푸스원',
+          vintage: 2018,
+        }],
+      ]),
+      new Map([['opus one', 'opus-one-2018']]),
+      new Map(),
+      new Map(),
+      new Map(),
+      new Map(),
+    );
+
+    expect(row).toEqual(expect.objectContaining({
+      semanticScopeKey: 'line::opus one::::::::2019::mixed_script::ko',
+      scopeAxis: 'line',
+      familyKey: 'opus one',
+      vintage: 2019,
+      surfaceFormKind: 'mixed_script',
+      benchmarkGoldEntityIdSuggestion: 'opus-one-2018',
+      benchmarkGoldEntityIdSuggestionSource: 'hint_resolution',
+      triageBucket: 'scope_target_review',
+    }));
+  });
+
   it('promotes reviewed policy family decisions into auto_targetable rows', () => {
     const [row] = buildLookupV2CurationDraftRowsWithRuntimeDescriptors(
       [

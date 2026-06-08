@@ -95,10 +95,12 @@ import {
   CORE_KOREAN_ICON_RELEASE_GATE_CASES,
 } from '../../test/support/core-korean-icon-fixtures.js';
 import {
+  assertLookupExactSafeRegistryVintageConsistency,
   assertLookupExactSafeRegistryCompatibleWithBaseAliases,
   buildLookupIdentityCertificatesByEntity,
   buildLookupRuntimeOverlayAliases,
   loadLookupExactSafeRegistry,
+  type LookupExactSafeRegistryRow,
 } from './lookup-exact-safe-registry.js';
 import {
   buildLookupAmbiguityRegistryEntries,
@@ -139,6 +141,48 @@ const REPO_GOLD_CATALOG_PATH = path.resolve(
   'data',
   'gold-wine-catalog.jsonl',
 );
+const LEGACY_BENCHMARK_ANCHOR_ENTITY_IDS = [
+  'chateau-margaux-2015',
+  'masi-amarone-2015',
+  'moet-brut-nv',
+  'opus-one-2018',
+  'romanee-conti-2015',
+  'sassicaia-2018',
+  'yquem-2015',
+] as const;
+const BENCHMARK_ANCHOR_SUITABILITY_GENERATION_SOURCE = 'llm_teacher_generated';
+const BENCHMARK_ANCHOR_SOURCE_DATASETS = [
+  'seed_wines_real',
+  'repo_gold_wine_catalog',
+] as const;
+
+export type BenchmarkAnchorSuitabilityGenerationSource =
+  typeof BENCHMARK_ANCHOR_SUITABILITY_GENERATION_SOURCE;
+export type BenchmarkAnchorSuitabilitySourceDataset =
+  (typeof BENCHMARK_ANCHOR_SOURCE_DATASETS)[number];
+export const AUTHORITATIVE_BENCHMARK_ANCHOR_ENTITY_IDS = [
+  ...new Set<string>([
+    ...LEGACY_BENCHMARK_ANCHOR_ENTITY_IDS,
+    ...collectCoreIconRequiredBenchmarkTargetIds(),
+  ]),
+].sort();
+
+const LEGACY_BENCHMARK_ANCHOR_ENTITY_ID_SET = new Set<string>(LEGACY_BENCHMARK_ANCHOR_ENTITY_IDS);
+const REPO_GOLD_BENCHMARK_ANCHOR_ENTITY_ID_SET = new Set<string>(
+  collectCoreIconRequiredBenchmarkTargetIds(),
+);
+
+export function resolveBenchmarkAnchorSuitabilitySourceDataset(
+  entityId: string,
+): BenchmarkAnchorSuitabilitySourceDataset {
+  if (LEGACY_BENCHMARK_ANCHOR_ENTITY_ID_SET.has(entityId)) {
+    return 'seed_wines_real';
+  }
+  if (REPO_GOLD_BENCHMARK_ANCHOR_ENTITY_ID_SET.has(entityId)) {
+    return 'repo_gold_wine_catalog';
+  }
+  throw new Error(`Unknown benchmark anchor suitability entityId "${entityId}"`);
+}
 
 function buildReviewedFamilyCoreKeysByEntity(
   reviewedFamilyCoreWitnessRows: readonly {
@@ -188,6 +232,7 @@ export interface Args {
   readonly fixtureRepoRoot?: string | undefined;
   readonly runtimeStatePath?: string | undefined;
   readonly reviewedRegistryOverrides?: {
+    readonly exactSafeRows?: readonly LookupExactSafeRegistryRow[] | undefined;
     readonly familyCollisionRows?: readonly LookupV2FamilyCollisionRegistryRow[] | undefined;
     readonly familyCoreWitnessRows?: readonly LookupV2FamilyCoreWitnessRegistryRow[] | undefined;
     readonly carryForwardTargetEntityIds?: readonly CanonicalEntityId[] | undefined;
@@ -275,6 +320,31 @@ function buildFieldAvailability(
   };
 }
 
+function buildLookupExactSafeEntityVintagesById(args: {
+  readonly records: readonly SnapshotBuildRecord[];
+  readonly entityIdBySourceId: ReadonlyMap<SourceRecordId, CanonicalEntityId>;
+}): ReadonlyMap<CanonicalEntityId, readonly number[]> {
+  const grouped = new Map<CanonicalEntityId, Set<number>>();
+  for (const record of args.records) {
+    if (record.vintageYear == null) {
+      continue;
+    }
+    const entityId = args.entityIdBySourceId.get(record.sourceId as SourceRecordId);
+    if (entityId === undefined) {
+      continue;
+    }
+    const existing = grouped.get(entityId) ?? new Set<number>();
+    existing.add(record.vintageYear);
+    grouped.set(entityId, existing);
+  }
+  return new Map(
+    [...grouped.entries()].map(([entityId, vintages]) => [
+      entityId,
+      [...vintages].sort((left, right) => left - right),
+    ]),
+  );
+}
+
 /**
  * Benchmark-anchor suitability artifact.
  *
@@ -297,7 +367,7 @@ function buildFieldAvailability(
  */
 const BENCHMARK_ANCHOR_SUITABILITY_VERSION = 'v1';
 
-const REPO_BENCHMARK_ANCHOR_SUITABILITY_PATH = path.resolve(
+export const REPO_BENCHMARK_ANCHOR_SUITABILITY_PATH = path.resolve(
   path.dirname(new URL(import.meta.url).pathname),
   '..',
   '..',
@@ -315,9 +385,11 @@ const BenchmarkAnchorSuitabilityScoreSchema = z.object({
   evidenceAxes: z.array(z.string().min(1)).max(64),
   snippet: z.string().min(1),
   rationale: z.string().min(1),
+  generationSource: z.literal(BENCHMARK_ANCHOR_SUITABILITY_GENERATION_SOURCE),
 }).strict();
 
 const BenchmarkAnchorSuitabilityEntrySchema = z.object({
+  sourceDataset: z.enum(BENCHMARK_ANCHOR_SOURCE_DATASETS),
   gift: BenchmarkAnchorSuitabilityScoreSchema,
   beginner: BenchmarkAnchorSuitabilityScoreSchema,
 }).strict();
@@ -325,11 +397,15 @@ const BenchmarkAnchorSuitabilityEntrySchema = z.object({
 const BenchmarkAnchorSuitabilityArtifactSchema = z.object({
   version: z.literal(BENCHMARK_ANCHOR_SUITABILITY_VERSION),
   generatedAt: z.string().datetime(),
-  model: z.string().min(1),
+  models: z.object({
+    gift: z.string().min(1),
+    beginner: z.string().min(1),
+  }).strict(),
   promptVersions: z.object({
     gift: z.string().min(1),
     beginner: z.string().min(1),
   }).strict(),
+  requiredEntityIds: z.array(z.string().min(1)).min(1),
   entities: z.record(z.string().min(1), BenchmarkAnchorSuitabilityEntrySchema),
 }).strict();
 
@@ -337,6 +413,69 @@ export type BenchmarkAnchorSuitabilityArtifact = z.infer<typeof BenchmarkAnchorS
 export type BenchmarkAnchorSuitabilityEntry = z.infer<typeof BenchmarkAnchorSuitabilityEntrySchema>;
 
 const benchmarkAnchorSuitabilityCache = new Map<string, BenchmarkAnchorSuitabilityArtifact>();
+
+function diffStringSets(args: {
+  readonly expected: readonly string[];
+  readonly actual: readonly string[];
+}): {
+  readonly missing: readonly string[];
+  readonly extras: readonly string[];
+} {
+  const expectedSet = new Set(args.expected);
+  const actualSet = new Set(args.actual);
+  return {
+    missing: args.expected.filter((value) => !actualSet.has(value)),
+    extras: args.actual.filter((value) => !expectedSet.has(value)),
+  };
+}
+
+function isAuthoritativeBenchmarkAnchorSuitabilityPath(resolvedPath: string): boolean {
+  const normalized = path.resolve(resolvedPath);
+  return (
+    normalized === path.resolve(DEFAULT_BENCHMARK_ANCHOR_SUITABILITY_PATH)
+    || normalized === path.resolve(REPO_BENCHMARK_ANCHOR_SUITABILITY_PATH)
+  );
+}
+
+export function assertAuthoritativeBenchmarkAnchorSuitabilityArtifact(
+  artifact: BenchmarkAnchorSuitabilityArtifact,
+): void {
+  const expectedIds = AUTHORITATIVE_BENCHMARK_ANCHOR_ENTITY_IDS;
+  const actualRequiredIds = [...new Set(artifact.requiredEntityIds)].sort();
+  const requiredIdDiff = diffStringSets({
+    expected: expectedIds,
+    actual: actualRequiredIds,
+  });
+  if (requiredIdDiff.missing.length > 0 || requiredIdDiff.extras.length > 0) {
+    throw new Error(
+      `Benchmark anchor suitability artifact requiredEntityIds drifted: missing=[${requiredIdDiff.missing.join(', ')}] extras=[${requiredIdDiff.extras.join(', ')}]`,
+    );
+  }
+
+  const actualEntityIds = Object.keys(artifact.entities).sort();
+  const entityIdDiff = diffStringSets({
+    expected: expectedIds,
+    actual: actualEntityIds,
+  });
+  if (entityIdDiff.missing.length > 0 || entityIdDiff.extras.length > 0) {
+    throw new Error(
+      `Benchmark anchor suitability artifact entity coverage drifted: missing=[${entityIdDiff.missing.join(', ')}] extras=[${entityIdDiff.extras.join(', ')}]`,
+    );
+  }
+
+  for (const entityId of expectedIds) {
+    const entry = artifact.entities[entityId];
+    if (entry === undefined) {
+      throw new Error(`Benchmark anchor suitability artifact missing entity "${entityId}"`);
+    }
+    const expectedDataset = resolveBenchmarkAnchorSuitabilitySourceDataset(entityId);
+    if (entry.sourceDataset !== expectedDataset) {
+      throw new Error(
+        `Benchmark anchor suitability artifact sourceDataset mismatch for "${entityId}": expected "${expectedDataset}", got "${entry.sourceDataset}"`,
+      );
+    }
+  }
+}
 
 /**
  * Load + validate the benchmark anchor suitability artifact.
@@ -362,6 +501,9 @@ export async function loadBenchmarkAnchorSuitabilityArtifact(
     throw new Error(
       `Benchmark anchor suitability artifact "${resolvedPath}" failed schema validation: ${result.error.message}`,
     );
+  }
+  if (isAuthoritativeBenchmarkAnchorSuitabilityPath(resolvedPath)) {
+    assertAuthoritativeBenchmarkAnchorSuitabilityArtifact(result.data);
   }
   benchmarkAnchorSuitabilityCache.set(resolvedPath, result.data);
   return result.data;
@@ -1225,7 +1367,7 @@ export function attachBenchmarkAnchorSuitability(
     giftSuitabilityClassification: {
       score: seed.gift.score,
       fingerprint: {
-        modelId: artifact.model,
+        modelId: artifact.models.gift,
         contentHash: buildGiftSuitabilityContentHash(record),
         version: GIFT_SUITABILITY_VERSION,
         generatedAt: artifact.generatedAt,
@@ -1241,7 +1383,7 @@ export function attachBenchmarkAnchorSuitability(
     beginnerSuitabilityClassification: {
       score: seed.beginner.score,
       fingerprint: {
-        modelId: artifact.model,
+        modelId: artifact.models.beginner,
         contentHash: buildBeginnerSuitabilityContentHash(record),
         version: BEGINNER_SUITABILITY_VERSION,
         generatedAt: artifact.generatedAt,
@@ -1494,6 +1636,7 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     });
     finalRecords = [...finalRecords, ...benchmarkAnchorRecords]
       .sort((left, right) => left.sourceId.localeCompare(right.sourceId));
+    assertSuitabilityCoverage(finalRecords);
     ({
       entityArtifact,
       resolvedAliases,
@@ -1521,7 +1664,9 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
   const aliasArtifactHash = hashStableJson(canonicalizeAliasSnapshotRecords(resolvedAliases));
   const ambiguityArtifactHash = hashStableJson(canonicalizeAmbiguitySnapshotRows(ambiguityRows));
   const snapshotEntityIds = new Set<CanonicalEntityId>([...entityIdBySourceId.values()]);
-  const lookupExactSafeRegistry = await loadLookupExactSafeRegistry();
+  const lookupExactSafeRegistry =
+    args.reviewedRegistryOverrides?.exactSafeRows
+    ?? await loadLookupExactSafeRegistry();
   const lookupAmbiguityRegistry = await loadLookupAmbiguityRegistry();
   const lookupConceptRedirectRegistry = await loadLookupConceptRedirectRegistry();
   const lookupPolicyConflictRegistry = loadLookupPolicyConflictRegistrySync();
@@ -1529,6 +1674,13 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
   assertLookupExactSafeRegistryCompatibleWithBaseAliases({
     baseAliases: resolvedAliases,
     registryRows: lookupExactSafeRegistry,
+  });
+  assertLookupExactSafeRegistryVintageConsistency({
+    rows: lookupExactSafeRegistry,
+    entityVintagesById: buildLookupExactSafeEntityVintagesById({
+      records: finalRecords,
+      entityIdBySourceId,
+    }),
   });
   assertLookupAuthorityBoundaryConsistency({
     exactSafeRows: lookupExactSafeRegistry,
@@ -1572,7 +1724,12 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
   });
   const lookupReviewedFamilyCoreWitnessRegistry =
     args.reviewedRegistryOverrides?.familyCoreWitnessRows
-    ?? loadLookupV2FamilyCoreWitnessRegistrySync();
+    // Validate witness entity ids against the entities being built in THIS snapshot
+    // — NOT the previously-published runtime. A witness for an entity that IS in the
+    // snapshot under construction (e.g. a freshly backfilled benchmark-anchor vintage)
+    // is valid; validating against the stale runtime would force an impossible two-
+    // publish bootstrap to land any witness that references a newly added entity.
+    ?? loadLookupV2FamilyCoreWitnessRegistrySync(undefined, snapshotEntityIds);
   const lookupReviewedFamilyCollisionRegistry =
     args.reviewedRegistryOverrides?.familyCollisionRows
     ?? loadLookupV2FamilyCollisionRegistrySync();
@@ -1809,13 +1966,12 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
   } as const;
 
   await fs.mkdir(snapshotRoot, { recursive: true });
-  await Promise.all([
+  const snapshotWrites = [
     atomicWriteFile(manifest.artifacts.documentsNdjson, documentsNdjson),
     fs.rm(manifest.artifacts.vespaFeedNdjson, { force: true }),
     atomicWriteFile(manifest.artifacts.entitiesNdjson, entitiesNdjson),
     atomicWriteFile(manifest.artifacts.aliasesNdjson, aliasesNdjson),
     atomicWriteFile(manifest.artifacts.lookupAliasRuntimeJson, lookupAliasRuntimeJson),
-    atomicWriteFile(manifest.artifacts.lookupAliasBroadRecallRuntimeJson, lookupAliasBroadRecallRuntimeJson),
     atomicWriteFile(manifest.artifacts.lookupExactSafeRuntimeJson, lookupExactSafeRuntimeJson),
     atomicWriteFile(manifest.artifacts.lookupResolverProjectionJson, lookupResolverProjectionJson),
     atomicWriteFile(manifest.artifacts.lookupEntityProjectionJson, lookupEntityProjectionJson),
@@ -1828,7 +1984,14 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     atomicWriteFile(manifest.artifacts.nlMappingsJson, nlMappingsCanonical),
     atomicWriteFile(manifest.artifacts.metadataJson, `${JSON.stringify(metadata, null, 2)}\n`),
     atomicWriteFile(path.join(snapshotRoot, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`),
-  ]);
+    ...(manifest.artifacts.lookupAliasBroadRecallRuntimeJson === undefined
+      ? []
+      : [atomicWriteFile(
+        manifest.artifacts.lookupAliasBroadRecallRuntimeJson,
+        lookupAliasBroadRecallRuntimeJson,
+      )]),
+  ];
+  await Promise.all(snapshotWrites);
 
   const finalizedSemanticDescriptors = [
     ...buildLookupV2RuntimeSemanticDescriptorMapFromDocuments(
@@ -1843,7 +2006,6 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
       manifestPath: path.join(snapshotRoot, 'manifest.json'),
       artifactPaths: {
         lookupAliasRuntimeJson: manifest.artifacts.lookupAliasRuntimeJson,
-        lookupAliasBroadRecallRuntimeJson: manifest.artifacts.lookupAliasBroadRecallRuntimeJson,
         lookupExactSafeRuntimeJson: manifest.artifacts.lookupExactSafeRuntimeJson,
         lookupResolverProjectionJson: manifest.artifacts.lookupResolverProjectionJson,
         lookupSemanticScopeRuntimeJson: manifest.artifacts.lookupSemanticScopeRuntimeJson,
@@ -1851,6 +2013,11 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
         lookupScopeGraphRuntimeJson: manifest.artifacts.lookupScopeGraphRuntimeJson,
         lookupAmbiguityRuntimeJson: manifest.artifacts.lookupAmbiguityRuntimeJson,
         lookupConceptRedirectRuntimeJson: manifest.artifacts.lookupConceptRedirectRuntimeJson,
+        ...(manifest.artifacts.lookupAliasBroadRecallRuntimeJson === undefined
+          ? {}
+          : {
+            lookupAliasBroadRecallRuntimeJson: manifest.artifacts.lookupAliasBroadRecallRuntimeJson,
+          }),
       },
       aliasRuntimeArtifact: finalizedLookupAliasRuntimeArtifact,
       aliasBroadRecallRuntimeArtifact: finalizedLookupAliasBroadRecallRuntimeArtifact,

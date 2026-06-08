@@ -231,11 +231,12 @@ describe('buildLookupV2ManualTargetFamilyReviewPacketRows', () => {
         suggestedAliasTypes: ['canonical'],
         surfaces: ['슈발 블랑 2010', '슈발블랑 2015'],
         rowCount: 2,
+        runtimeGapReason: 'runtime_family_missing',
       }),
     ]);
   });
 
-  it('fails closed for mixed-vintage unique-owner evidence unless the explicit line scope matches the descriptor exactly', () => {
+  it('keeps mixed-vintage line scopes closed but still allows a family scope to bind to a structural singleton owner', () => {
     const rows = buildLookupV2ManualTargetFamilyReviewPacketRows({
       draftRows: [
         {
@@ -325,18 +326,221 @@ describe('buildLookupV2ManualTargetFamilyReviewPacketRows', () => {
       expect.objectContaining({
         semanticScopeKey: 'family::pol roger::::::::::bare::ko',
         scopeRisk: 'mixed_vintage_family',
-        runtimeEvidenceStatus: 'missing_runtime_owner',
+        runtimeEvidenceStatus: 'candidate_unique_owner',
+        runtimeEvidenceEntityId: 'wine-ce-pol-roger-2020',
       }),
       expect.objectContaining({
         semanticScopeKey: 'line::pol roger::::::::2018::qualified::ko',
         scopeRisk: 'mixed_vintage_family',
         runtimeEvidenceStatus: 'missing_runtime_owner',
+        runtimeGapReason: 'requested_vintage_missing',
+        runtimeGapAvailableVintages: [2020],
       }),
       expect.objectContaining({
         semanticScopeKey: 'line::solaia::::::::2018::qualified::ko',
         scopeRisk: 'mixed_vintage_family',
         runtimeEvidenceStatus: 'candidate_unique_owner',
         runtimeEvidenceEntityId: 'wine-ce-solaia-2018',
+      }),
+    ]);
+  });
+
+  it('promotes a collision set to candidate_unique_owner when exactly one runtime descriptor matches the full requested scope', () => {
+    const rows = buildLookupV2ManualTargetFamilyReviewPacketRows({
+      draftRows: [
+        {
+          surface: '오푸스원 2018',
+          locale: 'ko',
+          suggestedAliasType: 'canonical',
+          holeClass: 'realworld_exact_vintage',
+          observedStatus: 'failed',
+          benchmarkGoldHint: 'opus one',
+          semanticScopeKey: 'line::opus one::오푸스원::::::2018::qualified::ko',
+          scopeAxis: 'line',
+          familyKey: 'opus one',
+          lineKey: '오푸스원',
+          vintage: 2018,
+          surfaceFormKind: 'qualified',
+          triageBucket: 'scope_target_review',
+          sourceArtifact: '/tmp/coverage.json',
+          sourceEvidence: 'exact vintage gap',
+          reviewedAt: '2026-06-08T00:00:00.000Z',
+        },
+      ],
+      runtimeOwnerEvidence: {
+        uniqueOwners: new Map(),
+        collidingOwners: new Map([
+          ['opus one', [
+            'opus-one-2018',
+            'wine-ce-5b9b06d3a1acd3f2394424d420b56e1d0cce85e5b4e924c006e1ade3819787a3',
+            'wine-ce-d39efce2cbe92cf403923d5e53dbb15fec3b4f7e738f25933a7e892d57002e63',
+          ]],
+        ]),
+        entityLabels: new Map([
+          ['opus-one-2018', 'Opus One 2018'],
+          ['wine-ce-5b9b06d3a1acd3f2394424d420b56e1d0cce85e5b4e924c006e1ade3819787a3', '1987 Opus One Opus One'],
+          ['wine-ce-d39efce2cbe92cf403923d5e53dbb15fec3b4f7e738f25933a7e892d57002e63', '2019 Opus One Overture'],
+        ]),
+        entityProducers: new Map(),
+        entityRegions: new Map(),
+        entityAppellations: new Map(),
+        uniqueOwnerWitnesses: new Map(),
+        collidingOwnerWitnesses: new Map([
+          ['opus one', [
+            {
+              entityId: 'opus-one-2018',
+              witnessSurface: 'opus one',
+              witnessSource: 'family_core_key',
+            },
+            {
+              entityId: 'wine-ce-5b9b06d3a1acd3f2394424d420b56e1d0cce85e5b4e924c006e1ade3819787a3',
+              witnessSurface: 'opus one',
+              witnessSource: 'family_core_key',
+            },
+            {
+              entityId: 'wine-ce-d39efce2cbe92cf403923d5e53dbb15fec3b4f7e738f25933a7e892d57002e63',
+              witnessSurface: 'Opus One',
+              witnessSource: 'producer',
+            },
+          ]],
+        ]),
+      },
+      runtimeDescriptorMap: new Map([
+        ['opus-one-2018', {
+          entityId: 'opus-one-2018',
+          canonicalLabel: 'Opus One 2018',
+          familyKey: 'opus one',
+          lineKey: '오푸스원',
+          vintage: 2018,
+        }],
+        ['wine-ce-5b9b06d3a1acd3f2394424d420b56e1d0cce85e5b4e924c006e1ade3819787a3', {
+          entityId: 'wine-ce-5b9b06d3a1acd3f2394424d420b56e1d0cce85e5b4e924c006e1ade3819787a3',
+          canonicalLabel: '1987 Opus One Opus One',
+          familyKey: 'opus one',
+          lineKey: '오푸스원',
+          vintage: 1987,
+        }],
+        ['wine-ce-d39efce2cbe92cf403923d5e53dbb15fec3b4f7e738f25933a7e892d57002e63', {
+          entityId: 'wine-ce-d39efce2cbe92cf403923d5e53dbb15fec3b4f7e738f25933a7e892d57002e63',
+          canonicalLabel: '2019 Opus One Overture',
+          familyKey: 'overture',
+          lineKey: 'opus one overture',
+          vintage: 2019,
+        }],
+      ]),
+    });
+
+    expect(rows).toEqual([
+      expect.objectContaining({
+        semanticScopeKey: 'line::opus one::오푸스원::::::2018::qualified::ko',
+        runtimeEvidenceStatus: 'candidate_unique_owner',
+        runtimeEvidenceEntityId: 'opus-one-2018',
+        runtimeEvidenceEntityLabel: 'Opus One 2018',
+        runtimeEvidenceWitnesses: [
+          {
+            entityId: 'opus-one-2018',
+            witnessSurface: 'opus one',
+            witnessSource: 'family_core_key',
+          },
+        ],
+      }),
+    ]);
+  });
+
+  it('reclassifies scoped collision sets with zero exact matches into runtime backfill work', () => {
+    const rows = buildLookupV2ManualTargetFamilyReviewPacketRows({
+      draftRows: [
+        {
+          surface: 'Opus 원 2019',
+          locale: 'ko',
+          suggestedAliasType: 'canonical',
+          holeClass: 'realworld_mixed_script_alias',
+          observedStatus: 'failed',
+          benchmarkGoldHint: 'opus one',
+          semanticScopeKey: 'line::opus one::::::::2019::mixed_script::ko',
+          scopeAxis: 'line',
+          familyKey: 'opus one',
+          vintage: 2019,
+          surfaceFormKind: 'mixed_script',
+          triageBucket: 'scope_target_review',
+          sourceArtifact: '/tmp/coverage.json',
+          sourceEvidence: 'mixed-script vintage gap',
+          reviewedAt: '2026-06-08T00:00:00.000Z',
+        },
+      ],
+      runtimeOwnerEvidence: {
+        uniqueOwners: new Map(),
+        collidingOwners: new Map([
+          ['opus one', [
+            'opus-one-2018',
+            'wine-ce-5b9b06d3a1acd3f2394424d420b56e1d0cce85e5b4e924c006e1ade3819787a3',
+            'wine-ce-d39efce2cbe92cf403923d5e53dbb15fec3b4f7e738f25933a7e892d57002e63',
+          ]],
+        ]),
+        entityLabels: new Map([
+          ['opus-one-2018', 'Opus One 2018'],
+          ['wine-ce-5b9b06d3a1acd3f2394424d420b56e1d0cce85e5b4e924c006e1ade3819787a3', '1987 Opus One Opus One'],
+          ['wine-ce-d39efce2cbe92cf403923d5e53dbb15fec3b4f7e738f25933a7e892d57002e63', '2019 Opus One Overture'],
+        ]),
+        entityProducers: new Map(),
+        entityRegions: new Map(),
+        entityAppellations: new Map(),
+        uniqueOwnerWitnesses: new Map(),
+        collidingOwnerWitnesses: new Map([
+          ['opus one', [
+            {
+              entityId: 'opus-one-2018',
+              witnessSurface: 'opus one',
+              witnessSource: 'family_core_key',
+            },
+            {
+              entityId: 'wine-ce-5b9b06d3a1acd3f2394424d420b56e1d0cce85e5b4e924c006e1ade3819787a3',
+              witnessSurface: 'opus one',
+              witnessSource: 'family_core_key',
+            },
+            {
+              entityId: 'wine-ce-d39efce2cbe92cf403923d5e53dbb15fec3b4f7e738f25933a7e892d57002e63',
+              witnessSurface: 'Opus One',
+              witnessSource: 'producer',
+            },
+          ]],
+        ]),
+      },
+      runtimeDescriptorMap: new Map([
+        ['opus-one-2018', {
+          entityId: 'opus-one-2018',
+          canonicalLabel: 'Opus One 2018',
+          familyKey: 'opus one',
+          lineKey: '오푸스원',
+          regionKey: 'napa valley',
+          appellationKey: 'napa valley ava',
+          vintage: 2018,
+        }],
+        ['wine-ce-5b9b06d3a1acd3f2394424d420b56e1d0cce85e5b4e924c006e1ade3819787a3', {
+          entityId: 'wine-ce-5b9b06d3a1acd3f2394424d420b56e1d0cce85e5b4e924c006e1ade3819787a3',
+          canonicalLabel: '1987 Opus One Opus One',
+          familyKey: 'opus one',
+          lineKey: '오푸스원',
+          regionKey: 'united states',
+          vintage: 1987,
+        }],
+        ['wine-ce-d39efce2cbe92cf403923d5e53dbb15fec3b4f7e738f25933a7e892d57002e63', {
+          entityId: 'wine-ce-d39efce2cbe92cf403923d5e53dbb15fec3b4f7e738f25933a7e892d57002e63',
+          canonicalLabel: '2019 Opus One Overture',
+          familyKey: 'overture',
+          lineKey: 'opus one overture',
+          regionKey: 'united states',
+          vintage: 2019,
+        }],
+      ]),
+    });
+
+    expect(rows).toEqual([
+      expect.objectContaining({
+        semanticScopeKey: 'line::opus one::::::::2019::mixed_script::ko',
+        runtimeEvidenceStatus: 'missing_runtime_owner',
+        runtimeGapReason: 'requested_vintage_missing',
+        runtimeGapAvailableVintages: [1987, 2018],
       }),
     ]);
   });

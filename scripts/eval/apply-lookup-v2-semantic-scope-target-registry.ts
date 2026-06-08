@@ -3,6 +3,7 @@ import { parseArgs } from 'node:util';
 import type { LookupV2ManualTargetFamilyReviewPacketRow } from './export-lookup-v2-manual-target-family-review-packet.js';
 import {
   DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_TARGET_REGISTRY_PATH,
+  lookupV2SemanticScopeTargetRowAllowsDetachedVintageAuthority,
   loadLookupV2SemanticScopeTargetRegistrySync,
   serializeLookupV2SemanticScopeTargetRegistryRows,
   type LookupV2SemanticScopeTargetRegistryRow,
@@ -125,12 +126,20 @@ function registryRowMatchesDescriptor(args: {
     readonly vintage?: number | undefined;
   };
 }): boolean {
+  const allowDetachedVintageAuthority =
+    args.registryRow.vintage !== undefined
+    && args.registryRow.vintage !== args.descriptor.vintage
+    && lookupV2SemanticScopeTargetRowAllowsDetachedVintageAuthority(args.registryRow);
   return (
     args.registryRow.familyKey === args.descriptor.familyKey
     && (args.registryRow.lineKey === undefined || args.registryRow.lineKey === args.descriptor.lineKey)
     && (args.registryRow.regionKey === undefined || args.registryRow.regionKey === args.descriptor.regionKey)
     && (args.registryRow.appellationKey === undefined || args.registryRow.appellationKey === args.descriptor.appellationKey)
-    && (args.registryRow.vintage === undefined || args.registryRow.vintage === args.descriptor.vintage)
+    && (
+      args.registryRow.vintage === undefined
+      || args.registryRow.vintage === args.descriptor.vintage
+      || allowDetachedVintageAuthority
+    )
   );
 }
 

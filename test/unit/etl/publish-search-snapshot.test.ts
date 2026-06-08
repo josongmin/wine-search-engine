@@ -43,6 +43,7 @@ import {
   loadPublishedRuntimeState,
   resolvePublishFixtureRepoRoot,
   FIXTURE_REPO_REQUIRED_ERROR,
+  uniqueSnapshotDocIds,
 } from '../../../scripts/etl/publish-search-snapshot.js';
 import {
   promoteRuntimeSubstrateArtifacts,
@@ -361,6 +362,17 @@ describe('diffSnapshotVespaDocIds', () => {
     })).toEqual({
       missingDocIds: ['wine-1'],
       staleDocIds: ['wine-legacy'],
+    });
+  });
+
+  it('deduplicates expected doc ids before visibility diffing', () => {
+    expect(uniqueSnapshotDocIds(['wine-1', 'wine-1', 'wine-2'])).toEqual(['wine-1', 'wine-2']);
+    expect(diffSnapshotVespaDocIds({
+      expectedDocIds: ['wine-1', 'wine-1', 'wine-2'],
+      liveDocIds: ['wine-1', 'wine-2'],
+    })).toEqual({
+      missingDocIds: [],
+      staleDocIds: [],
     });
   });
 });

@@ -253,12 +253,18 @@ export function buildLookupV2CurationDraftRowsWithRuntimeDescriptors(
     const derivedScope = descriptorEntityId !== undefined
       ? runtimeDescriptorMap.get(descriptorEntityId)
       : undefined;
-    const baselineScope = derivedScope !== undefined
+    const descriptorScopedBaseline = derivedScope !== undefined
       ? buildLookupSemanticScopeFromProbe({
           probe: queryProbe,
           descriptor: derivedScope,
         })
-      : fallbackScope;
+      : undefined;
+    const baselineScope =
+      descriptorScopedBaseline !== undefined
+      && queryProbe.vintage !== undefined
+      && descriptorScopedBaseline.scopeAxis === 'family'
+        ? fallbackScope
+        : descriptorScopedBaseline ?? fallbackScope;
     const approvedSemanticTarget = semanticScopeTargetApprovedMap.get(baselineScope.semanticScopeKey);
     const rejectedSemanticTarget = semanticScopeTargetRejectedMap.get(baselineScope.semanticScopeKey);
     const semanticScopeSupportRegistryRow = semanticScopeSupportRegistryMap.get(baselineScope.semanticScopeKey);

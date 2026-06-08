@@ -28,8 +28,8 @@ import { ETL_ARTIFACT_FILES } from './artifact-contract.js';
 
 export const DATA_FILE = ETL_ARTIFACT_FILES.trackc;
 const OPENAI_BASE_URL = (process.env['OPENAI_BASE_URL'] ?? 'https://api.openai.com/v1').replace(/\/$/, '');
-const MODEL = process.env['OPENAI_BEGINNER_MODEL'] ?? 'gpt-5.4-mini';
-const PROMPT_VERSION = 'beginner-suitability-scorer-v2';
+export const BEGINNER_SUITABILITY_MODEL = process.env['OPENAI_BEGINNER_MODEL'] ?? 'gpt-5.4-mini';
+export const BEGINNER_SUITABILITY_PROMPT_VERSION = 'beginner-suitability-scorer-v2';
 const BATCH_SIZE = 20;
 /** LLM score normalization divisor: LLM outputs 0-100, we store [0, 1]. */
 const LLM_SCORE_SCALE = 100;
@@ -142,7 +142,7 @@ async function scoreBeginnerSuitability(record: EnrichedSilverRecord): Promise<B
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: MODEL,
+      model: BEGINNER_SUITABILITY_MODEL,
       temperature: 0,
       response_format: { type: 'json_object' },
       messages: [
@@ -192,14 +192,14 @@ async function scoreBeginnerSuitability(record: EnrichedSilverRecord): Promise<B
   return {
     score: rawScore / LLM_SCORE_SCALE,
     fingerprint: {
-      modelId: MODEL,
+      modelId: BEGINNER_SUITABILITY_MODEL,
       contentHash: contentHash(record),
       version: BEGINNER_SUITABILITY_VERSION,
       generatedAt: new Date().toISOString(),
     },
     provenance: {
       source: 'llm_beginner_suitability_scorer',
-      promptVersion: PROMPT_VERSION,
+      promptVersion: BEGINNER_SUITABILITY_PROMPT_VERSION,
       ...(evidenceAxes !== undefined ? { evidenceAxes } : {}),
       snippet: snippet.trim(),
       rationale: rationale.trim(),
@@ -215,10 +215,10 @@ function isFresh(record: EnrichedSilverRecord): boolean {
   const existing = record.beginnerSuitabilityClassification;
   if (existing === undefined) return false;
   return (
-    existing.fingerprint.modelId === MODEL
+    existing.fingerprint.modelId === BEGINNER_SUITABILITY_MODEL
     && existing.fingerprint.version === BEGINNER_SUITABILITY_VERSION
     && existing.fingerprint.contentHash === contentHash(record)
-    && existing.provenance.promptVersion === PROMPT_VERSION
+    && existing.provenance.promptVersion === BEGINNER_SUITABILITY_PROMPT_VERSION
   );
 }
 

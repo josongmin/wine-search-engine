@@ -10,6 +10,7 @@ import { loadLookupExactSafeRegistry } from '../etl/lookup-exact-safe-registry.j
 import type { LookupV2CurationDraftRow } from './export-lookup-v2-curation-drafts.js';
 import type { LookupV2ManualTargetFamilyReviewPacketRow } from './export-lookup-v2-manual-target-family-review-packet.js';
 import {
+  buildLookupV2SemanticScopeTargetApprovedMap,
   DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_TARGET_REGISTRY_PATH,
   loadLookupV2SemanticScopeTargetRegistrySync,
   type LookupV2SemanticScopeTargetRegistryRow,
@@ -157,6 +158,7 @@ export function applyLookupV2ManualTargetFamilyReviewPacket(args: {
       locale: row.locale,
       suggestedAliasType: row.suggestedAliasType,
       holeClass: row.holeClass,
+      semanticScopeKey: row.semanticScopeKey,
       benchmarkGoldHint: row.benchmarkGoldHint,
       benchmarkGoldEntityIdSource: 'semantic_scope_target_registry',
       sourceArtifact: row.sourceArtifact,
@@ -169,6 +171,7 @@ export function applyLookupV2ManualTargetFamilyReviewPacket(args: {
     exactSafePacketRows: buildLookupExactSafeProposalPacketRowsFromCandidates({
       candidateRows,
       existingRegistryRows: args.existingRegistryRows,
+      semanticScopeTargetApprovedMap: buildLookupV2SemanticScopeTargetApprovedMap(args.familyTargetRegistryRows),
     }),
     targetAssignedFamilies,
     rejectedFamilies,

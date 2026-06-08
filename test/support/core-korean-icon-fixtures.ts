@@ -92,6 +92,96 @@ export const CORE_KOREAN_ICON_QUERY_CASES: readonly CoreKoreanEntityCase[] = [
   { query: '펜폴즈 그레인지', expectedEntityId: 'w-penfolds-grange-2017' },
   { query: '에곤 뮐러', expectedEntityId: 'w-egon-muller-scharzhofberger-kabinett-2020' },
   { query: '샤또 디켐', expectedEntityId: 'w-chateau-dyquem-2015' },
+  // Requested-vintage runtime/catalog backfill (lookup-v2 korean-realworld-stretch
+  // `requested_vintage_missing` packet). Each is a real, separately-released vintage
+  // of an iconic family whose only runtime owner was a single other vintage; the
+  // gold-catalog row materializes the entity and the family-core-witness registry
+  // joins it to the producer family. identitySafe:false because the bare family
+  // surface owns a DIFFERENT vintage — these vintage-qualified forms resolve via
+  // vintage-aware family-member selection (the dual of the vintage-mismatch guard):
+  // a vintage-conflicting query under a singleton witness re-enables the family-graph
+  // expansion (normally suppressed for singletons), which surfaces the requested-vintage
+  // sibling from the wrong-vintage anchor for selection. Closable ONLY when the bare
+  // family surface is protected from displacement by the newly-materialized vintage:
+  // Calon-Ségur's bare alias is pinned by a curated exact-safe registry row (→ the
+  // incumbent 2003), so adding 2009/2012/2020 cannot hijack the bare query. Residue:
+  // Solaia (no curated bare-alias pin → a gold sibling would displace the scope-target
+  // incumbent for `솔라이아 2018`) and mixed-script "Opus 원 2019" (the surface recalls
+  // NO opus entity — a separate alias-normalization gap) stay open.
+  { query: '슈발 블랑 2010', expectedEntityId: 'w-cheval-blanc-2010', identitySafe: false },
+  { query: '슈발 블랑 2017', expectedEntityId: 'w-cheval-blanc-2017', identitySafe: false },
+  { query: '칼롱 세귀르 2009', expectedEntityId: 'w-calon-segur-2009', identitySafe: false },
+  { query: '칼롱 세귀르 2012', expectedEntityId: 'w-calon-segur-2012', identitySafe: false },
+  { query: '칼롱 세귀르 2020', expectedEntityId: 'w-calon-segur-2020', identitySafe: false },
+  { query: '파비 2014', expectedEntityId: 'w-pavie-2014', identitySafe: false },
+  { query: '파비 2017', expectedEntityId: 'w-pavie-2017', identitySafe: false },
+  // Pol Roger line runtime/catalog backfill (lookup-v2 korean-realworld-stretch
+  // `family_surface_needs_specific_line` packet). The only runtime owner was a single noisy
+  // Vivino vintage ("2020 Pol Roger Champagne") with no specific line. These gold rows
+  // materialize the real product lines (Brut Réserve flagship + prestige Cuvée Sir Winston
+  // Churchill) as exact-safe identity singletons; the family-core-witness registry joins them
+  // to the `pol roger` producer family. The two-digit vintage surface ("폴 로저 18") resolves
+  // as an exact-safe identity SINGLETON: the requested 2018 vintage is a collision-free unique
+  // owner, so a curated korean-exact-safe-registry row promotes "폴 로저 18" → the 2018 entity.
+  // The exact-safe planner matches the full vintage-canonicalized surface BEFORE family-vintage
+  // selection (search-snapshot-exact-safe-registry tries the vintageCanonicalized view), so it
+  // resolves cleanly (identitySafe:true). This is the dual of multi-vintage families whose bare
+  // surface is owned by a different vintage and stay requested_vintage_missing residue.
+  { query: '폴로저 브뤼', expectedEntityId: 'w-pol-roger-brut-reserve-nv' },
+  { query: '폴로저브뤼', expectedEntityId: 'w-pol-roger-brut-reserve-nv' },
+  { query: 'Pol Roger 브뤼', expectedEntityId: 'w-pol-roger-brut-reserve-nv' },
+  { query: '메종 폴 로저', expectedEntityId: 'w-pol-roger-brut-reserve-nv' },
+  { query: '폴 로저 윈스턴 처칠', expectedEntityId: 'w-pol-roger-sir-winston-churchill-2015' },
+  { query: '폴 로저 18', expectedEntityId: 'w-pol-roger-brut-vintage-2018' },
+  // Château Ausone non-vintage backfill (lookup-v2 korean-realworld-stretch scope_target_missing).
+  // Single gold vintage (2016) → bare/producer/orthography/mixed-script/brand surfaces are
+  // collision-free exact-safe identity singletons of the 2016 owner (no multi-vintage ambiguity).
+  // Vintage-qualified forms (오존 2015/2020) remain residue until those vintages are materialized.
+  { query: '오존', expectedEntityId: 'w-chateau-ausone-2016' },
+  { query: '샤또 오존', expectedEntityId: 'w-chateau-ausone-2016' },
+  { query: '오쏜', expectedEntityId: 'w-chateau-ausone-2016' },
+  { query: '샤또 Ausone', expectedEntityId: 'w-chateau-ausone-2016' },
+  { query: '오존 생테밀리옹', expectedEntityId: 'w-chateau-ausone-2016' },
+  { query: '오존생테밀리옹', expectedEntityId: 'w-chateau-ausone-2016' },
+  { query: '샤또 오존 생테밀리옹', expectedEntityId: 'w-chateau-ausone-2016' },
+  // Pure-vintage famous-wine backfill (lookup-v2 korean-realworld-stretch scope_target_missing).
+  // Each residue surface is a vintage-qualified form whose requested vintage is a collision-free
+  // unique owner → materialize the gold vintage entity + a curated korean-exact-safe-registry
+  // singleton (surface vintage == entity vintage), so the exact-safe planner resolves it directly
+  // (identitySafe:true). No bare-family residue → no multi-vintage ambiguity.
+  { query: '탈보 2018', expectedEntityId: 'w-talbot-2018' },
+  { query: '탈보 09', expectedEntityId: 'w-talbot-2009' },
+  { query: '몽로즈 2019', expectedEntityId: 'w-montrose-2019' },
+  { query: '몽로즈 10', expectedEntityId: 'w-montrose-2010' },
+  { query: '팔머 2020', expectedEntityId: 'w-palmer-2020' },
+  { query: '팔머 12', expectedEntityId: 'w-palmer-2012' },
+  { query: '피숑 바롱 2009', expectedEntityId: 'w-pichon-baron-2009' },
+  { query: '피숑 바롱 16', expectedEntityId: 'w-pichon-baron-2016' },
+  { query: '퐁테 카네 2011', expectedEntityId: 'w-pontet-canet-2011' },
+  { query: '퐁테 카네 14', expectedEntityId: 'w-pontet-canet-2014' },
+  { query: '랭쉬 바주 2016', expectedEntityId: 'w-lynch-bages-2016' },
+  { query: '랭쉬 바주 11', expectedEntityId: 'w-lynch-bages-2011' },
+  { query: '코스 데스투르넬 2013', expectedEntityId: 'w-cos-destournel-2013' },
+  { query: '코스 데스투르넬 15', expectedEntityId: 'w-cos-destournel-2015' },
+  { query: '베이슈벨 2017', expectedEntityId: 'w-beychevelle-2017' },
+  { query: '베이슈벨 13', expectedEntityId: 'w-beychevelle-2013' },
+  { query: '몬텔레나 11', expectedEntityId: 'w-montelena-2011' },
+  { query: '몬테 벨로 17', expectedEntityId: 'w-ridge-monte-bello-2017' },
+  { query: '앙젤뤼스 2012', expectedEntityId: 'w-angelus-2012' },
+  { query: '앙젤뤼스 18', expectedEntityId: 'w-angelus-2018' },
+  { query: '앙젤뤼스 2016', expectedEntityId: 'w-angelus-2016' },
+  // Remaining vintage residue via exact-safe singletons (caymus incl. the "카베르네 2019" strict-
+  // collision surface → exact-safe pins it; opus/solaia/pavie missing vintages; bollinger 2020).
+  { query: '케이머스 19', expectedEntityId: 'w-caymus-cabernet-2019' },
+  { query: '케이머스 카베르네 2019', expectedEntityId: 'w-caymus-cabernet-2019' },
+  { query: '케이머스 2010', expectedEntityId: 'w-caymus-cabernet-2010' },
+  { query: '케이머스 2015', expectedEntityId: 'w-caymus-cabernet-2015' },
+  { query: 'Opus 원 2019', expectedEntityId: 'w-opus-one-2019' },
+  { query: '솔라이아 2016', expectedEntityId: 'w-solaia-2016' },
+  { query: '솔라이아 2019', expectedEntityId: 'w-solaia-2019' },
+  { query: '솔라이아 19', expectedEntityId: 'w-solaia-2019' },
+  { query: '파비 19', expectedEntityId: 'w-pavie-2019' },
+  { query: '볼랭저 20', expectedEntityId: 'w-bollinger-la-grande-annee-2020' },
 ] as const;
 
 export const CORE_KOREAN_ICON_RELEASE_GATE_CASES: readonly CoreKoreanReleaseGateCase[] = [

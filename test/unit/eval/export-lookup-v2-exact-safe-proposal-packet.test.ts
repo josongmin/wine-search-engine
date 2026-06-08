@@ -132,6 +132,78 @@ describe('buildLookupExactSafeProposalPacketRows', () => {
     ]);
   });
 
+  it('fails closed when semantic scope target authority is provided without the approved scope map', () => {
+    expect(() => buildLookupExactSafeProposalPacketRows({
+      draftRows: [
+        {
+          surface: '팔머 2020',
+          locale: 'ko',
+          suggestedAliasType: 'canonical',
+          holeClass: 'realworld_exact_vintage',
+          observedStatus: 'failed',
+          benchmarkGoldHint: 'palmer',
+          benchmarkGoldEntityId: 'wine-ce-palmer-grand-vin',
+          benchmarkGoldEntityIdSource: 'semantic_scope_target_registry',
+          semanticScopeKey: 'line::palmer::::::::2020::qualified::ko',
+          scopeAxis: 'line',
+          familyKey: 'palmer',
+          vintage: 2020,
+          surfaceFormKind: 'qualified',
+          triageBucket: 'auto_targetable',
+          sourceArtifact: '/tmp/sample.json',
+          sourceEvidence: 'reviewed semantic scope authority',
+          reviewedAt: '2026-06-08T00:00:00.000Z',
+        },
+      ],
+    })).toThrow(/requires approved semantic scope target map/);
+  });
+
+  it('does not promote detached-vintage reviewed collision authority into exact-safe proposals', () => {
+    const rows = buildLookupExactSafeProposalPacketRows({
+      draftRows: [
+        {
+          surface: '팔머 2020',
+          locale: 'ko',
+          suggestedAliasType: 'canonical',
+          holeClass: 'realworld_exact_vintage',
+          observedStatus: 'failed',
+          benchmarkGoldHint: 'palmer',
+          benchmarkGoldEntityId: 'wine-ce-palmer-grand-vin',
+          benchmarkGoldEntityIdSource: 'semantic_scope_target_registry',
+          semanticScopeKey: 'line::palmer::::::::2020::qualified::ko',
+          scopeAxis: 'line',
+          familyKey: 'palmer',
+          vintage: 2020,
+          surfaceFormKind: 'qualified',
+          triageBucket: 'auto_targetable',
+          sourceArtifact: '/tmp/sample.json',
+          sourceEvidence: 'reviewed semantic scope authority',
+          reviewedAt: '2026-06-08T00:00:00.000Z',
+        },
+      ],
+      semanticScopeTargetApprovedMap: new Map([
+        ['line::palmer::::::::2020::qualified::ko', {
+          semanticScopeKey: 'line::palmer::::::::2020::qualified::ko',
+          benchmarkGoldHint: 'palmer',
+          normalizedBenchmarkGoldHint: 'palmer',
+          scopeAxis: 'line',
+          familyKey: 'palmer',
+          vintage: 2020,
+          surfaceFormKind: 'qualified',
+          locale: 'ko',
+          entityId: 'wine-ce-palmer-grand-vin',
+          decisionStatus: 'approved',
+          reviewedBy: 'registry',
+          reviewedAt: '2026-06-08T00:00:00.000Z',
+          decisionReason: 'reviewed collision lane',
+          evidenceClass: 'reviewed_collision_family_review',
+        }],
+      ]),
+    });
+
+    expect(rows).toEqual([]);
+  });
+
   it('accepts manual family review targets as exact-safe packet sources', () => {
     const rows = buildLookupExactSafeProposalPacketRowsFromCandidates({
       candidateRows: [
@@ -155,6 +227,67 @@ describe('buildLookupExactSafeProposalPacketRows', () => {
         surface: '칼롱 세귀르',
         entityId: 'wine-ce-calon-segur',
         benchmarkGoldEntityIdSource: 'manual_family_review_target',
+      }),
+    ]);
+  });
+
+  it('overlays reviewed exact-safe scope decisions onto matching proposal rows', () => {
+    const rows = buildLookupExactSafeProposalPacketRowsFromCandidates({
+      candidateRows: [
+        {
+          surface: '페트뤼스',
+          entityId: 'wine-ce-petrus',
+          locale: 'ko',
+          suggestedAliasType: 'translation',
+          holeClass: 'realworld_frenchish_korean_gap',
+          semanticScopeKey: 'family::petrus::::::bare::ko',
+          benchmarkGoldHint: 'petrus',
+          benchmarkGoldEntityIdSource: 'semantic_scope_target_registry',
+          sourceArtifact: '/tmp/manual-family-reviewed.jsonl',
+          sourceEvidence: 'coverage hole [reviewed exact-safe scope reject]',
+          proposedAt: '2026-06-06T00:00:00.000Z',
+        },
+      ],
+      semanticScopeTargetApprovedMap: new Map([
+        ['family::petrus::::::bare::ko', {
+          semanticScopeKey: 'family::petrus::::::bare::ko',
+          benchmarkGoldHint: 'petrus',
+          normalizedBenchmarkGoldHint: 'petrus',
+          scopeAxis: 'family',
+          familyKey: 'petrus',
+          surfaceFormKind: 'bare',
+          locale: 'ko',
+          entityId: 'wine-ce-petrus',
+          decisionStatus: 'approved',
+          reviewedBy: 'registry',
+          reviewedAt: '2026-06-06T00:30:00.000Z',
+          decisionReason: 'reviewed family authority',
+          evidenceClass: 'manual_target_family_review',
+        }],
+      ]),
+      exactSafeScopeRegistryMap: new Map([
+        ['wine-ce-petrus::translation::realworld_frenchish_korean_gap', {
+          reviewScopeKey: 'wine-ce-petrus::translation::realworld_frenchish_korean_gap',
+          entityId: 'wine-ce-petrus',
+          scopeHoleClass: 'realworld_frenchish_korean_gap',
+          scopeSuggestedAliasType: 'translation',
+          decisionStatus: 'rejected',
+          reviewedBy: 'registry',
+          reviewedAt: '2026-06-06T01:00:00.000Z',
+          decisionReason: 'reviewed reject',
+          evidenceClass: 'exact_safe_family_review',
+        }],
+      ]),
+    });
+
+    expect(rows).toEqual([
+      expect.objectContaining({
+        surface: '페트뤼스',
+        entityId: 'wine-ce-petrus',
+        proposalStatus: 'rejected',
+        reviewedBy: 'registry',
+        reviewedAt: '2026-06-06T01:00:00.000Z',
+        decisionReason: 'reviewed reject',
       }),
     ]);
   });

@@ -75,7 +75,26 @@ describe('buildLookupV2ReviewedCollisionFamilyReviewPacketRows', () => {
           ]],
         ]),
       },
-      runtimeDescriptorMap: new Map(),
+      runtimeDescriptorMap: new Map([
+        ['wine-ce-silver-oak-av', {
+          entityId: 'wine-ce-silver-oak-av',
+          canonicalLabel: 'Silver Oak Alexander Valley Cabernet Sauvignon',
+          familyKey: 'silver oak',
+          lineKey: 'alexander valley cabernet sauvignon',
+          regionKey: 'united states',
+          appellationKey: 'alexander valley',
+          vintage: 1984,
+        }],
+        ['wine-ce-silver-oak-napa', {
+          entityId: 'wine-ce-silver-oak-napa',
+          canonicalLabel: 'Silver Oak Napa Valley Cabernet Sauvignon',
+          familyKey: 'silver oak',
+          lineKey: 'napa valley cabernet sauvignon',
+          regionKey: 'united states',
+          appellationKey: 'napa valley',
+          vintage: 2014,
+        }],
+      ]),
     });
 
     expect(rows).toEqual([
@@ -117,6 +136,27 @@ describe('buildLookupV2ReviewedCollisionFamilyReviewPacketRows', () => {
             entityId: 'wine-ce-silver-oak-napa',
             witnessSurface: 'Silver Oak',
             witnessSource: 'producer',
+          },
+        ],
+        runtimeClarificationAxes: ['line', 'appellation', 'vintage'],
+        runtimeCollisionScopeDescriptors: [
+          {
+            entityId: 'wine-ce-silver-oak-av',
+            entityLabel: 'Silver Oak Alexander Valley Cabernet Sauvignon',
+            familyKey: 'silver oak',
+            lineKey: 'alexander valley cabernet sauvignon',
+            regionKey: 'united states',
+            appellationKey: 'alexander valley',
+            vintage: 1984,
+          },
+          {
+            entityId: 'wine-ce-silver-oak-napa',
+            entityLabel: 'Silver Oak Napa Valley Cabernet Sauvignon',
+            familyKey: 'silver oak',
+            lineKey: 'napa valley cabernet sauvignon',
+            regionKey: 'united states',
+            appellationKey: 'napa valley',
+            vintage: 2014,
           },
         ],
         proposedAt: '2026-06-07T01:00:00.000Z',

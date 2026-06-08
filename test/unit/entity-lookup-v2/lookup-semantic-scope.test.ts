@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildLookupQuerySemanticProbe,
+  deriveLookupSemanticEntityDescriptor,
   buildLookupSemanticScopeFromProbe,
   resolveLookupSemanticLocale,
 } from '../../../src/domain/resolver/v2/lookup-semantic-scope.js';
@@ -70,5 +71,28 @@ describe('lookup semantic scope short-vintage parsing', () => {
     expect(resolveLookupSemanticLocale({ query: '솔라이아 2018' })).toBe('ko');
     expect(resolveLookupSemanticLocale({ query: 'Solaia 2018' })).toBe('global');
     expect(resolveLookupSemanticLocale({ query: 'Solaia 2018', locale: 'ko-KR' })).toBe('ko');
+  });
+
+  it('prefers a compact-equivalent reviewed family-core key over the producer spelling variant', () => {
+    const descriptor = deriveLookupSemanticEntityDescriptor({
+      canonicalLabel: "2009 Cos d'Estournel Cos d'Estournel",
+      producer: "Cos d'Estournel",
+      region: 'France',
+      familyCoreKeys: ['cos destournel', 'cos d estournel'],
+    });
+
+    expect(descriptor.familyKey).toBe('cos destournel');
+  });
+
+  it('does not promote a pure region remainder into a line key when a reviewed family-core key exists', () => {
+    const descriptor = deriveLookupSemanticEntityDescriptor({
+      canonicalLabel: '2020 Pol Roger Champagne',
+      producer: 'Pol Roger',
+      region: 'Champagne',
+      familyCoreKeys: ['pol roger'],
+    });
+
+    expect(descriptor.familyKey).toBe('pol roger');
+    expect(descriptor.lineKey).toBeUndefined();
   });
 });

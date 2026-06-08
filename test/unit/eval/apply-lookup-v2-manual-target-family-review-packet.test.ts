@@ -124,4 +124,81 @@ describe('applyLookupV2ManualTargetFamilyReviewPacket', () => {
       }),
     ]);
   });
+
+  it('does not promote detached-vintage reviewed collision approvals into exact-safe proposals', () => {
+    const result = applyLookupV2ManualTargetFamilyReviewPacket({
+      familyRows: [
+        {
+          semanticScopeKey: 'line::palmer::::::::2020::qualified::ko',
+          scopeAxis: 'line',
+          familyKey: 'palmer',
+          vintage: 2020,
+          surfaceFormKind: 'qualified',
+          reviewScopeKey: 'palmer::canonical::realworld_exact_vintage',
+          benchmarkGoldHint: 'palmer',
+          normalizedBenchmarkGoldHint: 'palmer',
+          benchmarkGoldHintVariants: ['palmer'],
+          proposalStatus: 'target_assigned',
+          reviewTarget: 'lookup_reviewed_collision_resolution_v1',
+          scopeHoleClass: 'realworld_exact_vintage',
+          scopeSuggestedAliasType: 'canonical',
+          scopeRisk: 'mixed_vintage_family',
+          locales: ['ko'],
+          surfaces: ['팔머 2020'],
+          holeClasses: ['realworld_exact_vintage'],
+          suggestedAliasTypes: ['canonical'],
+          rowCount: 1,
+          sourceArtifacts: ['/tmp/palmer.json'],
+          sourceEvidenceSamples: ['coverage hole'],
+          proposedAt: '2026-06-08T00:00:00.000Z',
+          targetEntityId: 'wine-ce-palmer-grand-vin',
+          reviewedAt: '2026-06-08T01:00:00.000Z',
+          reviewedBy: 'op',
+          decisionReason: 'reviewed collision flagship anchor',
+        },
+      ],
+      draftRows: [
+        {
+          surface: '팔머 2020',
+          locale: 'ko',
+          suggestedAliasType: 'canonical',
+          holeClass: 'realworld_exact_vintage',
+          observedStatus: 'failed',
+          benchmarkGoldHint: 'palmer',
+          semanticScopeKey: 'line::palmer::::::::2020::qualified::ko',
+          scopeAxis: 'line',
+          familyKey: 'palmer',
+          vintage: 2020,
+          surfaceFormKind: 'qualified',
+          triageBucket: 'scope_target_review',
+          sourceArtifact: '/tmp/palmer.json',
+          sourceEvidence: 'coverage hole',
+          reviewedAt: '2026-06-08T00:00:00.000Z',
+        },
+      ],
+      familyTargetRegistryRows: [
+        {
+          semanticScopeKey: 'line::palmer::::::::2020::qualified::ko',
+          benchmarkGoldHint: 'palmer',
+          normalizedBenchmarkGoldHint: 'palmer',
+          scopeAxis: 'line',
+          familyKey: 'palmer',
+          vintage: 2020,
+          surfaceFormKind: 'qualified',
+          locale: 'ko',
+          entityId: 'wine-ce-palmer-grand-vin',
+          decisionStatus: 'approved',
+          reviewedBy: 'op',
+          reviewedAt: '2026-06-08T01:00:00.000Z',
+          decisionReason: 'reviewed collision flagship anchor',
+          evidenceClass: 'reviewed_collision_family_review',
+        },
+      ],
+      familyTargetRegistryPath: '/tmp/lookup-family-target-registry-merged.jsonl',
+      existingRegistryRows: [],
+    });
+
+    expect(result.targetAssignedFamilies).toBe(1);
+    expect(result.exactSafePacketRows).toEqual([]);
+  });
 });

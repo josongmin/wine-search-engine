@@ -179,6 +179,24 @@ function chooseFamilyKey(args: {
   );
   const producerKey = normalizeSemanticKey(args.producerKey);
   const canonicalKey = normalizeSemanticKey(args.canonicalLabelKey);
+  const producerCompact = compactSemanticKey(args.producerKey);
+  const canonicalCompact = compactSemanticKey(args.canonicalLabelKey);
+  const compactEquivalentCoreKeys = normalizedFamilyCoreKeys
+    .filter((value) => {
+      const compactValue = compactSemanticKey(value);
+      return compactValue.length > 0 && (
+        compactValue === producerCompact
+        || compactValue === canonicalCompact
+      );
+    })
+    .sort((left, right) =>
+      tokenize(left).length - tokenize(right).length
+      || left.length - right.length
+      || left.localeCompare(right),
+    );
+  if (compactEquivalentCoreKeys[0] !== undefined) {
+    return compactEquivalentCoreKeys[0];
+  }
   const embeddedCoreKeys = normalizedFamilyCoreKeys
     .filter((value) =>
       value.length > 0
@@ -214,11 +232,15 @@ function chooseLineKey(args: {
   readonly familyKey: string;
   readonly producerKey: string;
   readonly canonicalLabelKey: string;
+  readonly regionKey?: string | undefined;
+  readonly appellationKey?: string | undefined;
   readonly familyCoreKeys?: readonly string[] | undefined;
 }): string | undefined {
   const familyKey = normalizeSemanticKey(args.familyKey);
   const producerKey = normalizeSemanticKey(args.producerKey);
   const canonicalKey = normalizeSemanticKey(args.canonicalLabelKey);
+  const regionKey = args.regionKey !== undefined ? normalizeSemanticKey(args.regionKey) : undefined;
+  const appellationKey = args.appellationKey !== undefined ? normalizeSemanticKey(args.appellationKey) : undefined;
   const normalizedFamilyCoreKeys = unique(
     (args.familyCoreKeys ?? [])
       .map(normalizeSemanticKey)
@@ -229,10 +251,15 @@ function chooseLineKey(args: {
     removeCommonPrefixTokens(canonicalKey, producerKey),
     ...normalizedFamilyCoreKeys,
   ]).filter((value) => value.length > 0 && value !== familyKey);
-  if (remainderCandidates.length === 0) {
+  const scopeDescriptorRemainders = new Set(
+    [regionKey, appellationKey]
+      .filter((value): value is string => value !== undefined && value.length > 0),
+  );
+  const structuralRemainders = remainderCandidates.filter((value) => !scopeDescriptorRemainders.has(value));
+  if (structuralRemainders.length === 0) {
     return undefined;
   }
-  return remainderCandidates
+  return structuralRemainders
     .slice()
     .sort((left, right) =>
       tokenize(right).length - tokenize(left).length
@@ -286,6 +313,8 @@ export function deriveLookupSemanticEntityDescriptor(args: {
     familyKey,
     producerKey,
     canonicalLabelKey,
+    regionKey: args.region,
+    appellationKey: args.appellation,
     familyCoreKeys: args.familyCoreKeys,
   });
   return {

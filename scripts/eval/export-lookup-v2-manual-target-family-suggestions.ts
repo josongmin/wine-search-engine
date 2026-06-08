@@ -20,7 +20,17 @@ export interface LookupV2ManualTargetFamilySuggestionRow {
   readonly candidateEntityIds?: readonly string[] | undefined;
   readonly candidateEntityLabels?: readonly string[] | undefined;
   readonly candidateWitnesses?: readonly LookupV2RuntimeSurfaceOwnerWitness[] | undefined;
+  readonly runtimeGapReason?: LookupV2ManualTargetFamilyReviewPacketRow['runtimeGapReason'];
+  readonly runtimeGapEntityIds?: readonly string[] | undefined;
+  readonly runtimeGapEntityLabels?: readonly string[] | undefined;
+  readonly runtimeGapAvailableVintages?: readonly number[] | undefined;
+  readonly runtimeGapAvailableLineKeys?: readonly string[] | undefined;
+  readonly runtimeGapAvailableRegionKeys?: readonly string[] | undefined;
+  readonly runtimeGapAvailableAppellationKeys?: readonly string[] | undefined;
+  readonly runtimeClarificationAxes?: LookupV2ManualTargetFamilyReviewPacketRow['runtimeClarificationAxes'];
+  readonly runtimeCollisionScopeDescriptors?: LookupV2ManualTargetFamilyReviewPacketRow['runtimeCollisionScopeDescriptors'];
   readonly sourceEvidence: 'runtime_unique_surface_owner' | 'runtime_colliding_surface_owner' | 'runtime_owner_missing';
+  readonly proposedAt: string;
 }
 
 function isLookupV2ManualTargetFamilyReviewPacketRow(value: unknown): value is LookupV2ManualTargetFamilyReviewPacketRow {
@@ -67,6 +77,7 @@ export function buildLookupV2ManualTargetFamilySuggestions(
           ? { recommendedWitnesses: row.runtimeEvidenceWitnesses }
           : {}),
         sourceEvidence: 'runtime_unique_surface_owner',
+        proposedAt: row.proposedAt,
       };
     }
     if (row.runtimeEvidenceStatus === 'collision_candidates' && row.runtimeCollisionEntityIds !== undefined) {
@@ -83,7 +94,14 @@ export function buildLookupV2ManualTargetFamilySuggestions(
         ...(row.runtimeCollisionWitnesses !== undefined && row.runtimeCollisionWitnesses.length > 0
           ? { candidateWitnesses: row.runtimeCollisionWitnesses }
           : {}),
+        ...(row.runtimeClarificationAxes !== undefined && row.runtimeClarificationAxes.length > 0
+          ? { runtimeClarificationAxes: row.runtimeClarificationAxes }
+          : {}),
+        ...(row.runtimeCollisionScopeDescriptors !== undefined && row.runtimeCollisionScopeDescriptors.length > 0
+          ? { runtimeCollisionScopeDescriptors: row.runtimeCollisionScopeDescriptors }
+          : {}),
         sourceEvidence: 'runtime_colliding_surface_owner',
+        proposedAt: row.proposedAt,
       };
     }
     return {
@@ -94,7 +112,27 @@ export function buildLookupV2ManualTargetFamilySuggestions(
       scopeSuggestedAliasType: row.scopeSuggestedAliasType,
       scopeRisk: row.scopeRisk,
       suggestionStatus: 'missing_runtime_owner',
+      ...(row.runtimeGapReason !== undefined ? { runtimeGapReason: row.runtimeGapReason } : {}),
+      ...(row.runtimeGapEntityIds !== undefined && row.runtimeGapEntityIds.length > 0
+        ? { runtimeGapEntityIds: row.runtimeGapEntityIds }
+        : {}),
+      ...(row.runtimeGapEntityLabels !== undefined && row.runtimeGapEntityLabels.length > 0
+        ? { runtimeGapEntityLabels: row.runtimeGapEntityLabels }
+        : {}),
+      ...(row.runtimeGapAvailableVintages !== undefined && row.runtimeGapAvailableVintages.length > 0
+        ? { runtimeGapAvailableVintages: row.runtimeGapAvailableVintages }
+        : {}),
+      ...(row.runtimeGapAvailableLineKeys !== undefined && row.runtimeGapAvailableLineKeys.length > 0
+        ? { runtimeGapAvailableLineKeys: row.runtimeGapAvailableLineKeys }
+        : {}),
+      ...(row.runtimeGapAvailableRegionKeys !== undefined && row.runtimeGapAvailableRegionKeys.length > 0
+        ? { runtimeGapAvailableRegionKeys: row.runtimeGapAvailableRegionKeys }
+        : {}),
+      ...(row.runtimeGapAvailableAppellationKeys !== undefined && row.runtimeGapAvailableAppellationKeys.length > 0
+        ? { runtimeGapAvailableAppellationKeys: row.runtimeGapAvailableAppellationKeys }
+        : {}),
       sourceEvidence: 'runtime_owner_missing',
+      proposedAt: row.proposedAt,
     };
   }).sort((l, r) => l.reviewScopeKey.localeCompare(r.reviewScopeKey));
 }
@@ -102,8 +140,18 @@ export function buildLookupV2ManualTargetFamilySuggestions(
 export function buildLookupV2ManualTargetSuggestedDecisionRows(
   suggestionRows: readonly LookupV2ManualTargetFamilySuggestionRow[],
 ): readonly LookupV2ManualTargetFamilyReviewDecisionRow[] {
-  void suggestionRows;
-  return [];
+  return suggestionRows
+    .filter((row) => row.suggestionStatus === 'candidate_unique_owner' && row.recommendedEntityId !== undefined)
+    .map((row) => ({
+      reviewScopeKey: row.reviewScopeKey,
+      benchmarkGoldHint: row.benchmarkGoldHint,
+      decision: 'assign_target' as const,
+      entityId: row.recommendedEntityId!,
+      reviewedBy: 'codex:auto-suggest',
+      decisionReason: 'deterministic runtime unique surface owner candidate',
+      reviewedAt: row.proposedAt,
+    }))
+    .sort((left, right) => left.reviewScopeKey.localeCompare(right.reviewScopeKey));
 }
 
 function main(): void {

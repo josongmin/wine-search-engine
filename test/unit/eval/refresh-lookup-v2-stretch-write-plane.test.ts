@@ -66,6 +66,16 @@ describe('refreshLookupV2StretchWritePlaneArtifacts', () => {
       inputArtifact: '/tmp/sample-entity-no-policy.json',
       generatedAt: '2026-06-06T02:00:00.000Z',
       outputDir,
+      coverageReport: {
+        hotEntityCount: 10,
+        coveredCount: 6,
+        holes: [
+          { operatorBucket: 'reviewed_collision', observedReasonCode: 'reviewed_family_collision_requires_clarification' },
+          { operatorBucket: 'reviewed_collision', observedReasonCode: 'reviewed_family_collision_requires_clarification' },
+          { operatorBucket: 'catalog_support_review', observedReasonCode: 'active_entity_absent' },
+          { operatorBucket: 'auto_targetable', observedReasonCode: 'semantic_scope_target_registry' },
+        ],
+      },
       runtimeDescriptorMap: new Map(),
       benchmarkGoldHintMap: new Map([
         ['petrus', 'wine-ce-petrus-hint-only'],
@@ -186,12 +196,29 @@ describe('refreshLookupV2StretchWritePlaneArtifacts', () => {
       reviewedCollision: 1,
       scopeTargetReview: 0,
     });
+    expect(summary.coverageResidue).toEqual({
+      hotEntityCount: 10,
+      coveredCount: 6,
+      uncoveredCount: 4,
+      activeCoverageRatio: 0.6,
+      activeCoveragePercent: 60,
+      operatorBucketCounts: {
+        auto_targetable: 1,
+        catalog_support_review: 1,
+        reviewed_collision: 2,
+      },
+      observedReasonCodeCounts: {
+        active_entity_absent: 1,
+        reviewed_family_collision_requires_clarification: 2,
+        semantic_scope_target_registry: 1,
+      },
+    });
     expect(summary.exactSafe.packetRows).toBe(2);
     expect(summary.exactSafe.bySource).toEqual({
       semantic_policy_registry: 1,
       semantic_scope_target_registry: 1,
     });
-    expect(summary.exactSafe.reviewedAuthorityApprovedRows).toBe(2);
+    expect(summary.exactSafe.reviewedAuthorityApprovedRows).toBe(1);
     expect(summary.exactSafe.reviewedAuthorityPendingRows).toBe(0);
     expect(summary.exactSafe.scopeReviewedRowPacketRows).toBe(2);
     expect(summary.exactSafe.familyApprovedRows).toBe(0);
@@ -203,13 +230,53 @@ describe('refreshLookupV2StretchWritePlaneArtifacts', () => {
     expect(summary.manualTarget.ownerEvidenceIndex.totalRows).toBe(0);
     expect(summary.manualTarget.ownerEvidenceFamilyIndex.totalFamilies).toBe(0);
     expect(summary.manualTarget.ownerEvidenceFamilyIndex.candidateUniqueOwnerFamilies).toBe(0);
+    expect(summary.manualTarget.ownerEvidenceFamilyIndex.gapReasonSignatureCounts).toEqual({});
     expect(summary.manualTarget.ownerEvidenceIndex.candidateUniqueOwnerRows).toBe(0);
     expect(summary.manualTarget.familyReviewRows).toBe(0);
     expect(summary.scopeSupport.familyClusterIndex.totalRows).toBe(1);
     expect(summary.scopeSupport.familyClusterIndex.totalFamilies).toBe(1);
     expect(summary.reviewedCollision.familyClusterIndex.totalRows).toBe(1);
+    expect(summary.reviewedCollision.familyClusterIndex.totalReviewScopeRows).toBe(1);
     expect(summary.reviewedCollision.familyClusterIndex.totalFamilies).toBe(1);
+    expect(summary.reviewedCollision.familyClusterIndex.clarificationAxisCounts).toEqual({
+      none: 1,
+    });
     expect(summary.reviewedCollision.familyReviewRows).toBe(1);
+    expect(summary.ownerDispatch.manifest.totalPackets).toBe(1);
+    expect(summary.ownerDispatch.manifest.packetClassCounts).toEqual({
+      runtime_backfill: 0,
+      manual_target_collision: 0,
+      reviewed_collision_scope: 1,
+    });
+    expect(summary.remainingWork).toEqual({
+      ownerDispatchPackets: 1,
+      ownerDispatchFamilies: 1,
+      ownerDispatchRows: 1,
+      exactSafePendingFamilyRows: 1,
+      runtimeBackfill: {
+        packetCount: 0,
+        familyCount: 0,
+        rowCount: 0,
+        byGapReason: {},
+      },
+      manualTargetCollision: {
+        packetCount: 0,
+        familyCount: 0,
+        rowCount: 0,
+      },
+      reviewedCollisionScope: {
+        packetCount: 1,
+        familyCount: 1,
+        rowCount: 1,
+        byClarificationAxis: {
+          none: {
+            packetCount: 1,
+            familyCount: 1,
+            rowCount: 1,
+          },
+        },
+      },
+    });
     expect(summary.manualTarget.suggestions).toEqual({
       candidateUniqueOwner: 0,
       collisionCandidates: 0,
@@ -220,6 +287,12 @@ describe('refreshLookupV2StretchWritePlaneArtifacts', () => {
     expect(existsSync(summary.outputPaths.reviewedAuthorityApprovedExactSafePacket)).toBe(true);
     expect(existsSync(summary.outputPaths.reviewedScopeExactSafePacket)).toBe(true);
     expect(existsSync(summary.outputPaths.reviewedCollisionFamilyReviewPacket)).toBe(true);
+    expect(existsSync(summary.manualTarget.ownerEvidenceFamilyIndex.outputPaths.gapReasonIndexPath)).toBe(true);
+    expect(existsSync(summary.reviewedCollision.familyClusterIndex.clarificationIndexPath)).toBe(true);
+    expect(existsSync(summary.outputPaths.ownerDispatchManifest)).toBe(true);
+    expect(existsSync(summary.outputPaths.ownerDispatchPacketsDir)).toBe(true);
+    expect(existsSync(path.join(summary.outputPaths.ownerDispatchPacketsDir, 'reviewed-collision-none.review-template.json'))).toBe(true);
+    expect(existsSync(path.join(summary.outputPaths.ownerDispatchPacketsDir, 'reviewed-collision-none.handoff.md'))).toBe(true);
 
     const reviewedAuthorityRows = readFileSync(
       summary.outputPaths.reviewedAuthorityApprovedExactSafePacket,
@@ -238,7 +311,7 @@ describe('refreshLookupV2StretchWritePlaneArtifacts', () => {
       expect.arrayContaining([
         expect.objectContaining({
           surface: '페트뤼스',
-          proposalStatus: 'approved',
+          proposalStatus: 'rejected',
           benchmarkGoldEntityIdSource: 'semantic_scope_target_registry',
         }),
         expect.objectContaining({

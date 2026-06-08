@@ -81,6 +81,10 @@ describe('writeLookupV2ManualTargetOwnerFamilyClusters', () => {
           sourceArtifacts: ['/tmp/c.json'],
           sourceEvidenceSamples: ['hole c'],
           runtimeEvidenceStatus: 'missing_runtime_owner',
+          runtimeGapReason: 'requested_vintage_missing',
+          runtimeGapEntityIds: ['wine-salon-2008'],
+          runtimeGapEntityLabels: ['2008 Salon'],
+          runtimeGapAvailableVintages: [2008],
           proposedAt: '2026-06-06T00:00:00.000Z',
         },
       ],
@@ -95,6 +99,10 @@ describe('writeLookupV2ManualTargetOwnerFamilyClusters', () => {
     expect(index.missingRuntimeOwnerFamilies).toBe(1);
     expect(existsSync(index.outputPaths.collisionCandidateFamilies)).toBe(true);
     expect(existsSync(index.outputPaths.missingRuntimeOwnerFamilies)).toBe(true);
+    expect(existsSync(index.outputPaths.gapReasonIndexPath)).toBe(true);
+    expect(index.gapReasonSignatureCounts).toEqual({
+      requested_vintage_missing: 1,
+    });
 
     const collision = readFileSync(index.outputPaths.collisionCandidateFamilies, 'utf8')
       .trim()
@@ -105,6 +113,19 @@ describe('writeLookupV2ManualTargetOwnerFamilyClusters', () => {
         benchmarkGoldHint: 'beaucastel',
         familyReviewRowCount: 2,
         rowCount: 3,
+      }),
+    ]);
+
+    const missing = readFileSync(index.outputPaths.missingRuntimeOwnerFamilies, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { benchmarkGoldHint: string; runtimeGapReasons?: string[]; runtimeGapAvailableVintages?: number[] });
+    expect(missing).toEqual([
+      expect.objectContaining({
+        benchmarkGoldHint: 'salon',
+        runtimeGapReasons: ['requested_vintage_missing'],
+        runtimeGapReasonSignature: 'requested_vintage_missing',
+        runtimeGapAvailableVintages: [2008],
       }),
     ]);
   });

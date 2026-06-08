@@ -56,6 +56,15 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
       tasks,
       inputArtifact: '/tmp/sample-entity-no-policy.json',
       generatedAt: '2026-06-06T03:00:00.000Z',
+      coverageReport: {
+        hotEntityCount: 8,
+        coveredCount: 5,
+        holes: [
+          { operatorBucket: 'scope_target_missing', observedReasonCode: 'no_match' },
+          { operatorBucket: 'scope_policy_review', observedReasonCode: 'short_form_collision' },
+          { operatorBucket: 'scope_target_missing', observedReasonCode: 'candidate_unique_owner' },
+        ],
+      },
       workDir,
       outputSummaryPath: path.join(workDir, 'summary.json'),
       familyReviewRows: [
@@ -174,6 +183,23 @@ describe('verifyLookupV2StretchReviewedRegistryOverlay', () => {
     });
     expect(summary.semanticScopeTargetRegistryApply.registryInsertedRows).toBe(1);
     expect(summary.semanticPolicyRegistryApply.registryInsertedRows).toBe(1);
+    expect(summary.baseline.coverageResidue).toEqual({
+      hotEntityCount: 8,
+      coveredCount: 5,
+      uncoveredCount: 3,
+      activeCoverageRatio: 0.625,
+      activeCoveragePercent: 62.5,
+      operatorBucketCounts: {
+        scope_policy_review: 1,
+        scope_target_missing: 2,
+      },
+      observedReasonCodeCounts: {
+        candidate_unique_owner: 1,
+        no_match: 1,
+        short_form_collision: 1,
+      },
+    });
+    expect(summary.overlay.coverageResidue).toEqual(summary.baseline.coverageResidue);
     expect(summary.deltas).toEqual({
       draftAutoTargetable: 2,
       draftCatalogSupportReview: 0,

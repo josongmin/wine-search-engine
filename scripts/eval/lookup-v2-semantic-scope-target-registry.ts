@@ -140,6 +140,20 @@ function toScope(row: LookupV2SemanticScopeTargetRegistryRow): Omit<LookupSemant
   };
 }
 
+export function lookupV2SemanticScopeTargetRowAllowsDetachedVintageAuthority(
+  row: LookupV2SemanticScopeTargetRegistryRow,
+): boolean {
+  return (
+    row.decisionStatus === 'approved'
+    && row.evidenceClass === 'reviewed_collision_family_review'
+    && row.scopeAxis === 'line'
+    && row.vintage !== undefined
+    && row.lineKey === undefined
+    && row.regionKey === undefined
+    && row.appellationKey === undefined
+  );
+}
+
 export function assertLookupV2SemanticScopeTargetRegistryRowsValid(args: {
   readonly rows: readonly LookupV2SemanticScopeTargetRegistryRow[];
   readonly runtimeDescriptorMap?: ReadonlyMap<string, {
@@ -183,7 +197,11 @@ export function assertLookupV2SemanticScopeTargetRegistryRowsValid(args: {
     if (row.appellationKey !== undefined && descriptor.appellationKey !== row.appellationKey) {
       throw new Error(`lookup semantic scope target registry appellationKey mismatch for entityId=${JSON.stringify(row.entityId)}`);
     }
-    if (row.vintage !== undefined && descriptor.vintage !== row.vintage) {
+    if (
+      row.vintage !== undefined
+      && descriptor.vintage !== row.vintage
+      && !lookupV2SemanticScopeTargetRowAllowsDetachedVintageAuthority(row)
+    ) {
       throw new Error(`lookup semantic scope target registry vintage mismatch for entityId=${JSON.stringify(row.entityId)}`);
     }
     if (row.scopeAxis === 'line' && row.lineKey === undefined && row.vintage === undefined && row.regionKey === undefined && row.appellationKey === undefined) {

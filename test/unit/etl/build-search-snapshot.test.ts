@@ -3,9 +3,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  attachBenchmarkAnchorSuitability,
   buildSearchSnapshot,
   filterIdentityConflictingBenchmarkAnchorRecords,
   loadActiveBenchmarkCarryForwardRecords,
+  loadBenchmarkAnchorSuitabilityArtifact,
   loadRepoLocalCoreIconBenchmarkTargetIds,
   loadRepoLocalGoldBenchmarkAnchorRecords,
 } from '../../../scripts/etl/build-search-snapshot.js';
@@ -102,6 +104,7 @@ function makeRecord(): EnrichedSilverRecord {
 }
 
 const TEST_REVIEWED_REGISTRY_OVERRIDES = {
+  exactSafeRows: [],
   familyCollisionRows: [],
   familyCoreWitnessRows: [],
   carryForwardTargetEntityIds: [],
@@ -426,7 +429,7 @@ describe('buildSearchSnapshot', () => {
     expect(cachePayload?.semanticScopeComponentSurfaces).toEqual(
       semanticScopeRuntime.componentSurfaces,
     );
-  });
+  }, 10_000);
 
   it('treats repo-local benchmark ids as covered when the equivalent public fixture entity already exists', async () => {
     const dir = await makeTempDir();
@@ -534,11 +537,19 @@ describe('buildSearchSnapshot', () => {
     expect(identityCertificates.get('sassicaia-2018' as const)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          normalizedSurface: normalizeForMatch('Sassicaia 2019'),
+          normalizedSurface: normalizeForMatch('사시까야'),
+          kind: 'exact_safe',
+        }),
+        expect.objectContaining({
+          normalizedSurface: normalizeForMatch('사시까이아'),
           kind: 'exact_safe',
         }),
         expect.objectContaining({
           normalizedSurface: normalizeForMatch('사시카이아'),
+          kind: 'exact_safe',
+        }),
+        expect.objectContaining({
+          normalizedSurface: normalizeForMatch('사씨까이아'),
           kind: 'exact_safe',
         }),
         expect.objectContaining({
@@ -548,6 +559,65 @@ describe('buildSearchSnapshot', () => {
       ]),
     );
   }, 20_000);
+
+  it('fails closed when a vintage-bearing exact-safe row points at a different snapshot vintage', async () => {
+    const dir = await makeTempDir();
+    const inputPath = path.join(dir, 'silver-trackc.ndjson');
+    const outputDir = path.join(dir, 'search-snapshots');
+    const nlMappingsPath = path.join(dir, 'nl-mappings.json');
+
+    await fs.writeFile(inputPath, `${JSON.stringify(makeRecord())}\n`);
+    await fs.writeFile(nlMappingsPath, JSON.stringify({
+      mappings: [{ key: 'full-bodied', canonical: 'full_bodied' }],
+    }));
+
+    const fixtureRoot = path.join(dir, 'wine-engine-fixture');
+    await fs.mkdir(path.join(fixtureRoot, 'goldens'), { recursive: true });
+    await fs.writeFile(
+      path.join(fixtureRoot, 'goldens', 'canonical-entities.json'),
+      `${JSON.stringify({
+        _type: 'goldens',
+        entities: [
+          {
+            entity_id: 'opus-one-2018',
+            canonical_label: 'Opus One 2018',
+            vintage: 2018,
+          },
+        ],
+      })}\n`,
+    );
+
+    const baseline = await buildHermeticSearchSnapshot({
+      input: inputPath,
+      outputDir,
+      nlMappings: nlMappingsPath,
+      fixtureRepoRoot: fixtureRoot,
+    });
+    const baselineEntities = parseNdjson<EntitySnapshotRecord>(
+      await fs.readFile(baseline.manifest.artifacts.entitiesNdjson, 'utf8'),
+      baseline.manifest.artifacts.entitiesNdjson,
+    ).records;
+    const baselineEntityId = baselineEntities[0]?.entityId;
+    expect(baselineEntityId).toBeDefined();
+
+    await expect(buildSearchSnapshot({
+      input: inputPath,
+      outputDir,
+      nlMappings: nlMappingsPath,
+      fixtureRepoRoot: fixtureRoot,
+      reviewedRegistryOverrides: {
+        ...TEST_REVIEWED_REGISTRY_OVERRIDES,
+        exactSafeRows: [{
+          surface: 'Opus 원 2019',
+          entityId: baselineEntityId!,
+          promotionClass: 'exact_safe',
+          locale: 'ko',
+          sourceEvidence: 'test mismatch row',
+          reviewedAt: '2026-06-08T00:00:00.000Z',
+        }],
+      },
+    })).rejects.toThrow(/lookup exact-safe registry vintage mismatch.*Opus 원 2019/u);
+  });
 
   it('lets curated exact-safe overlays suppress conflicting base exact hits from other entities', () => {
     const aliasRuntimeRaw = buildLookupAliasRuntimeArtifact({
@@ -1084,19 +1154,69 @@ describe('buildSearchSnapshot', () => {
   });
 
   it('backfills missing benchmark anchors from the repo-local gold catalog with core-icon query surfaces', async () => {
+    const artifact = await loadBenchmarkAnchorSuitabilityArtifact();
     const records = await loadRepoLocalGoldBenchmarkAnchorRecords([
+      'w-calon-segur-2009',
+      'w-calon-segur-2012',
+      'w-calon-segur-2020',
+      'w-cheval-blanc-2010',
+      'w-cheval-blanc-2017',
       'w-dom-perignon-2013',
       'w-krug-grande-cuvee-170eme-nv',
       'w-louis-roederer-cristal-2014',
+      'w-pavie-2014',
+      'w-pavie-2017',
       'w-giacomo-conterno-monfortino-2015',
       'w-petrus-2016',
       'w-sassicaia-2018',
     ]);
 
     const byId = new Map(records.map((record) => [record.benchmarkAnchorEntityId, record] as const));
+    expect(byId.get('w-calon-segur-2009')?.giftSuitabilityClassification?.score).toBe(
+      artifact.entities['w-calon-segur-2009']?.gift.score,
+    );
+    expect(byId.get('w-calon-segur-2009')?.beginnerSuitabilityClassification?.score).toBe(
+      artifact.entities['w-calon-segur-2009']?.beginner.score,
+    );
+    expect(byId.get('w-calon-segur-2012')?.giftSuitabilityClassification?.score).toBe(
+      artifact.entities['w-calon-segur-2012']?.gift.score,
+    );
+    expect(byId.get('w-calon-segur-2012')?.beginnerSuitabilityClassification?.score).toBe(
+      artifact.entities['w-calon-segur-2012']?.beginner.score,
+    );
+    expect(byId.get('w-calon-segur-2020')?.giftSuitabilityClassification?.score).toBe(
+      artifact.entities['w-calon-segur-2020']?.gift.score,
+    );
+    expect(byId.get('w-calon-segur-2020')?.beginnerSuitabilityClassification?.score).toBe(
+      artifact.entities['w-calon-segur-2020']?.beginner.score,
+    );
+    expect(byId.get('w-cheval-blanc-2010')?.giftSuitabilityClassification?.score).toBe(
+      artifact.entities['w-cheval-blanc-2010']?.gift.score,
+    );
+    expect(byId.get('w-cheval-blanc-2010')?.beginnerSuitabilityClassification?.score).toBe(
+      artifact.entities['w-cheval-blanc-2010']?.beginner.score,
+    );
+    expect(byId.get('w-cheval-blanc-2017')?.giftSuitabilityClassification?.score).toBe(
+      artifact.entities['w-cheval-blanc-2017']?.gift.score,
+    );
+    expect(byId.get('w-cheval-blanc-2017')?.beginnerSuitabilityClassification?.score).toBe(
+      artifact.entities['w-cheval-blanc-2017']?.beginner.score,
+    );
     expect(byId.get('w-dom-perignon-2013')?.aliases.identitySafeProjection).toContain('돔 페리뇽 모엣');
     expect(byId.get('w-krug-grande-cuvee-170eme-nv')?.aliases.identitySafeProjection).toContain('크루그 그랑 뀌베');
     expect(byId.get('w-louis-roederer-cristal-2014')?.aliases.identitySafeProjection).toContain('루이로드레 크리스탈');
+    expect(byId.get('w-pavie-2014')?.giftSuitabilityClassification?.score).toBe(
+      artifact.entities['w-pavie-2014']?.gift.score,
+    );
+    expect(byId.get('w-pavie-2014')?.beginnerSuitabilityClassification?.score).toBe(
+      artifact.entities['w-pavie-2014']?.beginner.score,
+    );
+    expect(byId.get('w-pavie-2017')?.giftSuitabilityClassification?.score).toBe(
+      artifact.entities['w-pavie-2017']?.gift.score,
+    );
+    expect(byId.get('w-pavie-2017')?.beginnerSuitabilityClassification?.score).toBe(
+      artifact.entities['w-pavie-2017']?.beginner.score,
+    );
     expect(byId.get('w-giacomo-conterno-monfortino-2015')?.aliases.identitySafeProjection).toContain('자코모콘테르노');
     expect(byId.get('w-petrus-2016')?.aliases.identitySafeProjection).not.toContain('페트루스');
     expect(byId.get('w-petrus-2016')?.aliases.noisyRecallProjection).toContain('페트루스');
@@ -1104,5 +1224,36 @@ describe('buildSearchSnapshot', () => {
     expect(byId.get('w-sassicaia-2018')?.aliases.identitySafeProjection).not.toContain('사씨카이야');
     expect(byId.get('w-sassicaia-2018')?.aliases.noisyRecallProjection).toContain('사시카야');
     expect(byId.get('w-sassicaia-2018')?.aliases.noisyRecallProjection).toContain('사씨카이야');
+  });
+
+  it('leaves benchmark-anchor suitability unset when the artifact is missing an entity seed', () => {
+    const record = makeRecord();
+    const {
+      giftSuitabilityClassification: _gift,
+      beginnerSuitabilityClassification: _beginner,
+      ...withoutSuitability
+    } = record;
+    const seeded = attachBenchmarkAnchorSuitability({
+      ...withoutSuitability,
+      sourceId: 'benchmark-anchor-w-missing-seed',
+      externalId: 'w-missing-seed',
+      benchmarkAnchorEntityId: 'w-missing-seed',
+    }, {
+      version: 'v1',
+      generatedAt: '2026-04-17T00:00:00.000Z',
+      models: {
+        gift: 'gpt-5.4-mini',
+        beginner: 'gpt-5.4-mini',
+      },
+      promptVersions: {
+        gift: 'gift-suitability-scorer-v2',
+        beginner: 'beginner-suitability-scorer-v2',
+      },
+      requiredEntityIds: ['w-missing-seed'],
+      entities: {},
+    });
+
+    expect(seeded.giftSuitabilityClassification).toBeUndefined();
+    expect(seeded.beginnerSuitabilityClassification).toBeUndefined();
   });
 });

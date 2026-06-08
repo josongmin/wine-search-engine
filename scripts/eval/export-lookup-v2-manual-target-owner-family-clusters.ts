@@ -25,6 +25,15 @@ export interface LookupV2ManualTargetOwnerEvidenceFamilyClusterRow {
   readonly runtimeCollisionEntityIds?: readonly string[] | undefined;
   readonly runtimeCollisionEntityLabels?: readonly string[] | undefined;
   readonly runtimeCollisionWitnesses?: readonly LookupV2ManualTargetFamilyReviewPacketRow['runtimeCollisionWitnesses'] | undefined;
+  readonly runtimeGapReasons?: readonly LookupV2ManualTargetFamilyReviewPacketRow['runtimeGapReason'][] | undefined;
+  readonly runtimeGapReasonSignature?: string | undefined;
+  readonly runtimeGapEntityIds?: readonly string[] | undefined;
+  readonly runtimeGapEntityLabels?: readonly string[] | undefined;
+  readonly runtimeGapAvailableVintages?: readonly number[] | undefined;
+  readonly runtimeGapAvailableLineKeys?: readonly string[] | undefined;
+  readonly runtimeGapAvailableRegionKeys?: readonly string[] | undefined;
+  readonly runtimeGapAvailableAppellationKeys?: readonly string[] | undefined;
+  readonly runtimeClarificationAxes?: readonly NonNullable<LookupV2ManualTargetFamilyReviewPacketRow['runtimeClarificationAxes']>[number][] | undefined;
 }
 
 export interface LookupV2ManualTargetOwnerEvidenceFamilyClusterIndex {
@@ -39,7 +48,10 @@ export interface LookupV2ManualTargetOwnerEvidenceFamilyClusterIndex {
     readonly candidateUniqueOwnerFamilies: string;
     readonly collisionCandidateFamilies: string;
     readonly missingRuntimeOwnerFamilies: string;
+    readonly gapReasonDir: string;
+    readonly gapReasonIndexPath: string;
   };
+  readonly gapReasonSignatureCounts: Readonly<Record<string, number>>;
 }
 
 function isLookupV2ManualTargetFamilyReviewPacketRow(value: unknown): value is LookupV2ManualTargetFamilyReviewPacketRow {
@@ -70,6 +82,22 @@ function serializeJsonl(rows: readonly unknown[]): string {
 
 function sortUnique(values: readonly string[]): readonly string[] {
   return [...new Set(values)].sort((left, right) => left.localeCompare(right));
+}
+
+function sortUniqueNumbers(values: readonly number[]): readonly number[] {
+  return [...new Set(values)].sort((left, right) => left - right);
+}
+
+function buildGapReasonSignature(
+  reasons: readonly NonNullable<LookupV2ManualTargetFamilyReviewPacketRow['runtimeGapReason']>[],
+): string {
+  return reasons.join('+');
+}
+
+function buildGapReasonFileStem(signature: string): string {
+  return signature
+    .replaceAll('+', '__')
+    .replaceAll('_', '-');
 }
 
 function buildClusterRows(
@@ -111,8 +139,76 @@ function buildClusterRows(
         ...(exemplar.runtimeCollisionEntityIds !== undefined ? { runtimeCollisionEntityIds: exemplar.runtimeCollisionEntityIds } : {}),
         ...(exemplar.runtimeCollisionEntityLabels !== undefined ? { runtimeCollisionEntityLabels: exemplar.runtimeCollisionEntityLabels } : {}),
         ...(exemplar.runtimeCollisionWitnesses !== undefined ? { runtimeCollisionWitnesses: exemplar.runtimeCollisionWitnesses } : {}),
+        ...(rows.some((row) => row.runtimeGapReason !== undefined)
+          ? {
+              runtimeGapReasons: sortUnique(
+                rows
+                  .map((row) => row.runtimeGapReason)
+                  .filter((value): value is string => value !== undefined),
+              ) as readonly LookupV2ManualTargetFamilyReviewPacketRow['runtimeGapReason'][],
+            }
+          : {}),
+        ...(rows.some((row) => row.runtimeGapEntityIds !== undefined && row.runtimeGapEntityIds.length > 0)
+          ? {
+              runtimeGapEntityIds: sortUnique(
+                rows.flatMap((row) => row.runtimeGapEntityIds ?? []),
+              ),
+            }
+          : {}),
+        ...(rows.some((row) => row.runtimeGapEntityLabels !== undefined && row.runtimeGapEntityLabels.length > 0)
+          ? {
+              runtimeGapEntityLabels: sortUnique(
+                rows.flatMap((row) => row.runtimeGapEntityLabels ?? []),
+              ),
+            }
+          : {}),
+        ...(rows.some((row) => row.runtimeGapAvailableVintages !== undefined && row.runtimeGapAvailableVintages.length > 0)
+          ? {
+              runtimeGapAvailableVintages: sortUniqueNumbers(
+                rows.flatMap((row) => row.runtimeGapAvailableVintages ?? []),
+              ),
+            }
+          : {}),
+        ...(rows.some((row) => row.runtimeGapAvailableLineKeys !== undefined && row.runtimeGapAvailableLineKeys.length > 0)
+          ? {
+              runtimeGapAvailableLineKeys: sortUnique(
+                rows.flatMap((row) => row.runtimeGapAvailableLineKeys ?? []),
+              ),
+            }
+          : {}),
+        ...(rows.some((row) => row.runtimeGapAvailableRegionKeys !== undefined && row.runtimeGapAvailableRegionKeys.length > 0)
+          ? {
+              runtimeGapAvailableRegionKeys: sortUnique(
+                rows.flatMap((row) => row.runtimeGapAvailableRegionKeys ?? []),
+              ),
+            }
+          : {}),
+        ...(rows.some((row) => row.runtimeGapAvailableAppellationKeys !== undefined && row.runtimeGapAvailableAppellationKeys.length > 0)
+          ? {
+              runtimeGapAvailableAppellationKeys: sortUnique(
+                rows.flatMap((row) => row.runtimeGapAvailableAppellationKeys ?? []),
+              ),
+            }
+          : {}),
+        ...(rows.some((row) => row.runtimeClarificationAxes !== undefined && row.runtimeClarificationAxes.length > 0)
+          ? {
+              runtimeClarificationAxes: sortUnique(
+                rows.flatMap((row) => row.runtimeClarificationAxes ?? []),
+              ) as readonly NonNullable<LookupV2ManualTargetFamilyReviewPacketRow['runtimeClarificationAxes']>[number][],
+            }
+          : {}),
       };
     })
+    .map((row) => ({
+      ...row,
+      ...(row.runtimeGapReasons !== undefined && row.runtimeGapReasons.length > 0
+        ? {
+            runtimeGapReasonSignature: buildGapReasonSignature(
+              row.runtimeGapReasons as readonly NonNullable<LookupV2ManualTargetFamilyReviewPacketRow['runtimeGapReason']>[],
+            ),
+          }
+        : {}),
+    }))
     .sort((left, right) => left.normalizedBenchmarkGoldHint.localeCompare(right.normalizedBenchmarkGoldHint));
 }
 
@@ -132,11 +228,44 @@ export function writeLookupV2ManualTargetOwnerFamilyClusters(args: {
     candidateUniqueOwnerFamilies: path.join(args.outputDir, 'candidate-unique-owner-families.jsonl'),
     collisionCandidateFamilies: path.join(args.outputDir, 'collision-candidate-families.jsonl'),
     missingRuntimeOwnerFamilies: path.join(args.outputDir, 'missing-runtime-owner-families.jsonl'),
+    gapReasonDir: path.join(args.outputDir, 'missing-runtime-owner-families-by-gap-reason'),
+    gapReasonIndexPath: path.join(args.outputDir, 'missing-runtime-owner-families-by-gap-reason', 'gap-reason-index.json'),
   };
 
   writeFileSync(outputPaths.candidateUniqueOwnerFamilies, serializeJsonl(candidateUniqueOwnerFamilies), 'utf8');
   writeFileSync(outputPaths.collisionCandidateFamilies, serializeJsonl(collisionCandidateFamilies), 'utf8');
   writeFileSync(outputPaths.missingRuntimeOwnerFamilies, serializeJsonl(missingRuntimeOwnerFamilies), 'utf8');
+
+  mkdirSync(outputPaths.gapReasonDir, { recursive: true });
+  const gapReasonGroups = new Map<string, LookupV2ManualTargetOwnerEvidenceFamilyClusterRow[]>();
+  for (const row of missingRuntimeOwnerFamilies) {
+    const signature = row.runtimeGapReasonSignature ?? 'unknown';
+    const existing = gapReasonGroups.get(signature) ?? [];
+    existing.push(row);
+    gapReasonGroups.set(signature, existing);
+  }
+  const gapReasonSignatureCounts = Object.fromEntries(
+    [...gapReasonGroups.entries()]
+      .sort((left, right) => left[0].localeCompare(right[0]))
+      .map(([signature, rows]) => [signature, rows.length]),
+  ) as Readonly<Record<string, number>>;
+  for (const [signature, rows] of gapReasonGroups.entries()) {
+    writeFileSync(
+      path.join(outputPaths.gapReasonDir, `${buildGapReasonFileStem(signature)}.jsonl`),
+      serializeJsonl(rows),
+      'utf8',
+    );
+  }
+  writeFileSync(
+    outputPaths.gapReasonIndexPath,
+    JSON.stringify({
+      sourcePacketPath: args.sourcePacketPath,
+      generatedAt: args.generatedAt,
+      totalFamilies: missingRuntimeOwnerFamilies.length,
+      gapReasonSignatureCounts,
+    }, null, 2) + '\n',
+    'utf8',
+  );
 
   const index: LookupV2ManualTargetOwnerEvidenceFamilyClusterIndex = {
     sourcePacketPath: args.sourcePacketPath,
@@ -147,6 +276,7 @@ export function writeLookupV2ManualTargetOwnerFamilyClusters(args: {
     collisionCandidateFamilies: collisionCandidateFamilies.length,
     missingRuntimeOwnerFamilies: missingRuntimeOwnerFamilies.length,
     outputPaths,
+    gapReasonSignatureCounts,
   };
   writeFileSync(path.join(args.outputDir, 'family-index.json'), JSON.stringify(index, null, 2) + '\n', 'utf8');
   return index;

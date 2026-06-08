@@ -111,6 +111,41 @@ describe('buildLookupV2ExactSafeFamilyReviewPacketRows', () => {
     ]);
   });
 
+  it('preserves reviewed proposal status when the row packet is already scope-reviewed', () => {
+    const rows = buildLookupV2ExactSafeFamilyReviewPacketRows({
+      packetRows: [
+        {
+          surface: '페트뤼스',
+          entityId: 'wine-ce-petrus',
+          candidatePromotionClass: 'exact_safe',
+          locale: 'ko',
+          proposalStatus: 'rejected',
+          reviewTarget: 'lookup_exact_safe_registry_v1',
+          suggestedAliasType: 'translation',
+          holeClass: 'realworld_frenchish_korean_gap',
+          benchmarkGoldHint: 'petrus',
+          benchmarkGoldEntityIdSource: 'semantic_scope_target_registry',
+          sourceArtifact: '/tmp/a.json',
+          sourceEvidence: 'coverage hole A',
+          proposedAt: '2026-06-05T00:00:00.000Z',
+          reviewedBy: 'registry',
+          reviewedAt: '2026-06-06T00:00:00.000Z',
+          decisionReason: 'reviewed reject',
+        },
+      ],
+    });
+
+    expect(rows).toEqual([
+      expect.objectContaining({
+        reviewScopeKey: 'wine-ce-petrus::translation::realworld_frenchish_korean_gap',
+        proposalStatus: 'rejected',
+        reviewedBy: 'registry',
+        reviewedAt: '2026-06-06T00:00:00.000Z',
+        decisionReason: 'reviewed reject',
+      }),
+    ]);
+  });
+
   it('overlays reviewed exact-safe scope registry decisions onto matching family rows only', () => {
     const rows = applyLookupV2ExactSafeScopeRegistryToFamilyReviewPacketRows({
       familyRows: [

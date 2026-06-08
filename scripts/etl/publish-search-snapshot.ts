@@ -813,6 +813,7 @@ async function waitForVespaSnapshotSearchVisibility(args: {
   readonly snapshotId: string;
   readonly expectedDocIds: readonly string[];
 }): Promise<void> {
+  const uniqueExpectedDocIds = uniqueSnapshotDocIds(args.expectedDocIds);
   const deadline = Date.now() + VESPA_SNAPSHOT_VISIBILITY_TIMEOUT_MS;
   let lastCount = -1;
   let lastMissingDocIds: readonly string[] = [];
@@ -821,10 +822,10 @@ async function waitForVespaSnapshotSearchVisibility(args: {
   while (Date.now() <= deadline) {
     const liveCount = await fetchLiveVespaSnapshotDocumentCount(args.snapshotId);
     lastCount = liveCount;
-    if (liveCount === args.expectedDocIds.length) {
+    if (liveCount === uniqueExpectedDocIds.length) {
       const liveDocIds = await loadLiveVespaSnapshotDocIds(args.snapshotId);
       const diff = diffSnapshotVespaDocIds({
-        expectedDocIds: args.expectedDocIds,
+        expectedDocIds: uniqueExpectedDocIds,
         liveDocIds,
       });
       lastMissingDocIds = diff.missingDocIds;
@@ -836,17 +837,30 @@ async function waitForVespaSnapshotSearchVisibility(args: {
     await new Promise((resolve) => setTimeout(resolve, VESPA_SNAPSHOT_VISIBILITY_POLL_MS));
   }
 
-  if (lastCount === args.expectedDocIds.length && lastMissingDocIds.length === 0 && lastStaleDocIds.length === 0) {
+  if (lastCount === uniqueExpectedDocIds.length && lastMissingDocIds.length === 0 && lastStaleDocIds.length === 0) {
     return;
   }
 
   throw new Error(
     `Vespa search visibility did not converge for ${args.snapshotId}: `
-    + `visible=${lastCount}, expected=${args.expectedDocIds.length}, `
+    + `visible=${lastCount}, expected=${uniqueExpectedDocIds.length}, `
     + `missing=${lastMissingDocIds.length}, stale=${lastStaleDocIds.length}, `
     + `missing_sample=${lastMissingDocIds.slice(0, 5).join(',') || '<none>'}, `
     + `stale_sample=${lastStaleDocIds.slice(0, 5).join(',') || '<none>'}`,
   );
+}
+
+export function uniqueSnapshotDocIds(docIds: readonly string[]): readonly string[] {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const docId of docIds) {
+    if (seen.has(docId)) {
+      continue;
+    }
+    seen.add(docId);
+    unique.push(docId);
+  }
+  return unique;
 }
 
 export function diffSnapshotVespaDocIds(args: {
@@ -856,10 +870,11 @@ export function diffSnapshotVespaDocIds(args: {
   readonly missingDocIds: readonly string[];
   readonly staleDocIds: readonly string[];
 } {
-  const expectedSet = new Set(args.expectedDocIds);
+  const uniqueExpectedDocIds = uniqueSnapshotDocIds(args.expectedDocIds);
+  const expectedSet = new Set(uniqueExpectedDocIds);
   const liveSet = new Set(args.liveDocIds);
   return {
-    missingDocIds: args.expectedDocIds.filter((docId) => !liveSet.has(docId)),
+    missingDocIds: uniqueExpectedDocIds.filter((docId) => !liveSet.has(docId)),
     staleDocIds: args.liveDocIds.filter((docId) => !expectedSet.has(docId)),
   };
 }
@@ -878,7 +893,7 @@ async function reconcileTargetSnapshotVespaDocuments(
   snapshotId: string,
   expectedDocs: readonly PreparedVespaFeedDocument[],
 ): Promise<void> {
-  const expectedDocIds = expectedDocs.map((doc) => doc.id);
+  const expectedDocIds = uniqueSnapshotDocIds(expectedDocs.map((doc) => doc.id));
   const expectedDocIndex = buildPreparedDocIndex(expectedDocs);
   let lastMissingDocIds: readonly string[] = [];
   let lastStaleDocIds: readonly string[] = [];
@@ -1278,7 +1293,7 @@ async function run(): Promise<void> {
         await fs.readFile(manifestWithExactFeed.artifacts.vespaFeedNdjson, 'utf8'),
         manifestWithExactFeed.artifacts.vespaFeedNdjson,
       );
-      const newSnapshotPreparedDocIds = newSnapshotPreparedDocs.map((doc) => doc.id);
+      const newSnapshotPreparedDocIds = uniqueSnapshotDocIds(newSnapshotPreparedDocs.map((doc) => doc.id));
       const artifactCoverage = await assertSnapshotArtifactCriticalWineTypeCoverage(
         manifestWithExactFeed,
       );
