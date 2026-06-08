@@ -1,0 +1,3 @@
+# Self-contained workspace root so this app installs independently of the
+# parent wine-search-engine pnpm workspace. Run installs from THIS directory.
+packages: []

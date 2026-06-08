@@ -27,6 +27,7 @@ export default defineConfig({
       'test/e2e/golden-set.test.ts',
       'test/e2e/wine-search-api.test.ts',
       'test/e2e/error-envelope.contract.test.ts',
+      'test/e2e/lookup-v2-write-plane-cli.contract.test.ts',
     ],
     testTimeout: 30_000,
     hookTimeout: 30_000,

@@ -713,47 +713,66 @@ function main(): void {
       inputArtifact: { type: 'string', default: '/tmp/lookup-v2-coverage-korean-realworld-stretch-entity-no-policy.json' },
       outputDir: { type: 'string', default: lookupV2DraftCliPath() },
       generatedAt: { type: 'string', default: new Date().toISOString() },
-      manualTargetCollisionSource: { type: 'string', default: lookupV2DraftCliPath('manual-target-owner-evidence/collision-candidate-families.jsonl') },
-      manualTargetCollisionPacket: { type: 'string', default: lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-manual-target-family-review-packet.jsonl') },
-      runtimeBackfillByGapReasonDir: { type: 'string', default: lookupV2DraftCliPath('manual-target-owner-evidence/missing-runtime-owner-families-by-gap-reason') },
-      reviewedCollisionByClarificationAxisDir: { type: 'string', default: lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-reviewed-collision-family-clusters-by-clarification-axis') },
-      reviewedCollisionPacket: { type: 'string', default: lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-reviewed-collision-family-review-packet.jsonl') },
-      manifest: { type: 'string', default: lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-owner-dispatch-manifest.json') },
-      packetsDir: { type: 'string', default: lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-owner-dispatch-packets') },
+      manualTargetCollisionSource: { type: 'string' },
+      manualTargetCollisionPacket: { type: 'string' },
+      runtimeBackfillByGapReasonDir: { type: 'string' },
+      reviewedCollisionByClarificationAxisDir: { type: 'string' },
+      reviewedCollisionPacket: { type: 'string' },
+      manifest: { type: 'string' },
+      packetsDir: { type: 'string' },
     },
   });
 
+  const resolvedOutputDir = resolveCliDataPathArg(values.outputDir ?? lookupV2DraftCliPath());
+  const resolveOutputScopedPath = (pathLike: string | undefined, outputRelativePath: string): string =>
+    pathLike !== undefined
+      ? resolveCliDataPathArg(pathLike)
+      : path.join(resolvedOutputDir, outputRelativePath);
+  const manualTargetCollisionSourcePath = resolveOutputScopedPath(
+    values.manualTargetCollisionSource,
+    'manual-target-owner-evidence/collision-candidate-families.jsonl',
+  );
+  const manualTargetCollisionPacketPath = resolveOutputScopedPath(
+    values.manualTargetCollisionPacket,
+    'lookup-v2-korean-realworld-stretch-manual-target-family-review-packet.jsonl',
+  );
+  const runtimeBackfillByGapReasonDir = resolveOutputScopedPath(
+    values.runtimeBackfillByGapReasonDir,
+    'manual-target-owner-evidence/missing-runtime-owner-families-by-gap-reason',
+  );
+  const reviewedCollisionByClarificationAxisDir = resolveOutputScopedPath(
+    values.reviewedCollisionByClarificationAxisDir,
+    'lookup-v2-korean-realworld-stretch-reviewed-collision-family-clusters-by-clarification-axis',
+  );
+  const reviewedCollisionPacketPath = resolveOutputScopedPath(
+    values.reviewedCollisionPacket,
+    'lookup-v2-korean-realworld-stretch-reviewed-collision-family-review-packet.jsonl',
+  );
+  const manifestPath = resolveOutputScopedPath(
+    values.manifest,
+    'lookup-v2-korean-realworld-stretch-owner-dispatch-manifest.json',
+  );
+  const packetsDir = resolveOutputScopedPath(
+    values.packetsDir,
+    'lookup-v2-korean-realworld-stretch-owner-dispatch-packets',
+  );
   const manifest = writeLookupV2StretchOwnerDispatchManifest({
     inputArtifact: resolveCliDataPathArg(values.inputArtifact ?? '/tmp/lookup-v2-coverage-korean-realworld-stretch-entity-no-policy.json'),
-    outputDir: resolveCliDataPathArg(values.outputDir ?? lookupV2DraftCliPath()),
+    outputDir: resolvedOutputDir,
     generatedAt: values.generatedAt ?? new Date().toISOString(),
-    manualTargetCollisionSourcePath: resolveCliDataPathArg(
-      values.manualTargetCollisionSource ?? lookupV2DraftCliPath('manual-target-owner-evidence/collision-candidate-families.jsonl'),
-    ),
-    manualTargetCollisionPacketPath: resolveCliDataPathArg(
-      values.manualTargetCollisionPacket ?? lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-manual-target-family-review-packet.jsonl'),
-    ),
-    runtimeBackfillByGapReasonDir: resolveCliDataPathArg(
-      values.runtimeBackfillByGapReasonDir ?? lookupV2DraftCliPath('manual-target-owner-evidence/missing-runtime-owner-families-by-gap-reason'),
-    ),
-    reviewedCollisionByClarificationAxisDir: resolveCliDataPathArg(
-      values.reviewedCollisionByClarificationAxisDir ?? lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-reviewed-collision-family-clusters-by-clarification-axis'),
-    ),
-    reviewedCollisionPacketPath: resolveCliDataPathArg(
-      values.reviewedCollisionPacket ?? lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-reviewed-collision-family-review-packet.jsonl'),
-    ),
-    manifestPath: resolveCliDataPathArg(
-      values.manifest ?? lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-owner-dispatch-manifest.json'),
-    ),
-    packetsDir: resolveCliDataPathArg(
-      values.packetsDir ?? lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-owner-dispatch-packets'),
-    ),
+    manualTargetCollisionSourcePath,
+    manualTargetCollisionPacketPath,
+    runtimeBackfillByGapReasonDir,
+    reviewedCollisionByClarificationAxisDir,
+    reviewedCollisionPacketPath,
+    manifestPath,
+    packetsDir,
   });
 
   console.log(`[elv2-owner-dispatch] total_packets=${manifest.totalPackets}`);
   console.log(`[elv2-owner-dispatch] packet_class_counts=${JSON.stringify(manifest.packetClassCounts)}`);
-  console.log(`[elv2-owner-dispatch] manifest=${resolveCliDataPathArg(values.manifest ?? lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-owner-dispatch-manifest.json'))}`);
-  console.log(`[elv2-owner-dispatch] packets_dir=${resolveCliDataPathArg(values.packetsDir ?? lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-owner-dispatch-packets'))}`);
+  console.log(`[elv2-owner-dispatch] manifest=${manifestPath}`);
+  console.log(`[elv2-owner-dispatch] packets_dir=${packetsDir}`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

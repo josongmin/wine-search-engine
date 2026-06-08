@@ -24,6 +24,7 @@ const DRAFT_PATH_AUTHORITY_SCRIPTS = [
   'scripts/eval/export-lookup-v2-policy-family-review-packet.ts',
   'scripts/eval/export-lookup-v2-policy-family-suggestions.ts',
   'scripts/eval/export-lookup-v2-policy-review-packet.ts',
+  'scripts/eval/export-lookup-v2-stretch-owner-dispatch-manifest.ts',
   'scripts/eval/export-lookup-v2-reviewed-collision-family-clusters.ts',
   'scripts/eval/export-lookup-v2-reviewed-collision-family-review-packet.ts',
   'scripts/eval/export-lookup-v2-scope-support-family-clusters.ts',

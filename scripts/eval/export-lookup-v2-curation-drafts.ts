@@ -19,8 +19,11 @@ import {
   loadLookupV2SemanticScopeTargetRejectedMapSync,
   type LookupV2SemanticScopeTargetRegistryRow,
 } from './lookup-v2-semantic-scope-target-registry.js';
-import type { LookupPolicyConflictRegistryRow } from './lookup-v2-policy-conflict-registry.js';
-import { loadLookupPolicyConflictBenchmarkHintOwnerMapSync } from './lookup-v2-policy-conflict-registry.js';
+import {
+  DEFAULT_LOOKUP_POLICY_CONFLICT_REGISTRY_PATH,
+  loadLookupPolicyConflictBenchmarkHintOwnerMapSync,
+  type LookupPolicyConflictRegistryRow,
+} from './lookup-v2-policy-conflict-registry.js';
 import {
   DEFAULT_LOOKUP_V2_SEMANTIC_POLICY_REGISTRY_PATH,
   buildLookupV2SemanticPolicyRegistryKey,
@@ -346,22 +349,25 @@ export function buildLookupV2CurationDraftRowsWithRuntimeDescriptors(
     })) {
       return [];
     }
-    if (semanticPolicyDecision?.decision === 'keep_ambiguous' || semanticPolicyDecision?.decision === 'needs_scope_target') {
-      if (task.operatorBucket !== 'family_surface_gap' && task.operatorBucket !== 'qualified_scope_surface_gap') {
-        return [];
-      }
-    }
+    const isLocalizedSurfaceGap =
+      task.operatorBucket === 'family_surface_gap'
+      || task.operatorBucket === 'qualified_scope_surface_gap';
+    const reviewedKeepAmbiguous =
+      semanticPolicyDecision?.decision === 'keep_ambiguous'
+      && !isLocalizedSurfaceGap;
     const triageBucket = rejectedSemanticTarget !== undefined
       ? 'reviewed_rejected'
       : semanticScopeSupportRegistryRow !== undefined
         ? 'catalog_support_review'
       : isPendingPolicyReview
         ? 'scope_policy_review'
+        : reviewedKeepAmbiguous
+          ? 'reviewed_rejected'
         : reviewedAuthorityEntityId !== undefined
           ? 'auto_targetable'
       : familyCollisionRegistryRow?.collisionStatus === 'active_entity_collision'
         ? 'reviewed_collision'
-        : task.operatorBucket === 'family_surface_gap' || task.operatorBucket === 'qualified_scope_surface_gap'
+        : isLocalizedSurfaceGap
           ? 'localized_surface_review'
           : 'scope_target_review';
     return [{
@@ -434,6 +440,7 @@ function main(): void {
       input: { type: 'string', default: '/tmp/lookup-v2-coverage-korean-realworld-stretch-entity-no-policy.json' },
       output: { type: 'string', default: lookupV2DraftCliPath('lookup-v2-curation-draft.jsonl') },
       semanticScopeTargetRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_TARGET_REGISTRY_PATH },
+      policyConflictRegistry: { type: 'string', default: DEFAULT_LOOKUP_POLICY_CONFLICT_REGISTRY_PATH },
       semanticPolicyRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_SEMANTIC_POLICY_REGISTRY_PATH },
       semanticScopeSupportRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_SUPPORT_REGISTRY_PATH },
       familySupportRegistry: { type: 'string' },
@@ -445,6 +452,7 @@ function main(): void {
   const inputPath = values.input ?? '/tmp/lookup-v2-coverage-korean-realworld-stretch-entity-no-policy.json';
   const outputPath = resolveCliDataPathArg(values.output ?? lookupV2DraftCliPath('lookup-v2-curation-draft.jsonl'));
   const semanticScopeTargetRegistryPath = values.semanticScopeTargetRegistry ?? DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_TARGET_REGISTRY_PATH;
+  const policyConflictRegistryPath = values.policyConflictRegistry ?? DEFAULT_LOOKUP_POLICY_CONFLICT_REGISTRY_PATH;
   const semanticPolicyRegistryPath = values.semanticPolicyRegistry ?? DEFAULT_LOOKUP_V2_SEMANTIC_POLICY_REGISTRY_PATH;
   const semanticScopeSupportRegistryPath = values.semanticScopeSupportRegistry
     ?? values.familySupportRegistry
@@ -465,7 +473,7 @@ function main(): void {
     undefined,
     loadLookupV2SemanticScopeTargetApprovedMapSync(semanticScopeTargetRegistryPath),
     loadLookupV2SemanticScopeTargetRejectedMapSync(semanticScopeTargetRegistryPath),
-    undefined,
+    loadLookupPolicyConflictBenchmarkHintOwnerMapSync(policyConflictRegistryPath),
     loadLookupV2SemanticPolicyRegistryMapSync(semanticPolicyRegistryPath),
     loadLookupV2SemanticScopeSupportRegistryMapSync(semanticScopeSupportRegistryPath),
     loadLookupV2FamilyCollisionRegistryMapSync(familyCollisionRegistryPath),

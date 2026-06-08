@@ -669,4 +669,124 @@ describe('buildLookupV2CurationDraftRows', () => {
       operatorBucket: 'family_surface_gap',
     }));
   });
+
+  it('keeps reviewed keep_ambiguous scope-target holes visible as reviewed_rejected rows', () => {
+    const [row] = buildLookupV2CurationDraftRowsWithRuntimeDescriptors(
+      [
+        {
+          surfaceForm: '라뚜르 2009',
+          holeClass: 'realworld_exact_vintage',
+          observedStatus: 'failed',
+          suggestedAliasType: 'canonical',
+          status: 'needs_target',
+          benchmarkGoldHint: 'latour',
+          reason: 'Hot-entity coverage hole',
+          operatorBucket: 'scope_target_missing',
+        },
+      ],
+      '/tmp/sample-coverage.json',
+      '2026-06-09T00:00:00.000Z',
+      buildRuntimeDescriptorMap([]),
+      new Map([['latour', 'wine-ce-latour']]),
+      new Map(),
+      new Map(),
+      new Map([
+        ['latour', {
+          surface: '라뚜르',
+          locale: 'ko',
+          stretchExpectedStatus: 'ambiguous',
+          authorityStatus: 'resolved',
+          authorityEntityId: 'wine-ce-latour',
+          conflictType: 'short_form_collision',
+          conflictBenchmarkHints: ['latour'],
+          sourceEvidence: 'seed',
+          reviewedAt: '2026-06-09T00:00:00.000Z',
+        }],
+      ]),
+      new Map([
+        ['line::latour::::::::2009::qualified::ko::wine-ce-latour', {
+          semanticConflictKey: 'line::latour::::::::2009::qualified::ko',
+          conflictClass: 'short_form_collision',
+          entityId: 'wine-ce-latour',
+          decision: 'keep_ambiguous',
+          reviewedBy: 'codex',
+          reviewedAt: '2026-06-09T00:00:00.000Z',
+          decisionReason: 'reviewed ambiguity must stay unresolved',
+        }],
+      ]),
+      new Map(),
+      new Map(),
+      new Map(),
+    );
+
+    expect(row).toEqual(expect.objectContaining({
+      benchmarkGoldHint: 'latour',
+      benchmarkGoldEntityIdSuggestion: 'wine-ce-latour',
+      benchmarkGoldEntityIdSuggestionSource: 'hint_resolution',
+      semanticConflictKey: 'line::latour::::::::2009::qualified::ko',
+      triageBucket: 'reviewed_rejected',
+      operatorBucket: 'scope_target_missing',
+    }));
+    expect(row).not.toHaveProperty('benchmarkGoldEntityId');
+  });
+
+  it('keeps reviewed needs_scope_target rows in manual target scope review', () => {
+    const [row] = buildLookupV2CurationDraftRowsWithRuntimeDescriptors(
+      [
+        {
+          surfaceForm: '오퍼스 원 2019',
+          holeClass: 'realworld_mixed_script_alias',
+          observedStatus: 'failed',
+          suggestedAliasType: 'canonical',
+          status: 'needs_target',
+          benchmarkGoldHint: 'opus one',
+          reason: 'Hot-entity coverage hole',
+          operatorBucket: 'scope_target_missing',
+        },
+      ],
+      '/tmp/sample-coverage.json',
+      '2026-06-09T00:00:00.000Z',
+      buildRuntimeDescriptorMap([]),
+      new Map([['opus one', 'wine-ce-opus-one']]),
+      new Map(),
+      new Map(),
+      new Map([
+        ['opus one', {
+          surface: '오퍼스 원',
+          locale: 'ko',
+          stretchExpectedStatus: 'ambiguous',
+          authorityStatus: 'resolved',
+          authorityEntityId: 'wine-ce-opus-one',
+          conflictType: 'broad_icon_collision',
+          conflictBenchmarkHints: ['opus one'],
+          sourceEvidence: 'seed',
+          reviewedAt: '2026-06-09T00:00:00.000Z',
+        }],
+      ]),
+      new Map([
+        ['line::opus one::::::::2019::qualified::ko::wine-ce-opus-one', {
+          semanticConflictKey: 'line::opus one::::::::2019::qualified::ko',
+          conflictClass: 'broad_icon_collision',
+          entityId: 'wine-ce-opus-one',
+          decision: 'needs_scope_target',
+          reviewedBy: 'codex',
+          reviewedAt: '2026-06-09T00:00:00.000Z',
+          decisionReason: 'requires scope-target review instead of exact-safe promotion',
+        }],
+      ]),
+      new Map(),
+      new Map(),
+      new Map(),
+    );
+
+    expect(row).toEqual(expect.objectContaining({
+      benchmarkGoldHint: 'opus one',
+      benchmarkGoldEntityIdSuggestion: 'wine-ce-opus-one',
+      benchmarkGoldEntityIdSuggestionSource: 'hint_resolution',
+      semanticConflictKey: 'line::opus one::::::::2019::qualified::ko',
+      triageBucket: 'scope_target_review',
+      operatorBucket: 'scope_target_missing',
+    }));
+    expect(row).not.toHaveProperty('benchmarkGoldEntityId');
+  });
 });

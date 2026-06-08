@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
@@ -335,5 +336,76 @@ describe('writeLookupV2StretchOwnerDispatchManifest', () => {
 
     expect(manifest.totalPackets).toBe(1);
     expect(manifest.packets[0]?.packetId).toBe('runtime-backfill-family-surface-needs-specific-line-requested-vintage-missing');
+  });
+
+  it('derives CLI input defaults from outputDir when subordinate paths are omitted', () => {
+    const outputDir = mkdtempSync(path.join(tmpdir(), 'elv2-owner-dispatch-cli-'));
+    tempDirs.push(outputDir);
+
+    const runtimeGapDir = path.join(outputDir, 'manual-target-owner-evidence', 'missing-runtime-owner-families-by-gap-reason');
+    const reviewedCollisionDir = path.join(outputDir, 'lookup-v2-korean-realworld-stretch-reviewed-collision-family-clusters-by-clarification-axis');
+    mkdirSync(runtimeGapDir, { recursive: true });
+    mkdirSync(reviewedCollisionDir, { recursive: true });
+
+    writeFileSync(
+      path.join(runtimeGapDir, 'gap-reason-index.json'),
+      JSON.stringify({
+        gapReasonSignatureCounts: {
+          requested_vintage_missing: 1,
+        },
+      }, null, 2) + '\n',
+      'utf8',
+    );
+    writeJsonl(path.join(runtimeGapDir, 'requested-vintage-missing.jsonl'), [
+      {
+        benchmarkGoldHint: 'solaia',
+        normalizedBenchmarkGoldHint: 'solaia',
+        benchmarkGoldHintVariants: ['solaia'],
+        runtimeEvidenceStatus: 'missing_runtime_owner',
+        familyReviewRowCount: 1,
+        reviewScopeKeys: ['line::solaia::::::::2016::qualified::ko'],
+        scopeHoleClasses: ['realworld_exact_vintage'],
+        scopeSuggestedAliasTypes: ['canonical'],
+        scopeRisks: ['mixed_vintage_family'],
+        locales: ['ko'],
+        surfaces: ['솔라이아 2016'],
+        rowCount: 1,
+        sourceArtifacts: ['/tmp/input.json'],
+        sourceEvidenceSamples: ['hole'],
+        runtimeGapReasons: ['requested_vintage_missing'],
+        runtimeGapReasonSignature: 'requested_vintage_missing',
+        runtimeGapAvailableVintages: [2018],
+      },
+    ]);
+    writeFileSync(path.join(reviewedCollisionDir, 'clarification-axis-index.json'), JSON.stringify({
+      clarificationAxisCounts: {},
+    }, null, 2) + '\n', 'utf8');
+    writeFileSync(path.join(outputDir, 'manual-target-owner-evidence', 'collision-candidate-families.jsonl'), '', 'utf8');
+    writeFileSync(path.join(outputDir, 'lookup-v2-korean-realworld-stretch-manual-target-family-review-packet.jsonl'), '', 'utf8');
+    writeFileSync(path.join(outputDir, 'lookup-v2-korean-realworld-stretch-reviewed-collision-family-review-packet.jsonl'), '', 'utf8');
+
+    execFileSync(
+      'node',
+      [
+        '--import',
+        'tsx',
+        'scripts/eval/export-lookup-v2-stretch-owner-dispatch-manifest.ts',
+        '--inputArtifact',
+        '/tmp/lookup-v2-coverage-korean-realworld-stretch-entity-no-policy.json',
+        '--outputDir',
+        outputDir,
+      ],
+      { cwd: process.cwd(), encoding: 'utf8' },
+    );
+
+    const manifestPath = path.join(outputDir, 'lookup-v2-korean-realworld-stretch-owner-dispatch-manifest.json');
+    expect(existsSync(manifestPath)).toBe(true);
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+      totalPackets: number;
+      packets: Array<{ packetId: string; sourceJsonlPath: string }>;
+    };
+    expect(manifest.totalPackets).toBe(1);
+    expect(manifest.packets[0]?.packetId).toBe('runtime-backfill-requested-vintage-missing');
+    expect(manifest.packets[0]?.sourceJsonlPath).toBe(path.join(runtimeGapDir, 'requested-vintage-missing.jsonl'));
   });
 });
