@@ -5,7 +5,7 @@ import type { LookupV2CurationDraftRow } from './export-lookup-v2-curation-draft
 import {
   buildLookupV2ReviewedCollisionFamilyReviewPacketRows,
 } from './export-lookup-v2-manual-target-family-review-packet.js';
-import { resolveCliDataPathArg } from './cli-data-path.js';
+import { lookupV2DraftCliPath, resolveCliDataPathArg } from './cli-data-path.js';
 
 function isLookupV2CurationDraftRow(value: unknown): value is LookupV2CurationDraftRow {
   if (typeof value !== 'object' || value === null) {
@@ -37,13 +37,13 @@ function main(): void {
   const { values } = parseArgs({
     args: process.argv.slice(2).filter((arg) => arg !== '--'),
     options: {
-      input: { type: 'string', default: 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl' },
-      output: { type: 'string', default: 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-reviewed-collision-family-review-packet.jsonl' },
+      input: { type: 'string', default: lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl') },
+      output: { type: 'string', default: lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-reviewed-collision-family-review-packet.jsonl') },
     },
   });
 
-  const inputPath = resolveCliDataPathArg(values.input ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl');
-  const outputPath = resolveCliDataPathArg(values.output ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-reviewed-collision-family-review-packet.jsonl');
+  const inputPath = resolveCliDataPathArg(values.input ?? lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl'));
+  const outputPath = resolveCliDataPathArg(values.output ?? lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-reviewed-collision-family-review-packet.jsonl'));
   const draftRows = parseDraftJsonl(inputPath);
   const familyRows = buildLookupV2ReviewedCollisionFamilyReviewPacketRows({ draftRows });
 

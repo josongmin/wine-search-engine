@@ -3,7 +3,7 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
 import type { LookupExactSafeProposalPacketRow } from './export-lookup-v2-exact-safe-proposal-packet.js';
-import { resolveCliDataPathArg } from './cli-data-path.js';
+import { lookupV2DraftCliPath, resolveCliDataPathArg } from './cli-data-path.js';
 
 export interface LookupExactSafeProposalReviewDecisionRow {
   readonly surface: string;
@@ -128,14 +128,14 @@ async function main(): Promise<void> {
   const { values } = parseArgs({
     args: process.argv.slice(2).filter((arg) => arg !== '--'),
     options: {
-      input: { type: 'string', default: 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl' },
+      input: { type: 'string', default: lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl') },
       decisions: { type: 'string' },
       output: { type: 'string', default: '/tmp/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals-reviewed.jsonl' },
     },
     allowPositionals: false,
   });
 
-  const inputPath = resolveCliDataPathArg(values.input ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl');
+  const inputPath = resolveCliDataPathArg(values.input ?? lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl'));
   const decisionsPath = values.decisions !== undefined ? resolveCliDataPathArg(values.decisions) : undefined;
   if (decisionsPath === undefined || decisionsPath.length === 0) {
     throw new Error('--decisions is required');

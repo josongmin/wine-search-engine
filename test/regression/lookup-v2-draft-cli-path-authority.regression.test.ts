@@ -33,18 +33,23 @@ const DRAFT_PATH_AUTHORITY_SCRIPTS = [
   'scripts/eval/review-lookup-v2-manual-target-family-review-packet.ts',
   'scripts/eval/review-lookup-v2-policy-family-review-packet.ts',
   'scripts/eval/review-lookup-v2-policy-review-packet.ts',
-  'scripts/eval/verify-lookup-v2-stretch-reviewed-registry-overlay.ts',
 ] as const;
 
 describe('regression: lookup-v2 draft CLI path authority', () => {
   it('routes tracked draft path defaults through resolveCliDataPathArg', () => {
     for (const relativePath of DRAFT_PATH_AUTHORITY_SCRIPTS) {
       const source = readFileSync(path.join(REPO_ROOT, relativePath), 'utf8');
-      expect(source, `${relativePath} should import the shared CLI data path authority`).toContain(
-        "import { resolveCliDataPathArg } from './cli-data-path.js';",
+      expect(source, `${relativePath} should import the shared lookup-v2 draft path helper`).toContain(
+        "import { lookupV2DraftCliPath, resolveCliDataPathArg } from './cli-data-path.js';",
       );
       expect(source, `${relativePath} should route repo-relative draft paths through the helper`).toContain(
         'resolveCliDataPathArg(',
+      );
+      expect(source, `${relativePath} should build lookup-v2 draft defaults via the shared helper`).toContain(
+        'lookupV2DraftCliPath(',
+      );
+      expect(source, `${relativePath} should not embed repo-tracked draft literals directly`).not.toContain(
+        'data/lookup-v2/drafts',
       );
     }
   });

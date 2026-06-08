@@ -9,26 +9,26 @@
   - runtime state:
     - `/Users/songmin/.wine-search-engine/data/runtime-search-snapshot.json`
   - snapshot:
-    - `search-snapshot:v1:6384d22559774856`
+    - `search-snapshot:v1:a70349635d31cf85`
 - latest verified stretch backlog artifacts currently on disk:
   - stretch entity-no-policy coverage:
     - `/tmp/lookup-v2-coverage-korean-realworld-stretch-entity-no-policy.json`
-    - generated `2026-06-07T19:35:50.329Z`
-    - snapshot `search-snapshot:v1:6384d22559774856`
-    - `hot_entities=142/239`, `non_entity=227/351`, `holes=97`
+    - generated `2026-06-07T23:58:36.190Z`
+    - snapshot `search-snapshot:v1:a70349635d31cf85`
+    - `hot_entities=165/239`, `non_entity=226/351`, `holes=74`
     - operator buckets:
       `strict_collision_ambiguous=10`, `family_surface_gap=0`,
-      `qualified_scope_surface_gap=0`, `scope_target_missing=87`,
+      `qualified_scope_surface_gap=0`, `scope_target_missing=64`,
       `scope_support_needed=0`
   - stretch write-plane summary:
-    - `/Users/songmin/.wine-search-engine/data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-write-plane-summary.json`
-    - `draft.rows=94`, `auto_targetable=25`, `scope_policy_review=0`,
+    - `/tmp/lookup-v2-drafts/lookup-v2-korean-realworld-stretch-write-plane-summary.json`
+    - `draft.rows=71`, `auto_targetable=2`, `scope_policy_review=0`,
       `localized_surface_review=0`, `catalog_support_review=0`,
       `reviewed_collision=35`, `scope_target_review=13`,
       `reviewed_rejected=21`
-    - `exact_safe_packet_rows=25`, `reviewed_authority_approved_rows=25`,
+    - `exact_safe_packet_rows=2`, `reviewed_authority_approved_rows=2`,
       `reviewed_authority_pending_rows=0`
-    - `exact_safe_family_review_rows=25`, `exact_safe_family_pending_rows=17`
+    - `exact_safe_family_review_rows=2`, `exact_safe_family_pending_rows=0`
     - `reviewed_collision_family_clusters: rows=35, families=12`
     - `reviewed_collision_family_review_rows=29`
     - `manual_target_batch_rows=13`
@@ -52,27 +52,27 @@
   impossible `resolved` rows were reclassified from live operator buckets:
   `strict_collision_ambiguous -> ambiguous`, `catalog_support_needed -> failed`
 - active proof gap:
-  - current runtime pointer `6384d22559774856`에 대한 fresh stretch coverage / write-plane artifact는 now present
+  - current runtime pointer `a70349635d31cf85`에 대한 fresh stretch coverage / write-plane artifact는 now present
   - current runtime pointer에 대한 fresh isolated latency artifact는 아직 없다
   - 이 문서의 숫자는 backlog triage truth이며, cutover blocking rails는 `docs/bench/STATUS.md`에서 따로 본다
 - owner split:
   - policy review lane:
-    - `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-policy-review-packet.jsonl`
+    - `/Users/songmin/.wine-search-engine/data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-policy-review-packet.jsonl`
     - `rows=0`
   - entity-no-policy write-plane:
-    - `/Users/songmin/.wine-search-engine/data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-write-plane-summary.json`
-    - `draft rows=94`
-    - `auto_targetable=25`
+    - `/tmp/lookup-v2-drafts/lookup-v2-korean-realworld-stretch-write-plane-summary.json`
+    - `draft rows=71`
+    - `auto_targetable=2`
     - `scope_policy_review=0`
     - `localized_surface_review=0`
     - `catalog_support_review=0`
     - `reviewed_collision=35`
     - `scope_target_review=13`
-    - `exact_safe_packet_rows=25`
-    - `reviewed_authority_approved_rows=25`
+    - `exact_safe_packet_rows=2`
+    - `reviewed_authority_approved_rows=2`
     - `reviewed_authority_pending_rows=0`
-    - `exact_safe_family_review_rows=25`
-    - `exact_safe_family_pending_rows=17`
+    - `exact_safe_family_review_rows=2`
+    - `exact_safe_family_pending_rows=0`
     - `catalog-support family clusters: rows=0, families=0`
     - `reviewed-collision family clusters: rows=35, families=12`
     - `reviewed_collision_family_review_rows=29`
@@ -83,15 +83,15 @@
 - write-plane state:
   - exact-safe auto-approve source는 `fixture_exact`, `semantic_scope_target_registry`, `semantic_policy_registry`만 허용한다
   - current exact-safe packet:
-    - `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl`
-    - `rows=25`
+    - `/tmp/lookup-v2-drafts/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl`
+    - `rows=2`
     - reviewed-authority source:
-      `semantic_scope_target_registry=25`
+      `semantic_scope_target_registry=2`
   - current family-collision registry / reviewed-collision cluster:
     - `data/lookup-v2/lookup-family-collision-registry-v1.jsonl`
     - `reviewed_collision=35`, `scope_target_review=13` after active overlay
   - current overlay verifier:
-    - `data/lookup-v2/drafts/lookup-v2-stretch-reviewed-registry-overlay-summary.json`
+    - `/Users/songmin/.wine-search-engine/data/lookup-v2/drafts/lookup-v2-stretch-reviewed-registry-overlay-summary.json`
     - reviewed-registry overlay:
       `semantic_scope_registry_inserted=0`, `semantic_policy_registry_inserted=0`
     - collision-registry overlay proof:
@@ -100,12 +100,13 @@
     - invariants green
 
 - residual closeout owner split:
-  - active stretch backlog debt는 `scope_target_missing=87`이 중심이다
+  - active stretch backlog debt는 `scope_target_missing=64`가 중심이다
   - smaller residue는 `strict_collision_ambiguous=10`이다
   - latency/cold-first-query는 correctness와 분리된 별도 owner다
   - 이 문서는 non-blocking owner backlog다. cutover pass/fail 판단은 `STATUS.md`의 blocking rails로 한다
 
 아래 section은 archived historical RCA다. current owner 판단은 이 update block만 기준으로 본다.
+archived section 아래의 repo-relative `data/lookup-v2/drafts/...` 표기는 pre-purge 시점 기록으로 보존한다.
 
 ## Archived Historical Notes
 

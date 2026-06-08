@@ -112,7 +112,7 @@ import {
   loadLookupV2RuntimeSurfaceOwnerEvidenceSync,
 } from './lookup-v2-runtime-surface-owner-evidence.js';
 import { applyLookupV2ExactSafeFamilyReviewPacket } from './apply-lookup-v2-exact-safe-family-review-packet.js';
-import { resolveCliDataPathArg } from './cli-data-path.js';
+import { lookupV2DraftCliPath, resolveCliDataPathArg } from './cli-data-path.js';
 import type { LookupV2RuntimeSemanticDescriptor } from './lookup-v2-runtime-semantic-descriptors.js';
 import { loadLookupV2RuntimeSemanticDescriptorMapSync } from './lookup-v2-runtime-semantic-descriptors.js';
 
@@ -442,7 +442,7 @@ async function main(): Promise<void> {
     args: process.argv.slice(2).filter((arg) => arg !== '--'),
     options: {
       input: { type: 'string', default: '/tmp/lookup-v2-coverage-korean-realworld-stretch-entity-no-policy.json' },
-      outputDir: { type: 'string', default: 'data/lookup-v2/drafts' },
+      outputDir: { type: 'string', default: lookupV2DraftCliPath() },
       semanticScopeTargetRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_TARGET_REGISTRY_PATH },
       semanticPolicyRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_SEMANTIC_POLICY_REGISTRY_PATH },
       semanticScopeSupportRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_SUPPORT_REGISTRY_PATH },
@@ -453,7 +453,7 @@ async function main(): Promise<void> {
   });
 
   const inputPath = values.input ?? '/tmp/lookup-v2-coverage-korean-realworld-stretch-entity-no-policy.json';
-  const outputDir = resolveCliDataPathArg(values.outputDir ?? 'data/lookup-v2/drafts');
+  const outputDir = resolveCliDataPathArg(values.outputDir ?? lookupV2DraftCliPath());
   const familyTargetRegistryPath = values.semanticScopeTargetRegistry ?? DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_TARGET_REGISTRY_PATH;
   const policyFamilyDecisionRegistryPath = values.semanticPolicyRegistry ?? DEFAULT_LOOKUP_V2_SEMANTIC_POLICY_REGISTRY_PATH;
   const semanticScopeSupportRegistryPath = values.semanticScopeSupportRegistry ?? DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_SUPPORT_REGISTRY_PATH;

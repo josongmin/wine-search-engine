@@ -3,6 +3,7 @@ import { serialize } from 'node:v8';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearLookupRuntimeBundleCacheForTests, loadLookupRuntimeBundle } from '../lookup-runtime-bundle.js';
 import { SEARCH_SNAPSHOT_SCHEMA_VERSION } from '../../domain/shared/constants/search-snapshot.js';
+import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
 import {
   buildLookupRuntimeBundleCachePayload,
   deriveLookupRuntimeBundleCachePaths,
@@ -165,8 +166,20 @@ function buildArtifactMap(
       schemaVersion: 'lookup_semantic_scope_runtime.v1',
       snapshotId: 'search-snapshot:v1:test',
       generatedAt: '2026-06-05T00:00:00.000Z',
-      entries: {},
-      componentSurfaces: {},
+      entries: {
+        'line::opus-one::::::::2018::qualified::ko': {
+          semanticScopeKey: 'line::opus-one::::::::2018::qualified::ko',
+          scopeAxis: 'line',
+          familyKey: 'opus-one',
+          vintage: 2018,
+          surfaceFormKind: 'qualified',
+          locale: 'ko',
+          entityId: 'entity-1',
+        },
+      },
+      componentSurfaces: {
+        'family::opus-one::ko': ['오푸스 원'],
+      },
     })],
     [`${base}/lookup-reviewed-family-recall-runtime.json`, JSON.stringify({
       schemaVersion: 'lookup_reviewed_family_recall_runtime.v1',
@@ -443,6 +456,21 @@ describe('lookup runtime bundle cache', () => {
     expect(bundle.loadProfile.source).toBe('cache');
     expect(bundle.loadProfile.cacheReadProfile?.hit).toBe(true);
     expect(bundle.loadProfile.materializeMs.totalMs).toBeGreaterThanOrEqual(0);
+    expect(bundle.semanticScopeRegistry.findMatches({
+      query: '오푸스 원 2018',
+      views: buildNormalizedQueryViews('오푸스 원 2018'),
+      locale: 'ko',
+    })).toEqual([
+      {
+        semanticScopeKey: 'line::opus-one::::::::2018::qualified::ko',
+        scopeAxis: 'line',
+        familyKey: 'opus-one',
+        vintage: 2018,
+        surfaceFormKind: 'qualified',
+        locale: 'ko',
+        entityId: 'entity-1',
+      },
+    ]);
     expect(readFileSpy).toHaveBeenCalledTimes(2);
     expect(readFileSpy).toHaveBeenNthCalledWith(1, manifestPath, 'utf8');
     expect(readFileSpy).toHaveBeenNthCalledWith(2, cachePaths.cachePath);

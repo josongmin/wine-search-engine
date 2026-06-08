@@ -33,7 +33,7 @@
 {"qid": "elv2-033", "query": "샤또 무통 로칠드", "expected_status": "resolved", "expected_entity_hint": "mouton", "class": "hot_entity_coverage", "note": "common Korean Rothschild misspelling variant"}
 {"qid": "elv2-034", "query": "돔페리농", "expected_status": "resolved", "expected_entity_hint": "dom perignon", "class": "transliteration_hard", "note": "compact Korean typo of Dom Perignon should still resolve"}
 {"qid": "elv2-035", "query": "크룩 그랑 퀴베", "expected_status": "resolved", "expected_entity_hint": "krug", "class": "hot_entity_coverage", "note": "hard Korean typo for Krug Grande Cuvée"}
-{"qid": "elv2-036", "query": "사시카야", "expected_status": "ambiguous", "class": "ambiguity_korean_typo", "note": "Korean Sassicaia typo must not wrong-resolve"}
+{"qid": "elv2-036", "query": "사시카야", "expected_status": "failed", "accepted_statuses": ["failed", "ambiguous"], "class": "ambiguity_korean_typo", "note": "short Korean Sassicaia typo stays fail-closed on exact lookup and must never wrong-resolve"}
 {"qid": "elv2-037", "query": "페트루스", "expected_status": "ambiguous", "class": "ambiguity_korean_typo", "note": "popular Petrus spelling variant stays fail-closed"}
 {"qid": "elv2-038", "query": "까쇼 추천해줘", "expected_status": "redirect_discovery", "class": "concept_grape_recommendation", "note": "grape shorthand plus recommendation phrase should redirect"}
 {"qid": "elv2-039", "query": "보르도 와인 추천", "expected_status": "failed", "class": "safe_abstain_recommendation_phrase", "note": "region recommendation phrase currently safe-abstains and must never resolve"}

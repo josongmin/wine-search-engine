@@ -3,7 +3,7 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
 import type { LookupV2CurationDraftRow } from './export-lookup-v2-curation-drafts.js';
-import { resolveCliDataPathArg } from './cli-data-path.js';
+import { lookupV2DraftCliPath, resolveCliDataPathArg } from './cli-data-path.js';
 
 export interface LookupV2ScopeSupportFamilyClusterRow {
   readonly benchmarkGoldHint: string;
@@ -105,17 +105,17 @@ function main(): void {
   const { values } = parseArgs({
     args: process.argv.slice(2).filter((arg) => arg !== '--'),
     options: {
-      input: { type: 'string', default: 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl' },
-      output: { type: 'string', default: 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-scope-support-family-clusters.jsonl' },
+      input: { type: 'string', default: lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl') },
+      output: { type: 'string', default: lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-scope-support-family-clusters.jsonl') },
       generatedAt: { type: 'string', default: new Date().toISOString() },
     },
   });
 
   const inputPath = resolveCliDataPathArg(
-    values.input ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl',
+    values.input ?? lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl'),
   );
   const outputPath = resolveCliDataPathArg(
-    values.output ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-scope-support-family-clusters.jsonl',
+    values.output ?? lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-scope-support-family-clusters.jsonl'),
   );
   const generatedAt = values.generatedAt ?? new Date().toISOString();
   const draftRows = parseDraftJsonl(inputPath);

@@ -291,4 +291,38 @@ describe('MultiChannelRetrievalEngine — family_graph channel', () => {
     expect(dense?.firing).toBe(true);
     expect(dense?.hitCount).toBe(2);
   });
+
+  it('infers ko locale for reviewed family recall when locale is omitted but the query is Hangul', async () => {
+    const matcher = matcherReturning({});
+    const reviewedFamilyRecall = {
+      findMatches: vi.fn(() => []),
+    };
+    const engine = new MultiChannelRetrievalEngine({
+      aliasMatcher: matcher,
+      entityLookup,
+      reviewedFamilyRecall,
+    });
+
+    await engine.retrieve(input({
+      rawQuery: '실버 오크 17',
+      views: views({
+        raw: '실버 오크 17',
+        strict: '실버 오크 17',
+        accentless: '실버 오크 17',
+        collapsedWhitespace: '실버 오크 17',
+        punctuationStripped: '실버 오크 17',
+        compact: '실버오크17',
+        vintageCanonicalized: '실버 오크 2017',
+        vintageStripped: '실버 오크',
+        transliterated: 'silver oak 17',
+        semanticVariants: ['실버 오크 17'],
+        lookupVariants: ['실버 오크 17'],
+      }),
+    }));
+
+    expect(reviewedFamilyRecall.findMatches).toHaveBeenCalledWith(expect.objectContaining({
+      query: '실버 오크 17',
+      locale: 'ko',
+    }));
+  });
 });

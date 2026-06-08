@@ -3,7 +3,7 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import type { LookupV2PolicyReviewPacketRow } from './export-lookup-v2-policy-review-packet.js';
 import type { LookupV2PolicyFamilyReviewPacketRow } from './export-lookup-v2-policy-family-review-packet.js';
-import { resolveCliDataPathArg } from './cli-data-path.js';
+import { lookupV2DraftCliPath, resolveCliDataPathArg } from './cli-data-path.js';
 import {
   buildLookupV2SemanticPolicyRegistryKey,
   DEFAULT_LOOKUP_V2_SEMANTIC_POLICY_REGISTRY_PATH,
@@ -121,7 +121,7 @@ async function main(): Promise<void> {
     args: process.argv.slice(2).filter((arg) => arg !== '--'),
     options: {
       families: { type: 'string', default: '/tmp/lookup-v2-korean-realworld-stretch-policy-family-review-reviewed.jsonl' },
-      rows: { type: 'string', default: 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-policy-review-packet.jsonl' },
+      rows: { type: 'string', default: lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-policy-review-packet.jsonl') },
       registry: { type: 'string', default: DEFAULT_LOOKUP_V2_SEMANTIC_POLICY_REGISTRY_PATH },
       output: { type: 'string', default: '/tmp/lookup-v2-korean-realworld-stretch-policy-review-reviewed-from-family.jsonl' },
     },
@@ -129,7 +129,7 @@ async function main(): Promise<void> {
 
   const familiesPath = values.families ?? '/tmp/lookup-v2-korean-realworld-stretch-policy-family-review-reviewed.jsonl';
   const rowsPath = resolveCliDataPathArg(
-    values.rows ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-policy-review-packet.jsonl',
+    values.rows ?? lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-policy-review-packet.jsonl'),
   );
   const registryPath = values.registry ?? DEFAULT_LOOKUP_V2_SEMANTIC_POLICY_REGISTRY_PATH;
   const outputPath = values.output ?? '/tmp/lookup-v2-korean-realworld-stretch-policy-review-reviewed-from-family.jsonl';

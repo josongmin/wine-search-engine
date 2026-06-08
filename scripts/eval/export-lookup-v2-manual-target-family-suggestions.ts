@@ -4,7 +4,7 @@ import { parseArgs } from 'node:util';
 import type { LookupV2RuntimeSurfaceOwnerWitness } from './lookup-v2-runtime-surface-owner-evidence.js';
 import type { LookupV2ManualTargetFamilyReviewDecisionRow } from './review-lookup-v2-manual-target-family-review-packet.js';
 import type { LookupV2ManualTargetFamilyReviewPacketRow } from './export-lookup-v2-manual-target-family-review-packet.js';
-import { resolveCliDataPathArg } from './cli-data-path.js';
+import { lookupV2DraftCliPath, resolveCliDataPathArg } from './cli-data-path.js';
 
 export interface LookupV2ManualTargetFamilySuggestionRow {
   readonly reviewScopeKey: string;
@@ -110,15 +110,15 @@ function main(): void {
   const { values } = parseArgs({
     args: process.argv.slice(2).filter((arg) => arg !== '--'),
     options: {
-      input: { type: 'string', default: 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-manual-target-family-review-packet.jsonl' },
-      output: { type: 'string', default: 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-manual-target-family-suggestions.jsonl' },
-      decisionsOutput: { type: 'string', default: 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-manual-target-family.suggested-decisions.jsonl' },
+      input: { type: 'string', default: lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-manual-target-family-review-packet.jsonl') },
+      output: { type: 'string', default: lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-manual-target-family-suggestions.jsonl') },
+      decisionsOutput: { type: 'string', default: lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-manual-target-family.suggested-decisions.jsonl') },
     },
   });
 
-  const inputPath = resolveCliDataPathArg(values.input ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-manual-target-family-review-packet.jsonl');
-  const outputPath = resolveCliDataPathArg(values.output ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-manual-target-family-suggestions.jsonl');
-  const decisionsOutputPath = resolveCliDataPathArg(values.decisionsOutput ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-manual-target-family.suggested-decisions.jsonl');
+  const inputPath = resolveCliDataPathArg(values.input ?? lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-manual-target-family-review-packet.jsonl'));
+  const outputPath = resolveCliDataPathArg(values.output ?? lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-manual-target-family-suggestions.jsonl'));
+  const decisionsOutputPath = resolveCliDataPathArg(values.decisionsOutput ?? lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-manual-target-family.suggested-decisions.jsonl'));
   const packetRows = parsePacketJsonl(inputPath);
   const suggestionRows = buildLookupV2ManualTargetFamilySuggestions(packetRows);
   const decisionRows = buildLookupV2ManualTargetSuggestedDecisionRows(suggestionRows);

@@ -6,7 +6,7 @@ import {
   summarizeLookupV2StretchCorpus,
   type LookupV2StretchRow,
 } from './lookup-v2-stretch-corpus.js';
-import { resolveCliDataPathArg } from './cli-data-path.js';
+import { lookupV2DraftCliPath, resolveCliDataPathArg } from './cli-data-path.js';
 
 function sampleQueriesByStatus(rows: readonly LookupV2StretchRow[], status: LookupV2StretchRow['expected_status'], limit: number): readonly string[] {
   return rows
@@ -137,7 +137,7 @@ async function main(): Promise<void> {
     args: process.argv.slice(2).filter((arg) => arg !== '--'),
     options: {
       input: { type: 'string', default: 'test/fixtures/lookup-v2-korean-realworld-stretch.jsonl' },
-      output: { type: 'string', default: 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-expansion-prompt.txt' },
+      output: { type: 'string', default: lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-expansion-prompt.txt') },
       rows: { type: 'string', default: '500' },
       resolved: { type: 'string', default: '200' },
       ambiguous: { type: 'string', default: '100' },
@@ -146,7 +146,7 @@ async function main(): Promise<void> {
     },
   });
   const inputPath = values.input ?? 'test/fixtures/lookup-v2-korean-realworld-stretch.jsonl';
-  const outputPath = resolveCliDataPathArg(values.output ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-expansion-prompt.txt');
+  const outputPath = resolveCliDataPathArg(values.output ?? lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-expansion-prompt.txt'));
   const rows = loadLookupV2StretchCorpusSync(inputPath);
   const prompt = buildPrompt({
     baseRows: rows,

@@ -13,7 +13,7 @@
 2. external-LLM prompt 생성
    - `pnpm run eval:lookup-v2:stretch:build-expansion-prompt`
    - output:
-     - `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-expansion-prompt.txt`
+     - `/Users/songmin/.wine-search-engine/data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-expansion-prompt.txt`
 3. external LLM이 candidate JSONL 생성
    - qid 없이 생성 가능
    - required schema:
@@ -30,6 +30,13 @@
 5. merged corpus를 parity / coverage rail로 재검증
    - `pnpm run eval:lookup-v2:parity:korean-realworld-stretch`
    - `pnpm run eval:lookup-v2:coverage:korean-realworld-stretch`
+
+## Write Path Truth
+
+- lookup-v2 draft/write-plane 기본 출력은 repo 아래가 아니라
+  `/Users/songmin/.wine-search-engine/data/lookup-v2/drafts` 다.
+- live CLI는 repo-relative `data/lookup-v2/drafts/...` 기본값을 직접 쓰지 않고
+  path-authority helper를 통해 home data dir로 resolve된다.
 
 ## Contracts
 

@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import type { LookupV2ManualTargetFamilyReviewPacketRow } from './export-lookup-v2-manual-target-family-review-packet.js';
-import { resolveCliDataPathArg } from './cli-data-path.js';
+import { lookupV2DraftCliPath, resolveCliDataPathArg } from './cli-data-path.js';
 
 export interface LookupV2ManualTargetRuntimeOwnerPartitionIndex {
   readonly sourcePacketPath: string;
@@ -81,16 +81,16 @@ function main(): void {
   const { values } = parseArgs({
     args: process.argv.slice(2).filter((arg) => arg !== '--'),
     options: {
-      input: { type: 'string', default: 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-manual-target-family-review-packet.jsonl' },
-      outputDir: { type: 'string', default: 'data/lookup-v2/drafts/manual-target-owner-evidence' },
+      input: { type: 'string', default: lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-manual-target-family-review-packet.jsonl') },
+      outputDir: { type: 'string', default: lookupV2DraftCliPath('manual-target-owner-evidence') },
       generatedAt: { type: 'string', default: new Date().toISOString() },
     },
   });
 
   const inputPath = resolveCliDataPathArg(
-    values.input ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-manual-target-family-review-packet.jsonl',
+    values.input ?? lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-manual-target-family-review-packet.jsonl'),
   );
-  const outputDir = resolveCliDataPathArg(values.outputDir ?? 'data/lookup-v2/drafts/manual-target-owner-evidence');
+  const outputDir = resolveCliDataPathArg(values.outputDir ?? lookupV2DraftCliPath('manual-target-owner-evidence'));
   const generatedAt = values.generatedAt ?? new Date().toISOString();
   const packetRows = parsePacketJsonl(inputPath);
   const index = writeLookupV2ManualTargetRuntimeOwnerPartitions({

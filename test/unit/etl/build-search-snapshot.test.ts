@@ -28,6 +28,7 @@ import {
 } from '../../../scripts/etl/snapshot-entity-identity.js';
 import { canonicalizeAliasSnapshotRecords } from '../../../src/domain/shared/utils/search-snapshot-canonicalization.js';
 import { normalizeForMatch } from '../../../src/domain/alias/service/normalize.js';
+import { readLookupRuntimeBundleCache } from '../../../src/config/lookup-runtime-bundle-cache.js';
 
 async function makeTempDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'build-search-snapshot-'));
@@ -366,6 +367,66 @@ describe('buildSearchSnapshot', () => {
       redirectReason: 'concept_query',
     });
   }, 10_000);
+
+  it('writes reviewed semantic-scope component surfaces into the runtime-bundle cache payload', async () => {
+    const dir = await makeTempDir();
+    const inputPath = path.join(dir, 'silver-trackc.ndjson');
+    const outputDir = path.join(dir, 'search-snapshots');
+    const nlMappingsPath = path.join(dir, 'nl-mappings.json');
+
+    await fs.writeFile(inputPath, `${JSON.stringify(makeRecord())}\n`);
+    await fs.writeFile(nlMappingsPath, JSON.stringify({ mappings: [] }));
+
+    const result = await buildSearchSnapshot({
+      input: inputPath,
+      outputDir,
+      nlMappings: nlMappingsPath,
+      reviewedRegistryOverrides: {
+        ...TEST_REVIEWED_REGISTRY_OVERRIDES,
+        localizedScopeSurfaceRows: [
+          {
+            componentKind: 'family',
+            componentKey: 'solaia',
+            localSurface: '솔라이아',
+            normalizedLocalSurface: normalizeForMatch('솔라이아'),
+            locale: 'ko',
+            decisionStatus: 'approved',
+            reviewedBy: 'test',
+            reviewedAt: '2026-06-08T00:00:00.000Z',
+            decisionReason: 'cache parity test',
+            evidenceClass: 'localized_scope_surface_review',
+          },
+        ],
+      },
+    });
+
+    const semanticScopeRuntime = JSON.parse(
+      await fs.readFile(result.manifest.artifacts.lookupSemanticScopeRuntimeJson, 'utf8'),
+    ) as { componentSurfaces?: Record<string, readonly string[]> };
+    const cachePayload = await readLookupRuntimeBundleCache({
+      manifestPath: result.manifestPath,
+      snapshotId: result.manifest.snapshotId,
+      aliasContentHash: result.manifest.hashes.aliases,
+      artifactPaths: {
+        lookupAliasRuntimeJson: result.manifest.artifacts.lookupAliasRuntimeJson,
+        lookupAliasBroadRecallRuntimeJson: result.manifest.artifacts.lookupAliasBroadRecallRuntimeJson,
+        lookupExactSafeRuntimeJson: result.manifest.artifacts.lookupExactSafeRuntimeJson,
+        lookupResolverProjectionJson: result.manifest.artifacts.lookupResolverProjectionJson,
+        lookupSemanticScopeRuntimeJson: result.manifest.artifacts.lookupSemanticScopeRuntimeJson,
+        lookupReviewedFamilyRecallRuntimeJson: result.manifest.artifacts.lookupReviewedFamilyRecallRuntimeJson,
+        lookupScopeGraphRuntimeJson: result.manifest.artifacts.lookupScopeGraphRuntimeJson,
+        lookupAmbiguityRuntimeJson: result.manifest.artifacts.lookupAmbiguityRuntimeJson,
+        lookupConceptRedirectRuntimeJson: result.manifest.artifacts.lookupConceptRedirectRuntimeJson,
+      },
+    });
+
+    expect(semanticScopeRuntime.componentSurfaces).toEqual({
+      'family::solaia::ko': [normalizeForMatch('솔라이아')],
+    });
+    expect(cachePayload?.semanticScopeComponentSurfaces).toEqual(
+      semanticScopeRuntime.componentSurfaces,
+    );
+  });
 
   it('treats repo-local benchmark ids as covered when the equivalent public fixture entity already exists', async () => {
     const dir = await makeTempDir();

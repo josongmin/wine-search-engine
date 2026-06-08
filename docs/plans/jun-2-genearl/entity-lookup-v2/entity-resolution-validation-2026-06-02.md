@@ -1,8 +1,10 @@
 # Entity-Resolution Validation — Expanded (2026-06-02)
 
-> Historical analysis only. Current cutover authority moved to
-> `cutover-checklist.md` and `IMPROVEMENT-PLAN-2026-06-03.md` after the
-> 2026-06-03 full authority re-run (`V2 99.1%, wrong=1, miss=1`; gate FAIL).
+> Historical analysis only.
+> Current authority truth moved to `docs/bench/STATUS.md` and
+> `tools/feature-catalog/features/retrieval/entity-lookup-v2.yaml`.
+> The `V1` vs `V2` route framing below is preserved for RCA only, not as the
+> current public surface contract.
 
 Rigorous V1 (`/v1/lookup/wine`) vs V2 (`/v2/entity-lookup`) comparison over the
 PG `eval_cases` ground truth, scored by EXACT `expected_entity_id` match.

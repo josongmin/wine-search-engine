@@ -1,5 +1,10 @@
 # T-IR-01 Primitive Search And Lookup Contract Split
 
+> Historical / audit-only ticket.
+> Current public lookup truth moved to `docs/bench/STATUS.md` and
+> `tools/feature-catalog/features/retrieval/entity-lookup-v2.yaml`.
+> `/v1/lookup/wine` references below describe the pre-cutover target state only.
+
 ## 목표
 
 `search`를 path-authoritative primitive retrieval surface로 분해하고, `lookup`를 canonical wine resolution endpoint로 승격한다.

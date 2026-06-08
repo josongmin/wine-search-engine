@@ -1,6 +1,12 @@
 # May 29 Interface Revamp RFC
 
 > 목적: public surface를 `agent`, `search`, `lookup`의 세 계약으로 재정렬하고, agent의 `single-shot`과 `turnful` 차이를 `history context custody`로 명시한다. 이번 작업은 브레이킹 체인지를 허용한다.
+>
+> Historical / audit-only document.
+> Current public lookup truth moved to `docs/bench/STATUS.md` and
+> `tools/feature-catalog/features/retrieval/entity-lookup-v2.yaml`.
+> References to `/v1/lookup/wine` below are preserved as pre-cutover design
+> history, not as the current route contract.
 
 ## 1. 문제 정의
 

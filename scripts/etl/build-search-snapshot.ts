@@ -1887,6 +1887,8 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
       ] as const),
       semanticDescriptors: finalizedSemanticDescriptors,
       semanticScopeEntries: Object.entries(finalizedLookupSemanticScopeRuntimeArtifact.entries),
+      semanticScopeComponentSurfaces:
+        finalizedLookupSemanticScopeRuntimeArtifact.componentSurfaces ?? {},
       reviewedFamilyRecallEntries: Object.entries(finalizedLookupReviewedFamilyRecallRuntimeArtifact.entries),
       scopeGraphAdjacency: Object.entries(finalizedLookupScopeGraphRuntimeArtifact.adjacency),
       ambiguityEntries: Object.entries(finalizedLookupAmbiguityRuntimeArtifact.entries).map(([normalizedForm, entry]) => [

@@ -1,10 +1,10 @@
 # Entity Lookup V2 — Live Shadow-Compare Result (2026-06-02)
 
-> Historical analysis only. Current cutover authority moved to
-> `cutover-checklist.md` and `IMPROVEMENT-PLAN-2026-06-03.md` after the
-> 2026-06-03 full authority re-run (`V2 99.1%, wrong=1, miss=1`; gate FAIL).
+> Historical analysis only.
+> Current authority truth moved to `docs/bench/STATUS.md` and
+> `tools/feature-catalog/features/retrieval/entity-lookup-v2.yaml`.
 > Any PASS claim in this file is sample-limited or superseded and must not be
-> treated as the current cutover verdict.
+> treated as the current cutover verdict or current public surface contract.
 
 ## UPDATE (2026-06-03) — FULL eval_cases distribution: gate FAILS on a PRE-EXISTING fuzzy wrong-positive
 

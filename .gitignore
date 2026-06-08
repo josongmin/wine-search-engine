@@ -163,6 +163,7 @@ data/silver-quality-report.json
 # Offline / noisy eval machine-local outputs (scripts often write under /tmp; ignore if copied into tree)
 data/noisy-entity-eval-results.json
 data/offline-eval-*.json
+data/lookup-v2/drafts/
 # Generated calibration profiles (keep small fixtures / ndjson samples explicit if needed)
 data/calibration/threshold-profile*.json
 data/calibration/*.ndjson

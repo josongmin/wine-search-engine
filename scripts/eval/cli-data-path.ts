@@ -1,6 +1,7 @@
 import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 
 const DATA_PATH_PREFIX_PATTERN = /^data(?:[\\/]|$)/u;
+const LOOKUP_V2_DRAFTS_RELATIVE_DIR = 'data/lookup-v2/drafts';
 
 /**
  * CLI args may still pass repo-relative `data/...` paths.
@@ -13,4 +14,11 @@ export function resolveCliDataPathArg(pathLike: string): string {
   }
 
   return pathLike;
+}
+
+export function lookupV2DraftCliPath(relativePath: string = ''): string {
+  if (relativePath.length === 0) {
+    return LOOKUP_V2_DRAFTS_RELATIVE_DIR;
+  }
+  return `${LOOKUP_V2_DRAFTS_RELATIVE_DIR}/${relativePath.replace(/^\/+/u, '')}`;
 }

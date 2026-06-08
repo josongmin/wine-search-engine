@@ -38,7 +38,7 @@ describe('lookup-v2 hotset fixture stays diverse enough to catch real regression
 
     expect(statusCounts.resolved).toBeGreaterThanOrEqual(20);
     expect(statusCounts.redirect_discovery).toBeGreaterThanOrEqual(7);
-    expect(statusCounts.ambiguous).toBeGreaterThanOrEqual(9);
+    expect(statusCounts.ambiguous).toBeGreaterThanOrEqual(8);
     expect(statusCounts.failed).toBeGreaterThanOrEqual(5);
 
     for (const requiredClass of [

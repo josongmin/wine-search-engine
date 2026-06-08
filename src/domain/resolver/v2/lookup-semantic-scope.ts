@@ -67,6 +67,16 @@ export interface LookupQuerySemanticProbe {
   readonly isMixedScript: boolean;
 }
 
+export function resolveLookupSemanticLocale(args: {
+  readonly query: string;
+  readonly locale?: string | undefined;
+}): 'ko' | 'global' {
+  if (args.locale !== undefined && args.locale.toLowerCase().startsWith('ko')) {
+    return 'ko';
+  }
+  return HANGUL_RE.test(args.query) ? 'ko' : 'global';
+}
+
 export function buildLookupSemanticDescriptorMapFromProjectionDocuments(
   projectionDocuments: readonly LookupEntityProjectionDocument[],
 ): ReadonlyMap<string, LookupSemanticEntityDescriptor> {
@@ -331,7 +341,7 @@ export function buildLookupSemanticScopeFromProbe(args: {
   const scope = {
     scopeAxis,
     familyKey: args.descriptor.familyKey,
-    ...(scopeAxis === 'line' && args.descriptor.lineKey !== undefined ? { lineKey: args.descriptor.lineKey } : {}),
+    ...(hasLine && args.descriptor.lineKey !== undefined ? { lineKey: args.descriptor.lineKey } : {}),
     ...(hasRegion && args.descriptor.regionKey !== undefined ? { regionKey: args.descriptor.regionKey } : {}),
     ...(hasAppellation && args.descriptor.appellationKey !== undefined ? { appellationKey: args.descriptor.appellationKey } : {}),
     ...(hasExactVintage && args.descriptor.vintage !== undefined ? { vintage: args.descriptor.vintage } : {}),

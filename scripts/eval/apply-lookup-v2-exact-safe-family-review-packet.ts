@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import type { LookupExactSafeProposalPacketRow } from './export-lookup-v2-exact-safe-proposal-packet.js';
-import { resolveCliDataPathArg } from './cli-data-path.js';
+import { lookupV2DraftCliPath, resolveCliDataPathArg } from './cli-data-path.js';
 import {
   buildLookupV2ExactSafeReviewScopeKey,
   type LookupExactSafeFamilyReviewPacketRow,
@@ -93,14 +93,14 @@ async function main(): Promise<void> {
     args: process.argv.slice(2).filter((arg) => arg !== '--'),
     options: {
       families: { type: 'string', default: '/tmp/lookup-v2-korean-realworld-stretch-exact-safe-family-review-reviewed.jsonl' },
-      rows: { type: 'string', default: 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl' },
+      rows: { type: 'string', default: lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl') },
       output: { type: 'string', default: '/tmp/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals-reviewed-from-family.jsonl' },
     },
   });
 
   const familiesPath = values.families ?? '/tmp/lookup-v2-korean-realworld-stretch-exact-safe-family-review-reviewed.jsonl';
   const rowsPath = resolveCliDataPathArg(
-    values.rows ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl',
+    values.rows ?? lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl'),
   );
   const outputPath = values.output ?? '/tmp/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals-reviewed-from-family.jsonl';
   const familyRows = parsePacketJsonl(familiesPath, isLookupExactSafeFamilyReviewPacketRow);

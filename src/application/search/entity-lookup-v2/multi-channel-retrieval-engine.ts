@@ -61,7 +61,10 @@ import type {
   LookupScopeGraphEdge,
   LookupScopeGraphRelationKind,
 } from '../../../domain/resolver/v2/entity-scope-graph.port.js';
-import { buildLookupQuerySemanticProbe } from '../../../domain/resolver/v2/lookup-semantic-scope.js';
+import {
+  buildLookupQuerySemanticProbe,
+  resolveLookupSemanticLocale,
+} from '../../../domain/resolver/v2/lookup-semantic-scope.js';
 import type { LookupReviewedFamilyRecallPort } from '../../../domain/resolver/v2/lookup-reviewed-family-recall.js';
 
 export interface MultiChannelRetrievalDeps {
@@ -184,10 +187,14 @@ export class MultiChannelRetrievalEngine implements LookupCandidateRetrievalPort
     const runs = await Promise.all(
       runnable.map((b) => this.runChannel(b.channel, b.view as string, stageTimer)),
     );
+    const semanticLocale = resolveLookupSemanticLocale({
+      query: input.rawQuery,
+      locale: input.locale,
+    });
     const queryProbe = buildLookupQuerySemanticProbe({
       query: input.rawQuery,
       views: input.views,
-      locale: input.locale !== undefined && input.locale.toLowerCase().startsWith('ko') ? 'ko' : 'global',
+      locale: semanticLocale,
     });
 
     // UNION + dedupe by entity. Per-candidate channel provenance is derived from
@@ -255,7 +262,7 @@ export class MultiChannelRetrievalEngine implements LookupCandidateRetrievalPort
         const matches = this.deps.reviewedFamilyRecall.findMatches({
           query: input.rawQuery,
           views: input.views,
-          locale: queryProbe.locale,
+          locale: semanticLocale,
         });
         for (const match of matches) {
           for (const entityId of match.entityIds) {

@@ -8,7 +8,7 @@
   - runtime state:
     - `/Users/songmin/.wine-search-engine/data/runtime-search-snapshot.json`
   - snapshot:
-    - `search-snapshot:v1:6384d22559774856`
+    - `search-snapshot:v1:a70349635d31cf85`
   - runtime state schema:
     - `search_snapshot_runtime_state.v7`
   - manifest schema:
@@ -21,16 +21,16 @@
     - `rows=45`, `divergences=0`, gate **PASS**
   - authority artifact:
     - `/tmp/entity-resolution-validation.json`
-    - snapshot `search-snapshot:v1:6384d22559774856`
+    - snapshot `search-snapshot:v1:a70349635d31cf85`
     - `V2 215/215`, `wrong=0`, `miss=0`, gate **PASS**
   - stretch entity-no-policy coverage artifact:
     - `/tmp/lookup-v2-coverage-korean-realworld-stretch-entity-no-policy.json`
-    - generated `2026-06-07T19:35:50.329Z`
-    - snapshot `search-snapshot:v1:6384d22559774856`
-    - `hot_entities=142/239`, `non_entity=227/351`, `holes=97`
+    - generated `2026-06-07T23:58:36.190Z`
+    - snapshot `search-snapshot:v1:a70349635d31cf85`
+    - `hot_entities=165/239`, `non_entity=226/351`, `holes=74`
     - operator buckets:
       `strict_collision_ambiguous=10`, `family_surface_gap=0`,
-      `qualified_scope_surface_gap=0`, `scope_target_missing=87`,
+      `qualified_scope_surface_gap=0`, `scope_target_missing=64`,
       `scope_support_needed=0`
   - latest isolated latency artifact:
     - `/tmp/lookup-v2-latency-korean-famous-codex-2026-06-08-rca-profiled-rerun2.json`
@@ -44,8 +44,8 @@
       - active bottleneck is cache-hit `v8 deserialize`, not runtime materialization
       - latest profiled rerun: `cache read=121.457ms`, `deserialize=1769.713ms`, `materialize=4.242ms`
 - active proof gap:
-  - current runtime pointer `6384d22559774856` has hotset parity proof on disk
-  - current runtime pointer now also has fresh authority / stretch coverage / write-plane / reviewed-overlay artifacts on disk
+  - current runtime pointer `a70349635d31cf85` has fresh authority / stretch coverage / write-plane / reviewed-overlay artifacts on disk
+  - current runtime pointer does **not** yet have a fresh hotset parity artifact on disk
   - current runtime pointer still does **not** have a fresh isolated latency artifact on disk
   - older `d2a964e484ff2284` latency artifact remains useful RCA evidence, but it is not active-pointer proof
 - runtime / planner state:
@@ -61,20 +61,20 @@
     reviewed family recall, and concept redirect artifacts
   - runtime owner evidence / benchmark hints stay display-only and do not promote authority
 - publish state:
-  - active runtime pointer is `search-snapshot:v1:6384d22559774856`
+  - active runtime pointer is `search-snapshot:v1:a70349635d31cf85`
   - last verified stretch/latency artifacts currently on disk still reference
     `search-snapshot:v1:d2a964e484ff2284`
 - stretch truth:
   - current entity-no-policy draft:
-    - `/Users/songmin/.wine-search-engine/data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl`
-    - `rows=94`, `auto_targetable=25`, `scope_policy_review=0`,
+    - `/tmp/lookup-v2-drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl`
+    - `rows=71`, `auto_targetable=2`, `scope_policy_review=0`,
       `localized_surface_review=0`, `catalog_support_review=0`,
       `reviewed_collision=35`, `scope_target_review=13`,
       `reviewed_rejected=21`
   - current write-plane summary:
-    - `/Users/songmin/.wine-search-engine/data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-write-plane-summary.json`
-    - `exact_safe_packet_rows=25`, `reviewed_authority_approved_rows=25`, `reviewed_authority_pending_rows=0`
-    - `exact_safe_family_review_rows=25`, `exact_safe_family_pending_rows=17`
+    - `/tmp/lookup-v2-drafts/lookup-v2-korean-realworld-stretch-write-plane-summary.json`
+    - `exact_safe_packet_rows=2`, `reviewed_authority_approved_rows=2`, `reviewed_authority_pending_rows=0`
+    - `exact_safe_family_review_rows=2`, `exact_safe_family_pending_rows=0`
     - `catalog_support_family_clusters: rows=0, families=0`
     - `reviewed_collision_family_clusters: rows=35, families=12`
     - `reviewed_collision_family_review_rows=29`
@@ -84,17 +84,17 @@
     - `manual_target_collision_candidate_rows=1`
     - `manual_target_missing_runtime_owner_rows=10`
   - current policy review packet:
-    - `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-policy-review-packet.jsonl`
+    - `/Users/songmin/.wine-search-engine/data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-policy-review-packet.jsonl`
     - `rows=0`
   - current reviewed family-collision registry:
     - `data/lookup-v2/lookup-family-collision-registry-v1.jsonl`
   - overlay proof:
-    - `data/lookup-v2/drafts/lookup-v2-stretch-reviewed-registry-overlay-summary.json`
+    - `/Users/songmin/.wine-search-engine/data/lookup-v2/drafts/lookup-v2-stretch-reviewed-registry-overlay-summary.json`
     - reviewed-registry overlay: no pending reviewed registry delta (`semantic_scope_registry_inserted=0`, `semantic_policy_registry_inserted=0`)
     - family-collision overlay: `reviewed_collision 0 -> 36`, `scope_target_review 58 -> 23`
 
 - residual operator debt:
-  - remaining stretch debt is concentrated in `scope_target_missing=87`
+  - remaining stretch debt is concentrated in `scope_target_missing=64`
     with smaller `strict_collision_ambiguous=10`
   - semantic-scope cutover is active; remaining work is reviewed authority/data expansion, not legacy plane migration
 
@@ -188,7 +188,7 @@
 - `pnpm run eval:lookup-v2:stretch:build-expansion-prompt`
   - external-LLM append용 prompt를 current corpus 기준으로 regenerate한다
   - output:
-    `data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-expansion-prompt.txt`
+    `/Users/songmin/.wine-search-engine/data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-expansion-prompt.txt`
 - `pnpm run eval:lookup-v2:stretch:merge-candidate -- --candidate <jsonl> [--output <jsonl> | --write] [--qidPrefix kry]`
   - qid-less candidate rows를 deterministic append qid로 merge한다
   - duplicate query / invalid schema / invalid status contract는 fail-closed

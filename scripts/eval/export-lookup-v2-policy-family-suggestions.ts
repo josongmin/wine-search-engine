@@ -3,7 +3,7 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import type { LookupV2PolicyFamilyReviewDecisionRow } from './review-lookup-v2-policy-family-review-packet.js';
 import type { LookupV2PolicyFamilyReviewPacketRow } from './export-lookup-v2-policy-family-review-packet.js';
-import { resolveCliDataPathArg } from './cli-data-path.js';
+import { lookupV2DraftCliPath, resolveCliDataPathArg } from './cli-data-path.js';
 
 export interface LookupV2PolicyFamilySuggestionRow {
   readonly semanticConflictKey: string;
@@ -91,15 +91,15 @@ function main(): void {
   const { values } = parseArgs({
     args: process.argv.slice(2).filter((arg) => arg !== '--'),
     options: {
-      input: { type: 'string', default: 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-policy-family-review-packet.jsonl' },
-      output: { type: 'string', default: 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-policy-family-suggestions.jsonl' },
-      decisionsOutput: { type: 'string', default: 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-policy-family.suggested-decisions.jsonl' },
+      input: { type: 'string', default: lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-policy-family-review-packet.jsonl') },
+      output: { type: 'string', default: lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-policy-family-suggestions.jsonl') },
+      decisionsOutput: { type: 'string', default: lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-policy-family.suggested-decisions.jsonl') },
     },
   });
 
-  const inputPath = resolveCliDataPathArg(values.input ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-policy-family-review-packet.jsonl');
-  const outputPath = resolveCliDataPathArg(values.output ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-policy-family-suggestions.jsonl');
-  const decisionsOutputPath = resolveCliDataPathArg(values.decisionsOutput ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-policy-family.suggested-decisions.jsonl');
+  const inputPath = resolveCliDataPathArg(values.input ?? lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-policy-family-review-packet.jsonl'));
+  const outputPath = resolveCliDataPathArg(values.output ?? lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-policy-family-suggestions.jsonl'));
+  const decisionsOutputPath = resolveCliDataPathArg(values.decisionsOutput ?? lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-policy-family.suggested-decisions.jsonl'));
   const packetRows = parsePacketJsonl(inputPath);
   const suggestionRows = buildLookupV2PolicyFamilySuggestions(packetRows);
   const decisionRows = buildLookupV2PolicyFamilySuggestedDecisionRows(suggestionRows);

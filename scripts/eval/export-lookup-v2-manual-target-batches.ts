@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import type { LookupV2CurationDraftRow } from './export-lookup-v2-curation-drafts.js';
-import { resolveCliDataPathArg } from './cli-data-path.js';
+import { lookupV2DraftCliPath, resolveCliDataPathArg } from './cli-data-path.js';
 
 export interface LookupV2ManualTargetBatchIndexEntry {
   readonly holeClass: string;
@@ -114,13 +114,13 @@ function main(): void {
   const { values } = parseArgs({
     args: process.argv.slice(2).filter((arg) => arg !== '--'),
     options: {
-      input: { type: 'string', default: 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl' },
-      outputDir: { type: 'string', default: 'data/lookup-v2/drafts/manual-target-batches' },
+      input: { type: 'string', default: lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl') },
+      outputDir: { type: 'string', default: lookupV2DraftCliPath('manual-target-batches') },
     },
   });
 
-  const inputPath = resolveCliDataPathArg(values.input ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl');
-  const outputDir = resolveCliDataPathArg(values.outputDir ?? 'data/lookup-v2/drafts/manual-target-batches');
+  const inputPath = resolveCliDataPathArg(values.input ?? lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl'));
+  const outputDir = resolveCliDataPathArg(values.outputDir ?? lookupV2DraftCliPath('manual-target-batches'));
   const draftRows = parseDraftJsonl(inputPath);
   const generatedAt = new Date().toISOString();
   const index = writeLookupV2ManualTargetBatches({

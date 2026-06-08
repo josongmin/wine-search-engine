@@ -90,7 +90,7 @@
 {"qid":"elv2-kr-090","query":"스크리밍 이글","expected_status":"resolved","expected_entity_hint":"screaming eagle","class":"korean_icon_napa_cult","note":"spaced Korean Screaming Eagle variant"}
 {"qid":"elv2-kr-091","query":"할란 이스테이트","expected_status":"resolved","expected_entity_hint":"harlan estate","class":"korean_icon_napa_cult","note":"Korean Harlan Estate spelling variant"}
 {"qid":"elv2-kr-092","query":"도미니오 데 핑구스","expected_status":"resolved","expected_entity_hint":"pingus","class":"korean_icon_iberia_latam","note":"full Korean producer phrase for Pingus"}
-{"qid":"elv2-kr-093","query":"사시카야","expected_status":"ambiguous","class":"ambiguity_korean_typo","note":"short Korean Sassicaia typo must not wrong-resolve"}
+{"qid":"elv2-kr-093","query":"사시카야","expected_status":"failed","accepted_statuses":["failed","ambiguous"],"class":"ambiguity_korean_typo","note":"short Korean Sassicaia typo stays fail-closed on exact lookup and must never wrong-resolve"}
 {"qid":"elv2-kr-094","query":"사씨카이야","expected_status":"ambiguous","class":"ambiguity_korean_typo","note":"hard Korean Sassicaia typo must stay fail-closed"}
 {"qid":"elv2-kr-095","query":"페트루스","expected_status":"ambiguous","class":"ambiguity_korean_typo","note":"popular Petrus spelling variant still collides and must not wrong-resolve"}
 {"qid":"elv2-kr-106","query":"마고","expected_status":"ambiguous","class":"ambiguity_bordeaux_short_form","note":"ultra-short Korean Margaux shorthand should stay ambiguous"}

@@ -884,6 +884,105 @@ describe('T-ELV2-06 clarification contract on the wire', () => {
     expectWireContract(out);
   });
 
+  it('resolves a direct reviewed semantic-scope target even when resolver confidence stays below threshold', async () => {
+    const plannerPlan = makePlan({
+      rawQuery: '솔라이아 2018',
+      normalizedQuery: '솔라이아 2018',
+      normalizedQueryViews: makeViews('솔라이아 2018'),
+      queryClass: 'unknown',
+      anchors: [],
+    });
+    const resolver = makeResolver('failed', [
+      {
+        id: 'solaia-2018',
+        label: "2018 Antinori Tenuta Tignanello 'Solaia'",
+        score: 0,
+      },
+    ]);
+    const semanticScopeRegistry = {
+      findMatches: vi.fn().mockReturnValue([
+        {
+          semanticScopeKey: 'line::solaia::::::::2018::qualified::ko',
+          scopeAxis: 'line',
+          familyKey: 'solaia',
+          vintage: 2018,
+          surfaceFormKind: 'qualified',
+          locale: 'ko',
+          entityId: 'solaia-2018',
+        },
+      ]),
+      getReviewedTargetEntityIds: vi.fn().mockReturnValue(new Set()),
+    };
+    const entityLookup = {
+      getDocuments: vi.fn(async (ids: readonly unknown[]) => new Map(
+        ids.map((id) => [
+          id,
+          {
+            entityId: id,
+            entityType: 'wine',
+            canonicalLabel: "2018 Antinori Tenuta Tignanello 'Solaia'",
+          },
+        ]),
+      )),
+    };
+
+    const out = await makeUseCase(plannerPlan, resolver, {
+      semanticScopeRegistry,
+      entityLookup,
+    }).execute({ query: '솔라이아 2018', maxCandidates: 10, mode: 'default', locale: 'ko' });
+
+    expect(out.status).toBe('resolved');
+    expect(out.evidenceSummary.decisionReasonCode).toBe('reviewed_scope_target_resolved');
+    expect(out.topCandidate?.entityId).toBe('solaia-2018');
+    expect(out.candidates[0]?.entityId).toBe('solaia-2018');
+    expect(out.clarificationOptions).toHaveLength(0);
+    expectWireContract(out);
+  });
+
+  it('keeps a direct reviewed semantic-scope match fail-closed when multiple entity targets match', async () => {
+    const plannerPlan = makePlan({
+      rawQuery: '실버 오크',
+      normalizedQuery: '실버 오크',
+      normalizedQueryViews: makeViews('실버 오크'),
+      queryClass: 'unknown',
+      anchors: [],
+    });
+    const resolver = makeResolver('failed', [
+      { id: 'silver-oak-alexander', label: '1984 Silver Oak Alexander Valley Cabernet Sauvignon', score: 0 },
+      { id: 'silver-oak-napa', label: '2014 Silver Oak Napa Valley Cabernet Sauvignon', score: 0 },
+    ]);
+    const semanticScopeRegistry = {
+      findMatches: vi.fn().mockReturnValue([
+        {
+          semanticScopeKey: 'family::silver oak::::::::::bare::ko',
+          scopeAxis: 'family',
+          familyKey: 'silver oak',
+          surfaceFormKind: 'bare',
+          locale: 'ko',
+          entityId: 'silver-oak-alexander',
+        },
+        {
+          semanticScopeKey: 'family::silver oak::::::::::bare::ko',
+          scopeAxis: 'family',
+          familyKey: 'silver oak',
+          surfaceFormKind: 'bare',
+          locale: 'ko',
+          entityId: 'silver-oak-napa',
+        },
+      ]),
+      getReviewedTargetEntityIds: vi.fn().mockReturnValue(new Set()),
+    };
+
+    const out = await makeUseCase(plannerPlan, resolver, {
+      semanticScopeRegistry,
+    }).execute({ query: '실버 오크', maxCandidates: 10, mode: 'default', locale: 'ko' });
+
+    expect(out.status).toBe('failed');
+    expect(out.evidenceSummary.decisionReasonCode).not.toBe('reviewed_scope_target_resolved');
+    expect(out.topCandidate).toBeNull();
+    expectWireContract(out);
+  });
+
   it('keeps reviewed family collisions ambiguous when the reviewed anchor is only single-channel recall', async () => {
     const plannerPlan = makePlan({
       rawQuery: '샤또 앙젤뤼스',
@@ -1011,6 +1110,29 @@ describe('T-ELV2-06 clarification contract on the wire', () => {
     expect(out.status).toBe('resolved');
     expect(out.topCandidate?.entityId).toBe('sassicaia-2018');
     expect(out.evidenceSummary.decisionReasonCode).not.toBe('vintage_mismatch_downgrade');
+  });
+
+  it('infers ko locale for semantic scope retrieval when a Hangul query omits locale', async () => {
+    const semanticScopeRegistry = {
+      findMatches: vi.fn().mockReturnValue([]),
+      getReviewedTargetEntityIds: vi.fn().mockReturnValue(new Set()),
+    };
+
+    await makeUseCase(
+      makePlan({
+        rawQuery: '솔라이아 2018',
+        normalizedQuery: '솔라이아 2018',
+        normalizedQueryViews: makeViews('솔라이아 2018'),
+        anchors: [],
+      }),
+      makeResolver('failed'),
+      { semanticScopeRegistry },
+    ).execute({ query: '솔라이아 2018', maxCandidates: 10, mode: 'default' });
+
+    expect(semanticScopeRegistry.findMatches).toHaveBeenCalledWith(expect.objectContaining({
+      query: '솔라이아 2018',
+      locale: 'ko',
+    }));
   });
 
   it('does NOT bypass the vintage downgrade when exact-safe matched only through broadened lookup variants', async () => {

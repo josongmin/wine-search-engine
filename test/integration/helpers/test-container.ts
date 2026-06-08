@@ -43,6 +43,11 @@ import { AutocompleteUseCase } from '../../../src/application/search/autocomplet
 import { HybridUseCase } from '../../../src/application/search/hybrid.usecase.js';
 import { EntityLookupV2UseCase } from '../../../src/application/search/entity-lookup-v2/entity-lookup-v2.usecase.js';
 import { MultiChannelRetrievalEngine } from '../../../src/application/search/entity-lookup-v2/multi-channel-retrieval-engine.js';
+import { RuntimeLookupPlanner } from '../../../src/application/search/entity-lookup-v2/runtime-lookup-planner.js';
+import type {
+  LookupExactSafeMatch,
+  LookupExactSafeRegistryPort,
+} from '../../../src/domain/resolver/v2/lookup-v2-types.js';
 import type { Container } from '../../../src/config/container.js';
 import type { SnapshotVersions } from '../../../src/application/search/search.usecase.js';
 import {
@@ -74,7 +79,9 @@ import {
   toSimilarityCandidate,
 } from './test-fixtures.js';
 import type { RetrievalDocument } from '../../../src/domain/retrieval/model/retrieval-document.js';
-import type { EntityId } from '../../../src/domain/shared/types/index.js';
+import { createCanonicalEntityId, type EntityId } from '../../../src/domain/shared/types/index.js';
+import { normalizeForMatch } from '../../../src/domain/alias/service/normalize.js';
+import { compactForLookup } from '../../../src/domain/query/service/phonetic-skeleton.js';
 
 export interface TestFixtureAlias {
   readonly surfaceForm: string;
@@ -111,6 +118,99 @@ export interface TestContainerOptions {
   readonly fixtureDocuments?: readonly RetrievalDocument[];
 }
 
+function buildInMemoryExactSafeRegistry(
+  aliases: readonly TestFixtureAlias[],
+): LookupExactSafeRegistryPort {
+  const exactEntries = new Map<string, LookupExactSafeMatch | null>();
+  const compactEntries = new Map<string, LookupExactSafeMatch | null>();
+
+  const writeEntry = (
+    target: Map<string, LookupExactSafeMatch | null>,
+    key: string,
+    value: LookupExactSafeMatch,
+  ): void => {
+    if (key.length === 0) {
+      return;
+    }
+    const existing = target.get(key);
+    if (existing === undefined) {
+      target.set(key, value);
+      return;
+    }
+    if (existing === null) {
+      return;
+    }
+    if (String(existing.entityId) !== String(value.entityId)) {
+      target.set(key, null);
+    }
+  };
+
+  for (const alias of aliases) {
+    const normalizedSurface = normalizeForMatch(alias.surfaceForm);
+    const compactSurface = compactForLookup(alias.surfaceForm);
+    const locale = /[가-힣]/u.test(alias.surfaceForm) ? 'ko' : 'global';
+    writeEntry(exactEntries, normalizedSurface, {
+      entityId: createCanonicalEntityId(alias.entityId),
+      locale,
+      kind: 'exact_safe',
+      normalizedSurface,
+    });
+    writeEntry(compactEntries, compactSurface, {
+      entityId: createCanonicalEntityId(alias.entityId),
+      locale,
+      kind: 'compact_exact_safe',
+      normalizedSurface,
+      compactSurface,
+    });
+  }
+
+  return {
+    match(views) {
+      for (const surface of [
+        views.raw,
+        views.strict,
+        views.accentless,
+        views.collapsedWhitespace,
+        views.punctuationStripped,
+        views.vintageCanonicalized,
+        views.vintageStripped,
+        views.transliterated,
+        ...views.lookupVariants,
+      ]) {
+        if (surface === undefined) {
+          continue;
+        }
+        const hit = exactEntries.get(normalizeForMatch(surface));
+        if (hit !== undefined && hit !== null) {
+          return hit;
+        }
+      }
+
+      for (const surface of [
+        views.raw,
+        views.strict,
+        views.accentless,
+        views.compact,
+        views.vintageCanonicalized,
+        views.vintageStripped,
+        views.transliterated,
+        views.phoneticCompact,
+        ...views.lookupVariants,
+      ]) {
+        if (surface === undefined) {
+          continue;
+        }
+        const hit = compactEntries.get(compactForLookup(surface));
+        if (hit !== undefined && hit !== null) {
+          return hit;
+        }
+      }
+
+      return null;
+    },
+  };
+}
+
 /**
  * Creates a fully wired DI container backed by in-memory adapters.
  */
@@ -136,6 +236,7 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
   // pure curated baseline can pass `fixtureAliases: TEST_ALIASES`.
   const fixtureAliases = options.fixtureAliases ?? TEST_ALIASES_WITH_DERIVED;
   const fixtureDocuments = options.fixtureDocuments ?? TEST_DOCUMENTS;
+  const exactSafeRegistry = buildInMemoryExactSafeRegistry(fixtureAliases);
 
   for (const alias of fixtureAliases) {
     aliasMatcher.addAlias(
@@ -341,10 +442,14 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
     resolveUseCase,
     entityLookup: searchIndex,
   });
+  const lookupPlanner = new RuntimeLookupPlanner({
+    aliasMatcher,
+    ambiguityDictionary: ambiguityDict,
+    exactSafeRegistry,
+  });
   const entityLookupV2UseCase = new EntityLookupV2UseCase({
     admissionGate: new ConceptAdmissionGate(),
-    queryPlanner,
-    blocker,
+    lookupPlanner,
     entityResolver,
     entityLookup: searchIndex,
     candidateRetrieval: new MultiChannelRetrievalEngine({

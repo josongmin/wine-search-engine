@@ -1,6 +1,11 @@
 # Entity Lookup V2 RFC
 
 > 목적: ROI 무관, breaking change 허용 전제로 wine entity lookup를 `generic search wrapper`가 아니라 `전용 entity resolution system`으로 재구축한다.
+>
+> Historical / audit-only document.
+> Current authority truth moved to `docs/bench/STATUS.md` and
+> `tools/feature-catalog/features/retrieval/entity-lookup-v2.yaml`.
+> `/v1/lookup/wine` references below preserve pre-cutover design context only.
 
 ---
 

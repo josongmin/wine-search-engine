@@ -10,7 +10,7 @@ import {
 } from '../etl/lookup-exact-safe-registry.js';
 import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
 import type { LookupExactSafeProposalPacketRow } from './export-lookup-v2-exact-safe-proposal-packet.js';
-import { resolveCliDataPathArg } from './cli-data-path.js';
+import { lookupV2DraftCliPath, resolveCliDataPathArg } from './cli-data-path.js';
 
 interface ApplyResult {
   readonly mergedRows: readonly LookupExactSafeRegistryRow[];
@@ -137,7 +137,7 @@ async function main(): Promise<void> {
   const { values } = parseArgs({
     args: process.argv.slice(2).filter((arg) => arg !== '--'),
     options: {
-      input: { type: 'string', default: 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl' },
+      input: { type: 'string', default: lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl') },
       registry: { type: 'string', default: DEFAULT_LOOKUP_EXACT_SAFE_REGISTRY_PATH },
       output: { type: 'string', default: '/tmp/korean-exact-safe-registry-merged.jsonl' },
       write: { type: 'boolean', default: false },
@@ -146,7 +146,7 @@ async function main(): Promise<void> {
   });
 
   const inputPath = resolveCliDataPathArg(
-    values.input ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl',
+    values.input ?? lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl'),
   );
   const registryPath = values.registry ?? DEFAULT_LOOKUP_EXACT_SAFE_REGISTRY_PATH;
   const outputPath = values.output ?? '/tmp/korean-exact-safe-registry-merged.jsonl';

@@ -75,6 +75,7 @@ import { extractQueryVintageYear } from '../../../domain/shared/utils/vintage.js
 import type { LookupPlannerPort } from './lookup-planner.port.js';
 import type { LookupQueryPlan } from './lookup-query-plan.js';
 import type { LookupSemanticScopeRegistryPort } from '../../../domain/resolver/v2/lookup-semantic-scope.js';
+import { resolveLookupSemanticLocale } from '../../../domain/resolver/v2/lookup-semantic-scope.js';
 import type {
   EntityLookupV2Command,
   EntityLookupV2Result,
@@ -468,10 +469,14 @@ export class EntityLookupV2UseCase {
     const anchorCovered = new Set(effectiveAnchors.flatMap((a) => a.candidateEntityIds.map(String)));
     const seeds = new Map<string, CanonicalEntityId>();
     if (this.deps.semanticScopeRegistry !== undefined) {
+      const semanticScopeLocale = resolveLookupSemanticLocale({
+        query: plan.rawQuery,
+        locale,
+      });
       for (const match of this.deps.semanticScopeRegistry.findMatches({
         query: plan.rawQuery,
         views: plan.normalizedQueryViews ?? buildNormalizedQueryViews(plan.rawQuery),
-        locale: locale !== undefined && locale.toLowerCase().startsWith('ko') ? 'ko' : 'global',
+        locale: semanticScopeLocale,
       })) {
         if (
           exactSafeWitnessEntityId !== undefined
@@ -646,6 +651,52 @@ export class EntityLookupV2UseCase {
     return anchor.entityId;
   }
 
+  private resolveDirectReviewedScopeTargetIdentity(args: {
+    readonly command: EntityLookupV2Command;
+    readonly plan: LookupQueryPlan;
+    readonly allCandidates: readonly LookupV2CandidateView[];
+  }): string | undefined {
+    const registry = this.deps.semanticScopeRegistry;
+    if (registry === undefined) {
+      return undefined;
+    }
+    const exactSafeWitnessEntityId = findRawQueryExactSafeSingletonAliasWitness(
+      args.plan.rawQuery,
+      args.plan.normalizedQuery,
+      args.plan.anchors,
+    )?.entityId;
+    const matchedEntityIds = new Set<string>();
+    const semanticScopeLocale = resolveLookupSemanticLocale({
+      query: args.plan.rawQuery,
+      locale: args.command.locale,
+    });
+    for (const match of registry.findMatches({
+      query: args.plan.rawQuery,
+      views: args.plan.normalizedQueryViews ?? buildNormalizedQueryViews(args.plan.rawQuery),
+      locale: semanticScopeLocale,
+    })) {
+      if (
+        exactSafeWitnessEntityId !== undefined
+        && String(match.entityId) !== String(exactSafeWitnessEntityId)
+      ) {
+        continue;
+      }
+      matchedEntityIds.add(String(match.entityId));
+    }
+    if (matchedEntityIds.size !== 1) {
+      return undefined;
+    }
+    const [entityId] = [...matchedEntityIds];
+    const candidate = args.allCandidates.find((entry) => entry.entityId === entityId);
+    if (candidate === undefined) {
+      return undefined;
+    }
+    if (shouldDowngradeForVintageMismatch(args.command.query, candidate.canonicalLabel)) {
+      return undefined;
+    }
+    return entityId;
+  }
+
   private finishResult(args: {
     command: EntityLookupV2Command;
     plan: LookupQueryPlan;
@@ -752,6 +803,12 @@ export class EntityLookupV2UseCase {
       status = 'ambiguous';
       effectiveDecisionReasonCode = PERSISTED_AMBIGUITY_SURFACE_REASON_CODE;
     }
+    const directReviewedScopeTargetEntityId =
+      forcedStatus === undefined
+      && persistedAmbiguity === undefined
+      && !vintageMismatch
+        ? this.resolveDirectReviewedScopeTargetIdentity({ command, plan, allCandidates })
+        : undefined;
     // Reviewed semantic-scope-target authority resolves BEFORE the collision
     // gate: an approved scope-target that pins this query scope to a single
     // catalog entity present in the pool is identity-bearing and breaks the
@@ -764,20 +821,23 @@ export class EntityLookupV2UseCase {
     const reviewedScopeTargetEntityId =
       forcedStatus === undefined
       && persistedAmbiguity === undefined
+      && directReviewedScopeTargetEntityId === undefined
       && !vintageMismatch
       && status === 'ambiguous'
       && extractQueryVintageYear(command.query) === null
       && hasReviewedFamilyCollisionClarificationEvidence(allCandidates)
         ? this.resolveReviewedScopeTargetIdentity({ command, allCandidates })
         : undefined;
-    if (reviewedScopeTargetEntityId !== undefined) {
+    const resolvedReviewedScopeTargetEntityId =
+      directReviewedScopeTargetEntityId ?? reviewedScopeTargetEntityId;
+    if (resolvedReviewedScopeTargetEntityId !== undefined) {
       status = 'resolved';
       effectiveDecisionReasonCode = REVIEWED_SCOPE_TARGET_RESOLVED_REASON_CODE;
     }
     if (
       forcedStatus === undefined
       && persistedAmbiguity === undefined
-      && reviewedScopeTargetEntityId === undefined
+      && resolvedReviewedScopeTargetEntityId === undefined
       && hasReviewedFamilyCollisionClarificationEvidence(allCandidates)
       && !hasAnyIdentityBearingEvidence(result, plan)
       && (status === 'failed' || status === 'ambiguous')
@@ -802,10 +862,10 @@ export class EntityLookupV2UseCase {
     // The resolver orders by rank, so slicing keeps the strongest candidates.
     // When a reviewed scope-target resolved the collision, surface that anchor
     // first so it becomes the top candidate.
-    const orderedCandidates = reviewedScopeTargetEntityId !== undefined
+    const orderedCandidates = resolvedReviewedScopeTargetEntityId !== undefined
       ? [
-          ...allCandidates.filter((c) => c.entityId === reviewedScopeTargetEntityId),
-          ...allCandidates.filter((c) => c.entityId !== reviewedScopeTargetEntityId),
+          ...allCandidates.filter((c) => c.entityId === resolvedReviewedScopeTargetEntityId),
+          ...allCandidates.filter((c) => c.entityId !== resolvedReviewedScopeTargetEntityId),
         ]
       : allCandidates;
     const candidates = orderedCandidates.slice(0, command.maxCandidates);

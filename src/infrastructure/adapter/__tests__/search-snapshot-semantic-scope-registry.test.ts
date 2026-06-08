@@ -81,6 +81,42 @@ describe('SearchSnapshotSemanticScopeRegistry reviewed-anchor seam', () => {
       expect(matches).toEqual([]);
     });
 
+    it('matches a vintage-only line scope through the reviewed family surface when lineKey is absent from the scope', () => {
+      const vintageEntry: LookupSemanticScopeRuntimeEntry = {
+        semanticScopeKey: 'line::solaia::::::::2018::qualified::ko',
+        scopeAxis: 'line',
+        familyKey: 'solaia',
+        vintage: 2018,
+        surfaceFormKind: 'qualified',
+        locale: 'ko',
+        entityId: 'wine-ce-solaia-2018',
+      };
+      const registryWithVintageSurface = new SearchSnapshotSemanticScopeRegistry(
+        [vintageEntry],
+        new Map<string, ReadonlySet<string>>([
+          ['family::solaia::ko', new Set(['솔라이아'])],
+        ]),
+      );
+
+      const matches = registryWithVintageSurface.findMatches({
+        query: '솔라이아 2018',
+        views: buildNormalizedQueryViews('솔라이아 2018'),
+        locale: 'ko',
+      });
+
+      expect(matches).toEqual([
+        {
+          semanticScopeKey: 'line::solaia::::::::2018::qualified::ko',
+          scopeAxis: 'line',
+          familyKey: 'solaia',
+          vintage: 2018,
+          surfaceFormKind: 'qualified',
+          locale: 'ko',
+          entityId: 'wine-ce-solaia-2018',
+        },
+      ]);
+    });
+
     it('a Korean surface NOT in the reviewed index stays unmatched (no fuzzy leak)', () => {
       const matches = withSurfaces.findMatches({
         query: '랜덤 와인 이름',

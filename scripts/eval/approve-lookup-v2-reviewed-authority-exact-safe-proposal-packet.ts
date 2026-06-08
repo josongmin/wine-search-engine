@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import type { LookupExactSafeProposalPacketRow } from './export-lookup-v2-exact-safe-proposal-packet.js';
-import { resolveCliDataPathArg } from './cli-data-path.js';
+import { lookupV2DraftCliPath, resolveCliDataPathArg } from './cli-data-path.js';
 
 const REVIEWED_AUTHORITY_SOURCES = new Set([
   'fixture_exact',
@@ -81,7 +81,7 @@ async function main(): Promise<void> {
   const { values } = parseArgs({
     args: process.argv.slice(2).filter((arg) => arg !== '--'),
     options: {
-      input: { type: 'string', default: 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl' },
+      input: { type: 'string', default: lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl') },
       output: { type: 'string', default: '/tmp/lookup-v2-reviewed-authority-exact-safe-proposals-approved.jsonl' },
       reviewedBy: { type: 'string', default: 'registry:reviewed-authority' },
       reviewedAt: { type: 'string', default: new Date().toISOString() },
@@ -89,7 +89,7 @@ async function main(): Promise<void> {
     },
   });
 
-  const inputPath = resolveCliDataPathArg(values.input ?? 'data/lookup-v2/drafts/lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl');
+  const inputPath = resolveCliDataPathArg(values.input ?? lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-auto-targetable-exact-safe-proposals.jsonl'));
   const outputPath = values.output ?? '/tmp/lookup-v2-reviewed-authority-exact-safe-proposals-approved.jsonl';
   const packetRows = parsePacketJsonl(inputPath);
   const approvedRows = approveLookupV2ReviewedAuthorityExactSafeProposalPacket({
