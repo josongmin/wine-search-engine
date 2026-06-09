@@ -72,7 +72,10 @@ export const CORE_KOREAN_ICON_QUERY_CASES: readonly CoreKoreanEntityCase[] = [
   { query: '샤또 무통', expectedEntityId: 'w-chateau-mouton-rothschild-2018' },
   { query: '샤또 오브리옹', expectedEntityId: 'w-chateau-haut-brion-2015' },
   { query: '페트뤼스', expectedEntityId: 'w-petrus-2016', identitySafe: false },
-  { query: '슈발 블랑', expectedEntityId: 'w-cheval-blanc-2015' },
+  // Bare Cheval Blanc is no longer identity-safe after the Korean stretch
+  // backfill materialized multiple vintages (2010/2015/2017). The surface
+  // remains recall-safe, but lookup must not force a singleton owner.
+  { query: '슈발 블랑', expectedEntityId: 'w-cheval-blanc-2015', identitySafe: false },
   { query: '로마네 콩티', expectedEntityId: 'w-drc-romanee-conti-2017' },
   { query: '아르망 루소', expectedEntityId: 'w-armand-rousseau-chambertin-2018' },
   { query: '코쉬 뒤리', expectedEntityId: 'w-coche-dury-corton-charlemagne-2019' },
@@ -258,8 +261,11 @@ export const CORE_KOREAN_ICON_RELEASE_GATE_CASES: readonly CoreKoreanReleaseGate
   { query: '샤또페트뤼스', expectedEntityId: 'w-petrus-2016', sources: ['entity_alias_catalog'] },
   { query: '샤토페트루스', expectedEntityId: 'w-petrus-2016', sources: ['entity_alias_catalog'] },
 
-  { query: '슈발 블랑', expectedEntityId: 'w-cheval-blanc-2015', sources: ['entity_alias_catalog', 'gold_wine_catalog'] },
-  { query: '슈발블랑', expectedEntityId: 'w-cheval-blanc-2015', sources: ['entity_alias_catalog', 'gold_wine_catalog'] },
+  // Bare / compact Cheval Blanc surfaces now fan out to multiple vintages in
+  // lookup-v2. Keep them on the recall-only lane until an explicit reviewed
+  // bare-surface owner policy exists.
+  { query: '슈발 블랑', expectedEntityId: 'w-cheval-blanc-2015', sources: ['entity_alias_catalog', 'gold_wine_catalog'], identitySafe: false },
+  { query: '슈발블랑', expectedEntityId: 'w-cheval-blanc-2015', sources: ['entity_alias_catalog', 'gold_wine_catalog'], identitySafe: false },
   { query: '샤토 슈발 블랑', expectedEntityId: 'w-cheval-blanc-2015', sources: ['korean_wine_aliases', 'entity_alias_catalog', 'web_usage'] },
   { query: '샤또 슈발 블랑', expectedEntityId: 'w-cheval-blanc-2015', sources: ['korean_wine_aliases', 'entity_alias_catalog', 'web_usage'] },
   { query: '샤토슈발블랑', expectedEntityId: 'w-cheval-blanc-2015', sources: ['korean_wine_aliases', 'entity_alias_catalog'] },

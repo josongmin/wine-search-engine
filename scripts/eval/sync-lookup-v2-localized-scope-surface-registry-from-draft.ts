@@ -14,6 +14,8 @@ import {
   loadLookupV2SemanticScopeTargetApprovedMapSync,
   type LookupV2SemanticScopeTargetRegistryRow,
 } from './lookup-v2-semantic-scope-target-registry.js';
+import { DEFAULT_RUNTIME_STATE_PATH } from './lookup-v2-runtime-known-entity-ids.js';
+import { loadLookupV2RuntimeRegistryContextSync } from './lookup-v2-runtime-registry-context.js';
 
 interface LocalizedScopeSurfaceSyncResult {
   readonly mergedRows: readonly LookupV2LocalizedScopeSurfaceRegistryRow[];
@@ -136,6 +138,7 @@ function main(): void {
       input: { type: 'string', default: '/tmp/lookup-v2-drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl' },
       registry: { type: 'string', default: DEFAULT_LOOKUP_V2_LOCALIZED_SCOPE_SURFACE_REGISTRY_PATH },
       semanticScopeRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_TARGET_REGISTRY_PATH },
+      runtimeState: { type: 'string', default: DEFAULT_RUNTIME_STATE_PATH },
       output: { type: 'string', default: '/tmp/lookup-localized-scope-surface-registry-merged.jsonl' },
       write: { type: 'boolean', default: false },
     },
@@ -144,12 +147,14 @@ function main(): void {
   const inputPath = values.input ?? '/tmp/lookup-v2-drafts/lookup-v2-korean-realworld-stretch-entity-no-policy-draft.jsonl';
   const registryPath = values.registry ?? DEFAULT_LOOKUP_V2_LOCALIZED_SCOPE_SURFACE_REGISTRY_PATH;
   const semanticScopeRegistryPath = values.semanticScopeRegistry ?? DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_TARGET_REGISTRY_PATH;
+  const runtimeStatePath = values.runtimeState ?? DEFAULT_RUNTIME_STATE_PATH;
   const outputPath = values.output ?? '/tmp/lookup-localized-scope-surface-registry-merged.jsonl';
+  const { runtimeDescriptorMap } = loadLookupV2RuntimeRegistryContextSync(runtimeStatePath);
 
   const result = syncLookupV2LocalizedScopeSurfaceRegistryFromDraft({
     draftRows: parseDraftJsonl(inputPath),
     existingRows: loadLookupV2LocalizedScopeSurfaceRegistrySync(registryPath),
-    approvedScopeMap: loadLookupV2SemanticScopeTargetApprovedMapSync(semanticScopeRegistryPath),
+    approvedScopeMap: loadLookupV2SemanticScopeTargetApprovedMapSync(semanticScopeRegistryPath, runtimeDescriptorMap),
   });
 
   const targetPath = values.write ? registryPath : outputPath;

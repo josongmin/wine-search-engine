@@ -27,39 +27,39 @@ export const AUTHORITY_META: Record<
   { label: string; file: string; note: string }
 > = {
   exact_safe: {
-    label: 'Exact-safe',
+    label: '정확매칭 (exact-safe)',
     file: 'korean-exact-safe-registry-v1.jsonl',
-    note: 'collision-free singleton surface → entity. 리졸버가 vintageCanonicalized로 family-selection 전에 매칭.',
+    note: '충돌 없는 단일 표면 → 엔티티. 리졸버가 빈티지 정규화 후 family 선택보다 먼저 매칭.',
   },
   scope_target: {
-    label: 'Scope target',
+    label: '스코프 타깃',
     file: 'lookup-semantic-scope-target-registry-v1.jsonl',
-    note: 'family/line/vintage scope → reviewed target entity. localized surface auto-sync의 source.',
+    note: '패밀리/라인/빈티지 범위 → 검토된 타깃 엔티티. 지역화 표면 자동동기화의 원천.',
   },
   policy: {
-    label: 'Policy',
+    label: '정책',
     file: 'lookup-semantic-policy-registry-v1.jsonl',
-    note: 'semantic conflict → keep_ambiguous / promote_exact_safe / needs_scope_target.',
+    note: '의미 충돌 → 모호 유지 / exact-safe 승격 / 스코프타깃 필요.',
   },
   collision: {
-    label: 'Family collision',
+    label: '패밀리 충돌',
     file: 'lookup-family-collision-registry-v1.jsonl',
-    note: 'family surface 충돌 상태(reviewed).',
+    note: '패밀리 표면 충돌 상태(검토됨).',
   },
   scope_support: {
-    label: 'Scope support',
+    label: '스코프 지원',
     file: 'lookup-semantic-scope-support-registry-v1.jsonl',
-    note: 'scope의 catalog/runtime support 상태.',
+    note: '범위의 카탈로그/런타임 지원 상태.',
   },
   localized_surface: {
-    label: 'Localized surface',
+    label: '지역화 표면',
     file: 'lookup-localized-scope-surface-registry-v1.jsonl',
-    note: 'component(localized) surface — approved scope target에서 auto-sync 가능(수동 전용 아님).',
+    note: '지역화된 구성요소 표면 — 승인된 스코프 타깃에서 자동동기화 가능(수동 전용 아님).',
   },
   family_core_witness: {
-    label: 'Family-core witness',
+    label: '패밀리 증거 (witness)',
     file: 'lookup-family-core-witness-registry-v1.jsonl',
-    note: 'evidence-only overlay: surface→entity를 family owner set에 노출(authority 승격 아님).',
+    note: '증거 전용 오버레이: 표면→엔티티를 패밀리 owner 집합에 노출(권한 승격 아님).',
   },
 };
 
@@ -98,16 +98,68 @@ export interface CoverageReport {
   readonly reasonCounts: Record<string, number>;
 }
 
+export interface WritePlaneCoverageResidue {
+  readonly hotEntityCount: number;
+  readonly coveredCount: number;
+  readonly uncoveredCount: number;
+  readonly activeCoverageRatio: number;
+  readonly activeCoveragePercent: number;
+  readonly operatorBucketCounts: Record<string, number>;
+  readonly observedReasonCodeCounts: Record<string, number>;
+}
+
+export interface WritePlaneDraftSummary {
+  readonly rows: number;
+  readonly autoTargetable: number;
+  readonly scopePolicyReview: number;
+  readonly localizedSurfaceReview: number;
+  readonly reviewedRejected: number;
+  readonly catalogSupportReview: number;
+  readonly reviewedCollision: number;
+  readonly scopeTargetReview: number;
+}
+
+export interface WritePlaneOperationalResidue {
+  readonly draftRows: number;
+  readonly structurallyClosedRows: number;
+  readonly structurallyClosedRatio: number;
+  readonly structurallyClosedPercent: number;
+  readonly terminalReviewedRows: number;
+  readonly autoTargetableRows: number;
+  readonly manualReviewRows: number;
+  readonly manualReviewBreakdown: {
+    readonly scopePolicyReview: number;
+    readonly localizedSurfaceReview: number;
+    readonly catalogSupportReview: number;
+    readonly reviewedCollision: number;
+    readonly scopeTargetReview: number;
+  };
+  readonly ownerDispatchQueue: {
+    readonly packetCount: number;
+    readonly familyCount: number;
+    readonly rowCount: number;
+  };
+  readonly exactSafePendingFamilyRows: number;
+}
+
+export interface WritePlaneRemainingWork {
+  readonly ownerDispatchPackets: number;
+  readonly ownerDispatchFamilies: number;
+  readonly ownerDispatchRows: number;
+  readonly exactSafePendingFamilyRows: number;
+}
+
 export interface WritePlane {
   readonly generatedAt?: string;
-  readonly coverageResidue?: Record<string, unknown>;
-  readonly draft?: Record<string, number>;
+  readonly coverageResidue?: WritePlaneCoverageResidue;
+  readonly draft?: WritePlaneDraftSummary;
+  readonly operationalResidue?: WritePlaneOperationalResidue;
   readonly exactSafe?: Record<string, unknown>;
   readonly policy?: Record<string, unknown>;
   readonly manualTarget?: Record<string, unknown>;
   readonly scopeSupport?: Record<string, unknown>;
   readonly reviewedCollision?: Record<string, unknown>;
-  readonly remainingWork?: Record<string, unknown>;
+  readonly remainingWork?: WritePlaneRemainingWork;
 }
 
 export interface GoldRow {

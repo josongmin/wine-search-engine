@@ -121,7 +121,8 @@ import {
 import { applyLookupV2ExactSafeFamilyReviewPacket } from './apply-lookup-v2-exact-safe-family-review-packet.js';
 import { lookupV2DraftCliPath, resolveCliDataPathArg } from './cli-data-path.js';
 import type { LookupV2RuntimeSemanticDescriptor } from './lookup-v2-runtime-semantic-descriptors.js';
-import { loadLookupV2RuntimeSemanticDescriptorMapSync } from './lookup-v2-runtime-semantic-descriptors.js';
+import { DEFAULT_RUNTIME_STATE_PATH } from './lookup-v2-runtime-known-entity-ids.js';
+import { loadLookupV2RuntimeRegistryContextSync } from './lookup-v2-runtime-registry-context.js';
 
 interface LookupV2StretchCoverageArtifact {
   readonly generatedAt?: string;
@@ -181,6 +182,28 @@ export interface LookupV2StretchWritePlaneRefreshSummary {
     readonly catalogSupportReview: number;
     readonly reviewedCollision: number;
     readonly scopeTargetReview: number;
+  };
+  readonly operationalResidue: {
+    readonly draftRows: number;
+    readonly structurallyClosedRows: number;
+    readonly structurallyClosedRatio: number;
+    readonly structurallyClosedPercent: number;
+    readonly terminalReviewedRows: number;
+    readonly autoTargetableRows: number;
+    readonly manualReviewRows: number;
+    readonly manualReviewBreakdown: {
+      readonly scopePolicyReview: number;
+      readonly localizedSurfaceReview: number;
+      readonly catalogSupportReview: number;
+      readonly reviewedCollision: number;
+      readonly scopeTargetReview: number;
+    };
+    readonly ownerDispatchQueue: {
+      readonly packetCount: number;
+      readonly familyCount: number;
+      readonly rowCount: number;
+    };
+    readonly exactSafePendingFamilyRows: number;
   };
   readonly exactSafe: {
     readonly packetRows: number;
@@ -398,6 +421,56 @@ function buildRemainingWorkSummary(args: {
   };
 }
 
+function buildDraftSummary(
+  draftRows: readonly LookupV2CurationDraftRow[],
+): LookupV2StretchWritePlaneRefreshSummary['draft'] {
+  return {
+    rows: draftRows.length,
+    autoTargetable: draftRows.filter((row) => row.triageBucket === 'auto_targetable').length,
+    scopePolicyReview: draftRows.filter((row) => row.triageBucket === 'scope_policy_review').length,
+    localizedSurfaceReview: draftRows.filter((row) => row.triageBucket === 'localized_surface_review').length,
+    reviewedRejected: draftRows.filter((row) => row.triageBucket === 'reviewed_rejected').length,
+    catalogSupportReview: draftRows.filter((row) => row.triageBucket === 'catalog_support_review').length,
+    reviewedCollision: draftRows.filter((row) => row.triageBucket === 'reviewed_collision').length,
+    scopeTargetReview: draftRows.filter((row) => row.triageBucket === 'scope_target_review').length,
+  };
+}
+
+function buildOperationalResidueSummary(args: {
+  readonly draft: LookupV2StretchWritePlaneRefreshSummary['draft'];
+  readonly remainingWork: LookupV2StretchWritePlaneRefreshSummary['remainingWork'];
+}): LookupV2StretchWritePlaneRefreshSummary['operationalResidue'] {
+  const structurallyClosedRows = args.draft.autoTargetable + args.draft.reviewedRejected;
+  const structurallyClosedRatio = args.draft.rows > 0
+    ? structurallyClosedRows / args.draft.rows
+    : 0;
+
+  return {
+    draftRows: args.draft.rows,
+    structurallyClosedRows,
+    structurallyClosedRatio,
+    structurallyClosedPercent: args.draft.rows > 0
+      ? Number((structurallyClosedRatio * 100).toFixed(1))
+      : 0,
+    terminalReviewedRows: args.draft.reviewedRejected,
+    autoTargetableRows: args.draft.autoTargetable,
+    manualReviewRows: args.draft.rows - structurallyClosedRows,
+    manualReviewBreakdown: {
+      scopePolicyReview: args.draft.scopePolicyReview,
+      localizedSurfaceReview: args.draft.localizedSurfaceReview,
+      catalogSupportReview: args.draft.catalogSupportReview,
+      reviewedCollision: args.draft.reviewedCollision,
+      scopeTargetReview: args.draft.scopeTargetReview,
+    },
+    ownerDispatchQueue: {
+      packetCount: args.remainingWork.ownerDispatchPackets,
+      familyCount: args.remainingWork.ownerDispatchFamilies,
+      rowCount: args.remainingWork.ownerDispatchRows,
+    },
+    exactSafePendingFamilyRows: args.remainingWork.exactSafePendingFamilyRows,
+  };
+}
+
 export async function refreshLookupV2StretchWritePlaneArtifacts(args: {
   readonly tasks: readonly CurationTask[];
   readonly inputArtifact: string;
@@ -550,22 +623,23 @@ export async function refreshLookupV2StretchWritePlaneArtifacts(args: {
     manifestPath: outputPaths.ownerDispatchManifest,
     packetsDir: outputPaths.ownerDispatchPacketsDir,
   });
+  const draftSummary = buildDraftSummary(draftRows);
+  const exactSafePendingFamilyRows = exactSafeFamilyReviewRows.filter((row) => row.proposalStatus === 'needs_review').length;
+  const remainingWork = buildRemainingWorkSummary({
+    manifest: ownerDispatchManifest,
+    exactSafePendingFamilyRows,
+  });
 
   const summary: LookupV2StretchWritePlaneRefreshSummary = {
     inputArtifact: args.inputArtifact,
     generatedAt: args.generatedAt,
     outputPaths,
     coverageResidue: buildCoverageResidueSummary(args.coverageReport),
-    draft: {
-      rows: draftRows.length,
-      autoTargetable: draftRows.filter((row) => row.triageBucket === 'auto_targetable').length,
-      scopePolicyReview: draftRows.filter((row) => row.triageBucket === 'scope_policy_review').length,
-      localizedSurfaceReview: draftRows.filter((row) => row.triageBucket === 'localized_surface_review').length,
-      reviewedRejected: draftRows.filter((row) => row.triageBucket === 'reviewed_rejected').length,
-      catalogSupportReview: draftRows.filter((row) => row.triageBucket === 'catalog_support_review').length,
-      reviewedCollision: draftRows.filter((row) => row.triageBucket === 'reviewed_collision').length,
-      scopeTargetReview: draftRows.filter((row) => row.triageBucket === 'scope_target_review').length,
-    },
+    draft: draftSummary,
+    operationalResidue: buildOperationalResidueSummary({
+      draft: draftSummary,
+      remainingWork,
+    }),
     exactSafe: {
       packetRows: exactSafePacketRows.length,
       reviewedAuthorityApprovedRows: reviewedAuthorityApprovedExactSafePacketRows.filter((row) => row.proposalStatus === 'approved').length,
@@ -610,10 +684,7 @@ export async function refreshLookupV2StretchWritePlaneArtifacts(args: {
     ownerDispatch: {
       manifest: ownerDispatchManifest,
     },
-    remainingWork: buildRemainingWorkSummary({
-      manifest: ownerDispatchManifest,
-      exactSafePendingFamilyRows: exactSafeFamilyReviewRows.filter((row) => row.proposalStatus === 'needs_review').length,
-    }),
+    remainingWork,
   };
 
   writeFileSync(outputPaths.summary, JSON.stringify(summary, null, 2) + '\n', 'utf8');
@@ -633,6 +704,7 @@ async function main(): Promise<void> {
       familyCollisionRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_FAMILY_COLLISION_REGISTRY_PATH },
       exactSafeRegistry: { type: 'string', default: DEFAULT_LOOKUP_EXACT_SAFE_REGISTRY_PATH },
       exactSafeScopeRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_EXACT_SAFE_SCOPE_REGISTRY_PATH },
+      runtimeState: { type: 'string', default: DEFAULT_RUNTIME_STATE_PATH },
     },
   });
 
@@ -645,6 +717,8 @@ async function main(): Promise<void> {
   const familyCollisionRegistryPath = values.familyCollisionRegistry ?? DEFAULT_LOOKUP_V2_FAMILY_COLLISION_REGISTRY_PATH;
   const exactSafeRegistryPath = values.exactSafeRegistry ?? DEFAULT_LOOKUP_EXACT_SAFE_REGISTRY_PATH;
   const exactSafeScopeRegistryPath = values.exactSafeScopeRegistry ?? DEFAULT_LOOKUP_V2_EXACT_SAFE_SCOPE_REGISTRY_PATH;
+  const runtimeStatePath = values.runtimeState ?? DEFAULT_RUNTIME_STATE_PATH;
+  const { runtimeDescriptorMap, knownEntityIds } = loadLookupV2RuntimeRegistryContextSync(runtimeStatePath);
 
   const parsed = JSON.parse(readFileSync(inputPath, 'utf8')) as LookupV2StretchCoverageArtifact;
   const summary = await refreshLookupV2StretchWritePlaneArtifacts({
@@ -654,20 +728,23 @@ async function main(): Promise<void> {
     outputDir,
     coverageReport: parsed.report,
     benchmarkGoldHintMap: loadLookupV2BenchmarkGoldHintMapSync(),
-    familyTargetApprovedMap: loadLookupV2SemanticScopeTargetApprovedMapSync(familyTargetRegistryPath),
-    familyTargetRejectedMap: loadLookupV2SemanticScopeTargetRejectedMapSync(familyTargetRegistryPath),
+    familyTargetApprovedMap: loadLookupV2SemanticScopeTargetApprovedMapSync(familyTargetRegistryPath, runtimeDescriptorMap),
+    familyTargetRejectedMap: loadLookupV2SemanticScopeTargetRejectedMapSync(familyTargetRegistryPath, runtimeDescriptorMap),
     policyConflictOwners: loadLookupPolicyConflictBenchmarkHintOwnerMapSync(policyConflictRegistryPath),
-    policyFamilyDecisionMap: loadLookupV2SemanticPolicyRegistryMapSync(policyFamilyDecisionRegistryPath),
+    policyFamilyDecisionMap: loadLookupV2SemanticPolicyRegistryMapSync(policyFamilyDecisionRegistryPath, knownEntityIds),
     semanticScopeSupportRegistryMap: loadLookupV2SemanticScopeSupportRegistryMapSync(semanticScopeSupportRegistryPath),
     familyCollisionRegistryMap: loadLookupV2FamilyCollisionRegistryMapSync(familyCollisionRegistryPath),
     exactSafeRegistryRows: await loadLookupExactSafeRegistry(exactSafeRegistryPath),
-    exactSafeScopeRegistryMap: loadLookupV2ExactSafeScopeRegistryMapSync(exactSafeScopeRegistryPath),
-    runtimeOwnerEvidence: loadLookupV2RuntimeSurfaceOwnerEvidenceSync(),
+    exactSafeScopeRegistryMap: loadLookupV2ExactSafeScopeRegistryMapSync(exactSafeScopeRegistryPath, knownEntityIds),
+    runtimeOwnerEvidence: loadLookupV2RuntimeSurfaceOwnerEvidenceSync(runtimeStatePath),
+    runtimeDescriptorMap,
   });
 
   console.log(`[elv2-stretch-write-plane-refresh] draft_rows=${summary.draft.rows}`);
   console.log(`[elv2-stretch-write-plane-refresh] active_coverage=${summary.coverageResidue.coveredCount}/${summary.coverageResidue.hotEntityCount} (${summary.coverageResidue.activeCoveragePercent}%)`);
   console.log(`[elv2-stretch-write-plane-refresh] auto_targetable=${summary.draft.autoTargetable}`);
+  console.log(`[elv2-stretch-write-plane-refresh] structurally_closed_rows=${summary.operationalResidue.structurallyClosedRows}`);
+  console.log(`[elv2-stretch-write-plane-refresh] manual_review_rows=${summary.operationalResidue.manualReviewRows}`);
   console.log(`[elv2-stretch-write-plane-refresh] scope_policy_review=${summary.draft.scopePolicyReview}`);
   console.log(`[elv2-stretch-write-plane-refresh] localized_surface_review=${summary.draft.localizedSurfaceReview}`);
   console.log(`[elv2-stretch-write-plane-refresh] catalog_support_review=${summary.draft.catalogSupportReview}`);

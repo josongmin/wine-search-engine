@@ -41,14 +41,13 @@ async function lookup(query: string) {
 }
 
 describe('Realistic Scenarios — alias normalization', () => {
-  const cases = [
+  const identitySafeCases = [
     ['오퍼스 원', 'opus-one-2018'],
     ['opusone', 'opus-one-2018'],
     ['romanee conti', 'romanee-conti-2019'],
-    ['grange', 'penfolds-grange-2017'],
   ] as const;
 
-  for (const [query, expectedEntityId] of cases) {
+  for (const [query, expectedEntityId] of identitySafeCases) {
     it(`'${query}' stays non-failed in lookup and keeps '${expectedEntityId}' in the hybrid top-5`, async () => {
       const entity = await lookup(query);
       const hybrid = await search({
@@ -60,6 +59,18 @@ describe('Realistic Scenarios — alias normalization', () => {
       expect(getSearchEntityIds(hybrid).slice(0, 5)).toContain(expectedEntityId);
     });
   }
+
+  it("'grange' stays retrieval-visible in hybrid top-5 while lookup fails closed", async () => {
+    const entity = await lookup('grange');
+    const hybrid = await search({
+      query: 'grange',
+      options: { explain: false, clarification: false },
+    });
+
+    expect(entity.status).toMatch(/^(failed|redirect_discovery)$/);
+    expect(entity.top_candidate).toBeNull();
+    expect(getSearchEntityIds(hybrid).slice(0, 5)).toContain('penfolds-grange-2017');
+  });
 
   it('accented and accent-stripped Margaux queries do not fail', async () => {
     const accented = await lookup('Château Margaux');

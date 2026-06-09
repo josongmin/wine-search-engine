@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Card, Pill, Stat } from './ui';
+import { Card, Pill, Stat, Intro } from './ui';
 import { classifyDrift, DRIFT_LABEL, type DriftClass } from '../lib/drift';
 import type { Dataset } from '../types';
 
@@ -25,11 +25,17 @@ export function DriftIntake({ ds }: { ds: Dataset }) {
 
   return (
     <>
-      <Card title="Drift Intake" desc="운영 쿼리 로그의 신규 surface를 붙여넣으면, 기존 authority/gold와 비교해 자동 분류 (heuristic triage — 결정은 Evidence·Decision에서)">
+      <Intro title="⇲ 새로 들어온 검색어를 자동 분류하는 곳">
+        운영 로그에서 새로 보이는 검색어를 붙여넣으면, 기존 결정/카탈로그와 비교해 자동으로 분류합니다. (간이 분류 — 실제 결정은 「증거·결정」에서)
+        <ul className="steps">
+          <li><b>이미 됨</b> = 조치 불필요 · <b>새 별칭</b>/<b>빈티지 추가</b> = 잔여 큐로 · <b>진짜 모호</b> = 충돌/정책 결정.</li>
+        </ul>
+      </Intro>
+      <Card title="검색어 붙여넣기" desc="기존 결정/카탈로그와 비교해 자동 분류">
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="surface 한 줄에 하나씩 붙여넣기…"
+          placeholder="검색어를 한 줄에 하나씩 붙여넣기…"
           style={{ width: '100%', minHeight: 120, fontFamily: 'var(--mono)', fontSize: 13, padding: 12, border: '1px solid var(--border-strong)', borderRadius: 8, resize: 'vertical' }}
         />
         <div className="toolbar" style={{ marginTop: 10 }}>
@@ -41,7 +47,7 @@ export function DriftIntake({ ds }: { ds: Dataset }) {
 
       {results.length > 0 && (
         <>
-          <div className="grid cols-4" style={{ gridTemplateColumns: 'repeat(5, 1fr)', marginTop: 16, gap: 10 }}>
+          <div className="grid cols-4" style={{ gridTemplateColumns: 'repeat(5, 1fr)', gap: 10 }}>
             {(Object.keys(DRIFT_LABEL) as DriftClass[]).map((k) => (
               <Stat key={k} k={DRIFT_LABEL[k]} v={counts[k] ?? 0} tone={k === 'genuine_ambiguity' ? 'red' : k === 'runtime_backfill' ? 'amber' : k === 'covered' ? 'green' : undefined} />
             ))}

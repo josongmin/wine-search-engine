@@ -45,7 +45,7 @@ export function Bars({ data, total }: { data: [string, number][]; total?: number
   );
 }
 
-export function Copy({ text, label = 'copy' }: { text: string; label?: string }) {
+export function Copy({ text, label = '복사' }: { text: string; label?: string }) {
   const [done, setDone] = useState(false);
   return (
     <button
@@ -67,6 +67,15 @@ export function Empty({ title, hint }: { title: string; hint?: ReactNode }) {
     <div className="empty">
       <div className="big">{title}</div>
       {hint && <div>{hint}</div>}
+    </div>
+  );
+}
+
+export function Intro({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="intro">
+      <div className="intro-t">{title}</div>
+      <div className="intro-b">{children}</div>
     </div>
   );
 }

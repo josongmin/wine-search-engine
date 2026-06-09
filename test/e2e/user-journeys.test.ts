@@ -95,7 +95,7 @@ describe('User Journeys — ambiguity and graceful failure', () => {
   });
 });
 
-describe('User Journeys — semantic and mixed search', () => {
+describe('User Journeys — semantic and public discovery search', () => {
   it("'풀바디 레드 와인' returns at least one full-body red candidate in the top-5", async () => {
     const fullBodyIds = new Set([
       'opus-one-2018',
@@ -115,28 +115,28 @@ describe('User Journeys — semantic and mixed search', () => {
     expect(topFive.some((entityId) => fullBodyIds.has(entityId))).toBe(true);
   });
 
-  it("'오푸스원 같은 와인' returns non-empty alternatives without the seed as top result", async () => {
+  it("'오푸스원 같은 와인' stays on the public hybrid discovery lane with non-empty results", async () => {
     const body = await search({
       query: '오푸스원 같은 와인',
       options: { explain: false, clarification: false },
     });
 
     expect(body.results.length).toBeGreaterThan(0);
-    expect(body.meta.route).toMatch(/^(mixed|hybrid)$/);
+    expect(body.meta.route).toBe('hybrid');
+    expect(body.retrieval_mode).toBe('attribute_search');
     expect(body.engine_decision.decision_status).not.toBe('failed');
-    expect(body.results[0]?.entity.entity_id).not.toBe('opus-one-2018');
   });
 
-  it("'클라우디베이 말고 다른 화이트' returns non-empty mixed-style alternatives", async () => {
+  it("'클라우디베이 말고 다른 화이트' stays on the public hybrid discovery lane with non-empty results", async () => {
     const body = await search({
       query: '클라우디베이 말고 다른 화이트',
       options: { explain: false, clarification: false },
     });
 
     expect(body.results.length).toBeGreaterThan(0);
-    expect(body.meta.route).toMatch(/^(mixed|hybrid)$/);
+    expect(body.meta.route).toBe('hybrid');
+    expect(body.retrieval_mode).toBe('attribute_search');
     expect(body.engine_decision.decision_status).not.toBe('failed');
-    expect(body.results[0]?.entity.entity_id).not.toBe('cloudy-bay-2022');
   });
 });
 

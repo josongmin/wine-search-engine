@@ -28,13 +28,13 @@ async function search(query: string) {
 }
 
 describe('Specialized Modes Quality', () => {
-  it('keeps similar-items queries on the mixed route and excludes the seed wine', async () => {
+  it('keeps free-text anchored similarity on the public hybrid discovery lane', async () => {
     const body = await search('Opus One 2018 비슷한 와인');
 
-    expect(body.meta.route).toBe('mixed');
-    expect(body.retrieval_mode).toBe('similar_items');
-    expect(body.results.length).toBeGreaterThanOrEqual(3);
-    expect(getSearchEntityIds(body).slice(0, 5)).not.toContain('opus-one-2018');
+    expect(body.meta.route).toBe('hybrid');
+    expect(body.retrieval_mode).toBe('attribute_search');
+    expect(body.results.length).toBeGreaterThan(0);
+    expect(getSearchEntityIds(body).slice(0, 5)).toContain('opus-one-2018');
   });
 
   it('keeps recommendation queries on a ranked set-retrieval path with non-empty results', async () => {

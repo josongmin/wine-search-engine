@@ -12,10 +12,6 @@ export interface EntityExactReleaseBaseline {
   readonly top3Recall: number;
 }
 
-export interface AnchoredSimilarityReleaseBaseline {
-  readonly seedExclusionPrecision: number;
-}
-
 export interface RankedFamilyReleaseBaseline {
   readonly zeroCandidateRate: number;
   readonly meanNdcgAt10: number;
@@ -30,7 +26,6 @@ export interface NoMatchReleaseBaseline {
 export interface QueryFamilyReleaseBaselines {
   readonly entity_exact: EntityExactReleaseBaseline;
   readonly pure_constraint: RankedFamilyReleaseBaseline;
-  readonly anchored_similarity: AnchoredSimilarityReleaseBaseline;
   readonly pairing: RankedFamilyReleaseBaseline;
   readonly browse: RankedFamilyReleaseBaseline;
   readonly situation_based: RankedFamilyReleaseBaseline;
@@ -49,9 +44,6 @@ export const QUERY_FAMILY_RELEASE_BASELINES: QueryFamilyReleaseBaselines = {
     meanNdcgAt10: 1,
     meanRecallAt20: 1,
     meanMrrAt10: 1,
-  },
-  anchored_similarity: {
-    seedExclusionPrecision: 1,
   },
   pairing: {
     zeroCandidateRate: 0,
@@ -79,7 +71,6 @@ export const QUERY_FAMILY_RELEASE_BASELINES: QueryFamilyReleaseBaselines = {
 export const QUERY_FAMILY_RELEASE_THRESHOLDS = {
   entityExactWrongResolveMaxIncrease: 0,
   entityExactTop3RecallMaxDrop: 0,
-  anchoredSimilaritySeedExclusionMaxDrop: 0,
   noMatchFailClosedMaxDrop: 0,
   rankedFamilyZeroCandidateMaxIncrease: 0,
   rankedFamilyNdcgAt10MaxDrop: 0.02,

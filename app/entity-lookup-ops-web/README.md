@@ -19,12 +19,37 @@ The first-class objects here are **authority rows** (per registry class), the
 ```bash
 cd app/entity-lookup-ops-web
 pnpm install            # independent workspace (own pnpm-workspace.yaml)
-pnpm run sync-data      # copy latest pipeline artifacts into public/data
+pnpm run sync-data      # copy latest pipeline artifacts into public/data (static fallback)
 pnpm run dev            # http://localhost:5311
 ```
 
-`pnpm run build` / `pnpm run preview` for a static bundle (deploy anywhere — it's
-pure static + `public/data/*.json`).
+`pnpm run build` / `pnpm run preview` for a static bundle.
+
+### Live mode (backend ops API)
+
+The "검색어 처리" screen searches the **real catalog** and **saves** a decision
+when the main wine-search-engine backend is running. Vite proxies `/v2/*` →
+the backend (`http://localhost:3000`, override via `VITE_OPS_BACKEND`).
+
+```bash
+# repo root, separately:
+pnpm run dev            # backend on :3000 (needs PG + Vespa + active snapshot)
+```
+
+Uses existing backend endpoints (no new server code):
+
+| action | endpoint |
+|---|---|
+| catalog search (pick a wine) | `POST /v2/entity-lookup` |
+| coverage / queue health | `POST /v2/entity-lookup/ops/coverage-health` |
+| save a decision | `POST /v2/entity-lookup/ops/proposals/submit` (kind `alias`) |
+| list / review / publish | `POST /v2/entity-lookup/ops/proposals[/review|/publish]` |
+
+> ⚠️ Saving **writes to PostgreSQL** (curation write-plane, migration
+> `030_lookup_v2_curation_write_plane.sql`). Against prod RDS that is a
+> production write — get approval and ensure migration 030 is applied. Catalog
+> **search is read-only**. Backend down → the screen says so and only the
+> offline draft composer is available.
 
 ## Faces
 

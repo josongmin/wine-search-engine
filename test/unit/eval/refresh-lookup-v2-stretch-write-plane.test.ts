@@ -213,6 +213,28 @@ describe('refreshLookupV2StretchWritePlaneArtifacts', () => {
         semantic_scope_target_registry: 1,
       },
     });
+    expect(summary.operationalResidue).toEqual({
+      draftRows: 4,
+      structurallyClosedRows: 2,
+      structurallyClosedRatio: 0.5,
+      structurallyClosedPercent: 50,
+      terminalReviewedRows: 0,
+      autoTargetableRows: 2,
+      manualReviewRows: 2,
+      manualReviewBreakdown: {
+        scopePolicyReview: 0,
+        localizedSurfaceReview: 0,
+        catalogSupportReview: 1,
+        reviewedCollision: 1,
+        scopeTargetReview: 0,
+      },
+      ownerDispatchQueue: {
+        packetCount: 1,
+        familyCount: 1,
+        rowCount: 1,
+      },
+      exactSafePendingFamilyRows: 1,
+    });
     expect(summary.exactSafe.packetRows).toBe(2);
     expect(summary.exactSafe.bySource).toEqual({
       semantic_policy_registry: 1,

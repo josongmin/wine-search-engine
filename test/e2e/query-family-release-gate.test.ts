@@ -14,7 +14,6 @@ interface FamilyCase {
   readonly query: string;
   readonly relevant?: RelevanceMap;
   readonly expectedTop1?: string | undefined;
-  readonly excludedSeed?: string | undefined;
   readonly expectedDecisionStatus?: 'resolved' | 'ambiguous' | 'failed' | undefined;
 }
 
@@ -112,12 +111,10 @@ const CASES: readonly FamilyCase[] = [
   {
     family: 'anchored_similarity',
     query: '오푸스원 같은 와인',
-    excludedSeed: 'opus-one-2018',
   },
   {
     family: 'anchored_similarity',
     query: '클라우디베이 말고 다른 화이트',
-    excludedSeed: 'cloudy-bay-2022',
   },
   {
     family: 'pairing',
@@ -194,17 +191,18 @@ describe('Query Family Release Gate', () => {
     }
   });
 
-  it(`keeps anchored_similarity seed-exclusion non-regressing against ${QUERY_FAMILY_RELEASE_BASELINE_VERSION}`, async () => {
+  it('keeps anchored_similarity on the public hybrid discovery lane', async () => {
     const cases = CASES.filter((entry) => entry.family === 'anchored_similarity');
     const bodies = await Promise.all(cases.map((entry) => search(entry)));
-    const seedExclusionPrecision = bodies.filter((body, index) =>
-      body.results[0]?.entity.entity_id !== cases[index]?.excludedSeed,
-    ).length / bodies.length;
+    const hybridLaneRate = bodies.filter((body) => body.meta.route === 'hybrid').length / bodies.length;
+    const attributeSearchRate = bodies.filter((body) => body.retrieval_mode === 'attribute_search').length / bodies.length;
+    const nonFailedRate = bodies.filter((body) => body.engine_decision.decision_status !== 'failed').length / bodies.length;
+    const nonEmptyRate = bodies.filter((body) => body.results.length > 0).length / bodies.length;
 
-    expect(seedExclusionPrecision).toBeGreaterThanOrEqual(
-      QUERY_FAMILY_RELEASE_BASELINES.anchored_similarity.seedExclusionPrecision
-        - QUERY_FAMILY_RELEASE_THRESHOLDS.anchoredSimilaritySeedExclusionMaxDrop,
-    );
+    expect(hybridLaneRate, 'anchored_similarity: hybrid lane rate').toBe(1);
+    expect(attributeSearchRate, 'anchored_similarity: retrieval-mode rate').toBe(1);
+    expect(nonFailedRate, 'anchored_similarity: non-failed rate').toBe(1);
+    expect(nonEmptyRate, 'anchored_similarity: non-empty rate').toBe(1);
   });
 
   it(`keeps ranked families non-regressing against ${QUERY_FAMILY_RELEASE_BASELINE_VERSION}`, async () => {

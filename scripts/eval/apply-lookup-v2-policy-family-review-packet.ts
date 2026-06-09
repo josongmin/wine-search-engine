@@ -10,6 +10,8 @@ import {
   loadLookupV2SemanticPolicyRegistryMapSync,
   type LookupV2SemanticPolicyRegistryRow,
 } from './lookup-v2-semantic-policy-registry.js';
+import { DEFAULT_RUNTIME_STATE_PATH } from './lookup-v2-runtime-known-entity-ids.js';
+import { loadLookupV2RuntimeRegistryContextSync } from './lookup-v2-runtime-registry-context.js';
 
 function isLookupV2PolicyReviewPacketRow(value: unknown): value is LookupV2PolicyReviewPacketRow {
   if (typeof value !== 'object' || value === null) {
@@ -123,6 +125,7 @@ async function main(): Promise<void> {
       families: { type: 'string', default: '/tmp/lookup-v2-korean-realworld-stretch-policy-family-review-reviewed.jsonl' },
       rows: { type: 'string', default: lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-policy-review-packet.jsonl') },
       registry: { type: 'string', default: DEFAULT_LOOKUP_V2_SEMANTIC_POLICY_REGISTRY_PATH },
+      runtimeState: { type: 'string', default: DEFAULT_RUNTIME_STATE_PATH },
       output: { type: 'string', default: '/tmp/lookup-v2-korean-realworld-stretch-policy-review-reviewed-from-family.jsonl' },
     },
   });
@@ -132,10 +135,12 @@ async function main(): Promise<void> {
     values.rows ?? lookupV2DraftCliPath('lookup-v2-korean-realworld-stretch-policy-review-packet.jsonl'),
   );
   const registryPath = values.registry ?? DEFAULT_LOOKUP_V2_SEMANTIC_POLICY_REGISTRY_PATH;
+  const runtimeStatePath = values.runtimeState ?? DEFAULT_RUNTIME_STATE_PATH;
   const outputPath = values.output ?? '/tmp/lookup-v2-korean-realworld-stretch-policy-review-reviewed-from-family.jsonl';
   const familyRows = parsePacketJsonl(familiesPath, isLookupV2PolicyFamilyReviewPacketRow);
   const rowPacketRows = parsePacketJsonl(rowsPath, isLookupV2PolicyReviewPacketRow);
-  const policyFamilyDecisionMap = loadLookupV2SemanticPolicyRegistryMapSync(registryPath);
+  const { knownEntityIds } = loadLookupV2RuntimeRegistryContextSync(runtimeStatePath);
+  const policyFamilyDecisionMap = loadLookupV2SemanticPolicyRegistryMapSync(registryPath, knownEntityIds);
   const reviewedRows = applyLookupV2PolicyFamilyReviewPacket({
     familyRows,
     rowPacketRows,

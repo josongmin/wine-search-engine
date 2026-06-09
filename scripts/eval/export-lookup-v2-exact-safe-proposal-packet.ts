@@ -17,6 +17,8 @@ import {
   type LookupV2SemanticScopeTargetRegistryRow,
 } from './lookup-v2-semantic-scope-target-registry.js';
 import { lookupV2DraftCliPath, resolveCliDataPathArg } from './cli-data-path.js';
+import { DEFAULT_RUNTIME_STATE_PATH } from './lookup-v2-runtime-known-entity-ids.js';
+import { loadLookupV2RuntimeRegistryContextSync } from './lookup-v2-runtime-registry-context.js';
 
 export type LookupExactSafeProposalEntityIdSource =
   | 'fixture_exact'
@@ -283,6 +285,7 @@ async function main(): Promise<void> {
       registry: { type: 'string', default: undefined },
       exactSafeScopeRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_EXACT_SAFE_SCOPE_REGISTRY_PATH },
       semanticScopeTargetRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_TARGET_REGISTRY_PATH },
+      runtimeState: { type: 'string', default: DEFAULT_RUNTIME_STATE_PATH },
     },
     allowPositionals: false,
   });
@@ -294,11 +297,16 @@ async function main(): Promise<void> {
   const exactSafeScopeRegistryPath = values.exactSafeScopeRegistry ?? DEFAULT_LOOKUP_V2_EXACT_SAFE_SCOPE_REGISTRY_PATH;
   const semanticScopeTargetRegistryPath =
     values.semanticScopeTargetRegistry ?? DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_TARGET_REGISTRY_PATH;
+  const runtimeStatePath = values.runtimeState ?? DEFAULT_RUNTIME_STATE_PATH;
+  const { runtimeDescriptorMap, knownEntityIds } = loadLookupV2RuntimeRegistryContextSync(runtimeStatePath);
   const packetRows = buildLookupExactSafeProposalPacketRows({
     draftRows,
     existingRegistryRows,
-    exactSafeScopeRegistryMap: loadLookupV2ExactSafeScopeRegistryMapSync(exactSafeScopeRegistryPath),
-    semanticScopeTargetApprovedMap: loadLookupV2SemanticScopeTargetApprovedMapSync(semanticScopeTargetRegistryPath),
+    exactSafeScopeRegistryMap: loadLookupV2ExactSafeScopeRegistryMapSync(exactSafeScopeRegistryPath, knownEntityIds),
+    semanticScopeTargetApprovedMap: loadLookupV2SemanticScopeTargetApprovedMapSync(
+      semanticScopeTargetRegistryPath,
+      runtimeDescriptorMap,
+    ),
   });
 
   mkdirSync(path.dirname(outputPath), { recursive: true });

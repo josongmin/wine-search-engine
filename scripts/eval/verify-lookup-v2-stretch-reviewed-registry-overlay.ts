@@ -54,9 +54,9 @@ import {
 } from './lookup-v2-exact-safe-scope-registry.js';
 import type { LookupV2RuntimeSurfaceOwnerEvidence } from './lookup-v2-runtime-surface-owner-evidence.js';
 import { loadLookupV2RuntimeSurfaceOwnerEvidenceSync } from './lookup-v2-runtime-surface-owner-evidence.js';
-import { loadLookupV2RuntimeKnownEntityIdsSync } from './lookup-v2-runtime-known-entity-ids.js';
-import { loadLookupV2RuntimeSemanticDescriptorMapSync } from './lookup-v2-runtime-semantic-descriptors.js';
+import { DEFAULT_RUNTIME_STATE_PATH } from './lookup-v2-runtime-known-entity-ids.js';
 import { resolveCliDataPathArg } from './cli-data-path.js';
+import { loadLookupV2RuntimeRegistryContextSync } from './lookup-v2-runtime-registry-context.js';
 
 interface LookupV2StretchCoverageArtifact {
   readonly generatedAt?: string;
@@ -74,6 +74,8 @@ interface LookupV2StretchCoverageArtifact {
 interface LookupV2StretchReviewedRegistryOverlayInvariants {
   readonly autoTargetableNonDecreasing: boolean;
   readonly catalogSupportReviewNonDecreasing: boolean;
+  readonly structurallyClosedRowsNonDecreasing: boolean;
+  readonly manualReviewRowsNonIncreasing: boolean;
   readonly reviewedCollisionDirectionRespected: boolean;
   readonly scopePolicyReviewNonIncreasing: boolean;
   readonly scopeTargetReviewNonIncreasing: boolean;
@@ -101,6 +103,9 @@ export interface LookupV2StretchReviewedRegistryOverlaySummary {
     readonly draftReviewedCollision: number;
     readonly draftScopePolicyReview: number;
     readonly draftScopeTargetReview: number;
+    readonly operationalStructurallyClosedRows: number;
+    readonly operationalManualReviewRows: number;
+    readonly operationalTerminalReviewedRows: number;
     readonly exactSafePacketRows: number;
     readonly reviewedAuthorityApprovedRows: number;
     readonly policyReviewRows: number;
@@ -299,6 +304,10 @@ export async function verifyLookupV2StretchReviewedRegistryOverlay(args: {
   const invariants: LookupV2StretchReviewedRegistryOverlayInvariants = {
     autoTargetableNonDecreasing: overlay.draft.autoTargetable >= baseline.draft.autoTargetable,
     catalogSupportReviewNonDecreasing: overlay.draft.catalogSupportReview >= baseline.draft.catalogSupportReview,
+    structurallyClosedRowsNonDecreasing:
+      overlay.operationalResidue.structurallyClosedRows >= baseline.operationalResidue.structurallyClosedRows,
+    manualReviewRowsNonIncreasing:
+      overlay.operationalResidue.manualReviewRows <= baseline.operationalResidue.manualReviewRows,
     reviewedCollisionDirectionRespected: hasReviewedCollisionFamilyReview
       ? overlay.draft.reviewedCollision <= baseline.draft.reviewedCollision
       : overlay.draft.reviewedCollision >= baseline.draft.reviewedCollision,
@@ -330,6 +339,12 @@ export async function verifyLookupV2StretchReviewedRegistryOverlay(args: {
       draftReviewedCollision: overlay.draft.reviewedCollision - baseline.draft.reviewedCollision,
       draftScopePolicyReview: overlay.draft.scopePolicyReview - baseline.draft.scopePolicyReview,
       draftScopeTargetReview: overlay.draft.scopeTargetReview - baseline.draft.scopeTargetReview,
+      operationalStructurallyClosedRows:
+        overlay.operationalResidue.structurallyClosedRows - baseline.operationalResidue.structurallyClosedRows,
+      operationalManualReviewRows:
+        overlay.operationalResidue.manualReviewRows - baseline.operationalResidue.manualReviewRows,
+      operationalTerminalReviewedRows:
+        overlay.operationalResidue.terminalReviewedRows - baseline.operationalResidue.terminalReviewedRows,
       exactSafePacketRows: overlay.exactSafe.packetRows - baseline.exactSafe.packetRows,
       reviewedAuthorityApprovedRows:
         overlay.exactSafe.reviewedAuthorityApprovedRows - baseline.exactSafe.reviewedAuthorityApprovedRows,
@@ -362,6 +377,7 @@ async function main(): Promise<void> {
       familyCollisionRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_FAMILY_COLLISION_REGISTRY_PATH },
       exactSafeRegistry: { type: 'string', default: DEFAULT_LOOKUP_EXACT_SAFE_REGISTRY_PATH },
       exactSafeScopeRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_EXACT_SAFE_SCOPE_REGISTRY_PATH },
+      runtimeState: { type: 'string', default: DEFAULT_RUNTIME_STATE_PATH },
       workDir: { type: 'string', default: '/tmp/lookup-v2-stretch-reviewed-registry-overlay' },
       baselineOutputDir: { type: 'string' },
       overlayOutputDir: { type: 'string' },
@@ -383,10 +399,12 @@ async function main(): Promise<void> {
   const familyCollisionRegistryPath = values.familyCollisionRegistry ?? DEFAULT_LOOKUP_V2_FAMILY_COLLISION_REGISTRY_PATH;
   const exactSafeRegistryPath = values.exactSafeRegistry ?? DEFAULT_LOOKUP_EXACT_SAFE_REGISTRY_PATH;
   const exactSafeScopeRegistryPath = values.exactSafeScopeRegistry ?? DEFAULT_LOOKUP_V2_EXACT_SAFE_SCOPE_REGISTRY_PATH;
+  const runtimeStatePath = values.runtimeState ?? DEFAULT_RUNTIME_STATE_PATH;
   const workDir = resolveCliDataPathArg(values.workDir ?? '/tmp/lookup-v2-stretch-reviewed-registry-overlay');
   const baselineOutputDir = values.baselineOutputDir !== undefined ? resolveCliDataPathArg(values.baselineOutputDir) : undefined;
   const overlayOutputDir = values.overlayOutputDir !== undefined ? resolveCliDataPathArg(values.overlayOutputDir) : undefined;
   const outputPath = resolveCliDataPathArg(values.output ?? '/tmp/lookup-v2-stretch-reviewed-registry-overlay-summary.json');
+  const { runtimeDescriptorMap, knownEntityIds } = loadLookupV2RuntimeRegistryContextSync(runtimeStatePath);
 
   const artifact = readCoverageArtifact(inputPath);
   const familyReviewRows = readJsonlRows(familyReviewPath, isManualTargetFamilyReviewPacketRow);
@@ -406,9 +424,11 @@ async function main(): Promise<void> {
     benchmarkGoldHintMap: loadLookupV2BenchmarkGoldHintMapSync(),
     baselineFamilyTargetRegistryRows: loadLookupV2SemanticScopeTargetRegistrySync(
       baselineFamilyRegistryPath ?? familyRegistryPath,
+      runtimeDescriptorMap,
     ),
     baselinePolicyFamilyDecisionRegistryRows: loadLookupV2SemanticPolicyRegistrySync(
       baselinePolicyRegistryPath ?? policyRegistryPath,
+      knownEntityIds,
     ),
     baselineSemanticScopeSupportRegistryRows: loadLookupV2SemanticScopeSupportRegistrySync(
       baselineSemanticScopeSupportRegistryPath ?? semanticScopeSupportRegistryPath,
@@ -416,16 +436,22 @@ async function main(): Promise<void> {
     baselineFamilyCollisionRegistryRows: loadLookupV2FamilyCollisionRegistrySync(
       baselineFamilyCollisionRegistryPath ?? familyCollisionRegistryPath,
     ),
-    existingFamilyTargetRegistryRows: loadLookupV2SemanticScopeTargetRegistrySync(familyRegistryPath),
-    existingPolicyFamilyDecisionRegistryRows: loadLookupV2SemanticPolicyRegistrySync(policyRegistryPath),
+    existingFamilyTargetRegistryRows: loadLookupV2SemanticScopeTargetRegistrySync(
+      familyRegistryPath,
+      runtimeDescriptorMap,
+    ),
+    existingPolicyFamilyDecisionRegistryRows: loadLookupV2SemanticPolicyRegistrySync(
+      policyRegistryPath,
+      knownEntityIds,
+    ),
     existingSemanticScopeSupportRegistryRows: loadLookupV2SemanticScopeSupportRegistrySync(semanticScopeSupportRegistryPath),
     existingFamilyCollisionRegistryRows: loadLookupV2FamilyCollisionRegistrySync(familyCollisionRegistryPath),
     exactSafeRegistryRows: await loadLookupExactSafeRegistry(exactSafeRegistryPath),
-    exactSafeScopeRegistryMap: loadLookupV2ExactSafeScopeRegistryMapSync(exactSafeScopeRegistryPath),
-    runtimeOwnerEvidence: loadLookupV2RuntimeSurfaceOwnerEvidenceSync(),
-    runtimeDescriptorMap: loadLookupV2RuntimeSemanticDescriptorMapSync(),
+    exactSafeScopeRegistryMap: loadLookupV2ExactSafeScopeRegistryMapSync(exactSafeScopeRegistryPath, knownEntityIds),
+    runtimeOwnerEvidence: loadLookupV2RuntimeSurfaceOwnerEvidenceSync(runtimeStatePath),
+    runtimeDescriptorMap,
     approvedScopeSurfaceMap: buildLookupV2ApprovedScopeSurfaceMap(loadLookupV2LocalizedScopeSurfaceRegistrySync()),
-    knownEntityIds: loadLookupV2RuntimeKnownEntityIdsSync(),
+    knownEntityIds,
     policyConflictOwners: loadLookupPolicyConflictBenchmarkHintOwnerMapSync(policyConflictRegistryPath),
   });
 

@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react';
-import { Card, Pill, Empty } from './ui';
+import { Card, Pill, Empty, Intro } from './ui';
+import { prettyKey, koStatus } from '../lib/labels';
+import { ProposalsInbox } from './ProposalsInbox';
 import { AUTHORITY_CLASSES, AUTHORITY_META, type AuthorityClass, type Dataset } from '../types';
 
 function statusTone(s?: string): 'green' | 'amber' | 'red' | 'gray' {
@@ -26,7 +28,17 @@ export function AuthorityWorkbench({ ds }: { ds: Dataset }) {
 
   return (
     <>
-      <div className="grid cols-4" style={{ gridTemplateColumns: 'repeat(7, 1fr)', gap: 8, marginBottom: 16 }}>
+      <Intro title="⚖ 지금까지 내려진 결정들을 종류별로 보는 곳 (읽기 전용)">
+        검색 엔진이 검색어를 어떤 와인으로 연결할지에 대해 <b>이미 검토·확정된 결정(authority)</b>들의 모음입니다. 새로 만드는 곳이 아니라, 뭐가 등록돼 있는지 확인·검색하는 곳.
+        <ul className="steps">
+          <li>위 카드에서 결정 <b>종류</b>를 선택, 우측 입력창으로 검색.</li>
+          <li>새 결정이 필요하면 → <b>고칠 검색어</b> → <b>검색어 처리</b>에서 저장.</li>
+        </ul>
+      </Intro>
+
+      <ProposalsInbox />
+
+      <div className="grid cols-4" style={{ gridTemplateColumns: 'repeat(7, 1fr)', gap: 8 }}>
         {AUTHORITY_CLASSES.map((c) => (
           <button key={c} className="card stat" style={{ textAlign: 'left', cursor: 'pointer', border: cls === c ? '1px solid var(--accent)' : undefined, padding: '12px 14px' }} onClick={() => setCls(c)}>
             <div className="k" style={{ fontSize: 11 }}>{AUTHORITY_META[c].label}</div>
@@ -51,9 +63,9 @@ export function AuthorityWorkbench({ ds }: { ds: Dataset }) {
             <tbody>
               {rows.slice(0, 400).map((r, i) => (
                 <tr key={r.key + i}>
-                  <td className="kr mono" style={{ fontSize: 12, maxWidth: 280 }}>{r.key}</td>
+                  <td className="kr" style={{ fontSize: 12, maxWidth: 300 }} title={r.key}>{prettyKey(r.key)}</td>
                   <td className="mono" style={{ fontSize: 11 }}>{r.entityId ?? '—'}</td>
-                  <td><Pill tone={statusTone(r.status)}>{r.status ?? '—'}</Pill></td>
+                  <td><Pill tone={statusTone(r.status)}>{koStatus(r.status)}</Pill></td>
                   <td className="muted mono">{r.family ?? '—'}</td>
                   <td className="muted">{r.reviewedBy ?? '—'}</td>
                   <td className="muted kr" style={{ maxWidth: 360, fontSize: 12 }}>{r.reason ?? '—'}</td>

@@ -9,6 +9,8 @@ import {
   loadLookupV2SemanticPolicyRegistryMapSync,
   type LookupV2SemanticPolicyRegistryRow,
 } from './lookup-v2-semantic-policy-registry.js';
+import { DEFAULT_RUNTIME_STATE_PATH } from './lookup-v2-runtime-known-entity-ids.js';
+import { loadLookupV2RuntimeRegistryContextSync } from './lookup-v2-runtime-registry-context.js';
 
 interface PolicyReviewApplyResult {
   readonly exactSafePacketRows: readonly LookupExactSafeProposalPacketRow[];
@@ -185,6 +187,7 @@ async function main(): Promise<void> {
     options: {
       input: { type: 'string', default: '/tmp/lookup-v2-korean-realworld-stretch-policy-review-reviewed.jsonl' },
       registry: { type: 'string', default: DEFAULT_LOOKUP_V2_SEMANTIC_POLICY_REGISTRY_PATH },
+      runtimeState: { type: 'string', default: DEFAULT_RUNTIME_STATE_PATH },
       output: { type: 'string', default: '/tmp/lookup-v2-korean-realworld-stretch-policy-review-approved-exact-safe-packet.jsonl' },
     },
     allowPositionals: false,
@@ -192,9 +195,11 @@ async function main(): Promise<void> {
 
   const inputPath = values.input ?? '/tmp/lookup-v2-korean-realworld-stretch-policy-review-reviewed.jsonl';
   const registryPath = values.registry ?? DEFAULT_LOOKUP_V2_SEMANTIC_POLICY_REGISTRY_PATH;
+  const runtimeStatePath = values.runtimeState ?? DEFAULT_RUNTIME_STATE_PATH;
   const outputPath = values.output ?? '/tmp/lookup-v2-korean-realworld-stretch-policy-review-approved-exact-safe-packet.jsonl';
   const packetRows = parsePacketJsonl(inputPath);
-  const policyFamilyDecisionMap = loadLookupV2SemanticPolicyRegistryMapSync(registryPath);
+  const { knownEntityIds } = loadLookupV2RuntimeRegistryContextSync(runtimeStatePath);
+  const policyFamilyDecisionMap = loadLookupV2SemanticPolicyRegistryMapSync(registryPath, knownEntityIds);
   const result = applyLookupV2PolicyReviewPacket({
     packetRows,
     policyFamilyDecisionMap,

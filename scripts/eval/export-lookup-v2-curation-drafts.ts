@@ -49,6 +49,8 @@ import {
   loadLookupV2RuntimeSemanticDescriptorMapSync,
   type LookupV2RuntimeSemanticDescriptor,
 } from './lookup-v2-runtime-semantic-descriptors.js';
+import { DEFAULT_RUNTIME_STATE_PATH } from './lookup-v2-runtime-known-entity-ids.js';
+import { loadLookupV2RuntimeRegistryContextSync } from './lookup-v2-runtime-registry-context.js';
 
 export interface LookupV2CurationDraftRow {
   readonly surface: string;
@@ -446,6 +448,7 @@ function main(): void {
       familySupportRegistry: { type: 'string' },
       familyCollisionRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_FAMILY_COLLISION_REGISTRY_PATH },
       localizedScopeSurfaceRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_LOCALIZED_SCOPE_SURFACE_REGISTRY_PATH },
+      runtimeState: { type: 'string', default: DEFAULT_RUNTIME_STATE_PATH },
     },
   });
 
@@ -460,6 +463,8 @@ function main(): void {
   const familyCollisionRegistryPath = values.familyCollisionRegistry ?? DEFAULT_LOOKUP_V2_FAMILY_COLLISION_REGISTRY_PATH;
   const localizedScopeSurfaceRegistryPath = values.localizedScopeSurfaceRegistry
     ?? DEFAULT_LOOKUP_V2_LOCALIZED_SCOPE_SURFACE_REGISTRY_PATH;
+  const runtimeStatePath = values.runtimeState ?? DEFAULT_RUNTIME_STATE_PATH;
+  const { runtimeDescriptorMap, knownEntityIds } = loadLookupV2RuntimeRegistryContextSync(runtimeStatePath);
   const parsed = JSON.parse(readFileSync(inputPath, 'utf8')) as {
     generatedAt?: string;
     curationTasks?: readonly CurationTask[];
@@ -470,11 +475,11 @@ function main(): void {
     tasks,
     inputPath,
     reviewedAt,
-    undefined,
-    loadLookupV2SemanticScopeTargetApprovedMapSync(semanticScopeTargetRegistryPath),
-    loadLookupV2SemanticScopeTargetRejectedMapSync(semanticScopeTargetRegistryPath),
+    runtimeDescriptorMap,
+    loadLookupV2SemanticScopeTargetApprovedMapSync(semanticScopeTargetRegistryPath, runtimeDescriptorMap),
+    loadLookupV2SemanticScopeTargetRejectedMapSync(semanticScopeTargetRegistryPath, runtimeDescriptorMap),
     loadLookupPolicyConflictBenchmarkHintOwnerMapSync(policyConflictRegistryPath),
-    loadLookupV2SemanticPolicyRegistryMapSync(semanticPolicyRegistryPath),
+    loadLookupV2SemanticPolicyRegistryMapSync(semanticPolicyRegistryPath, knownEntityIds),
     loadLookupV2SemanticScopeSupportRegistryMapSync(semanticScopeSupportRegistryPath),
     loadLookupV2FamilyCollisionRegistryMapSync(familyCollisionRegistryPath),
     buildLookupV2ApprovedScopeSurfaceMap(

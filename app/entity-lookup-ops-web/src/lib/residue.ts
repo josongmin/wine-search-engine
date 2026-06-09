@@ -1,24 +1,24 @@
 import type { AuthorityClass, CoverageHole, Dataset, GapBucket, OwnerEvidence, ResidueItem } from '../types';
 
 export const GAP_LABEL: Record<GapBucket, string> = {
-  scope_target_missing: 'scope_target_missing',
-  strict_collision_ambiguous: 'strict_collision_ambiguous',
-  requested_vintage_missing: 'requested_vintage_missing',
-  runtime_family_missing: 'runtime_family_missing',
-  family_surface_gap: 'family_surface_needs_specific_line',
-  recall_only_no_match: 'recall_only_no_match',
-  other: 'other',
+  scope_target_missing: '제품 좁히기',
+  strict_collision_ambiguous: '헷갈림',
+  requested_vintage_missing: '연도 제품 없음',
+  runtime_family_missing: '와이너리 없음',
+  family_surface_gap: '라인 정하기',
+  recall_only_no_match: '정확도 부족',
+  other: '기타',
 };
 
 export const CLASS_LABEL: Record<AuthorityClass | 'runtime_catalog_backfill', string> = {
-  exact_safe: 'Exact-safe',
-  scope_target: 'Scope target',
-  policy: 'Policy',
-  collision: 'Family collision',
-  scope_support: 'Scope support',
-  localized_surface: 'Localized surface',
-  family_core_witness: 'Family-core witness',
-  runtime_catalog_backfill: 'Runtime/catalog backfill',
+  exact_safe: '정확히 연결',
+  scope_target: '제품 지정',
+  policy: '정책 판단',
+  collision: '헷갈림 정리',
+  scope_support: '범위 지원',
+  localized_surface: '한글 표기',
+  family_core_witness: '근거 등록',
+  runtime_catalog_backfill: '제품 추가',
 };
 
 function bucketOf(hole: CoverageHole): GapBucket {

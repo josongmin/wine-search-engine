@@ -6,6 +6,10 @@ import type {
   GoldRow,
   OwnerEvidence,
   WritePlane,
+  WritePlaneCoverageResidue,
+  WritePlaneDraftSummary,
+  WritePlaneOperationalResidue,
+  WritePlaneRemainingWork,
 } from '../types';
 
 const BASE = `${import.meta.env.BASE_URL}data`;
@@ -106,20 +110,108 @@ function parseWritePlane(text: string | null): WritePlane | undefined {
   if (!text) return undefined;
   try {
     const j = JSON.parse(text) as Record<string, unknown>;
+    const coverageResidue = parseWritePlaneCoverageResidue(j.coverageResidue);
+    const draft = parseWritePlaneDraft(j.draft);
+    const remainingWork = parseWritePlaneRemainingWork(j.remainingWork);
     return {
       generatedAt: str(j.generatedAt),
-      coverageResidue: j.coverageResidue as Record<string, unknown> | undefined,
-      draft: j.draft as Record<string, number> | undefined,
+      coverageResidue,
+      draft,
+      operationalResidue: parseWritePlaneOperationalResidue(j.operationalResidue, draft, remainingWork),
       exactSafe: j.exactSafe as Record<string, unknown> | undefined,
       policy: j.policy as Record<string, unknown> | undefined,
       manualTarget: j.manualTarget as Record<string, unknown> | undefined,
       scopeSupport: j.scopeSupport as Record<string, unknown> | undefined,
       reviewedCollision: j.reviewedCollision as Record<string, unknown> | undefined,
-      remainingWork: j.remainingWork as Record<string, unknown> | undefined,
+      remainingWork,
     };
   } catch {
     return undefined;
   }
+}
+
+function record(v: unknown): Record<string, unknown> | undefined {
+  return typeof v === 'object' && v !== null ? v as Record<string, unknown> : undefined;
+}
+
+function parseNumberRecord(value: unknown): Record<string, number> {
+  const root = record(value);
+  if (!root) return {};
+  return Object.fromEntries(
+    Object.entries(root).filter(([, current]) => typeof current === 'number'),
+  ) as Record<string, number>;
+}
+
+function parseWritePlaneCoverageResidue(value: unknown): WritePlaneCoverageResidue | undefined {
+  const root = record(value);
+  if (!root) return undefined;
+  return {
+    hotEntityCount: num(root.hotEntityCount) ?? 0,
+    coveredCount: num(root.coveredCount) ?? 0,
+    uncoveredCount: num(root.uncoveredCount) ?? 0,
+    activeCoverageRatio: num(root.activeCoverageRatio) ?? 0,
+    activeCoveragePercent: num(root.activeCoveragePercent) ?? 0,
+    operatorBucketCounts: parseNumberRecord(root.operatorBucketCounts),
+    observedReasonCodeCounts: parseNumberRecord(root.observedReasonCodeCounts),
+  };
+}
+
+function parseWritePlaneDraft(value: unknown): WritePlaneDraftSummary | undefined {
+  const root = record(value);
+  if (!root) return undefined;
+  return {
+    rows: num(root.rows) ?? 0,
+    autoTargetable: num(root.autoTargetable) ?? 0,
+    scopePolicyReview: num(root.scopePolicyReview) ?? 0,
+    localizedSurfaceReview: num(root.localizedSurfaceReview) ?? 0,
+    reviewedRejected: num(root.reviewedRejected) ?? 0,
+    catalogSupportReview: num(root.catalogSupportReview) ?? 0,
+    reviewedCollision: num(root.reviewedCollision) ?? 0,
+    scopeTargetReview: num(root.scopeTargetReview) ?? 0,
+  };
+}
+
+function parseWritePlaneRemainingWork(value: unknown): WritePlaneRemainingWork | undefined {
+  const root = record(value);
+  if (!root) return undefined;
+  return {
+    ownerDispatchPackets: num(root.ownerDispatchPackets) ?? 0,
+    ownerDispatchFamilies: num(root.ownerDispatchFamilies) ?? 0,
+    ownerDispatchRows: num(root.ownerDispatchRows) ?? 0,
+    exactSafePendingFamilyRows: num(root.exactSafePendingFamilyRows) ?? 0,
+  };
+}
+
+function parseWritePlaneOperationalResidue(
+  value: unknown,
+  draft: WritePlaneDraftSummary | undefined,
+  remainingWork: WritePlaneRemainingWork | undefined,
+): WritePlaneOperationalResidue | undefined {
+  const root = record(value);
+  if (!root) return undefined;
+  return {
+    draftRows: num(root.draftRows) ?? draft?.rows ?? 0,
+    structurallyClosedRows: num(root.structurallyClosedRows) ?? 0,
+    structurallyClosedRatio: num(root.structurallyClosedRatio) ?? 0,
+    structurallyClosedPercent: num(root.structurallyClosedPercent) ?? 0,
+    terminalReviewedRows: num(root.terminalReviewedRows) ?? draft?.reviewedRejected ?? 0,
+    autoTargetableRows: num(root.autoTargetableRows) ?? draft?.autoTargetable ?? 0,
+    manualReviewRows: num(root.manualReviewRows) ?? 0,
+    manualReviewBreakdown: {
+      scopePolicyReview: num(record(root.manualReviewBreakdown)?.scopePolicyReview) ?? draft?.scopePolicyReview ?? 0,
+      localizedSurfaceReview: num(record(root.manualReviewBreakdown)?.localizedSurfaceReview) ?? draft?.localizedSurfaceReview ?? 0,
+      catalogSupportReview: num(record(root.manualReviewBreakdown)?.catalogSupportReview) ?? draft?.catalogSupportReview ?? 0,
+      reviewedCollision: num(record(root.manualReviewBreakdown)?.reviewedCollision) ?? draft?.reviewedCollision ?? 0,
+      scopeTargetReview: num(record(root.manualReviewBreakdown)?.scopeTargetReview) ?? draft?.scopeTargetReview ?? 0,
+    },
+    ownerDispatchQueue: {
+      packetCount: num(record(root.ownerDispatchQueue)?.packetCount) ?? remainingWork?.ownerDispatchPackets ?? 0,
+      familyCount: num(record(root.ownerDispatchQueue)?.familyCount) ?? remainingWork?.ownerDispatchFamilies ?? 0,
+      rowCount: num(record(root.ownerDispatchQueue)?.rowCount) ?? remainingWork?.ownerDispatchRows ?? 0,
+    },
+    exactSafePendingFamilyRows:
+      num(root.exactSafePendingFamilyRows) ?? remainingWork?.exactSafePendingFamilyRows ?? 0,
+  };
 }
 
 function rows(text: string | null, map: (o: Record<string, unknown>) => AuthorityRow): AuthorityRow[] {
