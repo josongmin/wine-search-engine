@@ -1,6 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodType } from 'zod';
 import {
+  EntityLookupV2ResponseSchema,
+  type EntityLookupV2Response,
+} from '../../../src/interface/http/schemas/entity-lookup-v2.schema.js';
+import {
   ComparisonSearchResponseSchema,
   ErrorResponseSchema,
   SearchResponseSchema,
@@ -99,6 +103,10 @@ function parseWithSchema<T>(
 
 export function parseSearchResponse(response: JsonHttpResponse): SearchResponseBody {
   return parseWithSchema(response, SearchResponseSchema, 'search response');
+}
+
+export function parseEntityLookupResponse(response: JsonHttpResponse): EntityLookupV2Response {
+  return parseWithSchema(response, EntityLookupV2ResponseSchema, 'entity-lookup response');
 }
 
 export function parseComparisonResponse(response: JsonHttpResponse): ComparisonSearchResponseBody {

@@ -6,7 +6,7 @@
   "description": "Standalone CSR ops console for the lookup-v2 entity-resolution curation pipeline (coverage triage, wine onboarding, disambiguation, drift monitor).",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc --noEmit && vite build",
     "preview": "vite preview --port 5311",
     "sync-data": "bash scripts/sync-data.sh",
     "typecheck": "tsc --noEmit"

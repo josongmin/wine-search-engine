@@ -2,7 +2,7 @@
  * E2E response-invariant tests for the Wine Search Engine.
  *
  * These tests assert structural and semantic contracts that MUST hold for
- * every successful response, regardless of the query or search mode.
+ * every successful response, regardless of the query or public route.
  * They validate the RFC-014 / RFC-015 guarantees about shape, completeness,
  * and determinism of the search engine's output.
  *
@@ -16,6 +16,7 @@ import {
   getSearchDecision,
   getSearchDecisionSnapshot,
   getSearchRelevanceScores,
+  parseEntityLookupResponse,
   parseSearchResponse,
   postJson,
 } from './helpers/http-transport.js';
@@ -36,6 +37,12 @@ async function search(body: unknown) {
   return parseSearchResponse(response);
 }
 
+async function lookup(query: string) {
+  const response = await postJson(server.app, '/v2/entity-lookup', { query });
+  expect(response.statusCode).toBe(200);
+  return parseEntityLookupResponse(response);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
 // Evidence obligation invariant
@@ -53,7 +60,7 @@ describe('Evidence obligation invariant', () => {
     it(`every result item for '${query}' has evidenceItems.length > 0 (with real evidence)`, async () => {
       const body = await search({
         query,
-        options: { mode: 'hybrid', explain: false, clarification: false },
+        options: { explain: false, clarification: false },
       });
       const results = body.results;
 
@@ -75,14 +82,14 @@ describe('Evidence obligation invariant', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('decisionSnapshot completeness (RFC-015)', () => {
-  const MODES = ['entity', 'hybrid', 'auto'] as const;
+  const CASES = [
+    ['exact entity query', { query: 'Opus One 2018' }],
+    ['semantic preference query', { query: '풀바디 레드 와인', options: { explain: false, clarification: false } }],
+  ] as const;
 
-  for (const mode of MODES) {
-    it(`mode='${mode}' → decisionSnapshot has all required RFC-015 fields`, async () => {
-      const snapshot = getSearchDecisionSnapshot(await search({
-        query: 'Opus One 2018',
-        options: { mode, explain: false, clarification: false },
-      }));
+  for (const [label, request] of CASES) {
+    it(`${label} → decisionSnapshot has all required RFC-015 fields`, async () => {
+      const snapshot = getSearchDecisionSnapshot(await search(request));
 
       expect(typeof snapshot['snapshot_id']).toBe('string');
       expect(snapshot['snapshot_id'].length).toBeGreaterThan(0);
@@ -145,10 +152,9 @@ describe('queryTimeMs is a non-negative integer', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('confidenceSemantics for resolved responses', () => {
-  it('keeps entity-mode confidence semantics aligned with calibration_trusted', async () => {
+  it('keeps exact-query search confidence semantics aligned with calibration_trusted', async () => {
     const decision = getSearchDecision(await search({
       query: 'Opus One 2018',
-      options: { mode: 'entity', explain: false, clarification: false },
     }));
     expect(decision.decision_status).toMatch(/^(resolved|ambiguous|failed)$/);
     expect(decision.confidence_semantics).toBe(
@@ -161,7 +167,7 @@ describe('confidenceSemantics for resolved responses', () => {
   it('maps untrusted semantic list scores to uncalibrated semantics', async () => {
     const decision = getSearchDecision(await search({
       query: '풀바디 레드 와인',
-      options: { mode: 'hybrid', explain: false, clarification: false },
+      options: { explain: false, clarification: false },
     }));
     expect(decision.decision_status).toMatch(/^(resolved|ambiguous)$/);
     expect(decision.calibration_trusted).toBe(false);
@@ -174,20 +180,17 @@ describe('confidenceSemantics for resolved responses', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("'results' is always an array on successful responses", () => {
-  const CASES: Array<{ query: string; mode: string }> = [
-    { query: 'Opus One 2018', mode: 'entity' },
-    { query: '풀바디 레드 와인', mode: 'hybrid' },
-    { query: 'DRC', mode: 'auto' },
-    { query: '스파클링 와인', mode: 'hybrid' },
-    { query: 'Château Margaux', mode: 'entity' },
-  ];
+  const CASES = [
+    { query: 'Opus One 2018' },
+    { query: '풀바디 레드 와인', options: { explain: false, clarification: false } },
+    { query: 'DRC', options: { explain: false, clarification: false } },
+    { query: '스파클링 와인', options: { explain: false, clarification: false } },
+    { query: 'Château Margaux' },
+  ] as const;
 
-  for (const { query, mode } of CASES) {
-    it(`mode='${mode}', query='${query}' → Array.isArray(body.results) === true with descending order`, async () => {
-      const body = await search({
-        query,
-        options: { mode, explain: false, clarification: false },
-      });
+  for (const request of CASES) {
+    it(`query='${request.query}' → Array.isArray(body.results) === true with descending order`, async () => {
+      const body = await search(request);
       expect(Array.isArray(body.results)).toBe(true);
       const scores = getSearchRelevanceScores(body);
       for (let i = 1; i < scores.length; i++) {
@@ -195,4 +198,17 @@ describe("'results' is always an array on successful responses", () => {
       }
     });
   }
+});
+
+describe('entity-lookup-v2 invariants', () => {
+  it('lookup responses always carry the dedicated V2 schema marker', async () => {
+    const body = await lookup('Opus One 2018');
+    expect(body.meta.engine_schema_version).toBe('entity_lookup_v2');
+  });
+
+  it('comparison-style lookup queries fail closed inside the 4-state envelope', async () => {
+    const body = await lookup('Opus One vs Sassicaia');
+    expect(body.status).not.toBe('resolved');
+    expect(body.top_candidate).toBeNull();
+  });
 });

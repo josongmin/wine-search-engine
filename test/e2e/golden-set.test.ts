@@ -28,7 +28,7 @@ afterAll(async () => {
 async function searchHybrid(query: string) {
   const response = await postJson(server.app, '/v1/search/hybrid', {
     query,
-    options: { mode: 'hybrid', explain: false, clarification: false },
+    options: { explain: false, clarification: false },
   });
 
   expect(response.statusCode).toBe(200);

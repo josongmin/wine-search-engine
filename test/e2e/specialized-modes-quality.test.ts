@@ -17,10 +17,10 @@ afterAll(async () => {
   await closeTestServer(server);
 });
 
-async function searchAuto(query: string) {
+async function search(query: string) {
   const response = await postJson(server.app, '/v1/search/hybrid', {
     query,
-    options: { mode: 'auto', explain: false, clarification: false },
+    options: { explain: false, clarification: false },
   });
 
   expect(response.statusCode).toBe(200);
@@ -29,7 +29,7 @@ async function searchAuto(query: string) {
 
 describe('Specialized Modes Quality', () => {
   it('keeps similar-items queries on the mixed route and excludes the seed wine', async () => {
-    const body = await searchAuto('Opus One 2018 비슷한 와인');
+    const body = await search('Opus One 2018 비슷한 와인');
 
     expect(body.meta.route).toBe('mixed');
     expect(body.retrieval_mode).toBe('similar_items');
@@ -38,7 +38,7 @@ describe('Specialized Modes Quality', () => {
   });
 
   it('keeps recommendation queries on a ranked set-retrieval path with non-empty results', async () => {
-    const body = await searchAuto('wine for steak');
+    const body = await search('wine for steak');
 
     expect(body.meta.route).toBe('hybrid');
     expect(body.retrieval_mode).toBe('recommendation');
@@ -48,7 +48,7 @@ describe('Specialized Modes Quality', () => {
   });
 
   it('does not falsely resolve fictional wines in the smoke no-match path', async () => {
-    const body = await searchAuto('Chateau Fantaisie 2025');
+    const body = await search('Chateau Fantaisie 2025');
     const decision = getSearchDecision(body);
 
     expect(body.meta.route).toBe('hybrid');

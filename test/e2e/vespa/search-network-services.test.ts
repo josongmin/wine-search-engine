@@ -6,6 +6,7 @@ import {
 } from './helpers/vespa-test-server.js';
 import { startFakeMlService, type FakeMlService } from './helpers/fake-ml-service.js';
 import {
+  parseEntityLookupResponse,
   parseSearchResponse,
   postJson,
 } from '../helpers/http-transport.js';
@@ -42,7 +43,6 @@ describe.skipIf(!HAS_REACHABLE_VESPA)('Vespa E2E — external ML services', () =
     const response = await postJson(server.app, '/v1/search/hybrid', {
       query: '샴페인 와인 추천',
       options: {
-        mode: 'hybrid',
         explain: false,
       },
     });
@@ -72,15 +72,14 @@ describe.skipIf(!HAS_REACHABLE_VESPA)('Vespa E2E — external ML services', () =
     );
   });
 
-  it('entity-mode search hits learned matcher over real HTTP once candidates are hydrated', async () => {
-    const response = await postJson(server.app, '/v1/search/hybrid', {
+  it('entity lookup hits learned matcher over real HTTP once candidates are hydrated', async () => {
+    const response = await postJson(server.app, '/v2/entity-lookup', {
       query: '오푸스원',
-      options: { mode: 'entity', explain: false, clarification: false },
     });
 
     expect(response.statusCode).toBe(200);
-    const body = parseSearchResponse(response);
-    expect(body.engine_decision.decision_status).toMatch(/^(resolved|ambiguous)$/);
+    const body = parseEntityLookupResponse(response);
+    expect(body.status).toMatch(/^(resolved|ambiguous)$/);
 
     expect(fakeMlService.countRequests('/match')).toBeGreaterThan(0);
 
@@ -108,7 +107,6 @@ describe.skipIf(!HAS_REACHABLE_VESPA)('Vespa E2E — external ML services', () =
     const response = await postJson(server.app, '/v1/search/hybrid', {
       query: '샴페인 와인 추천',
       options: {
-        mode: 'hybrid',
         explain: false,
       },
     });
@@ -120,17 +118,16 @@ describe.skipIf(!HAS_REACHABLE_VESPA)('Vespa E2E — external ML services', () =
     expect(fakeMlService.countRequests('/rerank')).toBeGreaterThan(0);
   });
 
-  it('entity-mode search degrades gracefully when learned matcher returns 500', async () => {
+  it('entity lookup degrades gracefully when learned matcher returns 500', async () => {
     fakeMlService.setFailure('/match', 500, { error: 'matcher_down' });
 
-    const response = await postJson(server.app, '/v1/search/hybrid', {
+    const response = await postJson(server.app, '/v2/entity-lookup', {
       query: '오푸스원',
-      options: { mode: 'entity', explain: false, clarification: false },
     });
 
     expect(response.statusCode).toBe(200);
-    const body = parseSearchResponse(response);
-    expect(body.engine_decision.decision_status).toMatch(/^(resolved|ambiguous|failed)$/);
+    const body = parseEntityLookupResponse(response);
+    expect(body.status).toMatch(/^(resolved|ambiguous|failed|redirect_discovery)$/);
     expect(fakeMlService.countRequests('/match')).toBeGreaterThan(0);
   });
 });

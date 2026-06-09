@@ -40,7 +40,6 @@ async function search(query: string) {
   const response = await postJson(server.app, '/v1/search/hybrid', {
     query,
     options: {
-      mode: 'hybrid',
       explain: false,
       clarification: false,
     },

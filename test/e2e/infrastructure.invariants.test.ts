@@ -109,11 +109,8 @@ function expectSuccessSearchEnvelope(response: {
   return body;
 }
 
-function makeEntitySearchPayload(query: string) {
-  return {
-    query,
-    options: { mode: 'entity', explain: false, clarification: false },
-  };
+function makeExactSearchPayload(query: string) {
+  return { query };
 }
 
 describe('Group 1: Rate Limiting (RFC-014 §13)', () => {
@@ -258,8 +255,8 @@ describe('Group 2: Request ID Correctness', () => {
 describe('Group 3: Snapshot Determinism', () => {
   it('same exact-entity query executed twice returns identical top entity ids', async () => {
     const [r1, r2] = await Promise.all([
-      injectSearch(pipelineInvariantServer, makeEntitySearchPayload('Opus One 2018')),
-      injectSearch(pipelineInvariantServer, makeEntitySearchPayload('Opus One 2018')),
+      injectSearch(pipelineInvariantServer, makeExactSearchPayload('Opus One 2018')),
+      injectSearch(pipelineInvariantServer, makeExactSearchPayload('Opus One 2018')),
     ]);
 
     const b1 = expectSuccessSearchEnvelope(r1);
@@ -271,8 +268,8 @@ describe('Group 3: Snapshot Determinism', () => {
 
   it('different queries return different results (not all queries return same entity)', async () => {
     const [opus, margaux] = await Promise.all([
-      injectSearch(pipelineInvariantServer, makeEntitySearchPayload('Opus One 2018')),
-      injectSearch(pipelineInvariantServer, makeEntitySearchPayload('Château Margaux')),
+      injectSearch(pipelineInvariantServer, makeExactSearchPayload('Opus One 2018')),
+      injectSearch(pipelineInvariantServer, makeExactSearchPayload('Château Margaux')),
     ]);
 
     const statuses = [
@@ -289,12 +286,12 @@ describe('Group 4: Concurrent Request Isolation', () => {
 
   it('3 concurrent requests with DIFFERENT queries do not cross-contaminate results', async () => {
     const [entityRes, hybridRes, margauxRes] = await Promise.all([
-      injectSearch(pipelineInvariantServer, makeEntitySearchPayload('Opus One 2018')),
+      injectSearch(pipelineInvariantServer, makeExactSearchPayload('Opus One 2018')),
       injectSearch(pipelineInvariantServer, {
         query: 'sparkling wine',
-        options: { mode: 'hybrid', explain: false, clarification: false },
+        options: { explain: false, clarification: false },
       }),
-      injectSearch(pipelineInvariantServer, makeEntitySearchPayload('chateau margaux')),
+      injectSearch(pipelineInvariantServer, makeExactSearchPayload('chateau margaux')),
     ]);
 
     expectUniqueInjectedRequestIds([entityRes, hybridRes, margauxRes], 3);
@@ -303,7 +300,7 @@ describe('Group 4: Concurrent Request Isolation', () => {
 
   it('6 concurrent requests with same query all return IDENTICAL decisionStatus', async () => {
     const requests = Array.from({ length: isolationConcurrency }, () =>
-      injectSearch(pipelineInvariantServer, makeEntitySearchPayload('Opus One 2018')),
+      injectSearch(pipelineInvariantServer, makeExactSearchPayload('Opus One 2018')),
     );
 
     const responses = await Promise.all(requests);

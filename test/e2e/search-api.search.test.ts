@@ -9,6 +9,7 @@ import {
   getSearchDecision,
   getSearchMeta,
   getSearchRequestId,
+  parseEntityLookupResponse,
   parseErrorResponse,
   parseSearchResponse,
   postJson,
@@ -69,12 +70,13 @@ function makeHybridBody(overrides: Record<string, unknown> = {}): Record<string,
 }
 
 describe('primitive search/lookup — happy paths', () => {
-  it('lookup query returns 200 with the V2 4-state entity-lookup shape', async () => {
+  it('lookup query returns 200 with the dedicated V2 4-state contract', async () => {
     const res = await postLookup(makeLookupBody());
 
     expect(res.statusCode).toBe(200);
-    const body = res.json() as { status?: string; meta?: { request_id?: string } };
-    expect(body.meta?.request_id).toBeTruthy();
+    const body = parseEntityLookupResponse(res);
+    expect(body.meta.request_id).toBeTruthy();
+    expect(body.meta.engine_schema_version).toBe('entity_lookup_v2');
     expect(body.status).toMatch(/^(resolved|ambiguous|failed|redirect_discovery)$/);
   });
 
@@ -104,10 +106,11 @@ describe('primitive search/lookup — happy paths', () => {
     const res = await postLookup({ query });
 
     expect(res.statusCode).toBe(200);
-    const body = parseSearchResponse(res);
-    expect(getSearchDecision(body).decision_status).toBe('resolved');
-    expect(body.results[0]?.entity.entity_id).toBe(entityId);
-    expect(getSearchDecision(body).decision_confidence).toBe(1);
+    const body = parseEntityLookupResponse(res);
+    expect(body.status).toBe('resolved');
+    expect(body.top_candidate?.entity_id).toBe(entityId);
+    expect(body.candidates[0]?.entity_id).toBe(entityId);
+    expect(body.candidates[0]?.calibrated_score).toBe(1);
   });
 
   it('explicit no-match lookup fails closed with zero results', async () => {
@@ -116,10 +119,10 @@ describe('primitive search/lookup — happy paths', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    const body = parseSearchResponse(res);
-    expect(getSearchDecision(body).decision_status).toBe('failed');
-    expect(getSearchDecision(body).next_action).toBe('fail');
-    expect(body.results).toHaveLength(0);
+    const body = parseEntityLookupResponse(res);
+    expect(body.status).toBe('failed');
+    expect(body.top_candidate).toBeNull();
+    expect(body.candidates).toHaveLength(0);
   });
 
   it('hybrid route preserves the general retrieval lane contract', async () => {
@@ -136,20 +139,19 @@ describe('primitive search/lookup — happy paths', () => {
     expect(body.meta.execution_contract?.lane_trace?.general?.participated).toBe(true);
   });
 
-  it('lookup route preserves entity-only execution topology', async () => {
+  it('lookup route preserves the dedicated V2 entity-lookup envelope', async () => {
     const res = await postLookup(makeLookupBody());
 
     expect(res.statusCode).toBe(200);
-    const body = parseSearchResponse(res);
-    expect(body.engine_decision.execution_topology).toBe('entity_only');
-    expect(body.meta.execution_contract?.execution_topology).toBe('entity_only');
-    expect(body.meta.execution_contract?.lane_trace?.identity?.participated).toBe(true);
-    expect(body.meta.execution_contract?.lane_trace?.general?.participated).toBe(false);
-    expect(body.meta.execution_contract?.lane_trace?.fused?.participated).toBe(false);
+    const body = parseEntityLookupResponse(res);
+    expect(body.meta.engine_schema_version).toBe('entity_lookup_v2');
+    expect(body.decision_reason.length).toBeGreaterThan(0);
+    expect(body.evidence_summary.decision_reason_code.length).toBeGreaterThan(0);
+    expect(body.normalized_query_views.lookup_variants.length).toBeGreaterThan(0);
   });
 
-  it('decision keys remain present on primitive responses', async () => {
-    const res = await postLookup({
+  it('decision keys remain present on search responses', async () => {
+    const res = await postHybrid({
       query: 'Château Margaux',
     });
 
@@ -162,8 +164,8 @@ describe('primitive search/lookup — happy paths', () => {
     expect(decision.authority_trace_ref).toBe(decision.decision_trace_ref);
   });
 
-  it('co-exposes authority/runtime/execution metadata', async () => {
-    const res = await postLookup(makeLookupBody());
+  it('co-exposes authority/runtime/execution metadata on search responses', async () => {
+    const res = await postHybrid(makeHybridBody());
 
     expect(res.statusCode).toBe(200);
     const body = parseSearchResponse(res);
@@ -299,13 +301,15 @@ describe('primitive search/lookup — error paths', () => {
     expectRfc014ErrorContract(parseErrorResponse(res).error);
   });
 
-  it('lookup rejects comparison queries with 400', async () => {
+  it('lookup admits comparison-style queries but fails closed without a resolved top candidate', async () => {
     const res = await postLookup({
       query: 'Opus One vs Sassicaia',
     });
 
-    expect(res.statusCode).toBe(400);
-    expectRfc014ErrorContract(parseErrorResponse(res).error);
+    expect(res.statusCode).toBe(200);
+    const body = parseEntityLookupResponse(res);
+    expect(body.status).not.toBe('resolved');
+    expect(body.top_candidate).toBeNull();
   });
 
   it('policy blocked request returns 403 with policy contract', async () => {

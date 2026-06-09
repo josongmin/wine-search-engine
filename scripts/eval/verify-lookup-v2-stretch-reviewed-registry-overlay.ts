@@ -15,8 +15,11 @@ import {
   loadLookupV2SemanticScopeTargetRegistrySync,
   type LookupV2SemanticScopeTargetRegistryRow,
 } from './lookup-v2-semantic-scope-target-registry.js';
-import { loadLookupPolicyConflictBenchmarkHintOwnerMapSync } from './lookup-v2-policy-conflict-registry.js';
-import type { LookupPolicyConflictRegistryRow } from './lookup-v2-policy-conflict-registry.js';
+import {
+  DEFAULT_LOOKUP_POLICY_CONFLICT_REGISTRY_PATH,
+  loadLookupPolicyConflictBenchmarkHintOwnerMapSync,
+  type LookupPolicyConflictRegistryRow,
+} from './lookup-v2-policy-conflict-registry.js';
 import {
   buildLookupV2SemanticPolicyRegistryMap,
   DEFAULT_LOOKUP_V2_SEMANTIC_POLICY_REGISTRY_PATH,
@@ -352,6 +355,7 @@ async function main(): Promise<void> {
       baselinePolicyRegistry: { type: 'string' },
       baselineSemanticScopeSupportRegistry: { type: 'string' },
       familyRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_TARGET_REGISTRY_PATH },
+      policyConflictRegistry: { type: 'string', default: DEFAULT_LOOKUP_POLICY_CONFLICT_REGISTRY_PATH },
       policyRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_SEMANTIC_POLICY_REGISTRY_PATH },
       semanticScopeSupportRegistry: { type: 'string', default: DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_SUPPORT_REGISTRY_PATH },
       baselineFamilyCollisionRegistry: { type: 'string' },
@@ -373,6 +377,7 @@ async function main(): Promise<void> {
   const baselineSemanticScopeSupportRegistryPath = values.baselineSemanticScopeSupportRegistry;
   const baselineFamilyCollisionRegistryPath = values.baselineFamilyCollisionRegistry;
   const familyRegistryPath = values.familyRegistry ?? DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_TARGET_REGISTRY_PATH;
+  const policyConflictRegistryPath = values.policyConflictRegistry ?? DEFAULT_LOOKUP_POLICY_CONFLICT_REGISTRY_PATH;
   const policyRegistryPath = values.policyRegistry ?? DEFAULT_LOOKUP_V2_SEMANTIC_POLICY_REGISTRY_PATH;
   const semanticScopeSupportRegistryPath = values.semanticScopeSupportRegistry ?? DEFAULT_LOOKUP_V2_SEMANTIC_SCOPE_SUPPORT_REGISTRY_PATH;
   const familyCollisionRegistryPath = values.familyCollisionRegistry ?? DEFAULT_LOOKUP_V2_FAMILY_COLLISION_REGISTRY_PATH;
@@ -421,6 +426,7 @@ async function main(): Promise<void> {
     runtimeDescriptorMap: loadLookupV2RuntimeSemanticDescriptorMapSync(),
     approvedScopeSurfaceMap: buildLookupV2ApprovedScopeSurfaceMap(loadLookupV2LocalizedScopeSurfaceRegistrySync()),
     knownEntityIds: loadLookupV2RuntimeKnownEntityIdsSync(),
+    policyConflictOwners: loadLookupPolicyConflictBenchmarkHintOwnerMapSync(policyConflictRegistryPath),
   });
 
   console.log(`[elv2-reviewed-registry-overlay-verify] baseline_auto_targetable=${summary.baseline.draft.autoTargetable}`);

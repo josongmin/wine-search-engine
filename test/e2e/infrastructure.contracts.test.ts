@@ -196,10 +196,7 @@ describe('Group 6: Response Envelope Completeness', () => {
     ['zzz_extremely_unknown_wine_xyz_no_match_9999', ['ambiguous', 'failed']],
     ['zzz_no_match_wine_abc', ['failed', 'ambiguous']],
   ])('unknown query %s still returns a safe 200 envelope', async (query, allowedStatuses) => {
-    const r = await injectSearch(staticContractServer, {
-      query,
-      options: { mode: 'entity', explain: false, clarification: false },
-    });
+    const r = await injectSearch(staticContractServer, { query });
     expect(r.statusCode).toBe(200);
 
     const body = parseInjectedSearchResponse(r);

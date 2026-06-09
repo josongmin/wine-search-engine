@@ -7,12 +7,14 @@ import {
 } from './helpers/vespa-test-server.js';
 import { createEntityId } from '../../../src/domain/shared/types/index.js';
 import {
+  parseEntityLookupResponse,
   parseSearchResponse,
   postJson,
   type JsonHttpResponse,
 } from '../helpers/http-transport.js';
 import { HAS_REACHABLE_VESPA } from './helpers/vespa-availability.js';
 import type { SearchResponseBody } from '../../../src/interface/http/schemas/search-response.schema.js';
+import type { EntityLookupV2Response } from '../../../src/interface/http/schemas/entity-lookup-v2.schema.js';
 
 const OPUS_ONE_2018_ID = 'opus-one-2018';
 const CHATEAU_MARGAUX_2015_ID = 'chateau-margaux-2015';
@@ -62,18 +64,22 @@ type SearchResult = {
   readonly raw: JsonHttpResponse;
 };
 
+type LookupResult = {
+  readonly statusCode: number;
+  readonly body?: EntityLookupV2Response;
+  readonly raw: JsonHttpResponse;
+};
+
 async function search(
   app: FastifyInstance,
   query: string,
   options: {
-    mode?: 'auto' | 'entity' | 'hybrid' | 'mixed';
     clarification?: boolean;
   } = {},
 ): Promise<SearchResult> {
   const response = await postJson(app, '/v1/search/hybrid', {
     query,
     options: {
-      mode: options.mode ?? 'auto',
       explain: false,
       clarification: options.clarification ?? false,
     },
@@ -86,23 +92,32 @@ async function search(
   };
 }
 
+async function lookup(
+  app: FastifyInstance,
+  query: string,
+): Promise<LookupResult> {
+  const response = await postJson(app, '/v2/entity-lookup', { query });
+  return {
+    statusCode: response.statusCode,
+    body: response.statusCode === 200 ? parseEntityLookupResponse(response) : undefined,
+    raw: response,
+  };
+}
+
 function topEntityIds(body: SearchResponseBody, limit = 3): string[] {
   return body.results.slice(0, limit).map((result) => result.entity.entity_id);
 }
 
 function expectNoWrongResolve(
-  body: SearchResponseBody,
+  body: EntityLookupV2Response,
   expectedEntityId: string,
 ): void {
-  expect(['resolved', 'ambiguous']).toContain(body.engine_decision.decision_status);
-  if (body.results.length > 0) {
-    expect(topEntityIds(body)).toContain(expectedEntityId);
+  expect(['resolved', 'ambiguous']).toContain(body.status);
+  if (body.top_candidate !== null) {
+    expect(body.top_candidate.entity_id).toBe(expectedEntityId);
     return;
   }
-
-  // Entity-route search can safely resolve from resolver evidence without
-  // materializing ranked result rows in the /v1/search/hybrid payload.
-  expect(body.engine_decision.route).toBe('entity');
+  expect(body.candidates.some((candidate) => candidate.entity_id === expectedEntityId)).toBe(true);
 }
 
 describe.skipIf(!HAS_REACHABLE_VESPA)('Vespa E2E — Search Quality', () => {
@@ -129,10 +144,7 @@ describe.skipIf(!HAS_REACHABLE_VESPA)('Vespa E2E — Search Quality', () => {
   });
 
   it('exact entity query does not wrong-resolve', async () => {
-    const { statusCode, body } = await search(server.app, 'Opus One 2018', {
-      mode: 'entity',
-      clarification: true,
-    });
+    const { statusCode, body } = await lookup(server.app, 'Opus One 2018');
 
     expect(statusCode).toBe(200);
     expect(body).toBeDefined();
@@ -141,8 +153,8 @@ describe.skipIf(!HAS_REACHABLE_VESPA)('Vespa E2E — Search Quality', () => {
 
   it('multilingual aliases do not wrong-resolve across languages', async () => {
     const [enRes, koRes] = await Promise.all([
-      search(server.app, 'Opus One', { mode: 'entity', clarification: true }),
-      search(server.app, '오푸스원', { mode: 'entity', clarification: true }),
+      lookup(server.app, 'Opus One'),
+      lookup(server.app, '오푸스원'),
     ]);
 
     expect(enRes.statusCode).toBe(200);
@@ -161,10 +173,7 @@ describe.skipIf(!HAS_REACHABLE_VESPA)('Vespa E2E — Search Quality', () => {
     ] as const;
 
     for (const [query, entityId] of samples) {
-      const { statusCode, body } = await search(server.app, query, {
-        mode: 'entity',
-        clarification: true,
-      });
+      const { statusCode, body } = await lookup(server.app, query);
 
       expect(statusCode).toBe(200);
       expect(body).toBeDefined();
@@ -173,17 +182,13 @@ describe.skipIf(!HAS_REACHABLE_VESPA)('Vespa E2E — Search Quality', () => {
   });
 
   it('ambiguous query returns clarification-safe behavior', async () => {
-    const { statusCode, body } = await search(server.app, '마고', {
-      mode: 'entity',
-      clarification: true,
-    });
+    const { statusCode, body } = await lookup(server.app, '마고');
 
     expect(statusCode).toBe(200);
     expect(body).toBeDefined();
-    expect(body!.engine_decision.decision_status).toBe('ambiguous');
-    if (body!.clarification != null) {
-      expect(body!.clarification.candidates.length).toBeGreaterThanOrEqual(1);
-      expect(body!.clarification.suggestion_type).toBe('disambiguation');
+    expect(body!.status).toBe('ambiguous');
+    if (body!.clarification_options.length > 0) {
+      expect(body!.clarification_options.length).toBeGreaterThanOrEqual(1);
     }
   });
 
@@ -198,9 +203,7 @@ describe.skipIf(!HAS_REACHABLE_VESPA)('Vespa E2E — Search Quality', () => {
   });
 
   it('hybrid sparkling query returns a sparkling wine in the top 3', async () => {
-    const { statusCode, body } = await search(server.app, '샴페인', {
-      mode: 'hybrid',
-    });
+    const { statusCode, body } = await search(server.app, '샴페인');
 
     expect(statusCode).toBe(200);
     expect(body).toBeDefined();
@@ -208,9 +211,7 @@ describe.skipIf(!HAS_REACHABLE_VESPA)('Vespa E2E — Search Quality', () => {
   });
 
   it('light-body query avoids heavy reds in the top 3', async () => {
-    const { statusCode, body } = await search(server.app, '라이트바디 와인', {
-      mode: 'hybrid',
-    });
+    const { statusCode, body } = await search(server.app, '라이트바디 와인');
 
     expect(statusCode).toBe(200);
     expect(body).toBeDefined();
@@ -220,9 +221,7 @@ describe.skipIf(!HAS_REACHABLE_VESPA)('Vespa E2E — Search Quality', () => {
   });
 
   it('response shape stays RFC-014 compliant on successful search', async () => {
-    const { statusCode, body } = await search(server.app, '샴페인', {
-      mode: 'hybrid',
-    });
+    const { statusCode, body } = await search(server.app, '샴페인');
 
     expect(statusCode).toBe(200);
     expect(body).toBeDefined();
