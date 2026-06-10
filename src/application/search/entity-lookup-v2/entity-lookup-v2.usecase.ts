@@ -445,7 +445,7 @@ export class EntityLookupV2UseCase {
       return await engine.retrieve(
         {
           rawQuery: plan.rawQuery,
-          views: plan.normalizedQueryViews ?? buildNormalizedQueryViews(plan.rawQuery),
+          views: plan.normalizedQueryViews,
           queryClass: plan.queryClass,
           maxCandidates: command.maxCandidates,
           // A vintage-conflicting query under a singleton witness NEEDS the family
@@ -500,12 +500,12 @@ export class EntityLookupV2UseCase {
       });
       for (const match of this.deps.semanticScopeRegistry.findMatches({
         query: plan.rawQuery,
-        views: plan.normalizedQueryViews ?? buildNormalizedQueryViews(plan.rawQuery),
+        views: plan.normalizedQueryViews,
         locale: semanticScopeLocale,
       })) {
         if (
           exactSafeWitnessEntityId !== undefined
-          && String(match.entityId) !== String(exactSafeWitnessEntityId)
+          && match.entityId !== String(exactSafeWitnessEntityId)
         ) {
           continue;
         }
@@ -547,9 +547,7 @@ export class EntityLookupV2UseCase {
     const resolverInput: ResolverInput = {
       rawQuery: plan.rawQuery,
       normalizedQuery: plan.normalizedQuery,
-      ...(plan.normalizedQueryViews !== undefined
-        ? { normalizedQueryViews: plan.normalizedQueryViews }
-        : {}),
+      normalizedQueryViews: plan.normalizedQueryViews,
       queryClass: plan.queryClass,
       policy: plan.policy,
       anchorCandidates: effectiveAnchors,
@@ -697,16 +695,16 @@ export class EntityLookupV2UseCase {
     });
     for (const match of registry.findMatches({
       query: args.plan.rawQuery,
-      views: args.plan.normalizedQueryViews ?? buildNormalizedQueryViews(args.plan.rawQuery),
+      views: args.plan.normalizedQueryViews,
       locale: semanticScopeLocale,
     })) {
       if (
         exactSafeWitnessEntityId !== undefined
-        && String(match.entityId) !== String(exactSafeWitnessEntityId)
+        && match.entityId !== String(exactSafeWitnessEntityId)
       ) {
         continue;
       }
-      matchedEntityIds.add(String(match.entityId));
+      matchedEntityIds.add(match.entityId);
     }
     if (matchedEntityIds.size !== 1) {
       return undefined;

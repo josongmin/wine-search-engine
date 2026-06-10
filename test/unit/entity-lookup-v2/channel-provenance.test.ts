@@ -137,7 +137,7 @@ describe('EntityLookupV2UseCase — channel provenance surfaced end-to-end', () 
     const doc = { entityId: eid, entityType: 'wine' as const, canonicalLabel: 'Opus One 2018' };
     const useCase = new EntityLookupV2UseCase({
       admissionGate: new ConceptAdmissionGate(),
-      queryPlanner,
+      lookupPlanner: queryPlanner,
       entityResolver: resolver,
       entityLookup: {
         getDocument: vi.fn().mockResolvedValue(doc),
@@ -197,7 +197,7 @@ describe('EntityLookupV2UseCase — channel provenance surfaced end-to-end', () 
     };
     const useCase = new EntityLookupV2UseCase({
       admissionGate: new ConceptAdmissionGate(),
-      queryPlanner,
+      lookupPlanner: queryPlanner,
       entityResolver: resolver,
       candidateRetrieval,
       entityLookup: { getDocument: vi.fn().mockResolvedValue(doc), getDocuments: vi.fn().mockResolvedValue(new Map([[eid, doc]])) },

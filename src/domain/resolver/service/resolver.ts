@@ -1,6 +1,5 @@
 import type { DecisionStatus, NextAction, QueryClass } from '../../shared/types/index.js';
 import { bootstrapLogger } from '../../../domain/shared/bootstrap-logger.js';
-import type { AnchorCandidate } from '../../query/model/anchor-candidate.js';
 import type { ThresholdEntry } from '../../query/model/threshold-profile.js';
 import { DEFAULT_THRESHOLD_PROFILE } from '../../query/model/threshold-profile.js';
 import { hasExactLikeLookupStrategy } from '../../query/service/lookup-strategy-taxonomy.js';
@@ -32,12 +31,17 @@ import {
   computeConformalSetSize,
   DEFAULT_ALPHA,
 } from './resolver-conformal.js';
-import {
-  applyLookupStrategyAdjustments,
-  computeLookupStrategyAdjustment,
-} from './resolver-lookup-strategy.js';
+import { applyLookupStrategyAdjustments } from './resolver-lookup-strategy.js';
 import type { LookupStrategyAdjustment } from './resolver-lookup-strategy.js';
 import type { ResolverInput } from '../model/resolver-input.js';
+import {
+  collectAnchorLookupStrategies,
+  collectAnchorLookupVariants,
+  collectBlockerSeedEntityIds,
+  collectCandidateSourceBreakdown,
+  collectCandidateSources,
+  collectLookupStrategyAdjustments,
+} from './resolver-collectors.js';
 
 // Re-export the public API so external import paths
 // (`service/resolver.js`) remain stable after the split.
@@ -50,10 +54,10 @@ const LEARNED_MATCH_RAW_SCORE_BLEND = 0.6;
 const LEARNED_MATCH_PROBABILITY_BLEND = 0.4;
 
 function hasCollisionFreeExactSafeCertificate(candidate: ResolverCandidate | undefined): boolean {
-  return candidate?.identityCertificates?.some((certificate) =>
-    certificate.singleton === true
-    && certificate.collisionFree === true,
-  ) ?? false;
+  // Every identity certificate is collision-free + singleton by type
+  // (singleton: true, collisionFree: true literals — see search-snapshot-lookup-runtime),
+  // so presence of any certificate is exactly "has a collision-free exact-safe certificate".
+  return (candidate?.identityCertificates?.length ?? 0) > 0;
 }
 
 /**
@@ -138,7 +142,7 @@ export class Resolver {
       candidate,
       rawScore: sanitizeRawScore(this.candidateScorer.score(candidate)),
     }));
-    const lookupStrategyAdjustments = this.collectLookupStrategyAdjustments(input);
+    const lookupStrategyAdjustments = collectLookupStrategyAdjustments(input);
     const adjustedScored = applyLookupStrategyAdjustments(scored, lookupStrategyAdjustments);
 
     // Step 2.5: Optionally blend learned match probabilities (RFC-006 §5.2).
@@ -500,7 +504,7 @@ export class Resolver {
       return false;
     }
 
-    const strategies = this.collectAnchorLookupStrategies(input.anchorCandidates);
+    const strategies = collectAnchorLookupStrategies(input.anchorCandidates);
     const hasNoisyLookup =
       strategies.includes('compact_exact') ||
       strategies.includes('fuzzy_char_ngram') ||
@@ -567,7 +571,7 @@ export class Resolver {
         calibratedScore = Math.max(0, calibrated.top1CalibratedScore * ratio);
       }
 
-      const candidateSources = this.collectCandidateSources(entry.candidate);
+      const candidateSources = collectCandidateSources(entry.candidate);
       const primarySource = candidateSources[0] ?? 'alias';
 
       // T-E4-02: Per-candidate structured trace
@@ -706,8 +710,8 @@ export class Resolver {
     input: ResolverInput,
     candidates?: readonly ResolverCandidate[],
   ): LearnedMatcherContext | undefined {
-    const anchorLookupVariants = this.collectAnchorLookupVariants(input.anchorCandidates);
-    const anchorLookupStrategies = this.collectAnchorLookupStrategies(input.anchorCandidates);
+    const anchorLookupVariants = collectAnchorLookupVariants(input.anchorCandidates);
+    const anchorLookupStrategies = collectAnchorLookupStrategies(input.anchorCandidates);
 
     // Compute per-candidate feature vectors for the learned matcher (Step 18.5)
     const candidateFeatures = new Map<string, MatcherFeatureVector>();
@@ -767,10 +771,10 @@ export class Resolver {
     learnedOutputs: readonly LearnedMatcherOutput[] | undefined,
     top1RawScore: number,
   ): ResolverDecisionTrace {
-    const anchorLookupVariants = this.collectAnchorLookupVariants(input.anchorCandidates);
-    const anchorLookupStrategies = this.collectAnchorLookupStrategies(input.anchorCandidates);
-    const blockerSeedEntityIds = this.collectBlockerSeedEntityIds(candidates);
-    const candidateSourceBreakdown = this.collectCandidateSourceBreakdown(candidates);
+    const anchorLookupVariants = collectAnchorLookupVariants(input.anchorCandidates);
+    const anchorLookupStrategies = collectAnchorLookupStrategies(input.anchorCandidates);
+    const blockerSeedEntityIds = collectBlockerSeedEntityIds(candidates);
+    const candidateSourceBreakdown = collectCandidateSourceBreakdown(candidates);
     const queryProvenance =
       input.normalizedQueryViews !== undefined ||
       anchorLookupVariants.length > 0 ||
@@ -836,129 +840,4 @@ export class Resolver {
     };
   }
 
-  private collectAnchorLookupVariants(anchors: readonly AnchorCandidate[]): readonly string[] {
-    const variants = new Set<string>();
-    for (const anchor of anchors) {
-      for (const variant of anchor.lookupVariants ?? []) {
-        if (variant.length > 0) {
-          variants.add(variant);
-        }
-      }
-    }
-
-    return [...variants].sort();
-  }
-
-  private collectAnchorLookupStrategies(anchors: readonly AnchorCandidate[]): readonly string[] {
-    const strategies = new Set<string>();
-    for (const anchor of anchors) {
-      for (const strategy of anchor.lookupStrategies ?? []) {
-        if (strategy.length > 0) {
-          strategies.add(strategy);
-        }
-      }
-    }
-
-    return [...strategies].sort();
-  }
-
-  private collectBlockerSeedEntityIds(
-    candidates: readonly ResolverCandidate[],
-  ): readonly string[] {
-    const blockerSeedEntityIds = new Set<string>();
-    for (const candidate of candidates) {
-      if (this.collectCandidateSources(candidate).includes('blocker_seed')) {
-        blockerSeedEntityIds.add(String(candidate.entityId));
-      }
-    }
-
-    return [...blockerSeedEntityIds].sort();
-  }
-
-  private collectCandidateSourceBreakdown(
-    candidates: readonly ResolverCandidate[],
-  ): readonly {
-    readonly source: EntityCandidateSource;
-    readonly entityIds: readonly string[];
-    readonly count: number;
-  }[] {
-    const bySource = new Map<EntityCandidateSource, Set<string>>();
-    for (const candidate of candidates) {
-      for (const source of this.collectCandidateSources(candidate)) {
-        const entityIds = bySource.get(source) ?? new Set<string>();
-        entityIds.add(String(candidate.entityId));
-        bySource.set(source, entityIds);
-      }
-    }
-
-    const sourceOrder: readonly EntityCandidateSource[] = [
-      'alias',
-      'planner_heuristic',
-      'entity_lookup',
-      'blocker_seed',
-    ];
-
-    return sourceOrder
-      .filter((source) => bySource.has(source))
-      .map((source) => {
-        const entityIds = [...(bySource.get(source) ?? new Set<string>())].sort();
-        return {
-          source,
-          entityIds,
-          count: entityIds.length,
-        };
-      });
-  }
-
-  private collectCandidateSources(
-    candidate: Pick<ResolverCandidate, 'source' | 'sources'>,
-  ): readonly EntityCandidateSource[] {
-    const combined = new Set<EntityCandidateSource>();
-    for (const source of candidate.sources ?? []) {
-      combined.add(source);
-    }
-    if (candidate.source !== undefined) {
-      combined.add(candidate.source);
-    }
-    return [...combined].sort();
-  }
-
-  private collectLookupStrategyAdjustments(
-    input: ResolverInput,
-  ): readonly LookupStrategyAdjustment[] {
-    const byEntity = new Map<string, Set<string>>();
-
-    for (const anchor of input.anchorCandidates) {
-      const strategies = anchor.lookupStrategies ?? [];
-      if (strategies.length === 0) {
-        continue;
-      }
-
-      for (const entityId of anchor.candidateEntityIds) {
-        const key = String(entityId);
-        const existing = byEntity.get(key) ?? new Set<string>();
-        for (const strategy of strategies) {
-          if (strategy.length > 0) {
-            existing.add(strategy);
-          }
-        }
-        byEntity.set(key, existing);
-      }
-    }
-
-    return [...byEntity.entries()]
-      .map(([entityId, strategies]) => {
-        const strategyList = [...strategies].sort();
-        const rawScoreDelta = computeLookupStrategyAdjustment(
-          strategyList,
-          input.queryClass,
-        );
-        return {
-          entityId,
-          strategies: strategyList,
-          rawScoreDelta,
-        };
-      })
-      .filter((entry) => entry.rawScoreDelta !== 0);
-  }
 }
