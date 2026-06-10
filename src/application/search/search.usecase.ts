@@ -33,7 +33,9 @@ import type {
 } from './port/search-executor.port.js';
 import type {
   DecomposedSearchUseCasePort,
+  EntityLookupV2UseCasePort,
 } from './port/search-route-usecases.port.js';
+import { executeEntityRouteViaLookupV2 } from './entity-lookup-v2/entity-lookup-v2-search-bridge.js';
 import type { SearchRequest } from './search-request.dto.js';
 import type { CacheLookupRuntimeState } from './search-usecase-cache-lookup.js';
 import type {
@@ -170,6 +172,11 @@ export interface SearchUseCaseDeps {
    * {@link multiQueryGenerator}.
    */
   readonly hydeGenerator?: HydeGenerator | undefined;
+  /**
+   * When wired, `executeEntityRoute` delegates to the dedicated V2 lookup
+   * authority instead of the legacy resolver + corrective-retry loop.
+   */
+  readonly entityLookupV2UseCase?: EntityLookupV2UseCasePort | undefined;
 }
 
 /**
@@ -435,7 +442,7 @@ export class SearchUseCase {
     } = await dispatchSearchRouteExecution(
       effectiveRoute,
       {
-        executeEntity: () => this.executeEntityRoute(plan, surfaceCompiled),
+        executeEntity: () => this.executeEntityRoute(plan, surfaceCompiled, routeRequestContext),
         executeHybrid: () => this.executeHybridRoute(
           plan,
           surfaceCompiled,
@@ -575,7 +582,17 @@ export class SearchUseCase {
   private async executeEntityRoute(
     plan: QueryPlanV1,
     compiled: CompiledWineQuery,
+    options?: RequestExecutionContext,
   ): Promise<EntityRouteResult> {
+    if (this.deps.entityLookupV2UseCase !== undefined) {
+      return executeEntityRouteViaLookupV2(
+        plan,
+        compiled,
+        this.deps.entityLookupV2UseCase,
+        options,
+      );
+    }
+
     // TA2-4: Run blocker to surface entity IDs not covered by alias anchors.
     // blockerOnlyIds = blocker output minus IDs already in anchor candidateEntityIds.
     const blockerOnlyIds = this.capBlockerSeedIds(

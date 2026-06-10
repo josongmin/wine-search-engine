@@ -20,6 +20,7 @@ import type {
   AutocompleteUseCasePort,
   BatchSearchUseCasePort,
   DecomposedSearchUseCasePort,
+  EntityLookupV2UseCasePort,
   HybridUseCasePort,
   InterpretUseCasePort,
   ResolveUseCasePort,
@@ -52,11 +53,17 @@ export interface UseCaseExtensions {
   readonly hydeGenerator?: HydeGenerator | undefined;
 }
 
+export interface UseCaseContainerOverrides {
+  readonly entityLookupV2UseCase?: EntityLookupV2UseCasePort | undefined;
+}
+
 export function buildUseCaseContainerServices(
   core: CoreContainerServices,
   config: Config,
   extensions: UseCaseExtensions = {},
+  overrides: UseCaseContainerOverrides = {},
 ): UseCaseContainerServices {
+  const entityLookupV2UseCase = overrides.entityLookupV2UseCase;
   const drinkingWindowUseCase = new DrinkingWindowUseCase(core.drinkingWindowPredictor);
   const queryEntrySecurityObserver = getQueryEntrySecurityMetricsCollector();
 
@@ -103,6 +110,9 @@ export function buildUseCaseContainerServices(
     ...(extensions.hydeGenerator !== undefined
       ? { hydeGenerator: extensions.hydeGenerator }
       : {}),
+    ...(entityLookupV2UseCase !== undefined
+      ? { entityLookupV2UseCase }
+      : {}),
   });
 
   decomposedRef.impl = new DecomposedSearchUseCase(searchUseCase);
@@ -140,7 +150,11 @@ export function buildUseCaseContainerServices(
     }),
     resolveUseCase,
     autocompleteUseCase: new AutocompleteUseCase({
-      resolveUseCase,
+      entityLookupV2UseCase: entityLookupV2UseCase ?? {
+        execute: () => Promise.reject(
+          new Error('[AutocompleteUseCase] EntityLookupV2UseCase is not wired'),
+        ),
+      },
       entityLookup: core.entityLookup,
     }),
     hybridUseCase: new HybridUseCase({

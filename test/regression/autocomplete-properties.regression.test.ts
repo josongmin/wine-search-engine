@@ -2,11 +2,11 @@
  * Property-based regression tests for the Autocomplete (typeahead) use case.
  *
  * Feature: tools.autocomplete — POST /v1/entity/autocomplete. The use case is a
- * deterministic projection over the entity resolver: it hydrates each resolver
- * candidate with an optional retrieval document and emits an AutocompleteSuggestion
- * card, preserving the resolver's rank ordering. It powers a low-latency hot path,
- * so the projection MUST be faithful, deterministic, NFC/NFD-stable, and order/
- * count/dedup preserving relative to the resolver contract.
+ * deterministic projection over Entity Lookup V2: it hydrates each V2 candidate
+ * with an optional retrieval document and emits an AutocompleteSuggestion card,
+ * preserving the V2 rank ordering. It powers a low-latency hot path, so the
+ * projection MUST be faithful, deterministic, NFC/NFD-stable, and order/count/
+ * dedup preserving relative to the V2 lookup contract.
  *
  * Production code under test (catalog key_files):
  *  - src/application/search/autocomplete.usecase.ts (AutocompleteUseCase)
@@ -18,28 +18,28 @@
  *
  * Invariants verified (append-only; SOTA++ grade; numRuns = 100):
  *   P1  Determinism — execute(req) called twice yields deeply-equal responses.
- *   P2  Cardinality — suggestions.length === resolver candidates.length (no drop,
- *       no synthesis). The HTTP schema caps at MAX_RESOLVE_CANDIDATES; the resolver
- *       is the authority on count, the use case is a faithful 1:1 projection.
+ *   P2  Cardinality — suggestions.length === V2 candidates.length (no drop,
+ *       no synthesis). The HTTP schema caps at MAX_RESOLVE_CANDIDATES; V2 is the
+ *       authority on count, the use case is a faithful 1:1 projection.
  *   P3  Order + rank preservation — suggestion[i].entity_id and .rank mirror the
- *       resolver candidate at the same index (rank ordering is the resolver's; the
- *       use case never re-sorts and never re-numbers).
+ *       V2 candidate at the same index (rank ordering is V2's; the use case never
+ *       re-sorts and never re-numbers).
  *   P4  Identity / dedup faithfulness — the multiset of emitted entity_ids equals
- *       the resolver candidate entity_id multiset (duplicates neither introduced
- *       nor collapsed by the projection).
+ *       the V2 candidate entity_id multiset (duplicates neither introduced nor
+ *       collapsed by the projection).
  *   P5  Label fallback — when document hydration misses an entity, canonical_label
- *       falls back to the resolver candidate's canonicalLabel; when present, the
- *       document label wins (newField ?? deprecatedField-style migration).
- *   P6  Passthrough — status, decision_trace_ref, authority_trace_ref, and
- *       request_id are forwarded verbatim from the resolver response.
+ *       falls back to the V2 candidate's canonicalLabel; when present, the document
+ *       label wins.
+ *   P6  Mapping fidelity — status is the V2→autocomplete projection, trace refs are
+ *       deterministic from the V2 evidence spine, and request_id comes from V2 meta.
  *   P7  NFC/NFD prefix stability — passing a Korean prefix in NFC vs NFD form
- *       reaches the resolver byte-for-byte unchanged (the use case is transparent;
+ *       reaches Entity Lookup V2 byte-for-byte unchanged (the use case is transparent;
  *       it neither normalizes nor mangles the query) AND the projected suggestions
- *       are identical regardless of which form the resolver echoes in labels.
+ *       are identical regardless of which form V2 echoes in labels.
  *   P8  Empty-prefix / empty-candidate safety — zero candidates yields zero
  *       suggestions, never throws, and skips the document lookup entirely.
  *   P9  Score bound preservation — calibrated_score is forwarded verbatim within
- *       the resolver's documented [0,1] range; never clamped or recomputed.
+ *       V2's documented [0,1] range; never clamped or recomputed.
  *
  * Shared eval helper invariants:
  *   P10 recallAtK monotonicity in k and consistency with reciprocal rank.
@@ -60,11 +60,14 @@ import {
   scoreAutocompleteBenchmark,
   type AutocompleteBenchmarkCase,
 } from '../../scripts/eval/run-autocomplete-eval.ts';
-import type { ResolveUseCasePort } from '../../src/application/search/port/search-route-usecases.port.js';
+import type { EntityLookupV2UseCasePort } from '../../src/application/search/port/search-route-usecases.port.js';
 import type { EntityDocumentLookupPort } from '../../src/application/search/port/search-pipeline-deps.port.js';
-import type { ResolveResponse } from '../../src/application/search/resolve-response.dto.js';
+import type { EntityLookupV2Command, EntityLookupV2Result } from '../../src/application/search/entity-lookup-v2/entity-lookup-v2.dto.js';
+import {
+  buildEntityLookupV2AutocompleteTraceRef,
+  mapLookupV2StatusToAutocompleteStatus,
+} from '../../src/application/search/entity-lookup-v2/entity-lookup-v2-autocomplete-mapping.js';
 import type { RetrievalDocument } from '../../src/domain/retrieval/model/retrieval-document.js';
-import type { ResolveRequest } from '../../src/application/search/resolve-request.dto.js';
 
 const RUNS = 100;
 
@@ -74,30 +77,74 @@ const RUNS = 100;
 //  샤르  → "샤르도네" (Chardonnay)
 const KOREAN_PREFIXES = ['와', '까베', '샤르'] as const;
 
-// A canonical decision-trace ref matching CANONICAL_AUTHORITY_TRACE_REF_PATTERN.
-const TRACE_REF =
-  'decision:v1:short_entity:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
-
-interface ResolverCandidateFixture {
+interface LookupV2CandidateFixture {
   readonly entityId: CanonicalEntityId;
   readonly canonicalLabel: string;
   readonly rank: number;
   readonly calibratedScore: number;
-  readonly evidenceRefs: readonly string[];
+}
+
+function buildLookupV2CandidateView(candidate: LookupV2CandidateFixture): EntityLookupV2Result['candidates'][number] {
+  return {
+    entityId: String(candidate.entityId),
+    canonicalLabel: candidate.canonicalLabel,
+    rank: candidate.rank,
+    calibratedScore: candidate.calibratedScore,
+    channelAgreement: 1,
+    channelHits: [],
+  };
+}
+
+function buildLookupV2Result(
+  status: EntityLookupV2Result['status'],
+  candidates: readonly LookupV2CandidateFixture[],
+  requestId?: string,
+): EntityLookupV2Result {
+  const candidateViews = candidates.map(buildLookupV2CandidateView);
+  return {
+    status,
+    decisionReason: 'test',
+    normalizedQueryViews: {
+      raw: 'q',
+      strict: 'q',
+      accentless: 'q',
+      compact: 'q',
+      vintageCanonicalized: 'q',
+      vintageStripped: 'q',
+      lookupVariants: ['q'],
+    },
+    candidates: candidateViews,
+    topCandidate: candidateViews[0] ?? null,
+    clarificationOptions: [],
+    evidenceSummary: {
+      admissionReasonCode: 'admit_entity_lookup',
+      decisionReasonCode: status === 'resolved' ? 'resolved_single_candidate' : 'test_reason',
+      calibrationTrusted: true,
+      queryClass: 'short_entity',
+      candidatePoolSize: candidates.length,
+      channelCoverage: [],
+    },
+    meta: {
+      queryTimeMs: 1,
+      version: 'entity-lookup-v2/1.0.0',
+      engineSchemaVersion: 'entity_lookup_v2',
+      ...(requestId !== undefined ? { requestId } : {}),
+    },
+  };
 }
 
 /**
- * Build a resolve use-case stub that echoes a fixed response. Records the
- * request/options it was called with so transparency (P7) can be asserted.
+ * Build an Entity Lookup V2 stub that echoes a fixed response. Records the
+ * command/options it was called with so transparency (P7) can be asserted.
  */
-function makeResolveStub(response: ResolveResponse): {
-  readonly port: ResolveUseCasePort;
-  readonly calls: { request: ResolveRequest; options: unknown }[];
+function makeEntityLookupV2Stub(response: EntityLookupV2Result): {
+  readonly port: EntityLookupV2UseCasePort;
+  readonly calls: { command: EntityLookupV2Command; options: unknown }[];
 } {
-  const calls: { request: ResolveRequest; options: unknown }[] = [];
-  const port: ResolveUseCasePort = {
-    execute: (request, options) => {
-      calls.push({ request, options });
+  const calls: { command: EntityLookupV2Command; options: unknown }[] = [];
+  const port: EntityLookupV2UseCasePort = {
+    execute: (command, options) => {
+      calls.push({ command, options });
       return Promise.resolve(response);
     },
   };
@@ -151,9 +198,9 @@ const entityIdSeedArb = fc.oneof(
   fc.string({ minLength: 1, maxLength: 12 }).filter((s) => s.trim().length > 0),
 );
 
-// Resolver candidate arbitrary. Ranks are assigned post-hoc (1..N) by the
-// generator to honor the resolver contract ("ordered by rank ascending").
-function candidateArb(): fc.Arbitrary<Omit<ResolverCandidateFixture, 'rank'>> {
+// V2 candidate arbitrary. Ranks are assigned post-hoc (1..N) by the generator to
+// honor the V2 contract ("ordered by rank ascending").
+function candidateArb(): fc.Arbitrary<Omit<LookupV2CandidateFixture, 'rank'>> {
   return fc.record({
     entityId: entityIdSeedArb.map((s) => createEntityId(s)),
     canonicalLabel: fc.oneof(
@@ -161,20 +208,19 @@ function candidateArb(): fc.Arbitrary<Omit<ResolverCandidateFixture, 'rank'>> {
       fc.string({ minLength: 1, maxLength: 24 }).filter((s) => s.trim().length > 0),
     ),
     calibratedScore: fc.double({ min: 0, max: 1, noNaN: true }),
-    evidenceRefs: fc.array(fc.string({ minLength: 1, maxLength: 8 }), { maxLength: 3 }),
   });
 }
 
-function statusArb(): fc.Arbitrary<ResolveResponse['status']> {
-  return fc.constantFrom('resolved', 'ambiguous', 'failed');
+function statusArb(): fc.Arbitrary<EntityLookupV2Result['status']> {
+  return fc.constantFrom('resolved', 'ambiguous', 'failed', 'redirect_discovery');
 }
 
-interface ResolveResponseFixture {
-  readonly response: ResolveResponse;
-  readonly candidates: readonly ResolverCandidateFixture[];
+interface LookupV2ResponseFixture {
+  readonly response: EntityLookupV2Result;
+  readonly candidates: readonly LookupV2CandidateFixture[];
 }
 
-function resolveResponseArb(): fc.Arbitrary<ResolveResponseFixture> {
+function lookupV2ResponseArb(): fc.Arbitrary<LookupV2ResponseFixture> {
   return fc
     .tuple(
       fc.array(candidateArb(), { minLength: 0, maxLength: 8 }),
@@ -182,30 +228,11 @@ function resolveResponseArb(): fc.Arbitrary<ResolveResponseFixture> {
       fc.option(fc.string({ minLength: 1, maxLength: 16 }), { nil: undefined }),
     )
     .map(([rawCandidates, status, requestId]) => {
-      const candidates: ResolverCandidateFixture[] = rawCandidates.map((c, index) => ({
+      const candidates: LookupV2CandidateFixture[] = rawCandidates.map((c, index) => ({
         ...c,
         rank: index + 1,
       }));
-      const response: ResolveResponse = {
-        status,
-        candidates: candidates.map((c) => ({
-          entityId: c.entityId,
-          canonicalLabel: c.canonicalLabel,
-          rank: c.rank,
-          calibratedScore: c.calibratedScore,
-          evidenceRefs: c.evidenceRefs,
-        })),
-        topEntity: candidates[0]
-          ? {
-              entityId: candidates[0].entityId,
-              canonicalLabel: candidates[0].canonicalLabel,
-              calibratedScore: candidates[0].calibratedScore,
-            }
-          : undefined,
-        decision_trace_ref: TRACE_REF,
-        authority_trace_ref: TRACE_REF,
-        ...(requestId !== undefined ? { request_id: requestId } : {}),
-      };
+      const response = buildLookupV2Result(status, candidates, requestId);
       return { response, candidates };
     });
 }
@@ -213,12 +240,12 @@ function resolveResponseArb(): fc.Arbitrary<ResolveResponseFixture> {
 // ── P1 Determinism ───────────────────────────────────────────────────────────
 
 describe('Property: autocomplete projection determinism', () => {
-  it('execute is referentially transparent for arbitrary resolver responses', async () => {
+  it('execute is referentially transparent for arbitrary V2 responses', async () => {
     await fc.assert(
-      fc.asyncProperty(resolveResponseArb(), async ({ response }) => {
-        const resolveA = makeResolveStub(response);
+      fc.asyncProperty(lookupV2ResponseArb(), async ({ response }) => {
+        const resolveA = makeEntityLookupV2Stub(response);
         const lookupA = makeEntityLookupStub(new Map());
-        const ucA = new AutocompleteUseCase({ resolveUseCase: resolveA.port, entityLookup: lookupA.port });
+        const ucA = new AutocompleteUseCase({ entityLookupV2UseCase: resolveA.port, entityLookup: lookupA.port });
 
         const first = await ucA.execute({ query: 'opu' });
         const second = await ucA.execute({ query: 'opu' });
@@ -234,10 +261,10 @@ describe('Property: autocomplete projection determinism', () => {
 describe('Property: faithful 1:1 projection (cardinality, order, rank, identity)', () => {
   it('preserves count, order, rank, and entity-id multiset', async () => {
     await fc.assert(
-      fc.asyncProperty(resolveResponseArb(), async ({ response, candidates }) => {
-        const resolve = makeResolveStub(response);
+      fc.asyncProperty(lookupV2ResponseArb(), async ({ response, candidates }) => {
+        const resolve = makeEntityLookupV2Stub(response);
         const lookup = makeEntityLookupStub(new Map());
-        const uc = new AutocompleteUseCase({ resolveUseCase: resolve.port, entityLookup: lookup.port });
+        const uc = new AutocompleteUseCase({ entityLookupV2UseCase: resolve.port, entityLookup: lookup.port });
 
         const result = await uc.execute({ query: 'q' });
 
@@ -263,10 +290,10 @@ describe('Property: faithful 1:1 projection (cardinality, order, rank, identity)
 // ── P5 Label fallback ─────────────────────────────────────────────────────────
 
 describe('Property: canonical label hydration + fallback', () => {
-  it('uses document label when present, resolver label when hydration misses', async () => {
+  it('uses document label when present, V2 label when hydration misses', async () => {
     await fc.assert(
       fc.asyncProperty(
-        resolveResponseArb(),
+        lookupV2ResponseArb(),
         // Independent boolean per candidate index decides whether a doc exists.
         fc.array(fc.boolean(), { maxLength: 8 }),
         async ({ response, candidates }, hydrateFlags) => {
@@ -279,9 +306,9 @@ describe('Property: canonical label hydration + fallback', () => {
               docs.set(candidates[i]!.entityId, buildDoc(candidates[i]!.entityId, `DOC::${String(candidates[i]!.entityId)}`));
             }
           }
-          const resolve = makeResolveStub(response);
+          const resolve = makeEntityLookupV2Stub(response);
           const lookup = makeEntityLookupStub(docs);
-          const uc = new AutocompleteUseCase({ resolveUseCase: resolve.port, entityLookup: lookup.port });
+          const uc = new AutocompleteUseCase({ entityLookupV2UseCase: resolve.port, entityLookup: lookup.port });
 
           const result = await uc.execute({ query: 'q' });
 
@@ -297,22 +324,23 @@ describe('Property: canonical label hydration + fallback', () => {
   });
 });
 
-// ── P6 Passthrough ────────────────────────────────────────────────────────────
+// ── P6 Mapping fidelity ─────────────────────────────────────────────────────
 
-describe('Property: status / trace-ref / request-id passthrough', () => {
-  it('forwards resolver envelope fields verbatim', async () => {
+describe('Property: status / trace-ref / request-id mapping fidelity', () => {
+  it('projects V2 envelope fields through the autocomplete mapping', async () => {
     await fc.assert(
-      fc.asyncProperty(resolveResponseArb(), async ({ response }) => {
-        const resolve = makeResolveStub(response);
+      fc.asyncProperty(lookupV2ResponseArb(), async ({ response }) => {
+        const lookupV2 = makeEntityLookupV2Stub(response);
         const lookup = makeEntityLookupStub(new Map());
-        const uc = new AutocompleteUseCase({ resolveUseCase: resolve.port, entityLookup: lookup.port });
+        const uc = new AutocompleteUseCase({ entityLookupV2UseCase: lookupV2.port, entityLookup: lookup.port });
 
         const result = await uc.execute({ query: 'q' });
+        const traceRef = buildEntityLookupV2AutocompleteTraceRef(response);
 
-        expect(result.status).toBe(response.status);
-        expect(result.decision_trace_ref).toBe(response.decision_trace_ref);
-        expect(result.authority_trace_ref).toBe(response.authority_trace_ref);
-        expect(result.request_id).toBe(response.request_id);
+        expect(result.status).toBe(mapLookupV2StatusToAutocompleteStatus(response.status));
+        expect(result.decision_trace_ref).toBe(traceRef);
+        expect(result.authority_trace_ref).toBe(traceRef);
+        expect(result.request_id).toBe(response.meta.requestId);
       }),
       { numRuns: RUNS },
     );
@@ -322,7 +350,7 @@ describe('Property: status / trace-ref / request-id passthrough', () => {
 // ── P7 NFC/NFD Korean prefix stability ───────────────────────────────────────
 
 describe('Property: NFC/NFD Korean prefix transparency', () => {
-  it('forwards the Korean query to the resolver byte-for-byte (no normalization)', async () => {
+  it('forwards the Korean query to Entity Lookup V2 byte-for-byte (no normalization)', async () => {
     await fc.assert(
       fc.asyncProperty(
         fc.constantFrom(...KOREAN_PREFIXES),
@@ -330,61 +358,47 @@ describe('Property: NFC/NFD Korean prefix transparency', () => {
         async (prefix, form) => {
           // Build the requested normalization form. The use case must not alter it.
           const query = prefix.normalize(form === 'NFC' ? 'NFC' : 'NFD');
-          const resolve = makeResolveStub({
-            status: 'resolved',
-            candidates: [],
-            topEntity: undefined,
-            decision_trace_ref: TRACE_REF,
-            authority_trace_ref: TRACE_REF,
-          });
+          const lookupV2 = makeEntityLookupV2Stub(buildLookupV2Result('resolved', []));
           const lookup = makeEntityLookupStub(new Map());
-          const uc = new AutocompleteUseCase({ resolveUseCase: resolve.port, entityLookup: lookup.port });
+          const uc = new AutocompleteUseCase({ entityLookupV2UseCase: lookupV2.port, entityLookup: lookup.port });
 
           await uc.execute({ query });
 
-          expect(resolve.calls).toHaveLength(1);
-          // Byte-for-byte transparency: the resolver receives exactly what we sent.
-          expect(resolve.calls[0]!.request.query).toBe(query);
+          expect(lookupV2.calls).toHaveLength(1);
+          // Byte-for-byte transparency: V2 receives exactly what we sent.
+          expect(lookupV2.calls[0]!.command.query).toBe(query);
         },
       ),
       { numRuns: RUNS },
     );
   });
 
-  it('projects identical suggestions whether resolver echoes NFC or NFD Korean labels', async () => {
+  it('projects identical suggestions whether V2 echoes NFC or NFD Korean labels', async () => {
     await fc.assert(
       fc.asyncProperty(fc.constantFrom(...KOREAN_PREFIXES), async (prefix) => {
         const baseLabel = `${prefix}도네 셀렉션`;
         const entityId = createEntityId(`ko-${prefix}`);
 
-        const buildResponse = (form: 'NFC' | 'NFD'): ResolveResponse => ({
-          status: 'resolved',
-          candidates: [
-            {
-              entityId,
-              canonicalLabel: baseLabel.normalize(form),
-              rank: 1,
-              calibratedScore: 0.9,
-              evidenceRefs: [],
-            },
-          ],
-          topEntity: undefined,
-          decision_trace_ref: TRACE_REF,
-          authority_trace_ref: TRACE_REF,
-        });
+        const buildResponse = (form: 'NFC' | 'NFD'): EntityLookupV2Result =>
+          buildLookupV2Result('resolved', [{
+            entityId,
+            canonicalLabel: baseLabel.normalize(form),
+            rank: 1,
+            calibratedScore: 0.9,
+          }]);
 
         const runForm = async (form: 'NFC' | 'NFD'): Promise<string | undefined> => {
-          const resolve = makeResolveStub(buildResponse(form));
+          const lookupV2 = makeEntityLookupV2Stub(buildResponse(form));
           const lookup = makeEntityLookupStub(new Map());
-          const uc = new AutocompleteUseCase({ resolveUseCase: resolve.port, entityLookup: lookup.port });
+          const uc = new AutocompleteUseCase({ entityLookupV2UseCase: lookupV2.port, entityLookup: lookup.port });
           const result = await uc.execute({ query: prefix });
           return result.suggestions[0]?.entity.canonical_label;
         };
 
         const nfc = await runForm('NFC');
         const nfd = await runForm('NFD');
-        // The projection preserves whatever the resolver returned; both forms
-        // render the same grapheme sequence after NFC re-normalization.
+        // The projection preserves whatever V2 returned; both forms render the same
+        // grapheme sequence after NFC re-normalization.
         expect(nfc).toBeDefined();
         expect(nfd).toBeDefined();
         expect(nfc!.normalize('NFC')).toBe(nfd!.normalize('NFC'));
@@ -397,21 +411,15 @@ describe('Property: NFC/NFD Korean prefix transparency', () => {
 // ── P8 Empty safety ───────────────────────────────────────────────────────────
 
 describe('Property: empty-candidate and empty-prefix safety', () => {
-  it('emits zero suggestions and skips the document lookup when resolver returns none', async () => {
+  it('emits zero suggestions and skips the document lookup when V2 returns none', async () => {
     await fc.assert(
       fc.asyncProperty(
         fc.oneof(fc.constant(''), fc.constantFrom(...KOREAN_PREFIXES), fc.string({ maxLength: 8 })),
         statusArb(),
         async (query, status) => {
-          const resolve = makeResolveStub({
-            status,
-            candidates: [],
-            topEntity: undefined,
-            decision_trace_ref: TRACE_REF,
-            authority_trace_ref: TRACE_REF,
-          });
+          const lookupV2 = makeEntityLookupV2Stub(buildLookupV2Result(status, []));
           const lookup = makeEntityLookupStub(new Map());
-          const uc = new AutocompleteUseCase({ resolveUseCase: resolve.port, entityLookup: lookup.port });
+          const uc = new AutocompleteUseCase({ entityLookupV2UseCase: lookupV2.port, entityLookup: lookup.port });
 
           const result = await uc.execute({ query });
           expect(result.suggestions).toEqual([]);
@@ -427,12 +435,12 @@ describe('Property: empty-candidate and empty-prefix safety', () => {
 // ── P9 Score bound preservation ───────────────────────────────────────────────
 
 describe('Property: calibrated score forwarded verbatim within [0,1]', () => {
-  it('never clamps or recomputes the resolver calibrated score', async () => {
+  it('never clamps or recomputes the V2 calibrated score', async () => {
     await fc.assert(
-      fc.asyncProperty(resolveResponseArb(), async ({ response, candidates }) => {
-        const resolve = makeResolveStub(response);
+      fc.asyncProperty(lookupV2ResponseArb(), async ({ response, candidates }) => {
+        const resolve = makeEntityLookupV2Stub(response);
         const lookup = makeEntityLookupStub(new Map());
-        const uc = new AutocompleteUseCase({ resolveUseCase: resolve.port, entityLookup: lookup.port });
+        const uc = new AutocompleteUseCase({ entityLookupV2UseCase: resolve.port, entityLookup: lookup.port });
 
         const result = await uc.execute({ query: 'q' });
         for (let i = 0; i < candidates.length; i += 1) {

@@ -42,7 +42,12 @@ describe('buildFeatureContainerServices', () => {
       { pool: { totalCount: 0 } as never },
     );
 
-    expect(buildUseCaseContainerServices).toHaveBeenCalledOnce();
+    expect(buildUseCaseContainerServices).toHaveBeenCalledWith(
+      expect.anything(),
+      config,
+      {},
+      { entityLookupV2UseCase: lookupAuthority.entityLookupV2UseCase },
+    );
     expect(features.entityLookupV2UseCase).toBe(lookupAuthority.entityLookupV2UseCase);
     expect(features.evalRunner).toBe('eval-runner');
   });

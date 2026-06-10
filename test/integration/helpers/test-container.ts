@@ -438,10 +438,6 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
     injectionJudge,
     judgeTimeoutMs,
   });
-  const autocompleteUseCase = new AutocompleteUseCase({
-    resolveUseCase,
-    entityLookup: searchIndex,
-  });
   const lookupPlanner = new RuntimeLookupPlanner({
     aliasMatcher,
     ambiguityDictionary: ambiguityDict,
@@ -458,6 +454,10 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
     }),
     ambiguityDictionary: ambiguityDict,
     querySanitizer,
+  });
+  const autocompleteUseCase = new AutocompleteUseCase({
+    entityLookupV2UseCase,
+    entityLookup: searchIndex,
   });
   const hybridUseCase = new HybridUseCase({
     queryPlanner,

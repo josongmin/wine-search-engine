@@ -44,7 +44,9 @@ export function buildFeatureContainerServices(
   runtime: RuntimeHandles = {},
   useCaseExtensions: UseCaseExtensions = {},
 ): FeatureContainerServices {
-  const useCases = buildUseCaseContainerServices(core, config, useCaseExtensions);
+  const useCases = buildUseCaseContainerServices(core, config, useCaseExtensions, {
+    entityLookupV2UseCase: lookupAuthority.entityLookupV2UseCase,
+  });
   const evalRunner = buildEvalRunner(runtime.pool, useCases.searchUseCase);
 
   return {

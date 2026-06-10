@@ -46,7 +46,11 @@ import { DrinkingWindowUseCase } from '../../../../src/application/drinking-wind
 import { InterpretUseCase } from '../../../../src/application/search/interpret.usecase.js';
 import { ResolveUseCase } from '../../../../src/application/search/resolve.usecase.js';
 import { AutocompleteUseCase } from '../../../../src/application/search/autocomplete.usecase.js';
+import { EntityLookupV2UseCase } from '../../../../src/application/search/entity-lookup-v2/entity-lookup-v2.usecase.js';
+import { MultiChannelRetrievalEngine } from '../../../../src/application/search/entity-lookup-v2/multi-channel-retrieval-engine.js';
+import { RuntimeLookupPlanner } from '../../../../src/application/search/entity-lookup-v2/runtime-lookup-planner.js';
 import { HybridUseCase } from '../../../../src/application/search/hybrid.usecase.js';
+import { ConceptAdmissionGate } from '../../../../src/domain/resolver/v2/concept-admission-gate.js';
 import type { Container } from '../../../../src/config/container.js';
 import type { SnapshotVersions } from '../../../../src/application/search/search.usecase.js';
 import { VespaClient } from '../../../../src/infrastructure/vespa/vespa-client.js';
@@ -384,11 +388,27 @@ export async function createVespaTestContainer(
     injectionJudge,
     judgeTimeoutMs,
   });
+  const decomposedSearchUseCase = new DecomposedSearchUseCase(searchUseCase);
+  const lookupPlanner = new RuntimeLookupPlanner({
+    aliasMatcher,
+    ambiguityDictionary: ambiguityDict,
+  });
+  const entityLookupV2UseCase = new EntityLookupV2UseCase({
+    admissionGate: new ConceptAdmissionGate(),
+    lookupPlanner,
+    entityResolver,
+    entityLookup: vespaSearchIndex,
+    candidateRetrieval: new MultiChannelRetrievalEngine({
+      aliasMatcher,
+      entityLookup: vespaSearchIndex,
+    }),
+    ambiguityDictionary: ambiguityDict,
+    querySanitizer,
+  });
   const autocompleteUseCase = new AutocompleteUseCase({
-    resolveUseCase,
+    entityLookupV2UseCase,
     entityLookup: vespaSearchIndex,
   });
-  const decomposedSearchUseCase = new DecomposedSearchUseCase(searchUseCase);
   const hybridUseCase = new HybridUseCase({
     queryPlanner,
     candidatePool,
@@ -418,6 +438,7 @@ export async function createVespaTestContainer(
     searchUseCase,
     interpretUseCase,
     resolveUseCase,
+    entityLookupV2UseCase,
     autocompleteUseCase,
     hybridUseCase,
     decomposedSearchUseCase,

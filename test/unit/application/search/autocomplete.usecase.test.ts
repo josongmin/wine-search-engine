@@ -2,34 +2,81 @@ import { describe, expect, it, vi } from 'vitest';
 import { AutocompleteUseCase } from '../../../../src/application/search/autocomplete.usecase.js';
 import { createEntityId } from '../../../../src/domain/shared/types/index.js';
 import type { EntityDocumentLookupPort } from '../../../../src/application/search/port/search-pipeline-deps.port.js';
-import type { ResolveUseCasePort } from '../../../../src/application/search/port/search-route-usecases.port.js';
+import type { EntityLookupV2UseCasePort } from '../../../../src/application/search/port/search-route-usecases.port.js';
+import type { EntityLookupV2Result } from '../../../../src/application/search/entity-lookup-v2/entity-lookup-v2.dto.js';
+
+function makeLookupV2Result(overrides: Partial<EntityLookupV2Result> = {}): EntityLookupV2Result {
+  return {
+    status: 'resolved',
+    decisionReason: 'Confidently resolved to a single wine entity.',
+    normalizedQueryViews: {
+      raw: 'opu',
+      strict: 'opu',
+      accentless: 'opu',
+      compact: 'opu',
+      vintageCanonicalized: 'opu',
+      vintageStripped: 'opu',
+      lookupVariants: ['opu'],
+    },
+    candidates: [],
+    topCandidate: null,
+    clarificationOptions: [],
+    evidenceSummary: {
+      admissionReasonCode: 'admit_entity_lookup',
+      decisionReasonCode: 'resolved_single_candidate',
+      calibrationTrusted: true,
+      queryClass: 'short_entity',
+      candidatePoolSize: 0,
+      channelCoverage: [],
+    },
+    meta: {
+      queryTimeMs: 1,
+      version: 'entity-lookup-v2/1.0.0',
+      engineSchemaVersion: 'entity_lookup_v2',
+    },
+    ...overrides,
+  };
+}
 
 describe('AutocompleteUseCase', () => {
-  it('hydrates resolver candidates into authoritative autocomplete suggestion cards', async () => {
+  it('hydrates V2 candidates into authoritative autocomplete suggestion cards', async () => {
     const entityId = createEntityId('opus-one-2018');
-    const resolveUseCase: ResolveUseCasePort = {
-      execute: vi.fn().mockResolvedValue({
-        status: 'resolved',
+    const entityLookupV2UseCase: EntityLookupV2UseCasePort = {
+      execute: vi.fn().mockResolvedValue(makeLookupV2Result({
         candidates: [
           {
             entityId,
             canonicalLabel: 'Opus One 2018',
+            entityType: 'wine',
             rank: 1,
             calibratedScore: 0.97,
-            evidenceRefs: ['resolver:alias_exact:opus-one-2018'],
-            source: 'alias',
-            sources: ['alias'],
+            channelAgreement: 1,
+            channelHits: [
+              {
+                channel: 'alias_exact',
+                matchedView: 'opu',
+                channelScore: 0.97,
+                channelRank: 1,
+              },
+            ],
           },
         ],
-        topEntity: {
+        topCandidate: {
           entityId,
           canonicalLabel: 'Opus One 2018',
+          entityType: 'wine',
+          rank: 1,
           calibratedScore: 0.97,
+          channelAgreement: 1,
+          channelHits: [],
         },
-        decision_trace_ref: 'decision:v1:short_entity:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
-        authority_trace_ref: 'decision:v1:short_entity:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
-        request_id: 'req-autocomplete-1',
-      }),
+        meta: {
+          requestId: 'req-autocomplete-1',
+          queryTimeMs: 1,
+          version: 'entity-lookup-v2/1.0.0',
+          engineSchemaVersion: 'entity_lookup_v2',
+        },
+      })),
     };
     const entityLookup: EntityDocumentLookupPort = {
       getDocuments: vi.fn().mockResolvedValue(new Map([
@@ -59,7 +106,7 @@ describe('AutocompleteUseCase', () => {
     };
 
     const useCase = new AutocompleteUseCase({
-      resolveUseCase,
+      entityLookupV2UseCase,
       entityLookup,
     });
 
@@ -68,43 +115,44 @@ describe('AutocompleteUseCase', () => {
       requestId: 'req-autocomplete-1',
     });
 
-    expect(resolveUseCase.execute).toHaveBeenCalledWith(
-      { query: 'opu', requestId: 'req-autocomplete-1' },
+    expect(entityLookupV2UseCase.execute).toHaveBeenCalledWith(
+      {
+        query: 'opu',
+        requestId: 'req-autocomplete-1',
+        maxCandidates: 10,
+        mode: 'default',
+      },
       undefined,
     );
     expect(entityLookup.getDocuments).toHaveBeenCalledWith([entityId]);
-    expect(result).toMatchObject({
-      status: 'resolved',
-      suggestions: [
-        {
-          entity: {
-            entity_id: entityId,
-            canonical_label: 'Opus One 2018',
-            entity_type: 'wine',
-            producer: 'Opus One',
-            region: 'Napa Valley',
-            country: 'United States',
-            appellation: 'Oakville',
-            vintage: 2018,
-            wine_type: 'red',
-            grapes: ['Cabernet Sauvignon'],
-            availability: true,
-          },
-          calibrated_score: 0.97,
-          rank: 1,
-          source: 'alias',
+    expect(result.status).toBe('resolved');
+    expect(result.request_id).toBe('req-autocomplete-1');
+    expect(result.decision_trace_ref).toBe(result.authority_trace_ref);
+    expect(result.suggestions).toMatchObject([
+      {
+        entity: {
+          entity_id: entityId,
+          canonical_label: 'Opus One 2018',
+          entity_type: 'wine',
+          producer: 'Opus One',
+          region: 'Napa Valley',
+          country: 'United States',
+          appellation: 'Oakville',
+          vintage: 2018,
+          wine_type: 'red',
+          grapes: ['Cabernet Sauvignon'],
+          availability: true,
         },
-      ],
-      decision_trace_ref: 'decision:v1:short_entity:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
-      authority_trace_ref: 'decision:v1:short_entity:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
-      request_id: 'req-autocomplete-1',
-    });
+        calibrated_score: 0.97,
+        rank: 1,
+      },
+    ]);
   });
 
-  it('falls back to resolver labels when document hydration misses an entity', async () => {
+  it('falls back to V2 labels when document hydration misses an entity', async () => {
     const entityId = createEntityId('mystery-wine');
-    const resolveUseCase: ResolveUseCasePort = {
-      execute: vi.fn().mockResolvedValue({
+    const entityLookupV2UseCase: EntityLookupV2UseCasePort = {
+      execute: vi.fn().mockResolvedValue(makeLookupV2Result({
         status: 'ambiguous',
         candidates: [
           {
@@ -112,19 +160,15 @@ describe('AutocompleteUseCase', () => {
             canonicalLabel: 'Mystery Wine',
             rank: 1,
             calibratedScore: 0.61,
-            evidenceRefs: [],
-            source: 'blocker_seed',
-            blockerSeed: true,
+            channelAgreement: 0.5,
+            channelHits: [],
           },
         ],
-        topEntity: undefined,
-        decision_trace_ref: 'decision:v1:short_entity:1111111111111111111111111111111111111111111111111111111111111111',
-        authority_trace_ref: 'decision:v1:short_entity:1111111111111111111111111111111111111111111111111111111111111111',
-      }),
+      })),
     };
 
     const useCase = new AutocompleteUseCase({
-      resolveUseCase,
+      entityLookupV2UseCase,
       entityLookup: {
         getDocuments: vi.fn().mockResolvedValue(new Map()),
       },
@@ -132,6 +176,7 @@ describe('AutocompleteUseCase', () => {
 
     const result = await useCase.execute({ query: 'myst' });
 
+    expect(result.status).toBe('ambiguous');
     expect(result.suggestions).toEqual([
       {
         entity: {
@@ -140,9 +185,32 @@ describe('AutocompleteUseCase', () => {
         },
         rank: 1,
         calibrated_score: 0.61,
-        source: 'blocker_seed',
-        blocker_seed: true,
       },
     ]);
+  });
+
+  it('maps redirect_discovery to failed autocomplete status', async () => {
+    const entityLookupV2UseCase: EntityLookupV2UseCasePort = {
+      execute: vi.fn().mockResolvedValue(makeLookupV2Result({
+        status: 'redirect_discovery',
+        evidenceSummary: {
+          admissionReasonCode: 'redirect_concept_query',
+          decisionReasonCode: 'redirect_concept_query',
+          calibrationTrusted: false,
+          queryClass: 'concept_query',
+          candidatePoolSize: 0,
+          channelCoverage: [],
+        },
+      })),
+    };
+
+    const useCase = new AutocompleteUseCase({
+      entityLookupV2UseCase,
+    });
+
+    const result = await useCase.execute({ query: 'full bodied red' });
+
+    expect(result.status).toBe('failed');
+    expect(result.suggestions).toEqual([]);
   });
 });
