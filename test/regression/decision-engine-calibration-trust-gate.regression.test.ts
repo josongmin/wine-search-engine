@@ -67,10 +67,10 @@ const TEST_THRESHOLD_STORE: ThresholdStore = {
   getProfile: async () => DEFAULT_THRESHOLD_PROFILE,
 };
 
-function makeQueryPlan(): QueryPlanV1 {
+function makeQueryPlan(rawQuery = 'unit-test'): QueryPlanV1 {
   return {
-    rawQuery: 'unit-test',
-    normalizedQuery: 'unit-test',
+    rawQuery,
+    normalizedQuery: rawQuery,
     intent: 'entity_exact',
     route: 'entity',
     retrievalMode: 'entity_lookup',
@@ -146,8 +146,9 @@ function makeInput(opts: {
   exactnessTier: 'exact' | 'alias_exact' | 'alias_fuzzy' | 'alias_phonetic' | 'none';
   calibratedGap?: number | undefined;
   ambiguityDetected?: boolean;
+  rawQuery?: string;
 }): DecisionInput {
-  const queryPlan = makeQueryPlan();
+  const queryPlan = makeQueryPlan(opts.rawQuery);
   const resolveResult = makeResolveResult(opts.C, opts.calibrationTrusted, {
     calibratedGap: opts.calibratedGap,
     ...(opts.ambiguityDetected !== undefined ? { ambiguityDetected: opts.ambiguityDetected } : {}),
@@ -271,6 +272,7 @@ describe('DecisionEngine.applyCalibrationTrustGate', () => {
       exactnessTier: 'alias_fuzzy',
       calibratedGap: undefined, // singleton: no runner-up
       ambiguityDetected: false,
+      rawQuery: 'opuss one',
     });
     const output = await engine.decide(input, TEST_SNAPSHOT);
 
@@ -328,6 +330,7 @@ describe('DecisionEngine.applyCalibrationTrustGate', () => {
       exactnessTier: 'alias_phonetic',
       calibratedGap: undefined,
       ambiguityDetected: false,
+      rawQuery: 'opuss one',
     });
     const output = await engine.decide(input, TEST_SNAPSHOT);
 
