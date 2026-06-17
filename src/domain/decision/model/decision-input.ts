@@ -14,6 +14,7 @@ import type {
   DualLanePresence,
   IdentityExactnessTier,
 } from '../../retrieval/model/dual-lane-artifact.js';
+import { classifyQueryBudget } from '../../agent/service/adaptive-budget.js';
 
 /**
  * Summary of ambiguity signals aggregated from multiple pipeline stages.
@@ -289,6 +290,72 @@ export function hasUniquePhoneticIdentityWitness(
   }
 
   return trace.calibratedGap === undefined;
+}
+
+/**
+ * Approximate identity trust (fuzzy/phonetic unique witness) is reserved for
+ * specific-SKU lookup surfaces. Generic fragments ("샤토", "opu") must not
+ * inherit confident resolve via phonetic recall alone.
+ */
+export function allowsApproximateIdentityTrustForQuery(rawQuery: string): boolean {
+  return classifyQueryBudget(rawQuery.trim())?.classification === 'specific_sku';
+}
+
+function passesApproximateIdentityTrustSurface(input: {
+  readonly queryPlan: Pick<QueryPlanV1, 'rawQuery' | 'queryClass'>;
+  readonly ambiguitySummary?: AmbiguitySummary;
+  readonly uncertainty: QueryUncertainty;
+}): boolean {
+  if (!allowsApproximateIdentityTrustForQuery(input.queryPlan.rawQuery)) {
+    return false;
+  }
+  if (input.queryPlan.queryClass === 'ambiguous_short_form') {
+    return false;
+  }
+  if (input.ambiguitySummary?.decisionEffect === 'force_clarify') {
+    return false;
+  }
+  if (input.uncertainty.decisionEffect === 'force_clarify') {
+    return false;
+  }
+  return true;
+}
+
+export function hasTrustedUniqueFuzzyIdentityWitness(input: {
+  readonly queryPlan: Pick<QueryPlanV1, 'rawQuery' | 'queryClass'>;
+  readonly evidenceSummary?: EvidenceSummary;
+  readonly resolveResult: Pick<EntityResolveResult, 'decisionTrace'>;
+  readonly ambiguitySummary?: AmbiguitySummary;
+  readonly uncertainty: QueryUncertainty;
+}): boolean {
+  if (!passesApproximateIdentityTrustSurface(input)) {
+    return false;
+  }
+  return hasUniqueFuzzyIdentityWitness(input.evidenceSummary, input.resolveResult.decisionTrace);
+}
+
+export function hasTrustedUniquePhoneticIdentityWitness(input: {
+  readonly queryPlan: Pick<QueryPlanV1, 'rawQuery' | 'queryClass'>;
+  readonly evidenceSummary?: EvidenceSummary;
+  readonly resolveResult: Pick<EntityResolveResult, 'decisionTrace'>;
+  readonly ambiguitySummary?: AmbiguitySummary;
+  readonly uncertainty: QueryUncertainty;
+}): boolean {
+  if (!passesApproximateIdentityTrustSurface(input)) {
+    return false;
+  }
+  return hasUniquePhoneticIdentityWitness(input.evidenceSummary, input.resolveResult.decisionTrace);
+}
+
+export function hasTrustedUniqueApproximateIdentityWitness(input: {
+  readonly queryPlan: Pick<QueryPlanV1, 'rawQuery' | 'queryClass'>;
+  readonly evidenceSummary?: EvidenceSummary;
+  readonly resolveResult: Pick<EntityResolveResult, 'decisionTrace'>;
+  readonly ambiguitySummary?: AmbiguitySummary;
+  readonly uncertainty: QueryUncertainty;
+}): boolean {
+  return hasTrustedUniqueFuzzyIdentityWitness(input)
+    || hasTrustedUniquePhoneticIdentityWitness(input);
 }
 
 /**

@@ -32,8 +32,9 @@ import {
 } from '../../query/model/threshold-profile.js';
 import {
   hasExactMatchCandidate,
-  hasUniqueFuzzyIdentityWitness,
-  hasUniquePhoneticIdentityWitness,
+  hasTrustedUniqueApproximateIdentityWitness,
+  hasTrustedUniqueFuzzyIdentityWitness,
+  hasTrustedUniquePhoneticIdentityWitness,
   type DecisionInput,
 } from '../model/decision-input.js';
 import type { DecisionOutput } from '../model/decision-output.js';
@@ -437,8 +438,7 @@ export class DecisionEngine {
     if (
       requireEffectiveRetrievalMode(input) === 'no_match_detection'
       && !hasExactMatchCandidate(input.evidenceSummary)
-      && !hasUniqueFuzzyIdentityWitness(input.evidenceSummary, input.resolveResult.decisionTrace)
-      && !hasUniquePhoneticIdentityWitness(input.evidenceSummary, input.resolveResult.decisionTrace)
+      && !hasTrustedUniqueApproximateIdentityWitness(input)
     ) {
       rulesApplied.push('NO_MATCH_DETECTION_FAIL_CLOSED');
       return {
@@ -900,12 +900,12 @@ export class DecisionEngine {
     // undefined, no ambiguity). The NOISY_SHORT_QUERY_GUARD downstream remains
     // the multi-candidate backstop: it only bypasses for singletons / wide-gap
     // matches, so non-unique fuzzy matches still abstain there.
-    if (hasUniqueFuzzyIdentityWitness(input.evidenceSummary, input.resolveResult.decisionTrace)) {
+    if (hasTrustedUniqueFuzzyIdentityWitness(input)) {
       rulesApplied.push('CALIBRATION_TRUST_GATE_UNIQUE_FUZZY_IDENTITY');
       return state;
     }
 
-    if (hasUniquePhoneticIdentityWitness(input.evidenceSummary, input.resolveResult.decisionTrace)) {
+    if (hasTrustedUniquePhoneticIdentityWitness(input)) {
       rulesApplied.push('CALIBRATION_TRUST_GATE_UNIQUE_PHONETIC_IDENTITY');
       return state;
     }
@@ -1003,11 +1003,8 @@ export class DecisionEngine {
     // require_exact: if resolved but the richer identity trail does not
     // support an exact match, downgrade
     if (input.policy.requireExact && state.status === 'resolved') {
-      const resolverTrace = input.resolveResult.decisionTrace;
       const hasExactMatch = hasExactMatchCandidate(input.evidenceSummary);
-      const hasUniqueApproximateWitness =
-        hasUniqueFuzzyIdentityWitness(input.evidenceSummary, resolverTrace)
-        || hasUniquePhoneticIdentityWitness(input.evidenceSummary, resolverTrace);
+      const hasUniqueApproximateWitness = hasTrustedUniqueApproximateIdentityWitness(input);
 
       if (!hasExactMatch && !hasUniqueApproximateWitness) {
         rulesApplied.push('POLICY_REQUIRE_EXACT_DOWNGRADE');
@@ -1082,12 +1079,12 @@ export class DecisionEngine {
     }
 
     const resolverTrace = input.resolveResult.decisionTrace;
-    if (hasUniqueFuzzyIdentityWitness(input.evidenceSummary, resolverTrace)) {
+    if (hasTrustedUniqueFuzzyIdentityWitness(input)) {
       rulesApplied.push('NOISY_SHORT_QUERY_GUARD_BYPASSED_UNIQUE_FUZZY_IDENTITY');
       return state;
     }
 
-    if (hasUniquePhoneticIdentityWitness(input.evidenceSummary, resolverTrace)) {
+    if (hasTrustedUniquePhoneticIdentityWitness(input)) {
       rulesApplied.push('NOISY_SHORT_QUERY_GUARD_BYPASSED_UNIQUE_PHONETIC_IDENTITY');
       return state;
     }

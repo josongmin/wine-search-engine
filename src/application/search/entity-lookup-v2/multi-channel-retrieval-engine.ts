@@ -63,6 +63,7 @@ import {
   buildLookupQuerySemanticProbe,
   resolveLookupSemanticLocale,
 } from '../../../domain/resolver/v2/lookup-semantic-scope.js';
+import { isEligiblePhoneticCompactLookup } from '../../../domain/query/service/phonetic-skeleton.js';
 import type { LookupReviewedFamilyRecallPort } from '../../../domain/resolver/v2/lookup-reviewed-family-recall.js';
 
 export interface MultiChannelRetrievalDeps {
@@ -180,6 +181,9 @@ export class MultiChannelRetrievalEngine implements LookupCandidateRetrievalPort
       if (b.view === undefined) return false;
       const v = b.view.trim();
       if (v.length === 0 || seenViews.has(v)) return false;
+      if (b.channel === 'jamo_phonetic' && !isEligiblePhoneticCompactLookup(v)) {
+        return false;
+      }
       seenViews.add(v);
       return true;
     });

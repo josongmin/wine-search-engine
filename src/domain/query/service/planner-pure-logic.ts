@@ -41,6 +41,34 @@ import {
   hasSensoryPreferenceConstraint,
   hasOnlySemanticDiscoveryCompatibleHardConstraints,
 } from './planner-helpers.js';
+import { classifyQueryBudget } from '../../agent/service/adaptive-budget.js';
+import { VINTAGE_YEAR_RAW } from '../../shared/utils/vintage.js';
+
+const VINTAGE_BEARING_QUERY_RE = new RegExp(VINTAGE_YEAR_RAW, 'u');
+
+/** Intents eligible for vintage-bearing specific-SKU promotion into entity_fuzzy. */
+const VINTAGE_SKU_PROMOTABLE_INTENTS = new Set<QueryIntent>(['facet_search']);
+
+export function promoteIntentForVintageBearingSpecificSkuLookup(
+  intent: QueryIntent,
+  rawQuery: string,
+  normalizedQuery: string,
+  anchors: readonly AnchorCandidate[],
+): QueryIntent {
+  if (!VINTAGE_SKU_PROMOTABLE_INTENTS.has(intent)) {
+    return intent;
+  }
+  if (anchors.length === 0) {
+    return intent;
+  }
+  if (classifyQueryBudget(rawQuery.trim())?.classification !== 'specific_sku') {
+    return intent;
+  }
+  if (!VINTAGE_BEARING_QUERY_RE.test(normalizedQuery)) {
+    return intent;
+  }
+  return 'entity_fuzzy';
+}
 
 export function anchorUsesExactLikeLookup(anchor: AnchorCandidate): boolean {
   return (anchor.lookupStrategies ?? [])
@@ -172,6 +200,7 @@ export function shouldApplyFuzzyAnchorFallback(
  * before fuzzy anchor recovery runs.
  */
 export function shouldTreatSemanticDiscoveryAsShortEntitySurface(
+  rawQuery: string,
   normalizedQuery: string,
   intent: QueryIntent,
   anchors: readonly AnchorCandidate[],
@@ -179,7 +208,7 @@ export function shouldTreatSemanticDiscoveryAsShortEntitySurface(
   if (intent !== 'semantic_discovery' || anchors.length > 0) {
     return false;
   }
-  if (hasExactEntityLookupKeyword(normalizedQuery)) {
+  if (hasExactEntityLookupKeyword(rawQuery) || hasExactEntityLookupKeyword(normalizedQuery)) {
     return false;
   }
   if (!isShortEntityLikeSurface(normalizedQuery)) {

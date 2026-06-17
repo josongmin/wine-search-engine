@@ -92,6 +92,7 @@ import {
   promoteQueryClassFromConstraintEvidence,
   mergePairingIntoBundle,
   promoteIntentFromParsedConstraints,
+  promoteIntentForVintageBearingSpecificSkuLookup,
   shouldApplyFuzzyAnchorFallback,
   shouldTreatSemanticDiscoveryAsShortEntitySurface,
   computeFuzzyFallbackConfidence,
@@ -610,7 +611,12 @@ export class Planner {
       )
       : parsedIntent;
     const effectiveIntent = promoteIntentFromParsedConstraints(
-      detectedIntentAfterAnchorSuppression,
+      promoteIntentForVintageBearingSpecificSkuLookup(
+        detectedIntentAfterAnchorSuppression,
+        originalQuery,
+        plannerSurfaceNormalized,
+        effectiveAnchors,
+      ),
       buildBundleFromAtoms(roleTypedAtoms),
       effectiveAnchors,
     );
@@ -913,7 +919,7 @@ export class Planner {
       return 'short_entity';
     }
 
-    if (shouldTreatSemanticDiscoveryAsShortEntitySurface(normalizedQuery, intent, anchors)) {
+    if (shouldTreatSemanticDiscoveryAsShortEntitySurface(rawQuery, normalizedQuery, intent, anchors)) {
       return 'short_entity';
     }
 

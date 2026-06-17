@@ -92,3 +92,10 @@ export function normalizePhoneticSkeleton(value: string): string {
 export function phoneticCompactForLookup(value: string): string {
   return normalizePhoneticSkeleton(value).replace(LATIN_VOWEL_RE, '');
 }
+
+/** Minimum phonetic-compact key length before jamo_phonetic recall is allowed. */
+export const MIN_PHONETIC_COMPACT_LOOKUP_LENGTH = 3;
+
+export function isEligiblePhoneticCompactLookup(value: string): boolean {
+  return value.trim().length >= MIN_PHONETIC_COMPACT_LOOKUP_LENGTH;
+}
