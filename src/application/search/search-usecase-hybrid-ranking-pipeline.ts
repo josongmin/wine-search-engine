@@ -861,7 +861,7 @@ function mergeRouteDegradation(
 }
 
 /**
- * End-to-end shared ranked-route execution used by HybridUseCase:
+ * End-to-end shared ranked-route execution used by SearchUseCase hybrid routing:
  * specialized retrieval fallback + ranking/LTR + synthetic resolve.
  */
 export async function executeHybridRankedRoutePlan(

@@ -75,9 +75,6 @@ const EXPECTED_SORTED_STEP_VALUES: readonly string[] = [
   'http.reranker.ok',
   'http.reranker.parse_error',
   'http.reranker.timeout',
-  'hybrid.execute.ranked',
-  'hybrid.execute.stage_timings',
-  'hybrid.execute.start',
   'interpret.planner.done',
   'post_route.enter',
   'post_route.entropy_abstain',
@@ -184,9 +181,6 @@ function exhaustiveLabel(step: PipelineDebugStepId): string {
     case PipelineDebugStep.DECISION_ENGINE_REQUEST:
     case PipelineDebugStep.DECISION_ENGINE_RESPONSE:
     case PipelineDebugStep.CACHE_SET_SKIPPED:
-    case PipelineDebugStep.HYBRID_EXECUTE_START:
-    case PipelineDebugStep.HYBRID_EXECUTE_RANKED:
-    case PipelineDebugStep.HYBRID_EXECUTE_STAGE_TIMINGS:
     case PipelineDebugStep.BATCH_SEARCH_START:
     case PipelineDebugStep.ENTITY_LOOKUP_V2_USE_CASE_START:
     case PipelineDebugStep.ENTITY_LOOKUP_V2_CONSTRAINT_SAT_CONTRADICTED:

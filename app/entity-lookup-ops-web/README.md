@@ -41,17 +41,28 @@ Uses existing backend endpoints (no new server code):
 | action | endpoint |
 |---|---|
 | catalog search (pick a wine) | `POST /v2/entity-lookup` |
-| coverage / queue health | `POST /v2/entity-lookup/ops/coverage-health` |
-| save a decision | `POST /v2/entity-lookup/ops/proposals/submit` (kind `alias`) |
-| list / review / publish | `POST /v2/entity-lookup/ops/proposals[/review|/publish]` |
+| coverage / queue health | `POST /v2/entity-lookup/ops/coverage-health` (`published_awaiting_materialization` = snapshot backlog) |
+| save alias decision | `POST /v2/entity-lookup/ops/proposals/submit` (`kind: alias`) |
+| save ambiguity / suppression | same submit route with `kind: ambiguity` \| `suppression` (see `src/lib/api.ts` helpers) |
+| list / review / publish | `POST /v2/entity-lookup/ops/proposals[/review|/publish]` — pass proposal `kind` |
 
-> ⚠️ Saving **writes to PostgreSQL** (curation write-plane, migration
-> `030_lookup_v2_curation_write_plane.sql`). Against prod RDS that is a
-> production write — get approval and ensure migration 030 is applied. Catalog
-> **search is read-only**. Backend down → the screen says so and only the
-> offline draft composer is available.
+After **publish**, run snapshot `etl:build-search-snapshot` + `etl:publish-search-snapshot`
+to materialize into runtime (see `docs/runbook-curation-materialization.md`).
 
-## Faces
+> ⚠️ Saving **writes to PostgreSQL** (curation write-plane, migrations
+> `030_lookup_v2_curation_write_plane.sql` + `033_lookup_v2_curation_materialization.sql`).
+> Against prod RDS that is a production write — get approval and ensure migrations
+> through **033** are applied. Catalog **search is read-only**. Backend down → the
+> screen says so and only the offline draft composer is available.
+
+## Web consoles (two faces)
+
+| Console | Path | Role |
+|---|---|---|
+| **Next.js ops** (`web/`) | `/ops/{inspect,curation,coverage}` | Trusted-plane **read + curation write** against the live backend (`X-Debug-Key` / `X-Ops-Write-Key`). Full inspect spine, proposal submit/review/publish, coverage health. |
+| **CSR ops** (this app) | static residue / authority workbench | **Offline-first** cutover rail + registry residue queue + evidence composer. Live mode proxies the same `/v2/entity-lookup/ops/*` endpoints when the backend is up. |
+
+Both can submit alias proposals including `abbreviation` type; this app's **ProposalsInbox** supports approve / reject / publish.
 
 | Face | What it does |
 |---|---|

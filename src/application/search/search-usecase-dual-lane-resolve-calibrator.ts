@@ -85,7 +85,10 @@ export class DualLaneResolveCalibrator {
       corroboratedWinnerArtifact?.identityProvenance !== undefined;
     if (
       !corroboratedIdentityCalibration
-      && calibratedIdentityArtifact.exactnessTier === 'alias_fuzzy'
+      && (
+        calibratedIdentityArtifact.exactnessTier === 'alias_fuzzy'
+        || calibratedIdentityArtifact.exactnessTier === 'alias_phonetic'
+      )
     ) {
       return input.fusedResolveResult;
     }

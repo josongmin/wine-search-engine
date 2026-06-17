@@ -126,6 +126,8 @@ because:
    `phonetic_exact` regardless of which SQL channel caught them.
 
 If recall ceiling becomes a bottleneck (rare entities not retrieved by
-any existing SQL channel), the next step is a persistent
-`phonetic_key` column on `aliases` populated by an ETL job — not a
-PL/PG port.
+any existing SQL channel), the `phonetic_keys text[]` column on `aliases`
+(migration `034_aliases_phonetic_keys.sql`) is populated at snapshot publish
+time via `computeAliasPhoneticKeys()` and indexed with GIN for overlap
+recall. Client-side DM promotion remains authoritative for exactness
+classification — the column is recall-only, not a PL/PG port.

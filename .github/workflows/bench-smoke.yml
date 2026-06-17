@@ -24,5 +24,7 @@ jobs:
       - uses: ./.github/actions/setup-node-ci
       - name: Bench smoke (unit-only lightweight)
         run: pnpm run bench:smoke
+      - name: Lookup-v2 active-pointer contract gate
+        run: pnpm run eval:lookup-v2:active-pointer:proof:contract
       - name: PR-level micro-bench gate (covers smoke + future regression gate)
         run: pnpm exec tsx scripts/eval/bench-pr-gate.ts --skip-smoke

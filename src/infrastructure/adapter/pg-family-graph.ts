@@ -9,18 +9,7 @@ import {
   resolveActiveSnapshot,
 } from '../db/active-snapshot-resolver.js';
 
-/**
- * PgFamilyGraph — snapshot-scoped producer family adjacency (T-ELV2-06 Half B),
- * backed by the `entity_family` table (migration 031). Returns the co-producer
- * siblings of an anchor entity (excluding the anchor). Mirrors
- * PgAmbiguityDictionary's degradation contract: empty result when the table or
- * active snapshot is unavailable, so the family_graph channel stays dormant
- * until the graph is published — never throws on a missing substrate.
- *
- * The edge_weight is computed at build time (1 - 1/familySize); the runtime read
- * trusts it but validates the row shape (no `as` on external data, rule 11).
- */
-function parseSiblingRow(row: QueryResultRow): FamilySibling | null {
+function parseFamilySiblingRow(row: QueryResultRow): FamilySibling | null {
   const memberRaw: unknown = Reflect.get(row, 'member_entity_id');
   const weightRaw: unknown = Reflect.get(row, 'edge_weight');
   if (typeof memberRaw !== 'string' || memberRaw.length === 0) return null;
@@ -28,6 +17,22 @@ function parseSiblingRow(row: QueryResultRow): FamilySibling | null {
   return { entityId: memberRaw, edgeWeight: weightRaw };
 }
 
+/**
+ * PgFamilyGraph — legacy snapshot-scoped producer family adjacency (T-ELV2-06
+ * Half B), backed by the `entity_family` table (migration 031).
+ *
+ * @deprecated Lookup-lane `family_graph` recall is wired through the snapshot-
+ * published {@link EntityScopeGraphPort} in `lookup-authority.ts`, NOT this
+ * adapter. Retained for ETL / `etl:family-graph:publish` and historical reads
+ * until the `entity_family` substrate is fully retired.
+ *
+ * Returns the co-producer siblings of an anchor entity (excluding the anchor).
+ * Mirrors PgAmbiguityDictionary's degradation contract: empty result when the
+ * table or active snapshot is unavailable — never throws on a missing substrate.
+ *
+ * The edge_weight is computed at build time (1 - 1/familySize); the runtime read
+ * trusts it but validates the row shape (no `as` on external data, rule 11).
+ */
 export class PgFamilyGraph implements FamilyGraphPort {
   private activeSnapshotMissingUntil = 0;
   private missingLogged = false;
@@ -52,7 +57,7 @@ export class PgFamilyGraph implements FamilyGraphPort {
       [snap.activeSnapshotId, entityId],
       signal,
     );
-    return result.rows.map(parseSiblingRow).filter((s): s is FamilySibling => s !== null);
+    return result.rows.map(parseFamilySiblingRow).filter((s): s is FamilySibling => s !== null);
   }
 
   async getFamilySiblingsBatch(
@@ -79,7 +84,7 @@ export class PgFamilyGraph implements FamilyGraphPort {
     for (const row of result.rows) {
       const anchorRaw: unknown = Reflect.get(row, 'anchor_id');
       if (typeof anchorRaw !== 'string' || anchorRaw.length === 0) continue;
-      const sibling = parseSiblingRow(row);
+      const sibling = parseFamilySiblingRow(row);
       if (sibling === null) continue;
       const list = out.get(anchorRaw);
       if (list === undefined) out.set(anchorRaw, [sibling]);

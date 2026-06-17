@@ -198,26 +198,21 @@ batch-123-query2
 
 These IDs appear in response metadata for correlation with logs.
 
-## Idempotency
+## Idempotency (historical HTTP contract)
 
-Providing a consistent `batch_id` allows clients to retry the same batch without duplicating work (when appropriate):
+The retained batch schema supports deterministic `batch_id` replay. The public HTTP route
+`POST /v1/batch-search` is **not registered** — use the eval/fixture runner instead:
 
 ```typescript
+import { buildBatchSearchRunner } from '../src/config/build-batch-search-runner.js';
+
+const runner = buildBatchSearchRunner(searchExecutor);
+
 // First call
-const response1 = await fetch('/v1/batch-search', {
-  body: JSON.stringify({
-    requests: [...],
-    batch_id: 'my-batch-v1'
-  })
-});
+const response1 = await runner.execute(requests, options, 'my-batch-v1');
 
 // Safe to retry with same batch_id
-const response2 = await fetch('/v1/batch-search', {
-  body: JSON.stringify({
-    requests: [...],
-    batch_id: 'my-batch-v1'  // Same ID
-  })
-});
+const response2 = await runner.execute(requests, options, 'my-batch-v1');
 ```
 
 **Note:** Idempotency is best-effort; the server does not cache batch results.
@@ -232,11 +227,37 @@ succeeded + failed = total
 
 This holds regardless of execution mode or timeout behavior.
 
-## Examples
+## Examples (eval/fixture runner — no live HTTP route)
 
 ### Basic batch search
 
+```typescript
+import { buildBatchSearchRunner } from '../src/config/build-batch-search-runner.js';
+
+const runner = buildBatchSearchRunner(searchExecutor);
+await runner.execute([
+  { id: '1', query: 'Cabernet Sauvignon 2015' },
+  { id: '2', query: 'Chardonnay 2020' },
+]);
+```
+
+### With options
+
+```typescript
+await runner.execute(
+  [
+    { id: '1', query: 'Pinot Noir' },
+    { id: '2', query: 'Riesling' },
+  ],
+  { fail_fast: true, timeout_ms: 3000 },
+  'my-batch-001',
+);
+```
+
+### Historical HTTP contract (removed route)
+
 ```bash
+# REMOVED — retained wire-shape reference only
 curl -X POST http://localhost:3000/v1/batch-search \
   -H "Content-Type: application/json" \
   -d '{
@@ -247,46 +268,26 @@ curl -X POST http://localhost:3000/v1/batch-search \
   }'
 ```
 
-### With options
-
-```bash
-curl -X POST http://localhost:3000/v1/batch-search \
-  -H "Content-Type: application/json" \
-  -d '{
-    "requests": [
-      { "id": "1", "query": "Pinot Noir" },
-      { "id": "2", "query": "Riesling" }
-    ],
-    "options": {
-      "fail_fast": true,
-      "timeout_ms": 3000
-    },
-    "batch_id": "my-batch-001"
-  }'
-```
-
 ## Architecture
 
-- **Use Case:** `BatchSearchUseCase` (src/application/search/batch-search.usecase.ts)
+- **Runner:** `runBatchSearch` / `buildBatchSearchRunner()` (eval/fixture rail — `src/application/search/batch-search-runner.ts`)
   - Validates batch size (max 20)
   - Normalizes timeout (1000–30000 ms)
   - Orchestrates parallel or fail-fast execution
   - Maps errors to `BatchErrorCode`
   - Generates sub-request IDs
+  - Wired via `buildBatchSearchRunner()` — **not** on production `Container`
 
 - **Route:** retired from the current public HTTP surface (historical route module removed)
-  - Parses request via Zod schema
-  - Returns HTTP 207 Multi-Status
-  - Delegates to use case
+  - Retained Zod schema for contract regression only
 
 - **Schema:** Zod validation (src/interface/http/schemas/batch-search.schema.ts)
   - Enforces max 20 requests
   - Validates timeout range
   - Strict property checking
 
-- **DI:** Registered in container (src/config/container.ts)
-  - `batchSearchUseCase` depends on `searchUseCase`
-  - Exported from container for route registration
+- **DI:** **Not** registered in production `Container` (cutover 2026-06)
+  - Direct instantiate / test harness only: `buildBatchSearchRunner(searchUseCase)`
 
 ## Quality Standards
 

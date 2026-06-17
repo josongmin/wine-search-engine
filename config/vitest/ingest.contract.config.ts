@@ -19,6 +19,8 @@ export default defineConfig({
       'test/unit/etl/build-search-snapshot.test.ts',
       'test/unit/etl/build-alias-artifact.test.ts',
       'test/unit/etl/canonical-entity-graph-sync.test.ts',
+      'test/unit/etl/load-published-curation-proposals.test.ts',
+      'src/domain/alias/service/__tests__/alias-phonetic-keys.test.ts',
     ],
     testTimeout: 30_000,
     hookTimeout: 30_000,

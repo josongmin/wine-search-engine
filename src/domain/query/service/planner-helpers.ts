@@ -11,6 +11,7 @@ import {
   SEMANTIC_DISCOVERY_SENSORY_ATTRIBUTES,
   SEMANTIC_DISCOVERY_ALLOWED_HARD_ATTRIBUTES,
 } from './planner-constants.js';
+import { ONTOLOGY_SPAN_SOFT_ATTRIBUTES } from '../../shared/constants/constraint-attributes.js';
 
 function isPositivePreferenceConstraint(constraint: NormalizedConstraint): boolean {
   return constraint.operator === '='
@@ -32,6 +33,27 @@ export function hasOnlySemanticDiscoveryCompatibleHardConstraints(
 ): boolean {
   return bundle.hard.every((constraint) =>
     SEMANTIC_DISCOVERY_ALLOWED_HARD_ATTRIBUTES.has(constraint.attribute),
+  );
+}
+
+/**
+ * True when soft constraints are only ontology spans (region/appellation/grape…)
+ * extracted from an identity-shaped short surface — not sensory/pairing discovery.
+ */
+export function hasOntologyOnlySoftConstraintEvidence(
+  bundle: ConstraintBundle,
+): boolean {
+  if (bundle.hard.length > 0 || bundle.inferred.length > 0) {
+    return false;
+  }
+  if (bundle.soft.length === 0) {
+    return false;
+  }
+  if (hasSensoryPreferenceConstraint(bundle)) {
+    return false;
+  }
+  return bundle.soft.every((constraint) =>
+    ONTOLOGY_SPAN_SOFT_ATTRIBUTES.has(constraint.attribute),
   );
 }
 

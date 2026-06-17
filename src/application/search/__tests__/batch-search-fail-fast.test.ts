@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BatchSearchUseCase } from '../batch-search.usecase.js';
+import { buildBatchSearchRunner } from '../batch-search-runner.js';
 import type { SearchExecutorPort } from '../port/search-executor.port.js';
 import type { SearchResponseV1 } from '../../../domain/response/model/search-response.js';
 
@@ -33,7 +33,7 @@ function makeSuccessResponse(): SearchResponseV1 {
   };
 }
 
-describe('BatchSearchUseCase — fail_fast mode', () => {
+describe('BatchSearchRunner — fail_fast mode', () => {
   it('reports failed: 1, not_executed: N-1 when first item fails', async () => {
     const executor: SearchExecutorPort = {
       execute: vi.fn()
@@ -41,8 +41,8 @@ describe('BatchSearchUseCase — fail_fast mode', () => {
         .mockResolvedValue(makeSuccessResponse()),
     };
 
-    const useCase = new BatchSearchUseCase(executor);
-    const result = await useCase.execute(
+    const runner = buildBatchSearchRunner(executor);
+    const result = await runner.execute(
       [
         { id: 'a', query: 'Opus One 2018' },
         { id: 'b', query: 'Petrus 2000' },
@@ -77,8 +77,8 @@ describe('BatchSearchUseCase — fail_fast mode', () => {
         .mockRejectedValueOnce(new Error('last item error')),
     };
 
-    const useCase = new BatchSearchUseCase(executor);
-    const result = await useCase.execute(
+    const runner = buildBatchSearchRunner(executor);
+    const result = await runner.execute(
       [
         { id: 'a', query: 'Opus One 2018' },
         { id: 'b', query: 'Petrus 2000' },

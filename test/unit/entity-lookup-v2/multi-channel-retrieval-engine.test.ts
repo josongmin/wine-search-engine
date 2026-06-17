@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { MultiChannelRetrievalEngine } from '../../../src/application/search/entity-lookup-v2/multi-channel-retrieval-engine.js';
 import { wrapEntityDocumentBatchLookupAsResolverProjection } from '../../../src/application/search/__tests__/resolver-projection-lookup.stub.js';
 import { createEntityId } from '../../../src/domain/shared/types/index.js';
+import { globalSilentSkipCounter } from '../../../src/domain/observability/silent-skip-counters.js';
 import type { AliasMatcher, AliasMatchResult } from '../../../src/domain/query/service/anchor-extractor.js';
 import type { NormalizedQueryViews } from '../../../src/domain/query/model/query-views.js';
 import type { LookupRetrievalInput } from '../../../src/domain/resolver/v2/lookup-v2-types.js';
@@ -236,6 +237,7 @@ describe('MultiChannelRetrievalEngine — family_graph channel', () => {
   });
 
   it('survives a family graph that throws (request not sunk; alias union stands)', async () => {
+    globalSilentSkipCounter.reset();
     const matcher = matcherReturning({
       'opus one': [{ surfaceForm: 'Opus One', normalizedForm: 'opus one', entityIds: [opus], matchConfidence: 0.97 }],
     });
@@ -245,8 +247,61 @@ describe('MultiChannelRetrievalEngine — family_graph channel', () => {
     expect(result.candidates).toHaveLength(1);
     const fam = result.coverage.find((c) => c.channel === 'family_graph');
     expect(fam?.firing).toBe(false);
+    expect(globalSilentSkipCounter.snapshot()['lookup_scope_graph_channel_failure']).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('MultiChannelRetrievalEngine — line_graph + vintage_graph channels', () => {
+  function scopeGraphReturning(
+    relationKind: 'line' | 'vintage',
+    byAnchor: Record<string, { entityId: string; edgeWeight: number }[]>,
+  ) {
+    return {
+      async getRelatedEntitiesBatch(ids: readonly string[], kind: string) {
+        const m = new Map<string, readonly { targetEntityId: string; relationKind: typeof relationKind; weight: number; familyKey: string }[]>();
+        if (kind !== relationKind) {
+          return m;
+        }
+        for (const id of ids) {
+          if (byAnchor[id] === undefined) continue;
+          m.set(id, byAnchor[id].map((edge) => ({
+            targetEntityId: edge.entityId,
+            relationKind,
+            weight: edge.edgeWeight,
+            familyKey: relationKind,
+          })));
+        }
+        return m;
+      },
+    };
+  }
+
+  it('emits line siblings on the line_graph channel', async () => {
+    const matcher = matcherReturning({
+      'opus one': [{ surfaceForm: 'Opus One', normalizedForm: 'opus one', entityIds: [opus], matchConfidence: 0.97, lookupStrategy: 'exact' }],
+    });
+    const scopeGraph = scopeGraphReturning('line', { 'opus-one-2018': [{ entityId: 'opus-one-2019', edgeWeight: 0.7 }] });
+    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, resolverProjectionLookup, entityScopeGraph: scopeGraph });
+    const result = await engine.retrieve(input());
+    const sibling = result.candidates.find((c) => String(c.entityId) === 'opus-one-2019');
+    expect(sibling?.channelHits.some((h) => h.channel === 'line_graph' && h.channelScore === 0.7)).toBe(true);
+    expect(result.coverage.find((c) => c.channel === 'line_graph')?.firing).toBe(true);
   });
 
+  it('emits vintage siblings on the vintage_graph channel', async () => {
+    const matcher = matcherReturning({
+      'opus one': [{ surfaceForm: 'Opus One', normalizedForm: 'opus one', entityIds: [opus], matchConfidence: 0.97, lookupStrategy: 'exact' }],
+    });
+    const scopeGraph = scopeGraphReturning('vintage', { 'opus-one-2018': [{ entityId: 'opus-one-2017', edgeWeight: 0.85 }] });
+    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, resolverProjectionLookup, entityScopeGraph: scopeGraph });
+    const result = await engine.retrieve(input());
+    const sibling = result.candidates.find((c) => String(c.entityId) === 'opus-one-2017');
+    expect(sibling?.channelHits.some((h) => h.channel === 'vintage_graph' && h.channelScore === 0.85)).toBe(true);
+    expect(result.coverage.find((c) => c.channel === 'vintage_graph')?.firing).toBe(true);
+  });
+});
+
+describe('MultiChannelRetrievalEngine — reviewed family recall (dense channel)', () => {
   it('injects reviewed family recall seeds as dense recall-only provenance without forging exact alias evidence', async () => {
     const matcher = matcherReturning({});
     const reviewedFamilyRecall = {

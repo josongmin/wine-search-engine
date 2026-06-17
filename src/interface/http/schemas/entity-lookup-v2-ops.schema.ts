@@ -15,6 +15,7 @@
 import { z } from 'zod';
 import { ALIAS_TYPES } from '../../../domain/alias/model/alias.js';
 import { PROPOSAL_KINDS, PROPOSAL_STATUSES } from '../../../domain/curation/model/proposal.js';
+import { LOOKUP_V2_OPS_UNWIRED_SUBSTRATE_IDS_MAX } from '../../../domain/resolver/v2/lookup-v2-substrate-capabilities.js';
 
 // Operator-facing field bounds. Internal trusted surface, so bounds are
 // generous but finite (the 1 MiB body limit is the hard ceiling on evidence).
@@ -184,6 +185,15 @@ export const CoverageHealthResponseSchema = z.object({
     suppression: z.number().int().nonnegative(),
   }).strict(),
   total_proposals: z.number().int().nonnegative(),
+  published_awaiting_materialization: z.number().int().nonnegative(),
+  legacy_approved_abbreviation_backlog: z.number().int().nonnegative(),
+  lookup_runtime: z.object({
+    search_snapshot_id: z.string().min(1).optional(),
+    family_graph_edge_count: z.number().int().nonnegative(),
+    ltr_support_status: z.literal('unsupported'),
+    ltr_support_reason: z.literal('lookup_domain_model_absent'),
+    unwired_substrate_ids: z.array(z.string().min(1)).max(LOOKUP_V2_OPS_UNWIRED_SUBSTRATE_IDS_MAX),
+  }).strict().optional(),
 }).strict();
 
 export type SubmitProposalRequest = z.infer<typeof SubmitProposalRequestSchema>;

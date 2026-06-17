@@ -2,8 +2,9 @@ id: tools.decomposed-search
 name: Decomposed Search Endpoint
 category: tools
 summary: |
-  Comparison 쿼리를 두 leg parallel search로 분해 실행하는 endpoint (HTTP / agent
-  adapter 둘 다). decomposition-detector → SearchUseCase 2회 호출 → 결합.
+  Comparison 쿼리를 두 leg parallel search로 분해 실행하는 internal use case
+  (SearchUseCase 내부 wiring + agent compare_wines adapter). decomposition-detector
+  → SearchUseCase 2회 호출 → 결합. **별도 public HTTP route 없음.**
 
 maturity: 3
 maturity_rationale: |
@@ -17,11 +18,11 @@ maturity_rationale: |
 
 status: active
 since: 2025-09
-last_reviewed: 2026-05-21
+last_reviewed: 2026-06-10
 owner: core
 
 surfaces:
-  - "Internal use case (HTTP은 search route 안에서 분기)"
+  - "Internal use case (SearchUseCase comparison branch — no standalone HTTP route)"
   - "Agent tool compare_wines 기반"
 
 key_files:

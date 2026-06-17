@@ -36,11 +36,6 @@ vi.mock('../container-features.js', () => ({
     return {
       entityLookupV2UseCase: {} as never,
       searchUseCase: {} as never,
-      interpretUseCase: {} as never,
-      hybridUseCase: {} as never,
-      decomposedSearchUseCase: {} as never,
-      drinkingWindowUseCase: {} as never,
-      batchSearchUseCase: {} as never,
       evalRunner: null,
     };
   }),

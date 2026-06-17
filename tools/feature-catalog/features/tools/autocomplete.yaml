@@ -1,5 +1,5 @@
 id: tools.autocomplete
-name: Autocomplete Use Case (Typeahead)
+name: Autocomplete Query Runner (Typeahead)
 category: tools
 summary: |
   사용자 typing 중 prefix completion 제안. Entity Lookup V2 authority 위 thin
@@ -8,31 +8,29 @@ summary: |
 
 maturity: 4
 maturity_rationale: |
-  Use case + `buildAutocompleteUseCase()` eval factory 완료. Property-based regression
-  (autocomplete-properties, fast-check numRuns=100) + dedicated eval script
+  Query runner + `buildAutocompleteQueryRunnerForEval()` eval factory 완료. Property-based
+  regression (autocomplete-properties, fast-check numRuns=100) + dedicated eval script
   (`run-autocomplete-eval.ts`) + unit tests. Production HTTP route 없음 — internal
   typeahead rail only. HONEST 4: NDCG/online calibration 없음.
 
-status: active
+status: deprecated
 since: 2025-10
 last_reviewed: 2026-06-10
 owner: core
 
 surfaces:
-  - "Eval-only: buildAutocompleteUseCase() + run-autocomplete-eval.ts"
+  - "Eval-only: buildAutocompleteQueryRunnerForEval() + run-autocomplete-eval.ts"
 
 key_files:
-  - src/application/search/autocomplete.usecase.ts
-  - src/config/build-autocomplete-usecase.ts
-  - src/application/search/entity-lookup-v2/entity-lookup-v2-autocomplete-mapping.ts
+  - src/application/search/autocomplete-query-runner.ts
+  - src/config/build-autocomplete-query-runner.ts
+  - scripts/eval/run-autocomplete-eval.ts
 
 tests:
   unit:
-    - test/unit/application/search/autocomplete.usecase.test.ts
-    - test/unit/eval/autocomplete-eval.test.ts
+    - test/unit/application/search/autocomplete-query-runner.test.ts
   regression:
     - test/regression/autocomplete-properties.regression.test.ts
-    - test/regression/lookup-wine-authority-surface.regression.test.ts
 
 depends_on:
   - retrieval.entity-lookup-v2
@@ -40,14 +38,13 @@ depends_on:
 related_rfcs: []
 
 known_limitations:
-  - "No live HTTP route — eval/integration wiring only"
-  - "Prefix decay weight 미튜닝"
-  - "Suggestion satisfaction score 없음 (NDCG/online calibration 부재)"
+  - "No live HTTP route or production Container port"
+  - "NDCG/online calibration absent"
 
 next_steps:
-  - "Wire HTTP typeahead route or formalize eval-only status in OpenAPI catalog"
-  - "사용자 클릭 시그널로 ranking 학습 (online calibration → maturity 5 게이트)"
+  - "Online typeahead calibration when a consumer surface returns"
 
 tags:
-  - typeahead
+  - autocomplete
   - eval-only
+  - typeahead

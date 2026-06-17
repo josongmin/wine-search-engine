@@ -23,6 +23,7 @@ const ENTITY_ROUTE_INVARIANT_ERROR_PREFIX = 'Entity route ranked results invaria
 const MATCH_TYPE_EXACT = 'exact';
 const MATCH_TYPE_ALIAS_EXACT = 'alias_exact';
 const MATCH_TYPE_ALIAS_FUZZY = 'alias_fuzzy';
+const MATCH_TYPE_ALIAS_PHONETIC = 'alias_phonetic';
 
 const LEXICAL_CONTRIBUTION_EXACT = 1;
 const LEXICAL_CONTRIBUTION_ALIAS_EXACT = 0.9;
@@ -81,6 +82,7 @@ function buildIdentityProvenanceSignalSnapshot(
     canonicalNormalizedMatch: rawCandidate?.sourceSignals.canonicalNormalizedMatch ?? 0,
     aliasExactMatch: rawCandidate?.sourceSignals.aliasExactMatch ?? 0,
     aliasFuzzyMatch: rawCandidate?.sourceSignals.aliasFuzzyMatch ?? 0,
+    phoneticMatch: rawCandidate?.sourceSignals.phoneticMatch ?? 0,
     editDistanceScore: rawCandidate?.sourceSignals.editDistanceScore ?? 0,
   };
 }
@@ -97,6 +99,9 @@ function resolveIdentityExactnessTier(
   }
   if ((aliasSignals?.aliasFuzzyMatch ?? 0) > 0 || (aliasSignals?.editDistanceScore ?? 0) > 0) {
     return MATCH_TYPE_ALIAS_FUZZY;
+  }
+  if ((aliasSignals?.phoneticMatch ?? 0) > 0) {
+    return MATCH_TYPE_ALIAS_PHONETIC;
   }
   return 'none';
 }

@@ -69,11 +69,7 @@ export const PipelineDebugStep = {
   DECISION_ENGINE_RESPONSE: 'decision.engine.response',
   CACHE_SET_SKIPPED: 'cache.set_skipped',
 
-  // Hybrid use case
-  HYBRID_EXECUTE_START: 'hybrid.execute.start',
-  HYBRID_EXECUTE_RANKED: 'hybrid.execute.ranked',
-  HYBRID_EXECUTE_STAGE_TIMINGS: 'hybrid.execute.stage_timings',
-
+  // Hybrid use case removed — hybrid routing lives in SearchUseCase.
   // Batch
   BATCH_SEARCH_START: 'batch.search.start',
 
@@ -117,7 +113,6 @@ export const PIPELINE_STAGE_ORDER = [
   'resolve_interpret',
   'route_dispatch',
   'entity_route',
-  'hybrid_execution',
   'retrieval',
   'anchor_resolution',
   'ranking',
@@ -163,11 +158,6 @@ export const PIPELINE_STAGE_STEPS: Readonly<Record<PipelineStage, readonly Pipel
   entity_route: [
     PipelineDebugStep.ROUTE_ENTITY_ONLY_START,
     PipelineDebugStep.ROUTE_ENTITY_ONLY_DONE,
-  ],
-  hybrid_execution: [
-    PipelineDebugStep.HYBRID_EXECUTE_START,
-    PipelineDebugStep.HYBRID_EXECUTE_RANKED,
-    PipelineDebugStep.HYBRID_EXECUTE_STAGE_TIMINGS,
   ],
   retrieval: [
     PipelineDebugStep.RETRIEVAL_HYBRID_CANDIDATES_START,

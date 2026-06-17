@@ -4,7 +4,7 @@ import { parseEnv } from '../env.js';
 import { getQueryEntrySecurityMetricsCollector } from '../../infrastructure/observability/query-entry-security-metrics.js';
 
 describe('buildUseCaseContainerServices', () => {
-  it('wires the shared query-entry security policy into LLM-bearing public entry use cases only', () => {
+  it('wires the shared query-entry security policy into SearchUseCase only', () => {
     const config = parseEnv({
       NODE_ENV: 'test',
       INJECTION_JUDGE_FAIL_OPEN: 'true',
@@ -48,26 +48,20 @@ describe('buildUseCaseContainerServices', () => {
     });
     const queryEntrySecurityObserver = getQueryEntrySecurityMetricsCollector();
 
-    expect((useCases.searchUseCase as any).deps).toEqual(expect.objectContaining({
+    expect((useCases.searchUseCase as { deps: Record<string, unknown> }).deps).toEqual(expect.objectContaining({
       injectionJudge,
       judgeFailureMode: 'fail_open',
       judgeTimeoutMs: config.queryEntrySecurity.judgeTimeoutMs,
       queryEntrySecurityObserver,
       entityLookupV2UseCase: { execute: expect.any(Function) },
-    }));
-    expect((useCases.hybridUseCase as any).deps).toEqual(expect.objectContaining({
-      injectionJudge,
-      judgeFailureMode: 'fail_open',
-      judgeTimeoutMs: config.queryEntrySecurity.judgeTimeoutMs,
-      queryEntrySecurityObserver,
-      entityLookupV2UseCase: { execute: expect.any(Function) },
-    }));
-    expect((useCases.interpretUseCase as any).deps).toEqual(expect.objectContaining({
-      injectionJudge,
-      judgeFailureMode: 'fail_open',
-      judgeTimeoutMs: config.queryEntrySecurity.judgeTimeoutMs,
-      queryEntrySecurityObserver,
+      decomposedSearch: expect.any(Object),
+      drinkingWindow: expect.any(Object),
     }));
     expect(useCases).not.toHaveProperty('entityLookupV2UseCase');
+    expect(useCases).not.toHaveProperty('interpretUseCase');
+    expect(useCases).not.toHaveProperty('hybridUseCase');
+    expect(useCases).not.toHaveProperty('batchSearchUseCase');
+    expect(useCases).not.toHaveProperty('decomposedSearchUseCase');
+    expect(useCases).not.toHaveProperty('drinkingWindowUseCase');
   });
 });

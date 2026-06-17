@@ -7,6 +7,9 @@ import {
   RECALL_ONLY_NO_MATCH_REASON_CODE,
   REVIEWED_FAMILY_COLLISION_REASON_CODE,
   REVIEWED_SCOPE_TARGET_RESOLVED_REASON_CODE,
+  UNIQUE_EXACT_IDENTITY_RECALL_WITNESS_RESOLVED_REASON_CODE,
+  UNIQUE_FUZZY_RECALL_WITNESS_RESOLVED_REASON_CODE,
+  UNIQUE_JAMO_PHONETIC_RECALL_WITNESS_RESOLVED_REASON_CODE,
   VINTAGE_FAMILY_MEMBER_RESOLVED_REASON_CODE,
   VINTAGE_MISMATCH_REASON_CODE,
   type LookupDecisionCandidate,
@@ -240,5 +243,101 @@ describe('decideLookupOutcome', () => {
 
     expect(out.status).toBe('failed');
     expect(out.effectiveDecisionReasonCode).toBe(RECALL_ONLY_NO_MATCH_REASON_CODE);
+  });
+
+  it('promotes a singleton fuzzy_alias recall witness from failed to resolved', () => {
+    const out = decideLookupOutcome({
+      query: 'opuss one',
+      rawQuery: 'opuss one',
+      decisionReasonCode: 'CONFIDENCE_BELOW_THRESHOLD',
+      resolverStatus: 'failed',
+      topCandidateEntityId: 'opus-one-2018',
+      topCandidateCanonicalLabel: 'Opus One 2018',
+      anchors: [],
+      resolveCandidateEntityIds: ['opus-one-2018'],
+      allCandidates: [
+        candidate('opus-one-2018', 'Opus One 2018', [
+          {
+            channel: 'fuzzy_alias',
+            matchedView: 'opuss one',
+            matchedAlias: 'opus one',
+            channelScore: 0.679,
+            channelRank: 1,
+          },
+        ]),
+      ],
+      semanticScopeMatches: [],
+      reviewedTargetEntityIds: new Set(),
+      hasPersistedAmbiguity: false,
+    });
+
+    expect(out.status).toBe('resolved');
+    expect(out.effectiveDecisionReasonCode).toBe(UNIQUE_FUZZY_RECALL_WITNESS_RESOLVED_REASON_CODE);
+    expect(out.promotedTopConfidence).toBe(0.679);
+  });
+
+  it('promotes a singleton jamo_phonetic recall witness from failed to resolved', () => {
+    const out = decideLookupOutcome({
+      query: 'romane conti',
+      rawQuery: 'romane conti',
+      decisionReasonCode: 'CONFIDENCE_BELOW_THRESHOLD',
+      resolverStatus: 'failed',
+      topCandidateEntityId: 'romanee-conti-2015',
+      topCandidateCanonicalLabel: 'Romanée-Conti 2015',
+      anchors: [],
+      resolveCandidateEntityIds: ['romanee-conti-2015'],
+      allCandidates: [
+        candidate('romanee-conti-2015', 'Romanée-Conti 2015', [
+          {
+            channel: 'jamo_phonetic',
+            matchedView: 'romane conti',
+            matchedAlias: 'romanee conti',
+            channelScore: 0.86,
+            channelRank: 1,
+          },
+        ]),
+      ],
+      semanticScopeMatches: [],
+      reviewedTargetEntityIds: new Set(),
+      hasPersistedAmbiguity: false,
+      resolveThreshold: 0.45,
+    });
+
+    expect(out.status).toBe('resolved');
+    expect(out.effectiveDecisionReasonCode).toBe(UNIQUE_JAMO_PHONETIC_RECALL_WITNESS_RESOLVED_REASON_CODE);
+    expect(out.promotedTopConfidence).toBe(0.86);
+  });
+
+  it('promotes a singleton exact_alias recall witness from failed to resolved', () => {
+    const out = decideLookupOutcome({
+      query: 'Chateau Margaux',
+      rawQuery: 'Chateau Margaux',
+      decisionReasonCode: 'CONFIDENCE_BELOW_THRESHOLD',
+      resolverStatus: 'failed',
+      topCandidateEntityId: 'chateau-margaux-2015',
+      topCandidateCanonicalLabel: 'Château Margaux 2015',
+      anchors: [],
+      resolveCandidateEntityIds: ['chateau-margaux-2015'],
+      allCandidates: [
+        candidate('chateau-margaux-2015', 'Château Margaux 2015', [
+          {
+            channel: 'exact_alias',
+            matchedView: 'chateau margaux',
+            matchedAlias: 'Château Margaux',
+            channelScore: 0.95,
+            channelRank: 1,
+          },
+        ]),
+      ],
+      semanticScopeMatches: [],
+      reviewedTargetEntityIds: new Set(),
+      hasPersistedAmbiguity: false,
+    });
+
+    expect(out.status).toBe('resolved');
+    expect(out.effectiveDecisionReasonCode).toBe(
+      UNIQUE_EXACT_IDENTITY_RECALL_WITNESS_RESOLVED_REASON_CODE,
+    );
+    expect(out.promotedTopConfidence).toBe(0.95);
   });
 });

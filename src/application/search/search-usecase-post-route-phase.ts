@@ -471,7 +471,7 @@ export async function runRankedRouteDecisionPhase(
     // (Redis down, OOM, nil dereference, etc.). Per CLAUDE.md schema quality bar:
     // "Catch blocks in use-case code MUST NOT fabricate success-shaped (200 OK)
     // responses from unexpected errors."  Re-throw as DomainError so the HTTP
-    // error handler maps it to 500 + RFC-014 envelope (mirrors hybrid.usecase.ts).
+    // error handler maps it to 500 + RFC-014 envelope (mirrors search.usecase.ts).
     const errorMessage = buildErr instanceof Error ? buildErr.message : String(buildErr);
     bootstrapLogger.error(
       { requestId: ctx.requestId, err: buildErr },

@@ -387,7 +387,10 @@ export async function createServer(
   // Reads X-Debug-Key gated, writes X-Ops-Write-Key gated — registered when the
   // curation use case is wired (requires a PG pool).
   if (deps.curationUseCase !== undefined) {
-    registerEntityLookupV2OpsCurationRoutes(app, { curationUseCase: deps.curationUseCase });
+    registerEntityLookupV2OpsCurationRoutes(app, {
+      curationUseCase: deps.curationUseCase,
+      ...(deps.lookupOpsRuntime !== undefined ? { lookupOpsRuntime: deps.lookupOpsRuntime } : {}),
+    });
   }
   if (deps.wineSearch !== undefined) {
     // Canonical agent surface — `POST /v1/agent` for caller-managed history,

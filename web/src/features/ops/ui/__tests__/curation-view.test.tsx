@@ -116,6 +116,7 @@ describe('OpsCurationView', () => {
           target_entity_id: 'sassicaia-2018',
           proposed_type: 'phonetic',
           confidence: 0.9,
+          evidence: { source: 'ops_console', note: '' },
         }),
         WRITE_KEY,
       ),
@@ -156,6 +157,37 @@ describe('OpsCurationView', () => {
 
     await waitFor(() => expect(screen.getByText(/between 0 and 1/i)).toBeInTheDocument());
     expect(ops.submitProposal).not.toHaveBeenCalled();
+  });
+
+  it('rejects a pending proposal with the review payload', async () => {
+    seedKeys();
+    ops.listProposals.mockResolvedValue({
+      proposals: [
+        {
+          proposal_id: 'p2',
+          kind: 'alias',
+          status: 'pending',
+          evidence: {},
+          created_at: 't',
+          updated_at: 't',
+          surface_form: 'bad',
+          target_entity_id: 'sassicaia-2018',
+          proposed_type: 'misspelling',
+          confidence: 0.5,
+        },
+      ],
+    });
+    renderWithProviders(<OpsCurationView />);
+
+    await waitFor(() => expect(screen.getByText(/bad → sassicaia-2018/)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /reject/i }));
+
+    await waitFor(() =>
+      expect(ops.reviewProposal).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'alias', proposal_id: 'p2', decision: 'reject' }),
+        WRITE_KEY,
+      ),
+    );
   });
 
   it('approves a pending proposal with the review payload', async () => {

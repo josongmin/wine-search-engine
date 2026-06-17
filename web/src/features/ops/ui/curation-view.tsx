@@ -29,6 +29,7 @@ import { Badge, Button, Card, CardContent, CardHeader } from '@/shared/ui';
 import { OpsNav } from './ops-nav';
 import { OpsKeysPanel, useOpsKeys, type OpsKeys } from './ops-keys';
 import { EntityPicker, type EntityCandidate } from './entity-picker';
+import { OPS_CURATED_ALIAS_TYPES } from '@/shared/constants/ops-curated-alias-types';
 
 const STATUS_VARIANT: Record<ProposalStatus, string> = {
   pending: 'text-amber-700 bg-amber-100',
@@ -37,18 +38,6 @@ const STATUS_VARIANT: Record<ProposalStatus, string> = {
   published: 'text-green-700 bg-green-100',
 };
 
-/**
- * Alias types an operator can curate by hand. The remaining {@link ALIAS_TYPES}
- * members (`canonical`, `catalog_noise_alias`, `derived_initialism`) are
- * machine-derived at index time and must not be hand-authored here.
- */
-const CURATED_ALIAS_TYPES = [
-  'misspelling',
-  'abbreviation',
-  'translation',
-  'phonetic',
-  'observed_query_alias',
-] as const;
 const DEFAULT_ALIAS_CONFIDENCE = 0.8;
 
 const inputClass =
@@ -237,7 +226,7 @@ function AddAliasForm({
   onSubmitted: () => void;
 }) {
   const [surface, setSurface] = useState('');
-  const [type, setType] = useState<(typeof CURATED_ALIAS_TYPES)[number]>('misspelling');
+  const [type, setType] = useState<(typeof OPS_CURATED_ALIAS_TYPES)[number]>('misspelling');
   const [confidence, setConfidence] = useState(String(DEFAULT_ALIAS_CONFIDENCE));
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
@@ -296,10 +285,10 @@ function AddAliasForm({
         <select
           className={inputClass}
           value={type}
-          onChange={(e) => setType(e.target.value as (typeof CURATED_ALIAS_TYPES)[number])}
+          onChange={(e) => setType(e.target.value as (typeof OPS_CURATED_ALIAS_TYPES)[number])}
           aria-label="alias type"
         >
-          {CURATED_ALIAS_TYPES.map((t) => (
+          {OPS_CURATED_ALIAS_TYPES.map((t) => (
             <option key={t} value={t}>
               {t}
             </option>

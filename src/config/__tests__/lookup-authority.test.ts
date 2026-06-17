@@ -11,6 +11,7 @@ const reviewedFamilyRecallRegistry = {
 };
 const entityScopeGraph = {
   getRelatedEntities: vi.fn(async () => []),
+  countEdgesByRelation: vi.fn(() => 2),
 };
 const resolverProjectionLookup = {
   getResolverProjections: vi.fn(async () => new Map()),
@@ -74,13 +75,16 @@ describe('createLookupAuthorityServices', () => {
     expect(deps.resolverProjectionLookup).toBe(resolverProjectionLookup);
     expect(authority.resolverProjectionLookup).toBe(resolverProjectionLookup);
     expect(deps.ambiguityDictionary).toBe(ambiguityDictionary);
-    expect((deps.candidateRetrieval as any).deps.reviewedFamilyRecall).toBe(reviewedFamilyRecallRegistry);
-    expect((deps.candidateRetrieval as any).deps.entityScopeGraph).toBe(entityScopeGraph);
+    expect((deps.candidateRetrieval).deps.reviewedFamilyRecall).toBe(reviewedFamilyRecallRegistry);
+    expect((deps.candidateRetrieval).deps.entityScopeGraph).toBe(entityScopeGraph);
     expect(authority.metadata).toEqual({
       searchSnapshotId: 'search-snapshot:v1:test',
       searchSnapshotManifestPath: '/tmp/search-snapshot:v1:test/manifest.json',
       runtimeBundleCacheKey: 'search-snapshot:v1:test',
+      familyGraphEdgeCount: 2,
     });
+    expect(authority.bootstrapProfile.substrateCapabilities.ltrSupportReason).toBe('lookup_domain_model_absent');
+    expect(authority.bootstrapProfile.substrateCapabilities.unwiredSubstrates).toHaveLength(2);
   });
 
   it('reuses prebuilt resolver and calibration store when provided by the full container path', async () => {
@@ -103,5 +107,18 @@ describe('createLookupAuthorityServices', () => {
     const deps = (authority.entityLookupV2UseCase as any).deps;
     expect(deps.entityResolver).toBe(prebuiltEntityResolver);
     expect(buildEntityResolver).toHaveBeenCalledTimes(0);
+  });
+
+  it('buildLookupOpsRuntimeHealthView projects metadata and substrate capabilities', async () => {
+    const { createLookupAuthorityServices, buildLookupOpsRuntimeHealthView } = await import('../lookup-authority.js');
+    const config = parseEnv({ NODE_ENV: 'test' });
+    const authority = await createLookupAuthorityServices(config, {
+      searchSnapshotId: 'search-snapshot:v1:test',
+      searchSnapshotManifestPath: '/tmp/search-snapshot:v1:test/manifest.json',
+    });
+    const view = buildLookupOpsRuntimeHealthView(authority);
+    expect(view.searchSnapshotId).toBe('search-snapshot:v1:test');
+    expect(view.familyGraphEdgeCount).toBe(2);
+    expect(view.unwiredSubstrateIds).toContain('lookup_ltr_rerank');
   });
 });

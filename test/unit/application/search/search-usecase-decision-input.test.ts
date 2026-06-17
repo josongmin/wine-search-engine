@@ -618,6 +618,74 @@ describe('buildSearchDecisionInput', () => {
     expect(input.evidenceSummary.identityEvidence?.exactnessTier).toBe('none');
   });
 
+  it('projects hybrid anchor identity artifact when entity_resolution + generic_hybrid', () => {
+    const eid = createEntityId('entity-hybrid-anchor');
+    const plan = minimalPlan('hybrid');
+    const resolverResult = makeResolverResult({
+      topEntity: { entityId: eid, canonicalLabel: 'Hybrid Anchor Wine', calibratedScore: 0.91 },
+      candidates: [{
+        entityId: eid,
+        canonicalLabel: 'Hybrid Anchor Wine',
+        calibratedScore: 0.91,
+        rank: 1,
+        evidenceRefs: ['alias:hybrid-anchor'],
+      }],
+      decisionTrace: makeDecisionTrace({
+        top1CalibratedScore: 0.91,
+        decisionConfidenceC: 0.91,
+      }),
+    });
+
+    const input = buildSearchDecisionInput({
+      plan,
+      resolveResult: resolverResult,
+      identityResolveResult: resolverResult,
+      rankedResults: [makeRankedResult({ entityId: eid, canonicalLabel: 'Hybrid Anchor Wine' })],
+      effectiveRoute: 'hybrid',
+      executionContext: {
+        effectiveRetrievalMode: 'entity_resolution',
+        retrievalKind: 'generic_hybrid',
+        winnerDualLaneArtifact: {
+          entityId: eid,
+          canonicalLabel: 'Hybrid Anchor Wine',
+          lanePresence: 'entity_only',
+          identityProvenance: {
+            source: 'entity_resolver',
+            entityId: eid,
+            exactnessTier: 'exact',
+            calibratedScore: 0.91,
+            resolverRank: 1,
+            canonicalLabel: 'Hybrid Anchor Wine',
+            evidenceRefs: ['alias:hybrid-anchor'],
+            sourceSignals: {
+              canonicalExactMatch: 1,
+              canonicalNormalizedMatch: 1,
+              aliasExactMatch: 1,
+              aliasFuzzyMatch: 0,
+              editDistanceScore: 0,
+            },
+          },
+          fusedCandidate: {
+            entityId: eid,
+            canonicalLabel: 'Hybrid Anchor Wine',
+            matchedConstraints: [],
+            retrievalTrace: {
+              retrievalProfile: 'test',
+              lexicalQueriesUsed: [],
+              semanticQueriesUsed: [],
+              filtersApplied: [],
+              candidateSources: [],
+            },
+          },
+        },
+      },
+    });
+
+    expect(input.evidenceSummary.identityEvidencePresent).toBe(true);
+    expect(input.evidenceSummary.identityEvidence?.winnerIdentityArtifactPresent).toBe(true);
+    expect(input.evidenceSummary.identityEvidence?.exactnessTier).toBe('exact');
+  });
+
   it('prefers winner-aligned identity artifact exactness over query-level exact lookup strategy', () => {
     const eid = createEntityId('entity-artifact-exact');
     const plan = minimalPlan('hybrid');

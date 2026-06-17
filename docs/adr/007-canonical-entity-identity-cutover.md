@@ -1,5 +1,8 @@
 # ADR-007: Canonical Entity Identity Cutover
 
+> **HTTP superseded (2026-06 V2 cutover):** public entity lookup is **`POST /v2/entity-lookup`**.
+> References to `POST /v1/entity/resolve` below are historical ADR context only.
+
 ## Status: Accepted — in progress
 
 Engine repo as of this ADR revision:
@@ -499,9 +502,10 @@ acceptance:
 
 #### Concrete implementation tasks
 
-핵심 파일:
+핵심 파일 (2026-06 V2 cutover 이후 — `resolve.usecase.ts` 제거됨):
 
-- `src/application/search/resolve.usecase.ts`
+- `src/application/search/entity-lookup-v2/entity-lookup-v2.usecase.ts`
+- `src/application/search/entity-lookup-v2/entity-lookup-v2-search-bridge.ts`
 - `src/application/search/search-usecase-resolver-candidates.ts`
 - `src/application/search/search-usecase-ranked-route-resolve.ts`
 - `src/domain/resolver/service/resolver.ts`
@@ -799,9 +803,10 @@ CI에 추가할 명령:
 - `src/domain/response/service/response-builder.ts`
 - `src/interface/http/schemas/search-response.schema.ts`
 
-### Resolver / ranking / API
+### Resolver / ranking / API (2026-06 V2 cutover — `resolve.usecase.ts` removed)
 
-- `src/application/search/resolve.usecase.ts`
+- `src/application/search/entity-lookup-v2/entity-lookup-v2.usecase.ts`
+- `src/application/search/entity-lookup-v2/entity-lookup-v2-search-bridge.ts`
 - `src/application/search/search-usecase-resolver-candidates.ts`
 - `src/application/search/search-usecase-ranked-route-resolve.ts`
 - `src/domain/resolver/service/resolver.ts`

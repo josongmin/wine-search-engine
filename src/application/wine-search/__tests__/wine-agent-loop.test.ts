@@ -56,12 +56,7 @@ import type {
   SearchUseCasePort,
 } from '../execution-runner.js';
 import type { SearchUseCaseInput } from '../execution-plan-schemas.js';
-import type { DecomposedSearchUseCasePort } from '../../search/port/search-route-usecases.port.js';
-import type { DrinkingWindowUseCasePort } from '../../drinking-window/port/drinking-window-usecase.port.js';
 import type { WineSearchAnalysis } from '../wine-search-schemas.js';
-import type { ComparisonSearchResponse } from '../../../domain/response/model/comparison-response.js';
-import type { DrinkingWindowBlock } from '../../../domain/response/model/result-item.js';
-import { createCanonicalEntityId } from '../../../domain/shared/types/index.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -199,81 +194,11 @@ function makeSearchPort(
   };
 }
 
-function makeComparisonResponse(): ComparisonSearchResponse {
-  return {
-    queryType: 'comparison',
-    originalQuery: 'Wine A vs Wine B',
-    comparisonIntent: 'compare',
-    entities: [
-      {
-        subQuery: 'Wine A',
-        topResult: null,
-        resultCount: 1,
-        resolutionStatus: 'resolved',
-        allResults: [],
-      },
-      {
-        subQuery: 'Wine B',
-        topResult: null,
-        resultCount: 1,
-        resolutionStatus: 'resolved',
-        allResults: [],
-      },
-    ],
-    overallStatus: 'resolved',
-    requestId: REQUEST_ID,
-    executionTimeMs: 10,
-  };
-}
-
-function makeDecomposedSearchPort(
-  impl?: (...args: unknown[]) => Promise<ComparisonSearchResponse>,
-): DecomposedSearchUseCasePort & { readonly executeMock: ReturnType<typeof vi.fn> } {
-  const executeMock = vi.fn(impl ?? (() => Promise.resolve(makeComparisonResponse())));
-  return {
-    executeMock,
-    execute: (...args) => executeMock(...args),
-  } as unknown as DecomposedSearchUseCasePort & { readonly executeMock: ReturnType<typeof vi.fn> };
-}
-
-function makeDrinkingWindowBlock(): DrinkingWindowBlock {
-  return {
-    targetYear: 2026,
-    status: 'optimal',
-    message: 'Ready to drink',
-    confidence: 'high',
-    confidenceScore: 0.9,
-    prediction: {
-      drinkingWindowStart: 2024,
-      drinkingWindowEnd: 2028,
-      peakYear: 2026,
-      confidence: 'high',
-      confidenceScore: 0.9,
-      modelVersion: 'test',
-    },
-  } as unknown as DrinkingWindowBlock;
-}
-
-function makeDrinkingWindowPort(
-  impl?: (request: unknown) => Promise<DrinkingWindowBlock>,
-): DrinkingWindowUseCasePort & { readonly checkMock: ReturnType<typeof vi.fn> } {
-  const checkMock = vi.fn(impl ?? (() => Promise.resolve(makeDrinkingWindowBlock())));
-  return {
-    checkMock,
-    check: (request) => checkMock(request),
-  } as unknown as DrinkingWindowUseCasePort & { readonly checkMock: ReturnType<typeof vi.fn> };
-}
-
 function makeToolPorts(overrides?: Partial<WineAgentLoopToolPorts>): WineAgentLoopToolPorts {
   return {
     searchUseCase: overrides?.searchUseCase ?? makeSearchPort(),
     lookupWine: overrides?.lookupWine ?? (makeLookupPort() as unknown as WineAgentLoopToolPorts['lookupWine']),
-    ...(overrides?.decomposedSearchUseCase !== undefined
-      ? { decomposedSearchUseCase: overrides.decomposedSearchUseCase }
-      : {}),
-    ...(overrides?.drinkingWindowUseCase !== undefined
-      ? { drinkingWindowUseCase: overrides.drinkingWindowUseCase }
-      : {}),
+    ...overrides,
   };
 }
 
@@ -781,8 +706,7 @@ describe('WineAgentLoopRunner — removed convenience tools are unsupported (T-I
   const UNSUPPORTED_PREFIX = (name: string) =>
     `Tool "${name}" is not supported in the wine-agent-loop. Use one of:`;
 
-  it('compare_wines hits the unsupported default branch and never calls decomposedSearchUseCase', async () => {
-    const comparisonPort = makeDecomposedSearchPort();
+  it('compare_wines hits the unsupported default branch', async () => {
     const llm = makeStubLlm([
       async () => asToolUseResult([
         toolUse('compare_wines', { query_a: 'Opus One 2018', query_b: 'Almaviva 2019' }),
@@ -791,13 +715,10 @@ describe('WineAgentLoopRunner — removed convenience tools are unsupported (T-I
     ]);
     const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
     const out = await runner.run(makeInput({
-      toolPorts: makeToolPorts({ decomposedSearchUseCase: comparisonPort }),
       maxSteps: 4,
     }));
 
     expect(out.terminationReason).toBe('answer');
-    // Removed tool: the convenience use case MUST NOT be dispatched.
-    expect(comparisonPort.executeMock).not.toHaveBeenCalled();
     const compareStep = out.steps.find((s) =>
       s.toolCalls.some((c) => c.tool === 'compare_wines'),
     );
@@ -806,8 +727,7 @@ describe('WineAgentLoopRunner — removed convenience tools are unsupported (T-I
     );
   });
 
-  it('check_drinking_window hits the unsupported default branch and never calls the drinking-window use case', async () => {
-    const drinkingWindowPort = makeDrinkingWindowPort();
+  it('check_drinking_window hits the unsupported default branch', async () => {
     const llm = makeStubLlm([
       async () => asToolUseResult([
         toolUse('check_drinking_window', { entity_id: 'wine-1', target_year: 2026 }),
@@ -816,15 +736,10 @@ describe('WineAgentLoopRunner — removed convenience tools are unsupported (T-I
     ]);
     const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
     const out = await runner.run(makeInput({
-      toolPorts: makeToolPorts({
-        drinkingWindowUseCase: drinkingWindowPort,
-      }),
       maxSteps: 4,
     }));
 
     expect(out.terminationReason).toBe('answer');
-    // Removed tool: the drinking-window use case MUST NOT be dispatched.
-    expect(drinkingWindowPort.checkMock).not.toHaveBeenCalled();
     const dwStep = out.steps.find((s) =>
       s.toolCalls.some((c) => c.tool === 'check_drinking_window'),
     );

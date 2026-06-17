@@ -130,6 +130,12 @@ const metaPatterns = [
   /^src\/interface\/http\/schemas\/__tests__\/search-response-v2\.schema\.test\.ts$/,
   /^src\/interface\/http\/routes\/__tests__\/http-contract-manifest-script\.test\.ts$/,
   /^test\/meta\/vespa-hit-summary-readraw-parity\.test\.ts$/,
+  /^test\/meta\/lookup-v2-.+\.meta\.test\.ts$/,
+  /^test\/meta\/fuzzy-match-confidence-ssot\.test\.ts$/,
+  /^test\/meta\/meta-config-exhaustiveness\.meta\.test\.ts$/,
+  /^test\/meta\/ci-verification-core-parity\.meta\.test\.ts$/,
+  /^test\/unit\/meta\/bench-smoke-lookup-v2-contract\.meta\.test\.ts$/,
+  /^test\/unit\/meta\/curation-integration-lane-parity\.test\.ts$/,
 ];
 
 const metaSourcePatterns = [
@@ -141,6 +147,21 @@ const metaSourcePatterns = [
   /^src\/infrastructure\/vespa\/vespa-schema\.sd$/,
   /^src\/infrastructure\/vespa\/mapping\.ts$/,
   /^test\/meta\/vespa-hit-summary-readraw-parity\.test\.ts$/,
+  /^src\/config\/lookup-authority\.ts$/,
+  /^src\/application\/search\/entity-lookup-v2\//,
+  /^src\/domain\/resolver\/v2\/lookup-v2-substrate-capabilities\.ts$/,
+  /^src\/infrastructure\/curation\//,
+  /^scripts\/etl\/load-published-curation-proposals\.ts$/,
+  /^scripts\/eval\/run-lookup-v2-active-pointer-proof\.ts$/,
+];
+
+const httpContractSourcePatterns = [
+  /^src\/interface\/http\//,
+  /^docs\/http-contract-surface\.md$/,
+  /^data\/http-contract-manifest\.json$/,
+  /^scripts\/export-http-contract-manifest\.ts$/,
+  /^web\/src\/shared\/api\/ops-types\.ts$/,
+  /^app\/entity-lookup-ops-web\/src\/lib\/api\.ts$/,
 ];
 
 const evalPatterns = [
@@ -208,6 +229,7 @@ const changedFiles = uniqueExistingFiles(explicitFiles.length > 0 ? explicitFile
 const shouldRunTypecheck = changedFiles.some(needsTypecheck);
 const lintableFiles = changedFiles.filter((file) => isLintable(file) && !isDocLike(file));
 const shouldRunMetaLane = changedFiles.some((file) => matches(file, metaSourcePatterns));
+const shouldRunHttpContractVerification = changedFiles.some((file) => matches(file, httpContractSourcePatterns));
 const shouldRunHeavyLane = changedFiles.some((file) => matches(file, heavySourcePatterns));
 const shouldRunNoisyVerification = changedFiles.some((file) => matches(file, noisyGatePatterns));
 const label = stagedOnly ? 'check:smart:staged' : 'check:smart';
@@ -239,6 +261,10 @@ if (explicitFiles.length === 0 && changedFiles.length > 15) {
   if (shouldRunMetaLane) {
     console.log(`[${label}] Meta-contract-sensitive changes detected; running test:meta.`);
     npmRun('test:meta');
+  }
+  if (shouldRunHttpContractVerification) {
+    console.log(`[${label}] HTTP-contract-sensitive changes detected; running verify:http-contracts.`);
+    npmRun('verify:http-contracts');
   }
   if (shouldRunNoisyVerification) {
     console.log(`[${label}] Noisy-entity-sensitive changes detected; running test:verification:noisy.`);
@@ -288,6 +314,10 @@ if (broadFallback) {
   }
   npmRun('check:dev');
   npmRun('test:meta');
+  if (shouldRunHttpContractVerification) {
+    console.log(`[${label}] HTTP-contract-sensitive changes detected; running verify:http-contracts.`);
+    npmRun('verify:http-contracts');
+  }
   if (shouldRunNoisyVerification) {
     console.log(`[${label}] Noisy-entity-sensitive changes detected; running test:verification:noisy.`);
     npmRun('test:verification:noisy');
@@ -322,6 +352,11 @@ if (metaFiles.length > 0) {
 if (shouldRunMetaLane) {
   console.log(`[${label}] Meta-contract-sensitive source changes detected; running test:meta.`);
   npmRun('test:meta');
+}
+
+if (shouldRunHttpContractVerification) {
+  console.log(`[${label}] HTTP-contract-sensitive source changes detected; running verify:http-contracts.`);
+  npmRun('verify:http-contracts');
 }
 
 if (shouldRunNoisyVerification) {

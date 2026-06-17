@@ -15,7 +15,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 function read(relativePath: string): string {
@@ -48,20 +48,129 @@ describe('V2-only lookup cutover — removed surfaces stay removed', () => {
   });
 
   it('legacy resolve/autocomplete HTTP routes and resolve.route.ts stay removed', () => {
-    expect(existsSync(join(process.cwd(), 'src/interface/http/routes/resolve.route.ts'))).toBe(false);
+    for (const deadRoute of [
+      'src/interface/http/routes/resolve.route.ts',
+      'src/interface/http/routes/autocomplete.route.ts',
+      'src/interface/http/routes/interpret.route.ts',
+      'src/interface/http/routes/batch-search.route.ts',
+      'src/interface/http/routes/hybrid.route.ts',
+      'src/interface/http/routes/replay.route.ts',
+    ] as const) {
+      expect(existsSync(join(process.cwd(), deadRoute)), deadRoute).toBe(false);
+    }
+    expect(existsSync(join(process.cwd(), 'src/application/search/resolve.usecase.ts'))).toBe(false);
+    expect(existsSync(join(process.cwd(), 'test/unit/application/search/resolve.usecase.test.ts'))).toBe(false);
     const server = read('src/interface/http/server.ts');
     expect(server).not.toContain('registerResolveRoute');
+    expect(server).not.toContain('registerAutocompleteRoute');
+    expect(server).toContain('registerEntityLookupV2Route');
     const catalog = read('src/interface/http/routes/http-route-contract-catalog.ts');
     expect(catalog).not.toContain("'/v1/entity/resolve'");
     expect(catalog).not.toContain("'/v1/entity/autocomplete'");
   });
 
-  it('production Container does not wire autocompleteUseCase (eval-only factory)', () => {
+  it('production Container does not wire autocompleteUseCase (eval-only query runner factory)', () => {
     const containerTs = read('src/config/container.ts');
     expect(containerTs).not.toContain('autocompleteUseCase');
-    expect(existsSync(join(process.cwd(), 'src/config/build-autocomplete-usecase.ts'))).toBe(true);
+    expect(existsSync(join(process.cwd(), 'src/config/build-autocomplete-query-runner.ts'))).toBe(true);
+    expect(existsSync(join(process.cwd(), 'src/config/build-autocomplete-usecase.ts'))).toBe(false);
     const usecases = read('src/config/container-usecases.ts');
     expect(usecases).not.toContain('AutocompleteUseCase');
+  });
+
+  it('production Container exposes only live HTTP/agent search surfaces (no dead use-case ports)', () => {
+    const containerTs = read('src/config/container.ts');
+    for (const deadPort of [
+      'interpretUseCase',
+      'hybridUseCase',
+      'batchSearchUseCase',
+      'decomposedSearchUseCase',
+      'drinkingWindowUseCase',
+    ] as const) {
+      expect(containerTs).not.toContain(deadPort);
+    }
+    expect(containerTs).toContain('searchUseCase');
+    expect(containerTs).toContain('entityLookupV2UseCase');
+  });
+
+  it('InterpretUseCase class is deleted (eval-only interpret-query-runner remains)', () => {
+    expect(existsSync(join(process.cwd(), 'src/application/search/interpret.usecase.ts'))).toBe(false);
+    expect(existsSync(join(process.cwd(), 'src/config/build-interpret-query-runner.ts'))).toBe(true);
+    const port = read('src/application/search/port/search-route-usecases.port.ts');
+    expect(port).not.toContain('InterpretUseCasePort');
+  });
+
+  it('AutocompleteUseCase class is deleted (eval-only autocomplete-query-runner remains)', () => {
+    expect(existsSync(join(process.cwd(), 'src/application/search/autocomplete.usecase.ts'))).toBe(false);
+    expect(existsSync(join(process.cwd(), 'src/config/build-autocomplete-query-runner.ts'))).toBe(true);
+    const port = read('src/application/search/port/search-route-usecases.port.ts');
+    expect(port).not.toContain('AutocompleteUseCasePort');
+  });
+
+  it('BatchSearchUseCase class is deleted (eval-only batch-search-runner remains)', () => {
+    expect(existsSync(join(process.cwd(), 'src/application/search/batch-search.usecase.ts'))).toBe(false);
+    expect(existsSync(join(process.cwd(), 'src/config/build-batch-search-runner.ts'))).toBe(true);
+    const port = read('src/application/search/port/search-route-usecases.port.ts');
+    expect(port).not.toContain('BatchSearchUseCasePort');
+  });
+
+  it('HybridUseCase duplicate stack is deleted (POST /v1/search/hybrid uses SearchUseCase only)', () => {
+    expect(existsSync(join(process.cwd(), 'src/application/search/hybrid.usecase.ts'))).toBe(false);
+    expect(existsSync(join(process.cwd(), 'src/application/search/hybrid-request.dto.ts'))).toBe(false);
+    const port = read('src/application/search/port/search-route-usecases.port.ts');
+    expect(port).not.toContain('HybridUseCasePort');
+  });
+
+  it('dead eval-only use case classes are not re-instantiated under src/ (non-test paths)', () => {
+    const forbidden = [
+      'new AutocompleteUseCase(',
+      'new BatchSearchUseCase(',
+      'new InterpretUseCase(',
+      'new HybridUseCase(',
+    ] as const;
+    const roots = [
+      'src/application/search',
+      'src/config',
+      'src/interface/http',
+    ] as const;
+
+    function walk(dir: string): string[] {
+      const entries = readdirSync(join(process.cwd(), dir), { withFileTypes: true });
+      const files: string[] = [];
+      for (const entry of entries) {
+        const rel = `${dir}/${entry.name}`;
+        if (entry.isDirectory()) {
+          if (entry.name === '__tests__' || entry.name === 'node_modules') {
+            continue;
+          }
+          files.push(...walk(rel));
+          continue;
+        }
+        if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) {
+          files.push(rel);
+        }
+      }
+      return files;
+    }
+
+    for (const root of roots) {
+      for (const file of walk(root)) {
+        const content = read(file);
+        for (const needle of forbidden) {
+          expect(content, `${file} must not contain ${needle}`).not.toContain(needle);
+        }
+      }
+    }
+  });
+
+  it('feature catalog and debug docs do not claim legacy resolve HTTP harness remains', () => {
+    const elv2Catalog = read('tools/feature-catalog/features/retrieval/entity-lookup-v2.yaml');
+    expect(elv2Catalog).not.toMatch(/regression harness/i);
+    expect(elv2Catalog).not.toMatch(/exists only as a regression/i);
+    expect(elv2Catalog).not.toMatch(/is regression harness/i);
+    const playbook = read('.ai/llm-debugging-playbook.md');
+    expect(playbook).not.toContain('resolve.use_case.start');
+    expect(playbook).toContain('entity_lookup_v2.use_case.start');
   });
 
   it('the CLI lookup command dispatches the dedicated V2 lookup facade', () => {
@@ -83,6 +192,20 @@ describe('V2-only lookup cutover — removed surfaces stay removed', () => {
     expect(coverage).toContain('const pool = getPgPool();');
     expect(coverage).toContain('const container = await createLookupDirectContainer(config, {');
     expect(coverage).toContain('await pool.end();');
+  });
+
+  it('cutover docs mark stale e2e triage as superseded and eval rails use query runners', () => {
+    const knownIssues = read('docs/known-issues-cutover-blockers.md');
+    expect(knownIssues).toContain('Status: superseded');
+    expect(knownIssues).toContain('POST /v1/search/interpret');
+
+    const batchSearchDoc = read('docs/batch-search.md');
+    expect(batchSearchDoc).toContain('buildBatchSearchRunner');
+    expect(batchSearchDoc).not.toContain('BatchSearchUseCase');
+
+    const autocompleteCatalog = read('tools/feature-catalog/features/tools/autocomplete.yaml');
+    expect(autocompleteCatalog).toContain('status: deprecated');
+    expect(autocompleteCatalog).toContain('autocomplete-query-runner.ts');
   });
 
   it('lookup eval/debug runners route through the shared authority builders only', () => {

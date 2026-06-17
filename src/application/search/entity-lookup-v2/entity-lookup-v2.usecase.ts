@@ -56,6 +56,7 @@ import { buildNormalizedQueryViews } from '../../../domain/query/service/query-n
 import { buildResolverCandidatesFromGenerator } from '../search-usecase-resolver-candidates.js';
 import { hasDeterministicSingletonAliasWitness } from '../search-usecase-blocker-seed-policy.js';
 import { pipelineDebug, sanitizeQueryForDebug } from '../../../domain/observability/request-pipeline-debug.js';
+import { globalSilentSkipCounter } from '../../../domain/observability/silent-skip-counters.js';
 import { PipelineDebugStep } from '../../../domain/observability/pipeline-debug-steps.js';
 import { throwIfAborted } from '../../../domain/shared/cooperative-abort.js';
 import type { RequestExecutionContext } from '../../../domain/shared/request-execution-context.js';
@@ -451,6 +452,9 @@ export class EntityLookupV2UseCase {
         options?.stageTimer?.end('retrieval.total');
       });
     } catch {
+      globalSilentSkipCounter.increment('lookup_retrieval_engine_failure', {
+        phase: 'provisional',
+      });
       return undefined;
     }
   }
@@ -486,6 +490,9 @@ export class EntityLookupV2UseCase {
         options?.stageTimer?.end('retrieval.total');
       });
     } catch {
+      globalSilentSkipCounter.increment('lookup_retrieval_engine_failure', {
+        phase: 'primary',
+      });
       // Provenance is best-effort: fall back to the anchor re-projection.
       return undefined;
     }
@@ -736,12 +743,16 @@ export class EntityLookupV2UseCase {
       reviewedTargetEntityIds:
         this.deps.semanticScopeRegistry?.getReviewedTargetEntityIds() ?? new Set<string>(),
       hasPersistedAmbiguity: persistedAmbiguity !== undefined,
+      ...(trace?.appliedThresholds.resolveThreshold !== undefined
+        ? { resolveThreshold: trace.appliedThresholds.resolveThreshold }
+        : {}),
     });
     const {
       status,
       effectiveDecisionReasonCode,
       frontPromotedEntityId,
       preferVintageMismatchReasonText,
+      promotedTopConfidence,
     } = lookupDecision;
 
     // The resolver orders by rank, so slicing keeps the strongest candidates.
@@ -784,7 +795,9 @@ export class EntityLookupV2UseCase {
       : decision !== undefined && forcedStatus === undefined && effectiveDecisionReasonCode === decisionReasonCode
         ? decision.detail
         : decisionReasonText(status, effectiveDecisionReasonCode, admission);
-    const topConfidence = decision?.topConfidence ?? trace?.top1CalibratedScore;
+    const topConfidence = promotedTopConfidence
+      ?? decision?.topConfidence
+      ?? trace?.top1CalibratedScore;
     const top1Top2Margin = decision?.top1Top2Margin ?? trace?.calibratedGap;
 
     return {

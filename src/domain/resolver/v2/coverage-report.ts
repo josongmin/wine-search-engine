@@ -19,12 +19,16 @@
  */
 
 export type CoverageStatus = 'resolved' | 'ambiguous' | 'failed' | 'redirect_discovery';
-export type CoverageHoleOperatorBucket =
-  | 'strict_collision_ambiguous'
-  | 'family_surface_gap'
-  | 'qualified_scope_surface_gap'
-  | 'scope_target_missing'
-  | 'scope_support_needed';
+
+export const COVERAGE_HOLE_OPERATOR_BUCKETS = [
+  'strict_collision_ambiguous',
+  'family_surface_gap',
+  'qualified_scope_surface_gap',
+  'scope_target_missing',
+  'scope_support_needed',
+] as const;
+
+export type CoverageHoleOperatorBucket = (typeof COVERAGE_HOLE_OPERATOR_BUCKETS)[number];
 
 export interface CoverageInputRow {
   readonly qid: string;

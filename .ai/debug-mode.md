@@ -1,6 +1,6 @@
 # HTTP debug mode & pipeline debug logging
 
-Use this when you need **verbose request-scoped logs** for the search/resolve/interpret/batch pipeline without changing code.
+Use this when you need **verbose request-scoped logs** for the search / entity-lookup / interpret / batch pipeline without changing code.
 
 **LLM / agent autonomous debugging:** start from **[`llm-debugging-playbook.md`](./llm-debugging-playbook.md)** (log shape, typical `step` order, symptom → where to look, grep examples).
 
@@ -50,6 +50,23 @@ Helpers live in `src/observability/request-pipeline-debug.ts`.
 
 **Finding logs:** filter JSON logs for `pipeline_debug: true` and/or `step` (e.g. `decision.engine.response`, `http.embedding.ok`, `http.reranker.http_error`).
 
+## Entity Lookup V2 ops plane (curation)
+
+Operator curation routes under `/v2/entity-lookup/ops/*` use the debug gate for reads and a
+**separate write gate**:
+
+| Gate | Header | Env |
+|------|--------|-----|
+| Read (alias-audit, coverage-health, proposals list) | `X-Debug-Key` | `HTTP_DEBUG_SECRET` |
+| Write (submit / review / publish) | `X-Ops-Write-Key` | `HTTP_OPS_WRITE_SECRET` |
+
+`coverage-health` exposes:
+- `published_awaiting_materialization` — ops **publish** happened but snapshot ETL has not materialized rows yet
+- `legacy_approved_abbreviation_backlog` — transitional `approved` abbreviation rows still awaiting ops publish
+- `lookup_runtime` — active snapshot id, `family_graph_edge_count`, LTR unsupported reason, unwired substrate ids
+
+See [`docs/runbook-curation-materialization.md`](../docs/runbook-curation-materialization.md).
+
 ### HTTP client outcomes (embedding / reranker)
 
 When a search request runs with debug mode, infrastructure HTTP adapters may emit:
@@ -68,7 +85,9 @@ Success lines are emitted **after** successful parse, so you do not get a false 
 
 ### In scope (ALS + request logger)
 
-Routes registered with **`registerContractRoute`** (search, hybrid, interpret, resolve, batch, feedback, health, watchlist, replay, claude-tools, etc.) run the handler inside `runWithRequestPipelineDebug`, so the async continuation chain from that handler can emit `pipelineDebug`.
+Routes registered with **`registerContractRoute`** (primitive search, entity lookup, agent, health, etc.) run the handler inside `runWithRequestPipelineDebug`, so the async continuation chain from that handler can emit `pipelineDebug`.
+
+Removed from live catalog (2026-06): interpret, resolve, autocomplete, batch-search, replay, feedback, watchlist, claude-tools HTTP routes.
 
 ### Out of scope (no pipeline ALS)
 
@@ -76,7 +95,7 @@ Routes registered with **`registerContractRoute`** (search, hybrid, interpret, r
 |------|--------|
 | **Non-contract routes** | e.g. **`GET /openapi.json`** (`openapi.route.ts`) — not wrapped; `pipelineDebug` is a no-op (no store). |
 | **Code outside the handler chain** | Background jobs, CLI, or unit tests without `runWithRequestPipelineDebug`. |
-| **Batch search — parallel sub-requests** | The batch orchestrator may log `batch.search.start` when the **HTTP** request has debug mode. Each **concurrent** `SearchUseCase.execute` inside `Promise.all` may **not** reliably inherit the same ALS context as the parent in all Node scheduling cases. Treat per-item `pipelineDebug` lines inside parallel batch items as **best-effort**, not guaranteed. |
+| **Batch search — parallel sub-requests** | Eval/fixture `batch-search-runner` may log `batch.search.start`. Each concurrent `SearchExecutorPort.execute` inside the worker pool may **not** reliably inherit the same ALS context as a parent HTTP request in all Node scheduling cases. Treat per-item `pipelineDebug` lines inside parallel batch items as **best-effort**, not guaranteed. |
 
 ## Security notes
 

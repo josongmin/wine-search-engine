@@ -45,8 +45,8 @@ import {
   parseLookupScopeGraphRuntimeArtifact,
   parseLookupSemanticScopeRuntimeArtifact,
 } from '../../src/domain/shared/types/search-snapshot-lookup-semantic-runtime.js';
-import { applyFullCanonicalGraphSync } from './canonical-entity-graph-sync.js';
 import { pgTableHasColumn } from '../../src/infrastructure/db/pg-schema-capabilities.js';
+import { computeAliasPhoneticKeys } from '../../src/domain/alias/service/alias-phonetic-keys.js';
 import { createRuntimeSubstratePublishStateMachine } from './runtime-substrate-publish-state-machine.js';
 
 const DEFAULT_RUNTIME_STATE_PATH = resolveDataPath('data/runtime-search-snapshot.json');
@@ -344,6 +344,7 @@ async function stageSnapshotRuntimeRowsInPg(args: {
   await assertSnapshotNotAlreadyPublished(args.client, args.manifest.snapshotId, {
     allowExistingActiveSnapshot: args.allowExistingActiveSnapshot,
   });
+  const phoneticKeysColumnEnabled = await pgTableHasColumn(args.client, 'aliases', 'phonetic_keys');
   for (const entityBatch of chunkArray(args.entities, RUNTIME_SUBSTRATE_ENTITY_STAGE_BATCH_SIZE)) {
     await args.client.query(
       `WITH input AS (
@@ -391,6 +392,38 @@ async function stageSnapshotRuntimeRowsInPg(args: {
     );
   }
   for (const aliasBatch of chunkArray(args.aliases, RUNTIME_SUBSTRATE_ALIAS_STAGE_BATCH_SIZE)) {
+    if (phoneticKeysColumnEnabled) {
+      await args.client.query(
+        `WITH input AS (
+         SELECT *
+         FROM jsonb_to_recordset($1::jsonb) AS rows(
+           alias_id text,
+           search_snapshot_id text,
+           entity_id text,
+           alias_type text,
+           alias_scope text,
+           surface_form text,
+           normalized_value text,
+           source text,
+           source_trust double precision,
+           confidence double precision,
+           phonetic_keys text[]
+         )
+       )
+       INSERT INTO aliases (
+         alias_id, search_snapshot_id, entity_id, alias_type, alias_scope, surface_form,
+         normalized_value, source, source_trust, confidence, is_suppressed, phonetic_keys
+       )
+       SELECT
+         alias_id, search_snapshot_id, entity_id, alias_type, alias_scope, surface_form,
+         normalized_value, source, source_trust, confidence, FALSE, phonetic_keys
+       FROM input
+       ON CONFLICT (search_snapshot_id, alias_id) DO NOTHING`,
+        [buildAliasRowsJson(aliasBatch, args.manifest.snapshotId, { materializePhoneticKeys: true })],
+      );
+      continue;
+    }
+
     await args.client.query(
       `WITH input AS (
          SELECT *
@@ -416,7 +449,7 @@ async function stageSnapshotRuntimeRowsInPg(args: {
          normalized_value, source, source_trust, confidence, FALSE
        FROM input
        ON CONFLICT (search_snapshot_id, alias_id) DO NOTHING`,
-      [buildAliasRowsJson(aliasBatch, args.manifest.snapshotId)],
+      [buildAliasRowsJson(aliasBatch, args.manifest.snapshotId, { materializePhoneticKeys: false })],
     );
   }
   for (const ambiguityBatch of chunkArray(args.ambiguityRows, RUNTIME_SUBSTRATE_AMBIGUITY_STAGE_BATCH_SIZE)) {
@@ -448,21 +481,6 @@ async function stageSnapshotRuntimeRowsInPg(args: {
     );
   }
 
-}
-
-async function syncCanonicalGraphForSnapshot(args: {
-  readonly client: PoolClient;
-  readonly manifest: SearchSnapshotManifest;
-  readonly entities: readonly EntitySnapshotRecord[];
-  readonly aliases: readonly AliasSnapshotRecord[];
-  readonly ambiguityRows: readonly AmbiguityRegistrySnapshotRow[];
-}): Promise<void> {
-  await applyFullCanonicalGraphSync(args.client, {
-    entities: args.entities,
-    aliases: args.aliases,
-    ambiguityRows: args.ambiguityRows,
-    searchSnapshotId: args.manifest.snapshotId,
-  });
 }
 
 export async function stageSnapshotRuntimeSubstratesToPg(
@@ -688,8 +706,12 @@ async function assertLookupRuntimeArtifactsReady(
   }
 
   const aliasRuntimeHash = manifest.artifacts.lookupAliasBroadRecallRuntimeJson === undefined
-    ? buildLookupAliasRuntimeArtifactHash(aliasRuntime)
-    : buildLookupAliasRuntimeCoreArtifactHash(aliasRuntime);
+    ? buildLookupAliasRuntimeArtifactHash(
+      aliasRuntime as import('../../src/domain/shared/types/search-snapshot-lookup-runtime.js').LookupAliasRuntimeArtifact,
+    )
+    : buildLookupAliasRuntimeCoreArtifactHash(
+      aliasRuntime as import('../../src/domain/shared/types/search-snapshot-lookup-runtime.js').LookupAliasRuntimeCoreArtifact,
+    );
   if (aliasRuntimeHash !== manifest.hashes.lookupAliasRuntime) {
     throw new Error(
       `Lookup alias runtime hash mismatch: manifest=${manifest.hashes.lookupAliasRuntime} artifact=${aliasRuntimeHash}`,
@@ -1055,9 +1077,17 @@ function buildEntitySnapshotRowsJson(
   })));
 }
 
+function resolveAliasPhoneticKeys(alias: AliasSnapshotRecord): readonly string[] {
+  if (alias.phoneticKeys != null && alias.phoneticKeys.length > 0) {
+    return alias.phoneticKeys;
+  }
+  return computeAliasPhoneticKeys(alias.normalizedValue);
+}
+
 function buildAliasRowsJson(
   aliases: readonly AliasSnapshotRecord[],
   searchSnapshotId: string,
+  options: { readonly materializePhoneticKeys: boolean },
 ): string {
   return JSON.stringify(aliases.map((alias) => ({
     alias_id: alias.aliasId,
@@ -1070,6 +1100,9 @@ function buildAliasRowsJson(
     source: alias.source,
     source_trust: alias.sourceTrust,
     confidence: alias.confidencePrior,
+    ...(options.materializePhoneticKeys
+      ? { phonetic_keys: resolveAliasPhoneticKeys(alias) }
+      : {}),
   })));
 }
 

@@ -132,9 +132,10 @@ export const LOOKUP_RETRIEVAL_CHANNELS = [
   // which require the unwired PgAliasMatcher).
   'fuzzy_alias',
   // family_graph: producer family recall (T-ELV2-06 Half B). The engine walks
-  // alias-recalled anchors to their persisted producer family (PgFamilyGraph) and
-  // emits co-producer siblings. Fires when the entity_family substrate is
-  // populated (operator ETL); dormant otherwise.
+  // alias-recalled anchors through the snapshot-published EntityScopeGraphPort
+  // (`family` relation edges). Fires when the active search snapshot's scope
+  // graph carries family edges; dormant when unwired or empty. Legacy
+  // `PgFamilyGraph` / `entity_family` is NOT the lookup-lane SSoT.
   'family_graph',
   // same producer, different line/cuvee siblings from the snapshot-published
   // scope graph. Used to surface reviewed scope-local alternatives without

@@ -3,11 +3,6 @@ import { parseEnv } from '../env.js';
 
 const buildUseCaseContainerServices = vi.fn(() => ({
   searchUseCase: { execute: vi.fn() } as never,
-  interpretUseCase: {} as never,
-  hybridUseCase: {} as never,
-  decomposedSearchUseCase: {} as never,
-  drinkingWindowUseCase: {} as never,
-  batchSearchUseCase: {} as never,
 }));
 const buildEvalRunner = vi.fn(() => 'eval-runner');
 

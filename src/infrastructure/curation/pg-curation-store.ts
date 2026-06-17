@@ -16,6 +16,8 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
 import { z } from 'zod';
+import { pgCurationMaterializationTrackingEnabled } from './curation-materialization-capability.js';
+import { readCanonicalCurationEvidence } from '../../domain/curation/model/curation-proposal-evidence.js';
 import {
   isProposalStatus,
   type AliasProposal,
@@ -111,10 +113,20 @@ function toDate(value: Date | string): Date {
   return d;
 }
 
+function canonicalEvidenceForKind(
+  kind: ProposalKind,
+  evidence: Record<string, unknown>,
+): Record<string, unknown> {
+  return { ...readCanonicalCurationEvidence(kind, evidence) };
+}
+
 /** Builds the common lifecycle fields, omitting optional keys that are null (exactOptionalPropertyTypes). */
-function lifecycleFields(row: z.infer<typeof AliasProposalRowSchema>
-  | z.infer<typeof AmbiguityProposalRowSchema>
-  | z.infer<typeof SuppressionProposalRowSchema>): {
+function lifecycleFields(
+  kind: ProposalKind,
+  row: z.infer<typeof AliasProposalRowSchema>
+    | z.infer<typeof AmbiguityProposalRowSchema>
+    | z.infer<typeof SuppressionProposalRowSchema>,
+): {
   proposalId: string;
   status: ProposalStatus;
   evidence: Record<string, unknown>;
@@ -131,7 +143,7 @@ function lifecycleFields(row: z.infer<typeof AliasProposalRowSchema>
   return {
     proposalId: row.proposal_id,
     status: row.status,
-    evidence: row.evidence,
+    evidence: canonicalEvidenceForKind(kind, row.evidence),
     createdAt: toDate(row.created_at),
     updatedAt: toDate(row.updated_at),
     ...(row.proposed_by !== null ? { proposedBy: row.proposed_by } : {}),
@@ -153,7 +165,7 @@ function rowToAliasProposal(raw: unknown): AliasProposal {
   }
   return {
     kind: 'alias',
-    ...lifecycleFields(row),
+    ...lifecycleFields('alias', row),
     surfaceForm: row.surface_form,
     targetEntityId: row.target_entity_id,
     proposedType,
@@ -165,7 +177,7 @@ function rowToAmbiguityProposal(raw: unknown): AmbiguityProposal {
   const row = AmbiguityProposalRowSchema.parse(raw);
   return {
     kind: 'ambiguity',
-    ...lifecycleFields(row),
+    ...lifecycleFields('ambiguity', row),
     normalizedForm: row.normalized_form,
     memberEntityIds: row.member_entity_ids,
   };
@@ -175,7 +187,7 @@ function rowToSuppressionProposal(raw: unknown): SuppressionProposal {
   const row = SuppressionProposalRowSchema.parse(raw);
   return {
     kind: 'suppression',
-    ...lifecycleFields(row),
+    ...lifecycleFields('suppression', row),
     surfaceForm: row.surface_form,
     reason: row.reason,
     ...(row.target_entity_id !== null ? { targetEntityId: row.target_entity_id } : {}),
@@ -214,6 +226,7 @@ export class PgCurationStore implements CurationStorePort {
 
   async createAliasProposal(input: CreateAliasProposalInput): Promise<AliasProposal> {
     const id = randomUUID();
+    const evidence = canonicalEvidenceForKind('alias', input.evidence);
     const result = await this.pool.query(
       `INSERT INTO alias_proposals
          (proposal_id, surface_form, target_entity_id, proposed_type, confidence, evidence, status, proposed_by)
@@ -225,7 +238,7 @@ export class PgCurationStore implements CurationStorePort {
         input.targetEntityId,
         input.proposedType,
         input.confidence,
-        JSON.stringify(input.evidence),
+        JSON.stringify(evidence),
         input.proposedBy ?? null,
       ],
     );
@@ -234,6 +247,7 @@ export class PgCurationStore implements CurationStorePort {
 
   async createAmbiguityProposal(input: CreateAmbiguityProposalInput): Promise<AmbiguityProposal> {
     const id = randomUUID();
+    const evidence = canonicalEvidenceForKind('ambiguity', input.evidence);
     const result = await this.pool.query(
       `INSERT INTO ambiguity_proposals
          (proposal_id, normalized_form, member_entity_ids, evidence, status, proposed_by)
@@ -243,7 +257,7 @@ export class PgCurationStore implements CurationStorePort {
         id,
         input.normalizedForm,
         JSON.stringify(input.memberEntityIds),
-        JSON.stringify(input.evidence),
+        JSON.stringify(evidence),
         input.proposedBy ?? null,
       ],
     );
@@ -252,6 +266,7 @@ export class PgCurationStore implements CurationStorePort {
 
   async createSuppressionProposal(input: CreateSuppressionProposalInput): Promise<SuppressionProposal> {
     const id = randomUUID();
+    const evidence = canonicalEvidenceForKind('suppression', input.evidence);
     const result = await this.pool.query(
       `INSERT INTO suppression_proposals
          (proposal_id, surface_form, target_entity_id, reason, evidence, status, proposed_by)
@@ -262,7 +277,7 @@ export class PgCurationStore implements CurationStorePort {
         input.surfaceForm,
         input.targetEntityId ?? null,
         input.reason,
-        JSON.stringify(input.evidence),
+        JSON.stringify(evidence),
         input.proposedBy ?? null,
       ],
     );
@@ -397,6 +412,9 @@ export class PgCurationStore implements CurationStorePort {
     };
     const queueByKind: Record<ProposalKind, number> = { alias: 0, ambiguity: 0, suppression: 0 };
     let total = 0;
+    let publishedAwaitingMaterialization = 0;
+    let legacyApprovedAbbreviationBacklog = 0;
+    const materializationTrackingEnabled = await pgCurationMaterializationTrackingEnabled(this.pool);
 
     for (const kind of ['alias', 'ambiguity', 'suppression'] as const) {
       const result = await this.pool.query(
@@ -408,8 +426,38 @@ export class PgCurationStore implements CurationStorePort {
         queueByKind[kind] += n;
         total += n;
       }
+      if (materializationTrackingEnabled) {
+        const unmaterialized = await this.pool.query<{ n: number }>(
+          `SELECT COUNT(*)::int AS n
+             FROM ${TABLE_BY_KIND[kind]}
+            WHERE status = 'published'
+              AND materialized_snapshot_id IS NULL`,
+        );
+        publishedAwaitingMaterialization += unmaterialized.rows[0]?.n ?? 0;
+      } else {
+        const publishedOnly = await this.pool.query<{ n: number }>(
+          `SELECT COUNT(*)::int AS n
+             FROM ${TABLE_BY_KIND[kind]}
+            WHERE status = 'published'`,
+        );
+        publishedAwaitingMaterialization += publishedOnly.rows[0]?.n ?? 0;
+      }
     }
 
-    return { queueByStatus, queueByKind, totalProposals: total };
+    const legacyAbbrev = await this.pool.query<{ n: number }>(
+      `SELECT COUNT(*)::int AS n
+         FROM alias_proposals
+        WHERE status = 'approved'
+          AND proposed_type = 'abbreviation'`,
+    );
+    legacyApprovedAbbreviationBacklog = legacyAbbrev.rows[0]?.n ?? 0;
+
+    return {
+      queueByStatus,
+      queueByKind,
+      totalProposals: total,
+      publishedAwaitingMaterialization,
+      legacyApprovedAbbreviationBacklog,
+    };
   }
 }

@@ -87,6 +87,11 @@ async function main(): Promise<void> {
         `[elv2-family] ${records.length} entities but 0 carry a producer — the producer JSONB path is likely wrong; refusing to wipe entity_family. Verify metadata->>'producer' on a real snapshot.`,
       );
     }
+    if (withProducer > 0 && rows.length === 0) {
+      throw new Error(
+        `[elv2-family] ${withProducer} entities carry a producer but family graph builder produced 0 rows — likely singleton-only corpus; refusing to publish an empty entity_family wipe.`,
+      );
+    }
 
     // Atomic republish: DELETE + INSERT in one transaction (no partial wipe).
     const client = await pool.connect();

@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import type { CurationTask } from '../../src/domain/alias/curation/coverage-curation-task.js';
+import type { CoverageHoleOperatorBucket } from '../../src/domain/resolver/v2/coverage-report.js';
 import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
 import { compactForLookup } from '../../src/domain/query/service/phonetic-skeleton.js';
 import { lookupV2DraftCliPath, resolveCliDataPathArg } from './cli-data-path.js';
@@ -84,13 +85,7 @@ export interface LookupV2CurationDraftRow {
     | 'reviewed_rejected'
     | 'catalog_support_review'
     | 'reviewed_collision';
-  readonly operatorBucket?:
-    | 'strict_collision_ambiguous'
-    | 'family_surface_gap'
-    | 'qualified_scope_surface_gap'
-    | 'scope_target_missing'
-    | 'scope_support_needed'
-    | undefined;
+  readonly operatorBucket?: CoverageHoleOperatorBucket | undefined;
   readonly policyConflictHint?: string | undefined;
   readonly semanticConflictKey?: string | undefined;
   readonly supportStatus?: LookupV2SemanticScopeSupportRegistryRow['supportStatus'] | undefined;

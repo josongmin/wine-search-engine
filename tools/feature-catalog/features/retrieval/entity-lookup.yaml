@@ -6,6 +6,7 @@ summary: |
   dedicated lookup primitive로 직행하는 경로. 한국어 별칭 catalog (3-tier:
   gold/seeded/silver)에 매칭되면 LLM 없이 처리.
 
+status: deprecated
 maturity: 5
 maturity_rationale: |
   프로덕션 와이어링 완료 (`cascade-router`가 query를 적절한 retrieval mode로 라우팅).
@@ -20,14 +21,12 @@ maturity_rationale: |
   전체 curated surface로 검증 — production normalize/vintage-strip 로직 drift
   발생 시 즉시 실패.
 
-status: deprecated
 since: 2025-09
-last_reviewed: 2026-05-21
+last_reviewed: 2026-06-10
 owner: core
 
 surfaces:
-  - "Agent tool: lookup_wine"
-  - "Agent tool: lookup_wine"
+  - "Agent tool: lookup_wine (V2 authority via lookup-authority.ts)"
 
 key_files:
   - src/domain/query/model/retrieval-mode.ts

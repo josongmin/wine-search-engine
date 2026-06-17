@@ -15,6 +15,7 @@ import type { ResolveResponse } from '../resolve-response.dto.js';
 import type { EntityLookupV2Result } from './entity-lookup-v2.dto.js';
 import { mapResolveRequestToEntityLookupV2Command } from './entity-lookup-v2-request-mapping.js';
 import { buildEntityLookupV2AutocompleteTraceRef } from './entity-lookup-v2-autocomplete-mapping.js';
+import { projectV2EvidenceRefs } from './entity-lookup-v2-candidate-projection.js';
 
 /** Compatibility alias — prefer {@link mapLookupV2StatusToWireDecisionStatus}. */
 export const mapLookupV2StatusToResolveStatus = mapLookupV2StatusToWireDecisionStatus;
@@ -43,7 +44,7 @@ export function mapEntityLookupV2ResultToResolveResponse(
       canonicalLabel: candidate.canonicalLabel,
       calibratedScore: candidate.calibratedScore,
       rank: candidate.rank,
-      evidenceRefs: [],
+      evidenceRefs: projectV2EvidenceRefs(candidate.channelHits),
     })),
     topEntity: result.topCandidate !== null
       ? {

@@ -25,6 +25,8 @@ export interface AliasSnapshotRecord {
   readonly source: string;
   readonly sourceTrust: number;
   readonly confidencePrior: number;
+  /** Sorted distinct Double Metaphone keys for SQL / snapshot recall substrates. */
+  readonly phoneticKeys?: readonly string[];
 }
 
 export interface EntitySnapshotRecord {
@@ -125,9 +127,11 @@ export interface SearchSnapshotArtifactHashes {
   readonly aliases: string;
   readonly lookupAliasRuntime: string;
   readonly lookupAliasBroadRecallRuntime?: string;
+  readonly lookupExactSafeRuntime: string;
   readonly lookupResolverProjection: string;
   readonly lookupEntityProjection: string;
   readonly lookupSemanticScopeRuntime: string;
+  readonly lookupReviewedFamilyRecallRuntime: string;
   readonly lookupScopeGraphRuntime: string;
   readonly lookupAmbiguityRuntime: string;
   readonly lookupConceptRedirectRuntime: string;
@@ -479,12 +483,12 @@ function normalizeLegacyManifestShape(parsed: unknown, filePath: string): unknow
       ambiguityRegistry: ambiguityHash,
       nlMappings: readString(hashes.nlMappings) ?? entitiesHash,
     },
-  };
+  } as SearchSnapshotManifest;
 }
 
 export function parseManifest(raw: string, _filePath: string): SearchSnapshotManifest {
   const parsed: unknown = JSON.parse(raw);
-  return SearchSnapshotManifestSchema.parse(normalizeLegacyManifestShape(parsed, _filePath));
+  return SearchSnapshotManifestSchema.parse(normalizeLegacyManifestShape(parsed, _filePath)) as SearchSnapshotManifest;
 }
 
 export { hashStableJson, hashText, stableJsonStringify };

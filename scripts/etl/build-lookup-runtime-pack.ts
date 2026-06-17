@@ -1,4 +1,5 @@
 import { Transliterator } from '../../src/domain/alias/service/transliterator.js';
+import { parseAliasType } from '../../src/domain/alias/model/alias.js';
 import { doubleMetaphoneKeys } from '../../src/domain/alias/service/double-metaphone.js';
 import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
 import type { SourceRecordId } from '../../src/domain/shared/types/entity-id.js';
@@ -9,6 +10,7 @@ import type {
   LookupAliasRuntimeArtifact,
   LookupAliasBroadRecallRuntimeArtifact,
   LookupAliasRuntimeCoreArtifact,
+  LookupAliasRuntimeHangulCompletionEntry,
   LookupAliasRuntimeRow,
   LookupConceptRedirectRuntimeArtifact,
   LookupConceptRedirectRuntimeEntry,
@@ -155,15 +157,6 @@ function tokenizeNormalizedSurface(value: string): readonly string[] {
     .filter(Boolean);
 }
 
-function addFamilyCoreTerms(target: Set<string>, surface: string): void {
-  for (const term of buildAliasPrefixTerms([surface])) {
-    const trimmed = term.trim();
-    if (trimmed.length > 0) {
-      target.add(trimmed);
-    }
-  }
-}
-
 function buildDisallowedFamilyCoreTerms(grapes: readonly string[]): ReadonlySet<string> {
   const disallowed = new Set<string>();
   for (const grape of grapes) {
@@ -288,11 +281,30 @@ function mapToRecord(index: Map<string, readonly number[]>): Record<string, read
   );
 }
 
+type LookupProjectionAttributeHints = NonNullable<LookupEntityProjectionDocument['attributeHints']>;
+
+function projectLookupAttributeHints(
+  hints: Readonly<Record<string, unknown>> | undefined,
+): LookupProjectionAttributeHints | undefined {
+  return hints as LookupProjectionAttributeHints | undefined;
+}
+
+function resolveRuntimeAliasType(value: string | undefined): LookupAliasRuntimeRow['aliasType'] {
+  if (value === undefined) {
+    return undefined;
+  }
+  const parsed = parseAliasType(value);
+  if (parsed === undefined) {
+    throw new Error(`Invalid lookup alias type: ${value}`);
+  }
+  return parsed;
+}
+
 function buildHangulCompletionEntries(
   alias: LookupAliasRuntimeRow,
   aliasIndex: number,
-): readonly LookupAliasRuntimeArtifact['hangulCompletionRecords'] {
-  const entries: LookupAliasRuntimeArtifact['hangulCompletionRecords'] = [];
+): readonly LookupAliasRuntimeHangulCompletionEntry[] {
+  const entries: LookupAliasRuntimeHangulCompletionEntry[] = [];
   const seenJamoKeys = new Set<string>();
   for (const value of [alias.value, alias.normalizedValue]) {
     const key = buildHangulJamoKey(value);
@@ -343,7 +355,7 @@ export function buildLookupAliasRuntimeArtifacts(args: {
   const doubleMetaphoneIndex = new Map<string, number[]>();
   const doubleMetaphoneKeysByAliasId = new Map<string, readonly string[]>();
   const prefixCatalog = new Map<string, number[]>();
-  const hangulCompletionRecords: LookupAliasRuntimeArtifact['hangulCompletionRecords'] = [];
+  const hangulCompletionRecords: LookupAliasRuntimeHangulCompletionEntry[] = [];
   const seenSurfaceForms = new Set<string>();
   const surfaceForms: string[] = [];
   const overlayPromotionClassByAliasId = new Map<string, LookupRuntimeOverlayAlias['promotionClass']>();
@@ -357,7 +369,9 @@ export function buildLookupAliasRuntimeArtifacts(args: {
     normalizedValue: alias.normalizedValue,
     sourceTrust: alias.sourceTrust,
     confidencePrior: alias.confidencePrior,
-    ...(alias.aliasType !== undefined ? { aliasType: alias.aliasType } : {}),
+    ...(resolveRuntimeAliasType(alias.aliasType ?? alias.type) !== undefined
+      ? { aliasType: resolveRuntimeAliasType(alias.aliasType ?? alias.type) }
+      : {}),
   }));
   for (const overlay of args.runtimeOverlayAliases ?? []) {
     const existingExactOwner = exactOverrideOwnerByNormalizedValue.get(overlay.normalizedValue);
@@ -496,7 +510,7 @@ function buildLookupAliasRuntimeFullArtifact(args: {
   const doubleMetaphoneIndex = new Map<string, number[]>();
   const doubleMetaphoneKeysByAliasId = new Map<string, readonly string[]>();
   const prefixCatalog = new Map<string, number[]>();
-  const hangulCompletionRecords: LookupAliasRuntimeArtifact['hangulCompletionRecords'] = [];
+  const hangulCompletionRecords: LookupAliasRuntimeHangulCompletionEntry[] = [];
   const seenSurfaceForms = new Set<string>();
   const surfaceForms: string[] = [];
   const overlayPromotionClassByAliasId = new Map<string, LookupRuntimeOverlayAlias['promotionClass']>();
@@ -510,7 +524,9 @@ function buildLookupAliasRuntimeFullArtifact(args: {
     normalizedValue: alias.normalizedValue,
     sourceTrust: alias.sourceTrust,
     confidencePrior: alias.confidencePrior,
-    ...(alias.aliasType !== undefined ? { aliasType: alias.aliasType } : {}),
+    ...(resolveRuntimeAliasType(alias.aliasType ?? alias.type) !== undefined
+      ? { aliasType: resolveRuntimeAliasType(alias.aliasType ?? alias.type) }
+      : {}),
   }));
   for (const overlay of args.runtimeOverlayAliases ?? []) {
     const existingExactOwner = exactOverrideOwnerByNormalizedValue.get(overlay.normalizedValue);
@@ -699,7 +715,13 @@ export function buildLookupEntityProjectionArtifact(args: {
       ...(indexable.drinkingWindowEnd !== undefined ? { drinkingWindowEnd: indexable.drinkingWindowEnd } : {}),
       ...(indexable.drinkingWindowModelVersion !== undefined ? { drinkingWindowModelVersion: indexable.drinkingWindowModelVersion } : {}),
     };
-    const attributeHints = buildResolverCandidateAttributeHints(attributeHintDoc);
+    const attributeHints = projectLookupAttributeHints(
+      buildResolverCandidateAttributeHints(attributeHintDoc),
+    );
+    const aliasPrefixTerms = buildAliasPrefixTerms([
+      ...indexable.aliasesIdentitySafe,
+      ...indexable.aliasesNoisyRecall,
+    ]);
     const familyCoreKeys = mergeFamilyCoreKeys({
       derivedKeys: buildFamilyCoreKeys({
         canonicalLabel: indexable.canonicalLabel,
@@ -726,7 +748,7 @@ export function buildLookupEntityProjectionArtifact(args: {
         ? { identityCertificates: args.identityCertificatesByEntity.get(entityId)! }
         : {}),
       aliasesNoisyRecall: indexable.aliasesNoisyRecall,
-      ...(indexable.aliasPrefixTerms !== undefined ? { aliasPrefixTerms: indexable.aliasPrefixTerms } : {}),
+      ...(aliasPrefixTerms.length > 0 ? { aliasPrefixTerms } : {}),
       producer: record.producer,
       ...(attributeHints !== undefined ? { attributeHints } : {}),
       region: indexable.region ?? record.region,
@@ -856,7 +878,9 @@ export function buildLookupResolverProjectionArtifact(args: {
       ...(indexable.drinkingWindowEnd !== undefined ? { drinkingWindowEnd: indexable.drinkingWindowEnd } : {}),
       ...(indexable.drinkingWindowModelVersion !== undefined ? { drinkingWindowModelVersion: indexable.drinkingWindowModelVersion } : {}),
     };
-    const attributeHints = buildResolverCandidateAttributeHints(attributeHintDoc);
+    const attributeHints = projectLookupAttributeHints(
+      buildResolverCandidateAttributeHints(attributeHintDoc),
+    );
     return {
       entityId,
       entityType: indexable.entityType,

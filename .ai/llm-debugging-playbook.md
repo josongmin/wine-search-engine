@@ -64,7 +64,7 @@ Not every request runs every step; use this as a **mental model**, not a strict 
 7. `post_route.enter` (or `post_route.entropy_abstain` if entropy gate fires)  
 8. `search.execute.done`
 
-**Resolve-only** (`/v1/resolve` style): `resolve.use_case.start` → … → `resolve.use_case.done` (no ranking steps).
+**Entity Lookup V2** (`POST /v2/entity-lookup`, CLI, agent): `entity_lookup_v2.use_case.start` → … → `entity_lookup_v2.use_case.done` (no ranking steps).
 
 **Interpret-only**: `interpret.planner.done` after planner.
 
@@ -82,6 +82,7 @@ Not every request runs every step; use this as a **mental model**, not a strict 
 | Reranker failures | `http.reranker.*` | `HttpCrossEncoderReranker` |
 | Entity anchor missing in hybrid | `resolver.anchor.missing` | Resolver not configured |
 | Batch: only batch line, sparse inner steps | **Expected risk** | Parallel batch may not propagate ALS to every sub-call — see [`debug-mode.md`](./debug-mode.md) “Batch search” |
+| Ops publish stuck / lookup unchanged | `POST /v2/entity-lookup/ops/coverage-health` — `published_awaiting_materialization`, `legacy_approved_abbreviation_backlog`, `lookup_runtime.family_graph_edge_count` | Publish is **staging only**; runtime updates after `etl:build-search-snapshot` + `etl:publish-search-snapshot`. Mark runs in publish, not build. See [`docs/runbook-curation-materialization.md`](../docs/runbook-curation-materialization.md) |
 
 ---
 
@@ -102,6 +103,8 @@ Not every request runs every step; use this as a **mental model**, not a strict 
 | Step name constants | `src/observability/pipeline-debug-steps.ts` |
 | HTTP debug header | `src/interface/http/middleware/http-debug-mode.ts` |
 | Route wrap | `src/interface/http/routes/register-contract-route.ts` |
+| Curation materialization runbook | `docs/runbook-curation-materialization.md` |
+| ETL loader / mark | `scripts/etl/load-published-curation-proposals.ts`, `scripts/etl/publish-search-snapshot.ts` |
 | Server hook order | `src/interface/http/server.ts` |
 
 ---

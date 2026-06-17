@@ -93,6 +93,7 @@ import {
   mergePairingIntoBundle,
   promoteIntentFromParsedConstraints,
   shouldApplyFuzzyAnchorFallback,
+  shouldTreatSemanticDiscoveryAsShortEntitySurface,
   computeFuzzyFallbackConfidence,
   deriveExplicitNoMatchOverride,
   contextualizeConstraintAtoms,
@@ -909,6 +910,10 @@ export class Planner {
       ) {
         return 'ambiguous_short_form';
       }
+      return 'short_entity';
+    }
+
+    if (shouldTreatSemanticDiscoveryAsShortEntitySurface(normalizedQuery, intent, anchors)) {
       return 'short_entity';
     }
 

@@ -1,7 +1,12 @@
 # Final Implementation Gaps
 
+> **⚠️ Superseded (2026-06 Entity Lookup V2 cutover).** ResolveUseCase / TA3
+> corrective-retry / shared resolve entrypoint tasks below are historical. Live
+> entity authority: `EntityLookupV2UseCase` + `POST /v2/entity-lookup`. See
+> `tools/feature-catalog/features/retrieval/entity-lookup-v2.yaml`.
+
 > 작성일: 2026-04-11  
-> 상태: 실행 지시서  
+> 상태: 실행 지시서 (historical)  
 > 목적: 현재 코드 기준 **실제 남은 빵구만** 남기고, 중복구현 없이 exact wine retrieval 목표를 닫기 위한 최종 작업 기준을 고정한다.
 
 ---

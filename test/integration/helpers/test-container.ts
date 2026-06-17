@@ -36,10 +36,10 @@ import { DrinkingWindowUseCase } from '../../../src/application/drinking-window/
 import { SearchUseCase } from '../../../src/application/search/search.usecase.js';
 import { DecomposedSearchAdapter } from '../../../src/application/search/decomposed-search-adapter.js';
 import { DecomposedSearchUseCase } from '../../../src/application/search/decomposed-search.usecase.js';
-import { BatchSearchUseCase } from '../../../src/application/search/batch-search.usecase.js';
-import { InterpretUseCase } from '../../../src/application/search/interpret.usecase.js';
-import { buildAutocompleteUseCase } from '../../../src/config/build-autocomplete-usecase.js';
-import { HybridUseCase } from '../../../src/application/search/hybrid.usecase.js';
+import { buildInterpretQueryRunnerForEval } from '../../../src/config/build-interpret-query-runner.js';
+import type { InterpretQueryRunner } from '../../../src/application/search/interpret-query-runner.js';
+import { buildAutocompleteQueryRunnerForEval } from '../../../src/config/build-autocomplete-query-runner.js';
+import type { AutocompleteQueryRunner } from '../../../src/application/search/autocomplete-query-runner.js';
 import { EntityLookupV2UseCase } from '../../../src/application/search/entity-lookup-v2/entity-lookup-v2.usecase.js';
 import { MultiChannelRetrievalEngine } from '../../../src/application/search/entity-lookup-v2/multi-channel-retrieval-engine.js';
 import { RuntimeLookupPlanner } from '../../../src/application/search/entity-lookup-v2/runtime-lookup-planner.js';
@@ -91,8 +91,59 @@ export interface TestFixtureAlias {
   readonly provenance?: InMemoryAliasProvenance;
 }
 
+/** Production `benchmark-anchor:identity_safe_v1` confidence prior. */
+const FIXTURE_DOCUMENT_IDENTITY_SAFE_CONFIDENCE = 0.95;
+
+/** Production `benchmark-anchor:noisy_recall_v1` confidence prior (Latin surfaces). */
+const FIXTURE_DOCUMENT_NOISY_RECALL_CONFIDENCE = 0.68;
+
+function collectDocumentProjectedFixtureAliases(
+  documents: readonly RetrievalDocument[],
+): readonly TestFixtureAlias[] {
+  const projected: TestFixtureAlias[] = [];
+
+  for (const doc of documents) {
+    for (const surfaceForm of doc.aliasesIdentitySafe) {
+      projected.push({
+        surfaceForm,
+        entityId: doc.entityId,
+        confidence: FIXTURE_DOCUMENT_IDENTITY_SAFE_CONFIDENCE,
+        provenance: 'curated',
+      });
+    }
+    for (const surfaceForm of doc.aliasesNoisyRecall) {
+      projected.push({
+        surfaceForm,
+        entityId: doc.entityId,
+        confidence: FIXTURE_DOCUMENT_NOISY_RECALL_CONFIDENCE,
+        provenance: 'curated',
+      });
+    }
+  }
+
+  return projected;
+}
+
+function registerFixtureAliases(
+  aliasMatcher: InMemoryAliasMatcher,
+  aliases: readonly TestFixtureAlias[],
+): void {
+  for (const alias of aliases) {
+    aliasMatcher.addAlias(
+      alias.surfaceForm,
+      alias.entityId,
+      alias.confidence,
+      alias.provenance ?? 'curated',
+    );
+  }
+}
+
 export interface TestContainerParts {
   container: Container;
+  /** Eval/integration-only autocomplete wiring (not on production Container). */
+  readonly autocompleteQueryRunner: AutocompleteQueryRunner;
+  /** Planner-only interpret surface for schema/regression tests (no live HTTP route). */
+  readonly interpretQueryRunner: InterpretQueryRunner;
   ambiguityDict: InMemoryAmbiguityDictionary;
   blockingAdapter: InMemoryBlockingAdapter;
   searchIndex: InMemorySearchIndex;
@@ -236,16 +287,6 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
   // pure curated baseline can pass `fixtureAliases: TEST_ALIASES`.
   const fixtureAliases = options.fixtureAliases ?? TEST_ALIASES_WITH_DERIVED;
   const fixtureDocuments = options.fixtureDocuments ?? TEST_DOCUMENTS;
-  const exactSafeRegistry = buildInMemoryExactSafeRegistry(fixtureAliases);
-
-  for (const alias of fixtureAliases) {
-    aliasMatcher.addAlias(
-      alias.surfaceForm,
-      alias.entityId,
-      alias.confidence,
-      alias.provenance ?? 'curated',
-    );
-  }
 
   const materializedDocuments = fixtureDocuments.map((doc) => {
     const baseDoc = options.stripCachedDrinkingWindow === true
@@ -288,6 +329,17 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
       drinkingWindowModelVersion: options.drinkingWindowModelVersionOverride,
     };
   });
+
+  const documentProjectedAliases = collectDocumentProjectedFixtureAliases(materializedDocuments);
+  registerFixtureAliases(aliasMatcher, fixtureAliases);
+  registerFixtureAliases(aliasMatcher, documentProjectedAliases);
+
+  const exactSafeRegistry = buildInMemoryExactSafeRegistry([
+    ...fixtureAliases,
+    ...documentProjectedAliases.filter(
+      (alias) => alias.confidence >= FIXTURE_DOCUMENT_IDENTITY_SAFE_CONFIDENCE,
+    ),
+  ]);
 
   for (const doc of materializedDocuments) {
     searchIndex.upsertDoc(doc);
@@ -356,8 +408,12 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
     signalComputer,
     scoreAggregator,
     evidenceMapper,
-    options.reranker,
-    options.rerankThreshold,
+    {
+      ...(options.reranker !== undefined ? { reranker: options.reranker } : {}),
+      ...(options.rerankThreshold !== undefined
+        ? { rerankThreshold: options.rerankThreshold }
+        : {}),
+    },
   );
 
   // Domain services — decision, response, mixed, security
@@ -439,35 +495,16 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
   });
 
   decomposedRef.impl = new DecomposedSearchUseCase(searchUseCase);
-  const decomposedSearchUseCase = decomposedRef.impl;
-  const batchSearchUseCase = new BatchSearchUseCase(searchUseCase);
 
-  const interpretUseCase = new InterpretUseCase({
+  const interpretQueryRunner = buildInterpretQueryRunnerForEval({
     queryPlanner,
     querySanitizer,
     injectionJudge,
     judgeTimeoutMs,
   });
-  const autocompleteUseCase = buildAutocompleteUseCase({
+  const autocompleteQueryRunner = buildAutocompleteQueryRunnerForEval({
     entityLookupV2UseCase,
     resolverProjectionLookup,
-  });
-  const hybridUseCase = new HybridUseCase({
-    queryPlanner,
-    candidatePool,
-    browseRetriever,
-    compareRetriever,
-    entityLookupV2UseCase,
-    ranker,
-    decisionEngine,
-    responseBuilder,
-    snapshotVersions,
-    drinkingWindow: drinkingWindowUseCase,
-    querySanitizer,
-    injectionJudge,
-    judgeTimeoutMs,
-    judgeFailureMode: 'fail_closed',
-    decomposedSearch: decomposedSearchUseCase,
   });
 
   const container = {
@@ -478,14 +515,8 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
     responseBuilder,
     mixedSolver,
     searchUseCase,
-    interpretUseCase,
     entityLookupV2UseCase,
-    autocompleteUseCase,
-    hybridUseCase,
-    decomposedSearchUseCase,
-    drinkingWindowUseCase,
     drinkingWindowPredictor,
-    batchSearchUseCase,
     evalRunner: null,
     calibrationStore,
     runtimeReadiness: {} as never,
@@ -493,6 +524,8 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
 
   return {
     container,
+    autocompleteQueryRunner,
+    interpretQueryRunner,
     ambiguityDict,
     blockingAdapter,
     searchIndex,

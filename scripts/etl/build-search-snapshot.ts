@@ -21,7 +21,17 @@ import {
 import { resolveAliasClaimsAndBuildAmbiguityRegistry } from './build-ambiguity-registry.js';
 import { SEARCH_SNAPSHOT_SCHEMA_VERSION } from '../../src/domain/shared/constants/search-snapshot.js';
 import { buildAliasArtifact } from './build-alias-artifact.js';
-import type { SnapshotAliasOverlayProposal } from './build-alias-artifact.js';
+import {
+  applyPublishedSuppressionRules,
+  assertConsumedCurationPinsAlignWithSnapshot,
+  buildCurationPinConvergenceError,
+  CURATION_SNAPSHOT_PIN_MAX_PASSES,
+  formatUnconsumedPublishedProposalIds,
+  hasAdditionalPublishedConsumption,
+  loadPublishedCurationProposals,
+  mergePublishedAmbiguityRows,
+  type PublishedCurationConsumption,
+} from './load-published-curation-proposals.js';
 import {
   loadActiveSourceEntityContinuity,
   loadGoldCanonicalLookupForBuild,
@@ -34,7 +44,6 @@ import type {
   CanonicalEntityId,
   SourceRecordId,
 } from '../../src/domain/shared/types/entity-id.js';
-import { parseAliasType } from '../../src/domain/alias/model/alias.js';
 import {
   SOURCE_SYSTEM_BENCHMARK_ANCHOR_CATALOG,
   SOURCE_SYSTEM_VIVINO_SILVER,
@@ -289,6 +298,7 @@ export interface BuildSearchSnapshotResult {
   readonly manifest: SearchSnapshotManifest;
   readonly snapshotRoot: string;
   readonly manifestPath: string;
+  readonly consumedCuration: PublishedCurationConsumption;
 }
 
 type SnapshotBuildRecord = EnrichedSilverRecord & {
@@ -1407,11 +1417,13 @@ async function buildArtifactsForRecords(args: {
     readonly identitySignature: string;
     readonly benchmarkEntityId?: CanonicalEntityId;
   }>;
+  readonly curationTargetSnapshotId?: string | undefined;
 }): Promise<{
   readonly entityArtifact: readonly EntitySnapshotRecord[];
   readonly resolvedAliases: ReturnType<typeof resolveAliasClaimsAndBuildAmbiguityRegistry>['resolvedAliases'];
   readonly ambiguityRows: ReturnType<typeof resolveAliasClaimsAndBuildAmbiguityRegistry>['ambiguityRows'];
   readonly entityIdBySourceId: ReadonlyMap<SourceRecordId, CanonicalEntityId>;
+  readonly consumedCuration: PublishedCurationConsumption;
 }> {
   const entityArtifact: EntitySnapshotRecord[] = [];
   const entityIdBySourceId = new Map<SourceRecordId, CanonicalEntityId>();
@@ -1464,122 +1476,34 @@ async function buildArtifactsForRecords(args: {
     entityIdBySourceId.set(record.sourceId, runtimeEntityId);
   }
   entityArtifact.sort((left, right) => left.entityId.localeCompare(right.entityId));
-  const approvedAbbreviationOverlay = await loadApprovedAbbreviationAliasOverlay(
-    [...entityIdBySourceId.values()],
-  );
-  const baseAliasArtifact = buildAliasArtifact(
-    args.records,
-    entityIdBySourceId,
-    approvedAbbreviationOverlay,
-  );
+  const snapshotEntityIds = new Set<CanonicalEntityId>([...entityIdBySourceId.values()]);
+  const publishedCuration = await loadPublishedCurationProposals({
+    entityIds: [...snapshotEntityIds],
+    knownEntityIds: snapshotEntityIds,
+    targetSnapshotId: args.curationTargetSnapshotId,
+  });
   const aliasArtifact = buildAliasArtifact(
     args.records,
     entityIdBySourceId,
-    approvedAbbreviationOverlay,
+    publishedCuration.aliasOverlays,
   );
-  const { resolvedAliases, ambiguityRows } = resolveAliasClaimsAndBuildAmbiguityRegistry(aliasArtifact);
-  return { entityArtifact, resolvedAliases, ambiguityRows, entityIdBySourceId };
-}
-
-interface ApprovedAbbreviationAliasProposalRow {
-  readonly surface_form: string;
-  readonly target_entity_id: string;
-  readonly proposed_type: string;
-  readonly evidence: unknown;
-  readonly confidence: number;
-}
-
-function isRecordValue(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function parseApprovedAbbreviationAliasProposal(
-  row: ApprovedAbbreviationAliasProposalRow,
-): { readonly targetEntityId: CanonicalEntityId; readonly proposal: SnapshotAliasOverlayProposal } {
-  const aliasType = parseAliasType(row.proposed_type);
-  if (aliasType !== 'abbreviation') {
-    throw new Error(`Unsupported approved alias proposal type=${JSON.stringify(row.proposed_type)}`);
-  }
-  if (typeof row.surface_form !== 'string' || row.surface_form.length === 0) {
-    throw new Error(`Approved abbreviation proposal is missing surface_form for ${row.target_entity_id}`);
-  }
-  if (!Number.isFinite(row.confidence) || row.confidence <= 0) {
-    throw new Error(`Approved abbreviation proposal has invalid confidence for ${row.target_entity_id}`);
-  }
-  if (!isRecordValue(row.evidence)) {
-    throw new Error(`Approved abbreviation proposal evidence is malformed for ${row.target_entity_id}`);
-  }
-
-  const source = row.evidence['source'];
-  const sourceTrust = row.evidence['sourceTrust'];
-  const aliasScope = row.evidence['aliasScope'];
-  if (
-    typeof source !== 'string'
-    || source.length === 0
-    || typeof aliasScope !== 'string'
-    || aliasScope.length === 0
-    || typeof sourceTrust !== 'number'
-    || !Number.isFinite(sourceTrust)
-  ) {
-    throw new Error(`Approved abbreviation proposal evidence is incomplete for ${row.target_entity_id}`);
-  }
-
+  const { resolvedAliases: conflictResolvedAliases, ambiguityRows: collisionAmbiguityRows } =
+    resolveAliasClaimsAndBuildAmbiguityRegistry(aliasArtifact);
+  const resolvedAliases = applyPublishedSuppressionRules(
+    conflictResolvedAliases,
+    publishedCuration.suppressionRules,
+  );
+  const ambiguityRows = mergePublishedAmbiguityRows(
+    collisionAmbiguityRows,
+    publishedCuration.ambiguityRows,
+  );
   return {
-    targetEntityId: row.target_entity_id as CanonicalEntityId,
-    proposal: {
-      value: row.surface_form,
-      type: aliasType,
-      source,
-      sourceTrust,
-      confidencePrior: row.confidence,
-      scope: aliasScope,
-    },
+    entityArtifact,
+    resolvedAliases,
+    ambiguityRows,
+    entityIdBySourceId,
+    consumedCuration: publishedCuration.consumed,
   };
-}
-
-async function loadApprovedAbbreviationAliasOverlay(
-  entityIds: readonly CanonicalEntityId[],
-): Promise<ReadonlyMap<CanonicalEntityId, readonly SnapshotAliasOverlayProposal[]>> {
-  const uniqueEntityIds = [...new Set(entityIds)];
-  if (uniqueEntityIds.length === 0) {
-    return new Map();
-  }
-  if (process.env['DATABASE_URL'] === undefined && process.env['PG_HOST'] === undefined) {
-    return new Map();
-  }
-
-  const [{ loadConfig }, { createPgPool, shouldUsePgPool }] = await Promise.all([
-    import('../../src/config/env.js'),
-    import('../../src/infrastructure/db/pg-pool.js'),
-  ]);
-  const config = loadConfig();
-  if (!shouldUsePgPool(config.pg)) {
-    return new Map();
-  }
-
-  const pool = createPgPool(config.pg);
-  try {
-    const result = await pool.query<ApprovedAbbreviationAliasProposalRow>(
-      `SELECT surface_form, target_entity_id, proposed_type, evidence, confidence
-         FROM alias_proposals
-        WHERE proposed_type = 'abbreviation'
-          AND status IN ('approved', 'promoted')
-          AND target_entity_id = ANY($1::text[])
-        ORDER BY target_entity_id ASC, confidence DESC, proposal_id ASC`,
-      [uniqueEntityIds],
-    );
-
-    const overlay = new Map<CanonicalEntityId, SnapshotAliasOverlayProposal[]>();
-    for (const row of result.rows) {
-      const parsed = parseApprovedAbbreviationAliasProposal(row);
-      const existing = overlay.get(parsed.targetEntityId) ?? [];
-      existing.push(parsed.proposal);
-      overlay.set(parsed.targetEntityId, existing);
-    }
-    return overlay;
-  } finally {
-    await pool.end();
-  }
 }
 
 
@@ -1613,16 +1537,26 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
   const records = [...baseRecords, ...carryForwardRecords]
     .sort((left, right) => left.sourceId.localeCompare(right.sourceId));
   let finalRecords = records;
-  let {
+  let entityArtifact: readonly EntitySnapshotRecord[];
+  let resolvedAliases: ReturnType<typeof resolveAliasClaimsAndBuildAmbiguityRegistry>['resolvedAliases'];
+  let ambiguityRows: ReturnType<typeof resolveAliasClaimsAndBuildAmbiguityRegistry>['ambiguityRows'];
+  let entityIdBySourceId: ReadonlyMap<SourceRecordId, CanonicalEntityId>;
+  let consumedCuration: PublishedCurationConsumption = {
+    aliasProposalIds: [],
+    ambiguityProposalIds: [],
+    suppressionProposalIds: [],
+  };
+  ({
     entityArtifact,
     resolvedAliases,
     ambiguityRows,
     entityIdBySourceId,
+    consumedCuration,
   } = await buildArtifactsForRecords({
     records: finalRecords,
     goldLookup,
     sourceContinuityLookup,
-  });
+  }));
   const missingBenchmarkCoverage = await findMissingRequiredBenchmarkCoverage({
     fixtureRepoRoot: args.fixtureRepoRoot,
     entities: entityArtifact,
@@ -1642,6 +1576,7 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
       resolvedAliases,
       ambiguityRows,
       entityIdBySourceId,
+      consumedCuration,
     } = await buildArtifactsForRecords({
       records: finalRecords,
       goldLookup,
@@ -1653,17 +1588,49 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     entities: entityArtifact,
   });
   const nlMappings = parseNlMappings(nlMappingsRaw);
-
   const generatedAt = new Date().toISOString();
-  const documentsNdjson = serializeNdjson(finalRecords);
-  const entitiesNdjson = serializeNdjson(entityArtifact);
-  const aliasesNdjson = serializeNdjson(resolvedAliases);
-  const ambiguityNdjson = serializeNdjson(ambiguityRows);
   const nlMappingsCanonical = `${stableJsonStringify(nlMappings.payload)}\n`;
-  const entityArtifactHash = hashStableJson(canonicalizeEntitySnapshotRecords(entityArtifact));
-  const aliasArtifactHash = hashStableJson(canonicalizeAliasSnapshotRecords(resolvedAliases));
-  const ambiguityArtifactHash = hashStableJson(canonicalizeAmbiguitySnapshotRows(ambiguityRows));
-  const snapshotEntityIds = new Set<CanonicalEntityId>([...entityIdBySourceId.values()]);
+
+  let curationTargetSnapshotId: string | undefined;
+  let snapshotId = '';
+  let snapshotRoot = '';
+  let documentsNdjson = '';
+  let entitiesNdjson = '';
+  let aliasesNdjson = '';
+  let ambiguityNdjson = '';
+  let entityArtifactHash = '';
+  let aliasArtifactHash = '';
+  let ambiguityArtifactHash = '';
+  let snapshotEntityIds = new Set<CanonicalEntityId>();
+  let lookupAliasRuntimeArtifact!: ReturnType<typeof buildLookupAliasRuntimeArtifacts>['coreArtifact'];
+  let lookupAliasBroadRecallRuntimeArtifact!: ReturnType<typeof buildLookupAliasRuntimeArtifacts>['broadRecallArtifact'];
+  let lookupExactSafeRuntimeArtifact!: ReturnType<typeof buildLookupExactSafeRuntimeArtifact>;
+  let lookupResolverProjectionArtifact!: ReturnType<typeof buildLookupResolverProjectionArtifact>;
+  let lookupEntityProjectionArtifact!: ReturnType<typeof buildLookupEntityProjectionArtifact>;
+  let lookupSemanticScopeRuntimeArtifact!: ReturnType<typeof buildLookupSemanticScopeRuntimeArtifact>;
+  let lookupReviewedFamilyRecallRuntimeArtifact!: ReturnType<typeof buildLookupReviewedFamilyRecallRuntimeArtifact>;
+  let lookupScopeGraphRuntimeArtifact!: ReturnType<typeof buildLookupScopeGraphRuntimeArtifact>;
+  let lookupAmbiguityRuntimeArtifact!: ReturnType<typeof buildLookupAmbiguityRuntimeArtifact>;
+  let lookupConceptRedirectRuntimeArtifact!: ReturnType<typeof buildLookupConceptRedirectRuntimeArtifact>;
+  let hashes!: {
+    readonly documents: string;
+    readonly vespaFeed: string;
+    readonly entities: string;
+    readonly aliases: string;
+    readonly lookupAliasRuntime: string;
+    readonly lookupAliasBroadRecallRuntime: string;
+    readonly lookupExactSafeRuntime: string;
+    readonly lookupResolverProjection: string;
+    readonly lookupEntityProjection: string;
+    readonly lookupSemanticScopeRuntime: string;
+    readonly lookupReviewedFamilyRecallRuntime: string;
+    readonly lookupScopeGraphRuntime: string;
+    readonly lookupAmbiguityRuntime: string;
+    readonly lookupConceptRedirectRuntime: string;
+    readonly ambiguityRegistry: string;
+    readonly nlMappings: string;
+  };
+
   const lookupExactSafeRegistry =
     args.reviewedRegistryOverrides?.exactSafeRows
     ?? await loadLookupExactSafeRegistry();
@@ -1671,172 +1638,219 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
   const lookupConceptRedirectRegistry = await loadLookupConceptRedirectRegistry();
   const lookupPolicyConflictRegistry = loadLookupPolicyConflictRegistrySync();
   const lookupPolicyFamilyDecisionRegistry = loadLookupV2PolicyFamilyDecisionRegistrySync();
-  assertLookupExactSafeRegistryCompatibleWithBaseAliases({
-    baseAliases: resolvedAliases,
-    registryRows: lookupExactSafeRegistry,
-  });
-  assertLookupExactSafeRegistryVintageConsistency({
-    rows: lookupExactSafeRegistry,
-    entityVintagesById: buildLookupExactSafeEntityVintagesById({
+
+  for (let curationPinPass = 0; curationPinPass < CURATION_SNAPSHOT_PIN_MAX_PASSES; curationPinPass++) {
+    ({
+      entityArtifact,
+      resolvedAliases,
+      ambiguityRows,
+      entityIdBySourceId,
+      consumedCuration,
+    } = await buildArtifactsForRecords({
+      records: finalRecords,
+      goldLookup,
+      sourceContinuityLookup,
+      curationTargetSnapshotId,
+    }));
+
+    documentsNdjson = serializeNdjson(finalRecords);
+    entitiesNdjson = serializeNdjson(entityArtifact);
+    aliasesNdjson = serializeNdjson(resolvedAliases);
+    ambiguityNdjson = serializeNdjson(ambiguityRows);
+    entityArtifactHash = hashStableJson(canonicalizeEntitySnapshotRecords(entityArtifact));
+    aliasArtifactHash = hashStableJson(canonicalizeAliasSnapshotRecords(resolvedAliases));
+    ambiguityArtifactHash = hashStableJson(canonicalizeAmbiguitySnapshotRows(ambiguityRows));
+    snapshotEntityIds = new Set<CanonicalEntityId>([...entityIdBySourceId.values()]);
+    assertLookupExactSafeRegistryCompatibleWithBaseAliases({
+      baseAliases: resolvedAliases,
+      registryRows: lookupExactSafeRegistry,
+    });
+    assertLookupExactSafeRegistryVintageConsistency({
+      rows: lookupExactSafeRegistry,
+      entityVintagesById: buildLookupExactSafeEntityVintagesById({
+        records: finalRecords,
+        entityIdBySourceId,
+      }),
+    });
+    assertLookupAuthorityBoundaryConsistency({
+      exactSafeRows: lookupExactSafeRegistry,
+      ambiguityRows: lookupAmbiguityRegistry,
+      policyConflictRows: lookupPolicyConflictRegistry,
+      policyFamilyDecisionRows: lookupPolicyFamilyDecisionRegistry,
+    });
+    const lookupRuntimeOverlayAliases = buildLookupRuntimeOverlayAliases(
+      lookupExactSafeRegistry,
+      snapshotEntityIds,
+    );
+    const lookupIdentityCertificatesByEntity = buildLookupIdentityCertificatesByEntity(
+      lookupExactSafeRegistry,
+      snapshotEntityIds,
+    );
+
+    ({
+      coreArtifact: lookupAliasRuntimeArtifact,
+      broadRecallArtifact: lookupAliasBroadRecallRuntimeArtifact,
+    } = buildLookupAliasRuntimeArtifacts({
+      snapshotId: '',
+      generatedAt,
+      aliasRegistryHash: aliasArtifactHash,
+      aliases: resolvedAliases,
+      runtimeOverlayAliases: lookupRuntimeOverlayAliases,
+    }));
+    lookupExactSafeRuntimeArtifact = buildLookupExactSafeRuntimeArtifact({
+      snapshotId: '',
+      generatedAt,
+      rows: lookupExactSafeRegistry,
+      snapshotEntityIds,
+    });
+    lookupResolverProjectionArtifact = buildLookupResolverProjectionArtifact({
+      snapshotId: '',
+      generatedAt,
       records: finalRecords,
       entityIdBySourceId,
-    }),
-  });
-  assertLookupAuthorityBoundaryConsistency({
-    exactSafeRows: lookupExactSafeRegistry,
-    ambiguityRows: lookupAmbiguityRegistry,
-    policyConflictRows: lookupPolicyConflictRegistry,
-    policyFamilyDecisionRows: lookupPolicyFamilyDecisionRegistry,
-  });
-  const lookupRuntimeOverlayAliases = buildLookupRuntimeOverlayAliases(
-    lookupExactSafeRegistry,
-    snapshotEntityIds,
-  );
-  const lookupIdentityCertificatesByEntity = buildLookupIdentityCertificatesByEntity(
-    lookupExactSafeRegistry,
-    snapshotEntityIds,
-  );
-
-  const {
-    coreArtifact: lookupAliasRuntimeArtifact,
-    broadRecallArtifact: lookupAliasBroadRecallRuntimeArtifact,
-  } = buildLookupAliasRuntimeArtifacts({
-    snapshotId: '',
-    generatedAt,
-    aliasRegistryHash: aliasArtifactHash,
-    aliases: resolvedAliases,
-    runtimeOverlayAliases: lookupRuntimeOverlayAliases,
-  });
-  const lookupExactSafeRuntimeArtifact = buildLookupExactSafeRuntimeArtifact({
-    snapshotId: '',
-    generatedAt,
-    rows: lookupExactSafeRegistry,
-    snapshotEntityIds,
-  });
-  const lookupResolverProjectionArtifact = buildLookupResolverProjectionArtifact({
-    snapshotId: '',
-    generatedAt,
-    records: finalRecords,
-    entityIdBySourceId,
-    goldCanonicalLookup: goldLookup,
-    sourceContinuityLookup,
-    identityCertificatesByEntity: lookupIdentityCertificatesByEntity,
-  });
-  const lookupReviewedFamilyCoreWitnessRegistry =
-    args.reviewedRegistryOverrides?.familyCoreWitnessRows
-    // Validate witness entity ids against the entities being built in THIS snapshot
-    // — NOT the previously-published runtime. A witness for an entity that IS in the
-    // snapshot under construction (e.g. a freshly backfilled benchmark-anchor vintage)
-    // is valid; validating against the stale runtime would force an impossible two-
-    // publish bootstrap to land any witness that references a newly added entity.
-    ?? loadLookupV2FamilyCoreWitnessRegistrySync(undefined, snapshotEntityIds);
-  const lookupReviewedFamilyCollisionRegistry =
-    args.reviewedRegistryOverrides?.familyCollisionRows
-    ?? loadLookupV2FamilyCollisionRegistrySync();
-  const reviewedFamilyCoreKeysByEntity = buildReviewedFamilyCoreKeysByEntity(
-    lookupReviewedFamilyCoreWitnessRegistry,
-  );
-  const provisionalLookupEntityProjectionArtifact = buildLookupEntityProjectionArtifact({
-    snapshotId: '',
-    generatedAt,
-    records: finalRecords,
-    entityIdBySourceId,
-    goldCanonicalLookup: goldLookup,
-    sourceContinuityLookup,
-    identityCertificatesByEntity: lookupIdentityCertificatesByEntity,
-    reviewedFamilyCoreKeysByEntity,
-  });
-  const reviewedCollisionFamilyCoreKeysByEntity = buildReviewedCollisionFamilyCoreKeysByEntity({
-    documents: provisionalLookupEntityProjectionArtifact.documents,
-    reviewedCollisionRows: lookupReviewedFamilyCollisionRegistry,
-    reviewedFamilyCoreWitnessRows: lookupReviewedFamilyCoreWitnessRegistry,
-  });
-  const mergedReviewedFamilyCoreKeysByEntity = new Map<CanonicalEntityId, readonly string[]>();
-  for (const [entityId, surfaces] of reviewedFamilyCoreKeysByEntity.entries()) {
-    mergedReviewedFamilyCoreKeysByEntity.set(entityId, surfaces);
-  }
-  for (const [entityId, surfaces] of reviewedCollisionFamilyCoreKeysByEntity.entries()) {
-    const existing = mergedReviewedFamilyCoreKeysByEntity.get(entityId as CanonicalEntityId) ?? [];
-    mergedReviewedFamilyCoreKeysByEntity.set(
-      entityId as CanonicalEntityId,
-      [...new Set([...existing, ...surfaces])].sort((left, right) => left.localeCompare(right)),
+      goldCanonicalLookup: goldLookup,
+      sourceContinuityLookup,
+      identityCertificatesByEntity: lookupIdentityCertificatesByEntity,
+    });
+    const lookupReviewedFamilyCoreWitnessRegistry =
+      args.reviewedRegistryOverrides?.familyCoreWitnessRows
+      ?? loadLookupV2FamilyCoreWitnessRegistrySync(undefined, snapshotEntityIds);
+    const lookupReviewedFamilyCollisionRegistry =
+      args.reviewedRegistryOverrides?.familyCollisionRows
+      ?? loadLookupV2FamilyCollisionRegistrySync();
+    const reviewedFamilyCoreKeysByEntity = buildReviewedFamilyCoreKeysByEntity(
+      lookupReviewedFamilyCoreWitnessRegistry,
     );
-  }
-  const lookupEntityProjectionArtifact = buildLookupEntityProjectionArtifact({
-    snapshotId: '',
-    generatedAt,
-    records: finalRecords,
-    entityIdBySourceId,
-    goldCanonicalLookup: goldLookup,
-    sourceContinuityLookup,
-    identityCertificatesByEntity: lookupIdentityCertificatesByEntity,
-    reviewedFamilyCoreKeysByEntity: mergedReviewedFamilyCoreKeysByEntity,
-  });
-  const lookupSemanticRuntimeDescriptorMap = buildLookupV2RuntimeSemanticDescriptorMapFromDocuments(
-    lookupEntityProjectionArtifact.documents,
-  );
-  const lookupSemanticScopeTargetRegistry =
-    args.reviewedRegistryOverrides?.semanticScopeTargetRows
-    ?? loadLookupV2SemanticScopeTargetRegistrySync(
-      undefined,
-      lookupSemanticRuntimeDescriptorMap,
+    const provisionalLookupEntityProjectionArtifact = buildLookupEntityProjectionArtifact({
+      snapshotId: '',
+      generatedAt,
+      records: finalRecords,
+      entityIdBySourceId,
+      goldCanonicalLookup: goldLookup,
+      sourceContinuityLookup,
+      identityCertificatesByEntity: lookupIdentityCertificatesByEntity,
+      reviewedFamilyCoreKeysByEntity,
+    });
+    const reviewedCollisionFamilyCoreKeysByEntity = buildReviewedCollisionFamilyCoreKeysByEntity({
+      documents: provisionalLookupEntityProjectionArtifact.documents,
+      reviewedCollisionRows: lookupReviewedFamilyCollisionRegistry,
+      reviewedFamilyCoreWitnessRows: lookupReviewedFamilyCoreWitnessRegistry,
+    });
+    const mergedReviewedFamilyCoreKeysByEntity = new Map<CanonicalEntityId, readonly string[]>();
+    for (const [entityId, surfaces] of reviewedFamilyCoreKeysByEntity.entries()) {
+      mergedReviewedFamilyCoreKeysByEntity.set(entityId, surfaces);
+    }
+    for (const [entityId, surfaces] of reviewedCollisionFamilyCoreKeysByEntity.entries()) {
+      const existing = mergedReviewedFamilyCoreKeysByEntity.get(entityId as CanonicalEntityId) ?? [];
+      mergedReviewedFamilyCoreKeysByEntity.set(
+        entityId as CanonicalEntityId,
+        [...new Set([...existing, ...surfaces])].sort((left, right) => left.localeCompare(right)),
+      );
+    }
+    lookupEntityProjectionArtifact = buildLookupEntityProjectionArtifact({
+      snapshotId: '',
+      generatedAt,
+      records: finalRecords,
+      entityIdBySourceId,
+      goldCanonicalLookup: goldLookup,
+      sourceContinuityLookup,
+      identityCertificatesByEntity: lookupIdentityCertificatesByEntity,
+      reviewedFamilyCoreKeysByEntity: mergedReviewedFamilyCoreKeysByEntity,
+    });
+    const lookupSemanticRuntimeDescriptorMap = buildLookupV2RuntimeSemanticDescriptorMapFromDocuments(
+      lookupEntityProjectionArtifact.documents,
     );
-  const lookupLocalizedScopeSurfaceRegistry =
-    args.reviewedRegistryOverrides?.localizedScopeSurfaceRows
-    ?? loadLookupV2LocalizedScopeSurfaceRegistrySync();
-  const lookupSemanticScopeRuntimeArtifact = buildLookupSemanticScopeRuntimeArtifact({
-    snapshotId: '',
-    generatedAt,
-    reviewedRows: lookupSemanticScopeTargetRegistry,
-    scopeSurfaceRows: lookupLocalizedScopeSurfaceRegistry,
-  });
-  const lookupReviewedFamilyRecallRuntimeArtifact = buildLookupReviewedFamilyRecallRuntimeArtifact({
-    snapshotId: '',
-    generatedAt,
-    entityProjectionDocuments: lookupEntityProjectionArtifact.documents,
-    reviewedCollisionRows: lookupReviewedFamilyCollisionRegistry,
-    reviewedFamilyCoreWitnessRows: lookupReviewedFamilyCoreWitnessRegistry,
-    localizedScopeSurfaceRows: lookupLocalizedScopeSurfaceRegistry,
-  });
-  const lookupScopeGraphRuntimeArtifact = buildLookupScopeGraphRuntimeArtifact({
-    snapshotId: '',
-    generatedAt,
-    entityProjectionDocuments: lookupEntityProjectionArtifact.documents,
-  });
-  const lookupAmbiguityRuntimeArtifact = buildLookupAmbiguityRuntimeArtifact({
-    snapshotId: '',
-    generatedAt,
-    ambiguityRows,
-    curatedEntries: buildLookupAmbiguityRegistryEntries(lookupAmbiguityRegistry),
-  });
-  const lookupConceptRedirectRuntimeArtifact = buildLookupConceptRedirectRuntimeArtifact({
-    snapshotId: '',
-    generatedAt,
-    entries: buildLookupConceptRedirectRegistryEntries(lookupConceptRedirectRegistry),
-  });
+    const lookupSemanticScopeTargetRegistry =
+      args.reviewedRegistryOverrides?.semanticScopeTargetRows
+      ?? loadLookupV2SemanticScopeTargetRegistrySync(
+        undefined,
+        lookupSemanticRuntimeDescriptorMap,
+      );
+    const lookupLocalizedScopeSurfaceRegistry =
+      args.reviewedRegistryOverrides?.localizedScopeSurfaceRows
+      ?? loadLookupV2LocalizedScopeSurfaceRegistrySync();
+    lookupSemanticScopeRuntimeArtifact = buildLookupSemanticScopeRuntimeArtifact({
+      snapshotId: '',
+      generatedAt,
+      reviewedRows: lookupSemanticScopeTargetRegistry,
+      scopeSurfaceRows: lookupLocalizedScopeSurfaceRegistry,
+    });
+    lookupReviewedFamilyRecallRuntimeArtifact = buildLookupReviewedFamilyRecallRuntimeArtifact({
+      snapshotId: '',
+      generatedAt,
+      entityProjectionDocuments: lookupEntityProjectionArtifact.documents,
+      reviewedCollisionRows: lookupReviewedFamilyCollisionRegistry,
+      reviewedFamilyCoreWitnessRows: lookupReviewedFamilyCoreWitnessRegistry,
+      localizedScopeSurfaceRows: lookupLocalizedScopeSurfaceRegistry,
+    });
+    lookupScopeGraphRuntimeArtifact = buildLookupScopeGraphRuntimeArtifact({
+      snapshotId: '',
+      generatedAt,
+      entityProjectionDocuments: lookupEntityProjectionArtifact.documents,
+    });
+    lookupAmbiguityRuntimeArtifact = buildLookupAmbiguityRuntimeArtifact({
+      snapshotId: '',
+      generatedAt,
+      ambiguityRows,
+      curatedEntries: buildLookupAmbiguityRegistryEntries(lookupAmbiguityRegistry),
+    });
+    lookupConceptRedirectRuntimeArtifact = buildLookupConceptRedirectRuntimeArtifact({
+      snapshotId: '',
+      generatedAt,
+      entries: buildLookupConceptRedirectRegistryEntries(lookupConceptRedirectRegistry),
+    });
 
-  const hashes = {
-    documents: hashText(documentsNdjson),
-    vespaFeed: hashText(''),
-    entities: entityArtifactHash,
-    aliases: aliasArtifactHash,
-    lookupAliasRuntime: buildLookupAliasRuntimeCoreArtifactHash(lookupAliasRuntimeArtifact),
-    lookupAliasBroadRecallRuntime: buildLookupAliasBroadRecallRuntimeArtifactHash(lookupAliasBroadRecallRuntimeArtifact),
-    lookupExactSafeRuntime: buildLookupExactSafeRuntimeArtifactHash(lookupExactSafeRuntimeArtifact),
-    lookupResolverProjection: buildLookupResolverProjectionArtifactHash(lookupResolverProjectionArtifact),
-    lookupEntityProjection: buildLookupEntityProjectionArtifactHash(lookupEntityProjectionArtifact),
-    lookupSemanticScopeRuntime: buildLookupSemanticScopeRuntimeArtifactHash(lookupSemanticScopeRuntimeArtifact),
-    lookupReviewedFamilyRecallRuntime: buildLookupReviewedFamilyRecallRuntimeArtifactHash(lookupReviewedFamilyRecallRuntimeArtifact),
-    lookupScopeGraphRuntime: buildLookupScopeGraphRuntimeArtifactHash(lookupScopeGraphRuntimeArtifact),
-    lookupAmbiguityRuntime: buildLookupAmbiguityRuntimeArtifactHash(lookupAmbiguityRuntimeArtifact),
-    lookupConceptRedirectRuntime: buildLookupConceptRedirectRuntimeArtifactHash(lookupConceptRedirectRuntimeArtifact),
-    ambiguityRegistry: ambiguityArtifactHash,
-    nlMappings: hashText(nlMappingsCanonical),
-  } as const;
+    hashes = {
+      documents: hashText(documentsNdjson),
+      vespaFeed: hashText(''),
+      entities: entityArtifactHash,
+      aliases: aliasArtifactHash,
+      lookupAliasRuntime: buildLookupAliasRuntimeCoreArtifactHash(lookupAliasRuntimeArtifact),
+      lookupAliasBroadRecallRuntime: buildLookupAliasBroadRecallRuntimeArtifactHash(lookupAliasBroadRecallRuntimeArtifact),
+      lookupExactSafeRuntime: buildLookupExactSafeRuntimeArtifactHash(lookupExactSafeRuntimeArtifact),
+      lookupResolverProjection: buildLookupResolverProjectionArtifactHash(lookupResolverProjectionArtifact),
+      lookupEntityProjection: buildLookupEntityProjectionArtifactHash(lookupEntityProjectionArtifact),
+      lookupSemanticScopeRuntime: buildLookupSemanticScopeRuntimeArtifactHash(lookupSemanticScopeRuntimeArtifact),
+      lookupReviewedFamilyRecallRuntime: buildLookupReviewedFamilyRecallRuntimeArtifactHash(lookupReviewedFamilyRecallRuntimeArtifact),
+      lookupScopeGraphRuntime: buildLookupScopeGraphRuntimeArtifactHash(lookupScopeGraphRuntimeArtifact),
+      lookupAmbiguityRuntime: buildLookupAmbiguityRuntimeArtifactHash(lookupAmbiguityRuntimeArtifact),
+      lookupConceptRedirectRuntime: buildLookupConceptRedirectRuntimeArtifactHash(lookupConceptRedirectRuntimeArtifact),
+      ambiguityRegistry: ambiguityArtifactHash,
+      nlMappings: hashText(nlMappingsCanonical),
+    };
+
+    snapshotId = buildSearchSnapshotId(buildSearchSnapshotContentHash(hashes));
+    snapshotRoot = path.join(args.outputDir, snapshotId);
+
+    const pinnedProbe = await loadPublishedCurationProposals({
+      entityIds: [...snapshotEntityIds],
+      knownEntityIds: snapshotEntityIds,
+      targetSnapshotId: snapshotId,
+    });
+    if (!hasAdditionalPublishedConsumption(consumedCuration, pinnedProbe.consumed)) {
+      break;
+    }
+    if (curationPinPass + 1 >= CURATION_SNAPSHOT_PIN_MAX_PASSES) {
+      throw buildCurationPinConvergenceError({
+        snapshotId,
+        passesAttempted: curationPinPass + 1,
+        unconsumedProposalIds: formatUnconsumedPublishedProposalIds(consumedCuration, pinnedProbe.consumed),
+      });
+    }
+    curationTargetSnapshotId = snapshotId;
+  }
+
+  if (snapshotId.length === 0) {
+    throw new Error('Search snapshot build failed: curation pin loop produced no snapshot identity');
+  }
+
+  await assertConsumedCurationPinsAlignWithSnapshot({
+    snapshotId,
+    consumed: consumedCuration,
+  });
 
   const contentHash = buildSearchSnapshotContentHash(hashes);
-  const snapshotId = buildSearchSnapshotId(contentHash);
-  const snapshotRoot = path.join(args.outputDir, snapshotId);
+
   const finalizedLookupAliasRuntimeArtifact = {
     ...lookupAliasRuntimeArtifact,
     snapshotId,
@@ -2077,6 +2091,7 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     manifest,
     snapshotRoot,
     manifestPath: path.join(snapshotRoot, 'manifest.json'),
+    consumedCuration,
   };
 }
 

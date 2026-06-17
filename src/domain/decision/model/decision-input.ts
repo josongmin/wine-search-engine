@@ -259,6 +259,39 @@ export function hasUniqueFuzzyIdentityWitness(
 }
 
 /**
+ * Returns whether the resolver produced a UNIQUE phonetic identity witness
+ * (singleton jamo_phonetic / phonetic_exact recall) safe to treat as a trust
+ * substitute for the calibration trust gate and noisy-short-query guard.
+ *
+ * Symmetric to {@link hasUniqueFuzzyIdentityWitness} but for
+ * `alias_phonetic` exactness — phonetic-only surfaces must not be folded into
+ * the fuzzy tier because downstream policy treats fuzzy and phonetic differently.
+ */
+export function hasUniquePhoneticIdentityWitness(
+  summary: EvidenceSummary | undefined,
+  trace: ResolverDecisionTrace,
+): boolean {
+  const detail = summary?.identityEvidence;
+  if (detail === undefined) {
+    return false;
+  }
+
+  if (!hasWinnerIdentityArtifact(detail)) {
+    return false;
+  }
+
+  if (detail.exactnessTier !== 'alias_phonetic') {
+    return false;
+  }
+
+  if (trace.ambiguityDetected) {
+    return false;
+  }
+
+  return trace.calibratedGap === undefined;
+}
+
+/**
  * Returns whether the evidence summary carries sufficient hard-constraint evidence.
  */
 export function hasConstraintEvidence(summary?: EvidenceSummary): boolean {

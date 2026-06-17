@@ -59,7 +59,7 @@ describe('RFC-014 search response example parity', () => {
     expect(response.engine_decision.decision_snapshot.feature_flags).toEqual({});
   });
 
-  it('keeps the /v1/entity/resolve example aligned with the canonical resolve contract', () => {
+  it('keeps the historical ResolveResponse RFC-014 example aligned with ResolveResponseSchema', () => {
     const rawJson = extractJsonCodeBlock(rfc014, '5.3 Response');
     const parsed = JSON.parse(rawJson) as unknown;
     const response = ResolveResponseSchema.parse(parsed);

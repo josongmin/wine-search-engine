@@ -40,15 +40,10 @@ import { AnchorProfiler } from '../../../../src/domain/mixed/service/anchor-prof
 import { SimilarityScorer } from '../../../../src/domain/mixed/service/similarity-scorer.js';
 import { ConstraintOverlay } from '../../../../src/domain/mixed/service/constraint-overlay.js';
 import { SearchUseCase } from '../../../../src/application/search/search.usecase.js';
-import { DecomposedSearchUseCase } from '../../../../src/application/search/decomposed-search.usecase.js';
-import { BatchSearchUseCase } from '../../../../src/application/search/batch-search.usecase.js';
 import { DrinkingWindowUseCase } from '../../../../src/application/drinking-window/drinking-window.usecase.js';
-import { InterpretUseCase } from '../../../../src/application/search/interpret.usecase.js';
-import { buildAutocompleteUseCase } from '../../../../src/config/build-autocomplete-usecase.js';
 import { EntityLookupV2UseCase } from '../../../../src/application/search/entity-lookup-v2/entity-lookup-v2.usecase.js';
 import { MultiChannelRetrievalEngine } from '../../../../src/application/search/entity-lookup-v2/multi-channel-retrieval-engine.js';
 import { RuntimeLookupPlanner } from '../../../../src/application/search/entity-lookup-v2/runtime-lookup-planner.js';
-import { HybridUseCase } from '../../../../src/application/search/hybrid.usecase.js';
 import { ConceptAdmissionGate } from '../../../../src/domain/resolver/v2/concept-admission-gate.js';
 import type { Container } from '../../../../src/config/container.js';
 import type { SnapshotVersions } from '../../../../src/application/search/search.usecase.js';
@@ -391,34 +386,6 @@ export async function createVespaTestContainer(
     ltrModels,
   });
 
-  const interpretUseCase = new InterpretUseCase({
-    queryPlanner,
-    querySanitizer,
-    injectionJudge,
-    judgeTimeoutMs,
-  });
-  const decomposedSearchUseCase = new DecomposedSearchUseCase(searchUseCase);
-  const autocompleteUseCase = buildAutocompleteUseCase({
-    entityLookupV2UseCase,
-    resolverProjectionLookup,
-  });
-  const hybridUseCase = new HybridUseCase({
-    queryPlanner,
-    candidatePool,
-    entityLookupV2UseCase,
-    ranker,
-    decisionEngine,
-    responseBuilder,
-    snapshotVersions,
-    drinkingWindow: drinkingWindowUseCase,
-    ltrModels,
-    querySanitizer,
-    injectionJudge,
-    judgeTimeoutMs,
-    judgeFailureMode: 'fail_closed',
-    decomposedSearch: decomposedSearchUseCase,
-  });
-  const batchSearchUseCase = new BatchSearchUseCase(searchUseCase);
   const container = {
     queryPlanner,
     candidatePool,
@@ -427,14 +394,8 @@ export async function createVespaTestContainer(
     responseBuilder,
     mixedSolver,
     searchUseCase,
-    interpretUseCase,
     entityLookupV2UseCase,
-    autocompleteUseCase,
-    hybridUseCase,
-    decomposedSearchUseCase,
-    drinkingWindowUseCase,
     drinkingWindowPredictor,
-    batchSearchUseCase,
     evalRunner: null,
     calibrationStore,
     runtimeReadiness: {} as never,

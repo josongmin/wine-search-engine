@@ -22,6 +22,7 @@ import type { InMemoryAliasProvenance } from './in-memory-adapters.js';
 export const OPUS_ONE_ID = createEntityId('opus-one-2018');
 export const CHATEAU_MARGAUX_ID = createEntityId('chateau-margaux-2015');
 export const ROMANEE_CONTI_ID = createEntityId('romanee-conti-2019');
+export const ROMANEE_CONTI_2015_ID = createEntityId('romanee-conti-2015');
 export const SASSICAIA_ID = createEntityId('sassicaia-2018');
 export const PENFOLDS_GRANGE_ID = createEntityId('penfolds-grange-2017');
 export const CLOUDY_BAY_ID = createEntityId('cloudy-bay-2022');
@@ -71,6 +72,19 @@ const ROMANEE_CONTI_2019 = {
   style: 'light red',
   priceBand: 'luxury',
   popularityScore: 0.91,
+};
+
+const ROMANEE_CONTI_2015 = {
+  entityId: ROMANEE_CONTI_2015_ID,
+  entityType: 'wine' as const,
+  canonicalLabel: 'Romanée-Conti 2015',
+  region: 'Burgundy',
+  grapes: ['Pinot Noir'],
+  body: 0.6,
+  sweetness: 0.1,
+  style: 'light red',
+  priceBand: 'luxury',
+  popularityScore: 0.90,
 };
 
 const SASSICAIA_2018 = {
@@ -172,6 +186,7 @@ const ALL_TEST_FIXTURES = [
   OPUS_ONE_2018,
   CHATEAU_MARGAUX_2015,
   ROMANEE_CONTI_2019,
+  ROMANEE_CONTI_2015,
   SASSICAIA_2018,
   PENFOLDS_GRANGE_2017,
   CLOUDY_BAY_2022,
@@ -347,20 +362,24 @@ export function toAnchorEntityData(doc: RetrievalDocument): AnchorEntityData {
   };
 }
 
+const TEST_FIXTURE_DEFAULT_STYLE = 'dry red wine';
+
 export function toSimilarityCandidate(doc: RetrievalDocument): SimilarityCandidate {
+  const style = doc.style ?? TEST_FIXTURE_DEFAULT_STYLE;
   return {
     region: doc.region,
     grapes: [...doc.grapes],
     body: doc.body,
     sweetness: doc.sweetness,
-    style: doc.style,
+    style,
     embedding: makeEmbedding(String(doc.entityId)),
   };
 }
 
 export function toCandidateAttributes(doc: RetrievalDocument): Readonly<Record<string, unknown>> {
-  const wineType = doc.wineType ?? inferWineType(doc.style);
-  const color = inferColor(doc.style);
+  const style = doc.style ?? TEST_FIXTURE_DEFAULT_STYLE;
+  const wineType = doc.wineType ?? inferWineType(style);
+  const color = inferColor(style);
   const country = doc.country ?? inferCountry(doc.region);
   const grapePrimary = doc.grapePrimary ?? doc.grapes[0] ?? '';
 
@@ -392,6 +411,7 @@ export function toHybridCandidate(
 ): HybridCandidate {
   const anchorRank = Math.max(1, rank);
   const fusionRrfTotal = Math.max(0.01, 0.25 - (anchorRank - 1) * 0.02);
+  const style = doc.style ?? TEST_FIXTURE_DEFAULT_STYLE;
 
   return {
     entityId: doc.entityId,
@@ -399,7 +419,7 @@ export function toHybridCandidate(
     producer: doc.producer,
     region: doc.region,
     searchTextEn: doc.searchTextEn,
-    grapePrimary: doc.grapePrimary ?? doc.grapes[0],
+    grapePrimary: doc.grapePrimary ?? doc.grapes[0] ?? '',
     vintageYear: doc.vintageYear,
     body: doc.body,
     tannin: doc.tannin,
@@ -413,14 +433,15 @@ export function toHybridCandidate(
     // these, the predicate sees `style=undefined / wineType=undefined`,
     // can't infer red/white, and drops every candidate — emptying the
     // mixed-route fused lane for queries like `마고 비슷한 레드`.
-    style: doc.style,
+    style,
     priceBand: doc.priceBand,
-    wineType: doc.wineType ?? inferWineType(doc.style),
+    wineType: doc.wineType ?? inferWineType(style),
     sparseRank: anchorRank,
     denseRank: anchorRank,
     anchorRank,
     fusionRrfTotal,
     matchedConstraints: [],
+    identityExactnessTier: 'none',
     retrievalTrace: {
       retrievalProfile,
       lexicalQueriesUsed: [],
@@ -465,10 +486,18 @@ export const TEST_ALIASES: readonly TestAlias[] = [
   { surfaceForm: '샤토 마고', entityId: CHATEAU_MARGAUX_ID, confidence: 0.95 },
   { surfaceForm: '마고 샤또', entityId: CHATEAU_MARGAUX_ID, confidence: 0.93 },  // token-order variant
 
-  // Romanée-Conti
+  // Romanée-Conti 2015 (benchmark phonetic / vintage-partial alignment)
+  { surfaceForm: 'Romanée-Conti 2015', entityId: ROMANEE_CONTI_2015_ID, confidence: 1.0 },
+  { surfaceForm: 'romanee conti', entityId: ROMANEE_CONTI_2015_ID, confidence: 0.94 },
+  { surfaceForm: 'romane conti', entityId: ROMANEE_CONTI_2015_ID, confidence: 0.90 },
+  { surfaceForm: 'romanee contie', entityId: ROMANEE_CONTI_2015_ID, confidence: 0.88 },
+  { surfaceForm: 'conti burgundy', entityId: ROMANEE_CONTI_2015_ID, confidence: 0.86 },
+  { surfaceForm: 'DRC 2015', entityId: ROMANEE_CONTI_2015_ID, confidence: 0.88 },
+
+  // Romanée-Conti 2019
   { surfaceForm: 'Romanée-Conti 2019', entityId: ROMANEE_CONTI_ID, confidence: 1.0 },
+  { surfaceForm: 'Romanée-Conti', entityId: ROMANEE_CONTI_ID, confidence: 0.95 },
   { surfaceForm: 'DRC', entityId: ROMANEE_CONTI_ID, confidence: 0.88 },
-  { surfaceForm: 'romanee conti', entityId: ROMANEE_CONTI_ID, confidence: 0.94 },
   { surfaceForm: 'romanee', entityId: ROMANEE_CONTI_ID, confidence: 0.89 },
 
   // Sassicaia
@@ -490,18 +519,22 @@ export const TEST_ALIASES: readonly TestAlias[] = [
   // Moët Brut
   { surfaceForm: "Moët & Chandon Brut Impérial", entityId: MOET_BRUT_ID, confidence: 1.0 },
   { surfaceForm: 'Moet Brut', entityId: MOET_BRUT_ID, confidence: 0.94 },
+  { surfaceForm: 'moet imperial brut', entityId: MOET_BRUT_ID, confidence: 0.92 },
   { surfaceForm: '모에 샹동', entityId: MOET_BRUT_ID, confidence: 0.92 },
   { surfaceForm: '모엣', entityId: MOET_BRUT_ID, confidence: 0.88 },
 
   // Sauternes
   { surfaceForm: "Château d'Yquem Sauternes 2015", entityId: SAUTERNES_ID, confidence: 1.0 },
   { surfaceForm: "Château d'Yquem", entityId: SAUTERNES_ID, confidence: 0.95 },
+  { surfaceForm: 'Yquem 2015', entityId: SAUTERNES_ID, confidence: 0.93 },
+  { surfaceForm: 'yquem', entityId: SAUTERNES_ID, confidence: 0.88 },
   { surfaceForm: '이켐', entityId: SAUTERNES_ID, confidence: 0.90 },
 
   // Barolo
   { surfaceForm: 'Giacomo Conterno Barolo Monfortino', entityId: BAROLO_GIACOMO_ID, confidence: 1.0 },
   { surfaceForm: 'Barolo Monfortino', entityId: BAROLO_GIACOMO_ID, confidence: 0.94 },
   { surfaceForm: '바롤로 자코모', entityId: BAROLO_GIACOMO_ID, confidence: 0.90 },
+  { surfaceForm: '자코모', entityId: BAROLO_GIACOMO_ID, confidence: 0.86 },
 
   // Masi Amarone
   { surfaceForm: 'Masi Amarone della Valpolicella Classico', entityId: MASI_AMARONE_ID, confidence: 1.0 },
@@ -579,7 +612,7 @@ export const TEST_DOCUMENTS: readonly RetrievalDocument[] = [
     entityType: 'wine',
     canonicalLabel: 'Romanée-Conti 2019',
     aliasesIdentitySafe: ['Romanée-Conti 2019', 'romanee-conti 2019', 'Romanée-Conti', 'romanee-conti'],
-    aliasesNoisyRecall: ['DRC', '로마네꽁티', 'romanee conti', 'romanee'],
+    aliasesNoisyRecall: ['DRC', '로마네꽁티', 'romanee'],
     producer: 'Domaine de la Romanée-Conti',
     region: 'Burgundy',
     country: 'France',
@@ -603,6 +636,48 @@ export const TEST_DOCUMENTS: readonly RetrievalDocument[] = [
     beginnerSuitabilityScore: 0.48,
     availability: false,
     popularityScore: 0.91,
+  },
+  {
+    entityId: ROMANEE_CONTI_2015_ID,
+    entityType: 'wine',
+    canonicalLabel: 'Romanée-Conti 2015',
+    aliasesIdentitySafe: [
+      'Romanée-Conti 2015',
+      'romanee-conti 2015',
+      'Romanée-Conti',
+      'romanee-conti',
+    ],
+    aliasesNoisyRecall: [
+      'DRC',
+      'romanee conti',
+      'romane conti',
+      'romanee contie',
+      'conti burgundy',
+      'RC 2015',
+    ],
+    producer: 'Domaine de la Romanée-Conti',
+    region: 'Burgundy',
+    country: 'France',
+    appellation: 'Romanée-Conti',
+    grapes: ['Pinot Noir'],
+    grapePrimary: 'Pinot Noir',
+    wineType: 'red',
+    searchTextKo: '로마네 콩티 2015 부르고뉴 피노누아 라이트바디 레드 와인',
+    searchTextEn: 'Romanée-Conti 2015 Burgundy Pinot Noir light body red wine DRC',
+    semanticSummary:
+      'Romanée-Conti 2015 is a legendary Burgundy Pinot Noir from the world\'s most prestigious vineyard.',
+    body: 0.6,
+    tannin: 0.32,
+    acidity: 0.64,
+    sweetness: 0.1,
+    style: 'light red',
+    priceBand: 'luxury',
+    pairing: ['duck', 'game', 'truffle'],
+    occasion: ['once in a lifetime', 'investment'],
+    giftSuitabilityScore: 0.3,
+    beginnerSuitabilityScore: 0.48,
+    availability: false,
+    popularityScore: 0.90,
   },
   {
     entityId: SASSICAIA_ID,
@@ -698,8 +773,17 @@ export const TEST_DOCUMENTS: readonly RetrievalDocument[] = [
     entityId: MOET_BRUT_ID,
     entityType: 'wine',
     canonicalLabel: 'Moët & Chandon Brut Impérial',
-    aliasesIdentitySafe: ["Moët & Chandon Brut Impérial", 'moet & chandon brut imperial', 'Moet Brut', 'moet brut', '모에 샹동'],
-    aliasesNoisyRecall: ['모엣', 'moet chandon', '스파클링'],
+    aliasesIdentitySafe: [
+      "Moët & Chandon Brut Impérial",
+      'moet & chandon brut imperial',
+      'Moët Imperial Brut',
+      'moet imperial brut',
+      'moët imperial brut',
+      'Moet Brut',
+      'moet brut',
+      '모에 샹동',
+    ],
+    aliasesNoisyRecall: ['모엣', 'moet chandon', 'moet shandon', '스파클링'],
     producer: 'Moët & Chandon',
     region: 'Champagne',
     country: 'France',
@@ -729,7 +813,16 @@ export const TEST_DOCUMENTS: readonly RetrievalDocument[] = [
     entityType: 'wine',
     canonicalLabel: "Château d'Yquem Sauternes 2015",
     aliasesIdentitySafe: ["Château d'Yquem Sauternes 2015", "chateau d'yquem 2015", "Château d'Yquem", "chateau d'yquem", '이켐'],
-    aliasesNoisyRecall: ["d'Yquem", 'yquem sauternes', '달달한 와인', '디저트 와인'],
+    aliasesNoisyRecall: [
+      "d'Yquem",
+      'Yquem 2015',
+      'yquem 2015',
+      'Yquem',
+      'yquem',
+      'yquem sauternes',
+      '달달한 와인',
+      '디저트 와인',
+    ],
     producer: "Château d'Yquem",
     region: 'Bordeaux',
     country: 'France',
@@ -759,7 +852,7 @@ export const TEST_DOCUMENTS: readonly RetrievalDocument[] = [
     entityType: 'wine',
     canonicalLabel: 'Giacomo Conterno Barolo Monfortino',
     aliasesIdentitySafe: ['Giacomo Conterno Barolo Monfortino', 'barolo monfortino', '바롤로 자코모'],
-    aliasesNoisyRecall: ['Barolo Giacomo', 'barolo monfortino conterno'],
+    aliasesNoisyRecall: ['Barolo Giacomo', 'barolo monfortino conterno', '자코모'],
     producer: 'Giacomo Conterno',
     region: 'Piedmont',
     country: 'Italy',

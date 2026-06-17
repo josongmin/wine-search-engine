@@ -23,6 +23,7 @@ import {
   isPhoneticLookupStrategy,
 } from '../../domain/query/service/lookup-strategy-taxonomy.js';
 import { buildResolverCandidateAttributeHints } from './search-usecase-entity-attribute-projection.js';
+import { FUZZY_EDIT_DISTANCE_CONFIDENCE_FACTOR } from '../../domain/resolver/model/fuzzy-match-confidence.js';
 
 type ResolverProjectionLike =
   Pick<LookupResolverProjection, 'entityId' | 'entityType' | 'canonicalLabel' | 'aliasesIdentitySafe'>
@@ -43,7 +44,7 @@ function adaptRetrievalDocumentToResolverProjection(
     entityType: doc.entityType,
     canonicalLabel: doc.canonicalLabel,
     aliasesIdentitySafe: doc.aliasesIdentitySafe,
-    ...(doc.producer !== undefined ? { producer: doc.producer } : {}),
+    producer: doc.producer,
     ...(attributeHints !== undefined ? { attributeHints } : {}),
     ...(doc.sourceRecordRefs !== undefined && doc.sourceRecordRefs.length > 0
       ? { sourceRecordRefs: doc.sourceRecordRefs }
@@ -61,7 +62,7 @@ function mergeResolverProjectionLike(
   return {
     ...base,
     ...overlay,
-    aliasesIdentitySafe: overlay.aliasesIdentitySafe ?? base.aliasesIdentitySafe,
+    aliasesIdentitySafe: overlay.aliasesIdentitySafe,
     identitySafeKeys: overlay.identitySafeKeys ?? base.identitySafeKeys,
     identityCertificates: overlay.identityCertificates ?? base.identityCertificates,
     producer: overlay.producer ?? base.producer,
@@ -84,12 +85,6 @@ const ZERO_SIGNALS: MatchSignalSet = {
   editDistanceScore: 0,
   ambiguityPenalty: 0,
 };
-
-/** Down-weights fuzzy edit-distance matches by 20% relative to exact alias
- *  confidence. Rationale: edit-distance matches have higher false-positive
- *  rate (e.g. "Barolo" vs "Barossa"), so the confidence discount reflects
- *  the additional ambiguity inherent in fuzzy matching. */
-const FUZZY_EDIT_DISTANCE_CONFIDENCE_FACTOR = 0.8;
 
 function normalizeIdentitySurface(value: string): string {
   return value
@@ -247,7 +242,7 @@ function collectCertificateNormalizedKeys(
     views.vintageCanonicalized,
     views.vintageStripped,
     views.transliterated,
-    ...(views.lookupVariants ?? []),
+    ...views.lookupVariants,
   ];
   const keys = new Set<string>();
   for (const surface of surfaces) {

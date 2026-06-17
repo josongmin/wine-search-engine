@@ -30,8 +30,7 @@ import { KNOWN_AGENT_TOOL_NAMES } from '@domain/agent/model/agent-tool-attempt-s
 import { AGENT_DIRECTIVE_COPY } from '@domain/agent/copy/directive-copy.js';
 import type { SearchUseCasePort } from './execution-runner.js';
 import type { SearchUseCaseInput } from './execution-plan-schemas.js';
-import type { DecomposedSearchUseCasePort, EntityLookupV2UseCasePort } from '../search/port/search-route-usecases.port.js';
-import type { DrinkingWindowUseCasePort } from '../drinking-window/port/drinking-window-usecase.port.js';
+import type { EntityLookupV2UseCasePort } from '../search/port/search-route-usecases.port.js';
 import type { WineSearchAnalysis } from './wine-search-schemas.js';
 
 // ---------------------------------------------------------------------------
@@ -219,8 +218,6 @@ export interface WineAgentLoopToolPorts {
    * reserved for discovery + `similar_to_entity` only.
    */
   readonly lookupWine: EntityLookupV2UseCasePort;
-  readonly decomposedSearchUseCase?: DecomposedSearchUseCasePort | undefined;
-  readonly drinkingWindowUseCase?: DrinkingWindowUseCasePort | undefined;
 }
 
 // ---------------------------------------------------------------------------

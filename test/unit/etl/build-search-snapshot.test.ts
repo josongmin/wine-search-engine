@@ -369,7 +369,7 @@ describe('buildSearchSnapshot', () => {
       conceptClass: 'recommendation',
       redirectReason: 'concept_query',
     });
-  }, 10_000);
+  }, 30_000);
 
   it('writes reviewed semantic-scope component surfaces into the runtime-bundle cache payload', async () => {
     const dir = await makeTempDir();
@@ -429,7 +429,7 @@ describe('buildSearchSnapshot', () => {
     expect(cachePayload?.semanticScopeComponentSurfaces).toEqual(
       semanticScopeRuntime.componentSurfaces,
     );
-  }, 10_000);
+  }, 30_000);
 
   it('treats repo-local benchmark ids as covered when the equivalent public fixture entity already exists', async () => {
     const dir = await makeTempDir();

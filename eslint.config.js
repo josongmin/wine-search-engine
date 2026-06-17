@@ -20,6 +20,7 @@ export default tseslint.config(
       'eslint.config.js',
       '.claude/**',
       'web/**',
+      'app/entity-lookup-ops-web/**',
       'debug-vespa-fields.ts',
       '**/*.mjs',
     ],

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ErrorResponseSchema } from '../../../../src/interface/http/schemas/search-response.schema.js';
 import {
+  EntityLookupV2RouteContract,
   HybridSearchRouteContract,
   LexicalSearchRouteContract,
   SemanticSearchRouteContract,
@@ -20,6 +21,12 @@ describe('public query route contracts', () => {
     expect(HybridSearchRouteContract.responses[408]).toBe(ErrorResponseSchema);
     expect(SemanticSearchRouteContract.responses[408]).toBe(ErrorResponseSchema);
     expect(LexicalSearchRouteContract.responses[408]).toBe(ErrorResponseSchema);
+  });
+
+  it('declares RFC-014 error responses for the canonical public entity lookup surface', () => {
+    expect(EntityLookupV2RouteContract.responses[403]).toBe(ErrorResponseSchema);
+    expect(EntityLookupV2RouteContract.responses[408]).toBe(ErrorResponseSchema);
+    expect(EntityLookupV2RouteContract.responses[400]).toBe(ErrorResponseSchema);
   });
 
   it('pins the canonical query capability matrix in route contract metadata', () => {

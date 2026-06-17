@@ -4,6 +4,7 @@ import type {
   LookupScopeGraphRelationKind,
 } from '../../domain/resolver/v2/entity-scope-graph.port.js';
 import type { LookupSemanticEntityDescriptor } from '../../domain/resolver/v2/lookup-semantic-scope.js';
+import { countScopeGraphEdgesByRelation } from '../../domain/resolver/v2/scope-graph-substrate.js';
 
 export class SearchSnapshotEntityScopeGraph implements EntityScopeGraphPort {
   constructor(
@@ -38,5 +39,9 @@ export class SearchSnapshotEntityScopeGraph implements EntityScopeGraphPort {
     entityId: string,
   ): LookupSemanticEntityDescriptor | undefined {
     return this.descriptors.get(entityId);
+  }
+
+  countEdgesByRelation(relationKind: LookupScopeGraphRelationKind): number {
+    return countScopeGraphEdgesByRelation(this.adjacency, relationKind);
   }
 }

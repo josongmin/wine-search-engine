@@ -1,39 +1,22 @@
 import { SearchUseCase } from '../application/search/search.usecase.js';
 import type { MultiQueryGenerator } from '../domain/retrieval/service/multi-query-generator.js';
 import type { HydeGenerator } from '../domain/retrieval/service/hyde-generator.js';
-import { InterpretUseCase } from '../application/search/interpret.usecase.js';
 import { CurationUseCase } from '../application/curation/curation.usecase.js';
 import { PgCurationStore } from '../infrastructure/curation/pg-curation-store.js';
-import { HybridUseCase } from '../application/search/hybrid.usecase.js';
 import { DecomposedSearchUseCase } from '../application/search/decomposed-search.usecase.js';
 import { DecomposedSearchAdapter } from '../application/search/decomposed-search-adapter.js';
 import { DrinkingWindowUseCase } from '../application/drinking-window/drinking-window.usecase.js';
-import { BatchSearchUseCase } from '../application/search/batch-search.usecase.js';
 import { getQueryEntrySecurityMetricsCollector } from '../infrastructure/observability/query-entry-security-metrics.js';
-import type {
-  DrinkingWindowUseCasePort,
-} from '../application/drinking-window/port/drinking-window-usecase.port.js';
 import type { SearchExecutorPort } from '../application/search/port/search-executor.port.js';
-import type {
-  BatchSearchUseCasePort,
-  DecomposedSearchUseCasePort,
-  EntityLookupV2UseCasePort,
-  HybridUseCasePort,
-  InterpretUseCasePort,
-} from '../application/search/port/search-route-usecases.port.js';
+import type { EntityLookupV2UseCasePort } from '../application/search/port/search-route-usecases.port.js';
 import type { LookupResolverProjectionPort } from '../application/search/port/search-pipeline-deps.port.js';
 import type { CoreContainerServices } from './container-core.js';
 import type { Config } from './env.js';
 
 export interface UseCaseContainerServices {
   readonly searchUseCase: SearchExecutorPort;
-  readonly interpretUseCase: InterpretUseCasePort;
   /** Operator curation plane (T-ELV2-07); present only when a PG pool is wired. */
   readonly curationUseCase?: CurationUseCase | undefined;
-  readonly hybridUseCase: HybridUseCasePort;
-  readonly decomposedSearchUseCase: DecomposedSearchUseCasePort;
-  readonly drinkingWindowUseCase: DrinkingWindowUseCasePort;
-  readonly batchSearchUseCase: BatchSearchUseCasePort;
 }
 
 /**
@@ -107,7 +90,7 @@ export function buildUseCaseContainerServices(
   });
 
   decomposedRef.impl = new DecomposedSearchUseCase(searchUseCase);
-  const decomposedSearchUseCase = decomposedRef.impl;
+
   // T-ELV2-07: operator curation plane. DB-only — wired solely when a PG pool
   // exists (snapshot/in-memory modes leave it undefined and the ops routes are
   // not registered).
@@ -118,38 +101,5 @@ export function buildUseCaseContainerServices(
   return {
     searchUseCase,
     ...(curationUseCase !== undefined ? { curationUseCase } : {}),
-    interpretUseCase: new InterpretUseCase({
-      queryPlanner: core.queryPlanner,
-      querySanitizer: core.querySanitizer,
-      injectionJudge: core.injectionJudge,
-      judgeFailureMode: config.queryEntrySecurity.judgeFailureMode,
-      judgeTimeoutMs: config.queryEntrySecurity.judgeTimeoutMs,
-      queryEntrySecurityObserver,
-    }),
-    hybridUseCase: new HybridUseCase({
-      queryPlanner: core.queryPlanner,
-      candidatePool: core.candidatePool,
-      browseRetriever: core.browseRetriever,
-      compareRetriever: core.compareRetriever,
-      entityLookupV2UseCase,
-      ranker: core.ranker,
-      decisionEngine: core.decisionEngine,
-      responseBuilder: core.responseBuilder,
-      snapshotVersions: core.snapshotVersions,
-      drinkingWindow: drinkingWindowUseCase,
-      querySanitizer: core.querySanitizer,
-      injectionJudge: core.injectionJudge,
-      judgeFailureMode: config.queryEntrySecurity.judgeFailureMode,
-      judgeTimeoutMs: config.queryEntrySecurity.judgeTimeoutMs,
-      queryEntrySecurityObserver,
-      fieldAvailability: core.fieldAvailability,
-      cacheService: core.cacheService,
-      cacheLookupRuntimeState: core.cacheLookupRuntimeState,
-      cacheLookupRuntimeStateProvider: core.cacheLookupRuntimeStateProvider,
-      decomposedSearch: decomposedAdapter,
-    }),
-    decomposedSearchUseCase,
-    drinkingWindowUseCase,
-    batchSearchUseCase: new BatchSearchUseCase(searchUseCase),
   };
 }

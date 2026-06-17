@@ -76,6 +76,15 @@ export interface CoverageHealth {
   readonly queue_by_status: { pending: number; approved: number; rejected: number; published: number };
   readonly queue_by_kind: { alias: number; ambiguity: number; suppression: number };
   readonly total_proposals: number;
+  readonly published_awaiting_materialization: number;
+  readonly legacy_approved_abbreviation_backlog: number;
+  readonly lookup_runtime?: {
+    readonly search_snapshot_id?: string;
+    readonly family_graph_edge_count: number;
+    readonly ltr_support_status: 'unsupported';
+    readonly ltr_support_reason: 'lookup_domain_model_absent';
+    readonly unwired_substrate_ids: readonly string[];
+  };
 }
 export function coverageHealth(): Promise<CoverageHealth> {
   return postOps<CoverageHealth>('/v2/entity-lookup/ops/coverage-health', {});
@@ -84,9 +93,12 @@ export function coverageHealth(): Promise<CoverageHealth> {
 export interface Proposal {
   readonly proposal_id: string;
   readonly status: string;
-  readonly kind: string;
+  readonly kind: 'alias' | 'ambiguity' | 'suppression';
   readonly surface_form?: string;
   readonly target_entity_id?: string;
+  readonly normalized_form?: string;
+  readonly member_entity_ids?: readonly string[];
+  readonly reason?: string;
   readonly proposed_type?: string;
   readonly confidence?: number;
   readonly proposed_by?: string;
@@ -98,14 +110,14 @@ export async function listProposals(filter: { status?: string; kind?: string; li
   return r.proposals ?? [];
 }
 
-const ALIAS_TYPES = ['canonical', 'translation', 'phonetic', 'misspelling', 'observed_query_alias'] as const;
+const ALIAS_TYPES = ['misspelling', 'abbreviation', 'translation', 'phonetic', 'observed_query_alias'] as const;
 export type AliasType = (typeof ALIAS_TYPES)[number];
 export const ALIAS_TYPE_OPTIONS: { value: AliasType; label: string }[] = [
   { value: 'observed_query_alias', label: '손님이 실제로 친 검색어' },
   { value: 'phonetic', label: '소리나는 대로(음역)' },
   { value: 'translation', label: '번역/한글 표기' },
   { value: 'misspelling', label: '오타/변형' },
-  { value: 'canonical', label: '정식 명칭' },
+  { value: 'abbreviation', label: '약어/줄임(예: DRC)' },
 ];
 
 export function submitAliasProposal(input: {
@@ -127,9 +139,47 @@ export function submitAliasProposal(input: {
   }, true);
 }
 
-export function reviewProposal(proposalId: string, decision: 'approve' | 'reject', reason: string, by = 'ops-web'): Promise<Proposal> {
+export function submitAmbiguityProposal(input: {
+  normalized_form: string;
+  member_entity_ids: readonly string[];
+  evidence?: Record<string, unknown>;
+  proposed_by?: string;
+}): Promise<Proposal> {
+  return postOps<Proposal>('/v2/entity-lookup/ops/proposals/submit', {
+    kind: 'ambiguity',
+    normalized_form: input.normalized_form,
+    member_entity_ids: input.member_entity_ids,
+    evidence: input.evidence ?? { source: 'entity-lookup-ops-web' },
+    proposed_by: input.proposed_by ?? 'ops-web',
+  }, true);
+}
+
+export function submitSuppressionProposal(input: {
+  surface_form: string;
+  reason: string;
+  target_entity_id?: string;
+  evidence?: Record<string, unknown>;
+  proposed_by?: string;
+}): Promise<Proposal> {
+  return postOps<Proposal>('/v2/entity-lookup/ops/proposals/submit', {
+    kind: 'suppression',
+    surface_form: input.surface_form,
+    reason: input.reason,
+    ...(input.target_entity_id !== undefined ? { target_entity_id: input.target_entity_id } : {}),
+    evidence: input.evidence ?? { source: 'entity-lookup-ops-web' },
+    proposed_by: input.proposed_by ?? 'ops-web',
+  }, true);
+}
+
+export function reviewProposal(
+  proposalId: string,
+  kind: Proposal['kind'],
+  decision: 'approve' | 'reject',
+  reason: string,
+  by = 'ops-web',
+): Promise<Proposal> {
   return postOps<Proposal>('/v2/entity-lookup/ops/proposals/review', {
-    kind: 'alias',
+    kind,
     proposal_id: proposalId,
     decision,
     reviewed_by: by,
@@ -137,9 +187,9 @@ export function reviewProposal(proposalId: string, decision: 'approve' | 'reject
   }, true);
 }
 
-export function publishProposal(proposalId: string, by = 'ops-web'): Promise<Proposal> {
+export function publishProposal(proposalId: string, kind: Proposal['kind'], by = 'ops-web'): Promise<Proposal> {
   return postOps<Proposal>('/v2/entity-lookup/ops/proposals/publish', {
-    kind: 'alias',
+    kind,
     proposal_id: proposalId,
     reviewed_by: by,
   }, true);

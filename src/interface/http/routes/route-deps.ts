@@ -3,6 +3,7 @@ import type { EntityLookupV2UseCasePort } from '../../../application/search/port
 import type { EvalRunnerContract } from '../../../config/container-eval-contracts.js';
 import type { WineSearchContainerServices } from '../../../config/container.js';
 import type { CurationUseCase } from '../../../application/curation/curation.usecase.js';
+import type { LookupOpsRuntimeHealthView } from '../../../config/lookup-authority.js';
 
 export interface SearchRouteDeps {
   readonly searchUseCase: SearchExecutorPort;
@@ -11,6 +12,7 @@ export interface SearchRouteDeps {
 /** Dependencies for the operator curation plane routes (T-ELV2-07). */
 export interface CurationOpsRouteDeps {
   readonly curationUseCase: CurationUseCase;
+  readonly lookupOpsRuntime?: LookupOpsRuntimeHealthView | undefined;
 }
 
 /** Dependencies for `POST /v2/entity-lookup` and ops inspect routes. */
@@ -27,6 +29,8 @@ export interface HttpServerDeps
    * routes are registered.
    */
   readonly curationUseCase?: CurationUseCase | undefined;
+  /** Lookup runtime substrate snapshot for ops coverage-health (when wired). */
+  readonly lookupOpsRuntime?: LookupOpsRuntimeHealthView | undefined;
   /** Agentic orchestrator — present when AGENT_ENABLED=true and ChatLlmPort is available. */
   /**
    * Plan-then-Execute wine-search slice — present when

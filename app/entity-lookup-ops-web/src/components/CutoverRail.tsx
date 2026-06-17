@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Card, Stat, Bars, Copy, Intro } from './ui';
 import { RAILS } from '../lib/rails';
 import { koReason } from '../lib/labels';
-import { backendReachable, coverageHealth } from '../lib/api';
+import { backendReachable, coverageHealth, type CoverageHealth } from '../lib/api';
 import type { Dataset, ResidueItem } from '../types';
 
 export function CutoverRail({ ds, residue }: { ds: Dataset; residue: readonly ResidueItem[] }) {
@@ -10,9 +10,19 @@ export function CutoverRail({ ds, residue }: { ds: Dataset; residue: readonly Re
   const op = ds.writePlane?.operationalResidue;
   const pct = cov ? Math.round(cov.coverageRate * 1000) / 10 : 0;
   const [pending, setPending] = useState<number | null>(null);
+  const [awaitingMaterialization, setAwaitingMaterialization] = useState<number | null>(null);
+  const [legacyAbbrevBacklog, setLegacyAbbrevBacklog] = useState<number | null>(null);
+  const [lookupRuntime, setLookupRuntime] = useState<CoverageHealth['lookup_runtime'] | null>(null);
   useEffect(() => {
     void backendReachable().then((l) => {
-      if (l) void coverageHealth().then((h) => setPending(h.queue_by_status.pending)).catch(() => undefined);
+      if (l) {
+        void coverageHealth().then((h) => {
+          setPending(h.queue_by_status.pending);
+          setAwaitingMaterialization(h.published_awaiting_materialization);
+          setLegacyAbbrevBacklog(h.legacy_approved_abbreviation_backlog);
+          setLookupRuntime(h.lookup_runtime ?? null);
+        }).catch(() => undefined);
+      }
     });
   }, []);
   const buckets = (Object.entries(cov?.bucketCounts ?? {}).sort((a, b) => b[1] - a[1]) as [string, number][]).map(
@@ -71,6 +81,33 @@ export function CutoverRail({ ds, residue }: { ds: Dataset; residue: readonly Re
         <button className="btn cta" onClick={() => { window.location.hash = '#/authority'; }}>
           ✏️ 저장한 결정 {pending}건이 발행 대기 중 — 처리하러 가기 →
         </button>
+      )}
+
+      {awaitingMaterialization != null && awaitingMaterialization > 0 && (
+        <button className="btn cta" onClick={() => { window.location.hash = '#/authority'; }}>
+          📦 발행됐지만 검색 반영 대기 {awaitingMaterialization}건 — 스냅샷 배포 필요
+        </button>
+      )}
+
+      {legacyAbbrevBacklog != null && legacyAbbrevBacklog > 0 && (
+        <button className="btn cta" onClick={() => { window.location.hash = '#/authority'; }}>
+          🔤 legacy approved 약어 {legacyAbbrevBacklog}건 — publish 후 스냅샷 재배포 필요
+        </button>
+      )}
+
+      {lookupRuntime != null && lookupRuntime.family_graph_edge_count === 0 && (
+        <button className="btn cta" type="button">
+          🕸 family graph edge 0 — family_graph 채널 dormant (스냅샷 scope graph 확인)
+        </button>
+      )}
+
+      {lookupRuntime != null && lookupRuntime.unwired_substrate_ids.length > 0 && (
+        <p className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>
+          미배선 substrate: {lookupRuntime.unwired_substrate_ids.join(', ')}
+          {lookupRuntime.search_snapshot_id != null
+            ? ` · snapshot ${lookupRuntime.search_snapshot_id}`
+            : ''}
+        </p>
       )}
 
       <Card title="안 되는 이유" desc="무엇 때문에 못 연결됐는지">

@@ -14,9 +14,11 @@ import { normalizeForMatch } from '../../alias/service/normalize.js';
 import { compactForLookup } from '../../query/service/phonetic-skeleton.js';
 import { createCanonicalEntityId, type DecisionStatus } from '../../shared/types/index.js';
 import { extractQueryVintageYear } from '../../shared/utils/vintage.js';
+import { DEFAULT_THRESHOLD_PROFILE } from '../../query/model/threshold-profile.js';
 import {
   anchorsHaveExactIdentityEvidence,
   classifyResolveEvidenceGrade,
+  LOOKUP_IDENTITY_GRADE_CHANNELS,
 } from './channel-provenance.js';
 import type { LookupRetrievalChannel, LookupV2Status } from './lookup-v2-types.js';
 import {
@@ -36,6 +38,12 @@ export const RECALL_ONLY_NO_MATCH_REASON_CODE = 'recall_only_no_match';
 export const REVIEWED_FAMILY_COLLISION_REASON_CODE =
   'reviewed_family_collision_requires_clarification';
 export const REVIEWED_SCOPE_TARGET_RESOLVED_REASON_CODE = 'reviewed_scope_target_resolved';
+export const UNIQUE_FUZZY_RECALL_WITNESS_RESOLVED_REASON_CODE =
+  'unique_fuzzy_recall_witness_resolved';
+export const UNIQUE_JAMO_PHONETIC_RECALL_WITNESS_RESOLVED_REASON_CODE =
+  'unique_jamo_phonetic_recall_witness_resolved';
+export const UNIQUE_EXACT_IDENTITY_RECALL_WITNESS_RESOLVED_REASON_CODE =
+  'unique_exact_identity_recall_witness_resolved';
 
 /** Human-facing hint when the vintage guard downgrades a resolve. */
 export const VINTAGE_MISMATCH_DECISION_REASON_HINT =
@@ -83,6 +91,8 @@ export interface LookupDecisionInput {
   readonly semanticScopeMatches: readonly LookupDecisionSemanticScopeMatch[];
   readonly reviewedTargetEntityIds: ReadonlySet<string>;
   readonly hasPersistedAmbiguity: boolean;
+  /** Resolver-applied resolve floor; used for singleton fuzzy-recall promotion. */
+  readonly resolveThreshold?: number | undefined;
 }
 
 export interface LookupDecisionOutcome {
@@ -94,6 +104,8 @@ export interface LookupDecisionOutcome {
   readonly resolvedReviewedScopeTargetEntityId: string | undefined;
   /** When true, the use case should surface {@link VINTAGE_MISMATCH_DECISION_REASON_HINT}. */
   readonly preferVintageMismatchReasonText: boolean;
+  /** Recall score to surface when a singleton fuzzy witness promotes resolve. */
+  readonly promotedTopConfidence: number | undefined;
 }
 
 function mapResolverStatusToTerminalStatus(
@@ -197,6 +209,103 @@ function resolveReviewedScopeTargetIdentity(args: {
   return anchor.entityId;
 }
 
+function hasUniqueExactIdentityRecallWitness(
+  candidates: readonly LookupDecisionCandidate[],
+  resolveThreshold: number,
+): boolean {
+  if (candidates.length !== 1) {
+    return false;
+  }
+  const soleCandidate = candidates[0];
+  if (soleCandidate === undefined) {
+    return false;
+  }
+  if (classifyResolveEvidenceGrade(soleCandidate.channelHits) !== 'identity_grade') {
+    return false;
+  }
+  let bestIdentityScore = 0;
+  for (const hit of soleCandidate.channelHits) {
+    if (LOOKUP_IDENTITY_GRADE_CHANNELS.has(hit.channel) && hit.channelScore > bestIdentityScore) {
+      bestIdentityScore = hit.channelScore;
+    }
+  }
+  return bestIdentityScore >= resolveThreshold;
+}
+
+function bestIdentityGradeChannelScore(
+  candidate: LookupDecisionCandidate,
+): number {
+  let bestScore = 0;
+  for (const hit of candidate.channelHits) {
+    if (LOOKUP_IDENTITY_GRADE_CHANNELS.has(hit.channel) && hit.channelScore > bestScore) {
+      bestScore = hit.channelScore;
+    }
+  }
+  return bestScore;
+}
+
+function bestFuzzyAliasChannelScore(
+  candidate: LookupDecisionCandidate,
+): number {
+  let bestScore = 0;
+  for (const hit of candidate.channelHits) {
+    if (hit.channel !== 'fuzzy_alias') {
+      continue;
+    }
+    if (hit.channelScore > bestScore) {
+      bestScore = hit.channelScore;
+    }
+  }
+  return bestScore;
+}
+
+function bestJamoPhoneticChannelScore(
+  candidate: LookupDecisionCandidate,
+): number {
+  let bestScore = 0;
+  for (const hit of candidate.channelHits) {
+    if (hit.channel !== 'jamo_phonetic') {
+      continue;
+    }
+    if (hit.channelScore > bestScore) {
+      bestScore = hit.channelScore;
+    }
+  }
+  return bestScore;
+}
+
+function hasUniqueFuzzyAliasRecallWitness(
+  candidates: readonly LookupDecisionCandidate[],
+  resolveThreshold: number,
+): boolean {
+  if (candidates.length !== 1) {
+    return false;
+  }
+  const soleCandidate = candidates[0];
+  if (soleCandidate === undefined) {
+    return false;
+  }
+  const bestFuzzyScore = bestFuzzyAliasChannelScore(soleCandidate);
+  return bestFuzzyScore >= resolveThreshold;
+}
+
+function hasUniqueJamoPhoneticRecallWitness(
+  candidates: readonly LookupDecisionCandidate[],
+  resolveThreshold: number,
+): boolean {
+  if (candidates.length !== 1) {
+    return false;
+  }
+  const soleCandidate = candidates[0];
+  if (soleCandidate === undefined) {
+    return false;
+  }
+  if (classifyResolveEvidenceGrade(soleCandidate.channelHits) !== 'supportive_only') {
+    return false;
+  }
+  return bestJamoPhoneticChannelScore(soleCandidate) >= resolveThreshold;
+}
+
 function resolveDirectReviewedScopeTargetIdentity(args: {
   readonly query: string;
   readonly allCandidates: readonly LookupDecisionCandidate[];
@@ -248,7 +357,12 @@ export function decideLookupOutcome(input: LookupDecisionInput): LookupDecisionO
     semanticScopeMatches,
     reviewedTargetEntityIds,
     hasPersistedAmbiguity,
+    resolveThreshold,
   } = input;
+
+  const effectiveResolveThreshold = resolveThreshold
+    ?? DEFAULT_THRESHOLD_PROFILE.perQueryClass.short_entity.resolveTau;
+  let promotedTopConfidence: number | undefined;
 
   let status: TerminalLookupStatus = forcedStatus
     ?? decisionStatus
@@ -348,6 +462,51 @@ export function decideLookupOutcome(input: LookupDecisionInput): LookupDecisionO
   }
 
   if (
+    status === 'failed'
+    && forcedStatus === undefined
+    && !hasPersistedAmbiguity
+    && resolvedReviewedScopeTargetEntityId === undefined
+    && hasUniqueExactIdentityRecallWitness(allCandidates, effectiveResolveThreshold)
+  ) {
+    status = 'resolved';
+    effectiveDecisionReasonCode = UNIQUE_EXACT_IDENTITY_RECALL_WITNESS_RESOLVED_REASON_CODE;
+    const soleCandidate = allCandidates[0];
+    promotedTopConfidence = soleCandidate !== undefined
+      ? bestIdentityGradeChannelScore(soleCandidate)
+      : undefined;
+  }
+
+  if (
+    status === 'failed'
+    && forcedStatus === undefined
+    && !hasPersistedAmbiguity
+    && resolvedReviewedScopeTargetEntityId === undefined
+    && hasUniqueFuzzyAliasRecallWitness(allCandidates, effectiveResolveThreshold)
+  ) {
+    status = 'resolved';
+    effectiveDecisionReasonCode = UNIQUE_FUZZY_RECALL_WITNESS_RESOLVED_REASON_CODE;
+    const soleCandidate = allCandidates[0];
+    promotedTopConfidence = soleCandidate !== undefined
+      ? bestFuzzyAliasChannelScore(soleCandidate)
+      : undefined;
+  }
+
+  if (
+    status === 'failed'
+    && forcedStatus === undefined
+    && !hasPersistedAmbiguity
+    && resolvedReviewedScopeTargetEntityId === undefined
+    && hasUniqueJamoPhoneticRecallWitness(allCandidates, effectiveResolveThreshold)
+  ) {
+    status = 'resolved';
+    effectiveDecisionReasonCode = UNIQUE_JAMO_PHONETIC_RECALL_WITNESS_RESOLVED_REASON_CODE;
+    const soleCandidate = allCandidates[0];
+    promotedTopConfidence = soleCandidate !== undefined
+      ? bestJamoPhoneticChannelScore(soleCandidate)
+      : undefined;
+  }
+
+  if (
     status === 'ambiguous'
     && forcedStatus === undefined
     && !hasPersistedAmbiguity
@@ -371,5 +530,6 @@ export function decideLookupOutcome(input: LookupDecisionInput): LookupDecisionO
     vintagePromotedEntityId,
     resolvedReviewedScopeTargetEntityId,
     preferVintageMismatchReasonText: vintageMismatch,
+    promotedTopConfidence,
   };
 }

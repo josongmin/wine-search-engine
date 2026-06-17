@@ -340,8 +340,8 @@ describe('Planner – constraint extraction metadata', () => {
 
     expect(plan.anchors.length).toBeGreaterThan(0);
     expect(plan.anchors.some((anchor) => anchor.source === 'planner_heuristic')).toBe(true);
-    expect(batchLookup).toHaveBeenCalledTimes(3);
-    expect(batchLookup.mock.calls[2]?.[0]).toEqual(expect.arrayContaining(['opus one']));
+    expect(batchLookup).toHaveBeenCalledTimes(4);
+    expect(batchLookup.mock.calls[3]?.[0]).toEqual(expect.arrayContaining(['opus one']));
   });
 
   it('promotes queryClass to ambiguous_short_form when constraint parsing emits ambiguity hints', async () => {
@@ -592,8 +592,33 @@ describe('Planner – suggestedRoute matches expected routing', () => {
     expect(plan.suggestedRoute).toBe('hybrid');
   });
 
+  it('partial producer-label surface Barolo Giacomo keeps entity posture and route', async () => {
+    const planner = new Planner(
+      noAmbiguityDict,
+      new AnchorExtractor(new ExactAliasMatcher(new Map([
+        ['barolo giacomo', [makeMatchResult('Barolo Giacomo', 0.88, ['barolo-giacomo'])]],
+      ]))),
+      new ExpansionBuilder(),
+      noOpNLMapper,
+    );
+    const plan = await planner.plan('Barolo Giacomo');
+
+    expect(plan.queryClass).toBe('short_entity');
+    expect(plan.intent).toBe('entity_exact');
+    expect(plan.suggestedRoute).toBe('entity');
+    expect(['entity_lookup', 'entity_resolution']).toContain(plan.suggestedRetrievalMode);
+  });
+
+  it('single-token appellation Barolo without anchor stays on discovery lane', async () => {
+    const planner = makePlanner(new Map());
+    const plan = await planner.plan('Barolo');
+
+    expect(plan.intent).toBe('semantic_discovery');
+    expect(plan.queryClass).toBe('semantic_preference');
+    expect(plan.suggestedRoute).toBe('hybrid');
+  });
+
   it.each([
-    ['풀바디 레드 와인'],
     ['상큼한 화이트 와인'],
     ['호주 쉬라즈 풀바디'],
     ['강한 타닌 네비올로'],

@@ -46,6 +46,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-tsc-noemit-
       - run: pnpm run typecheck
+      - name: Entity lookup ops-web typecheck
+        run: pnpm --dir app/entity-lookup-ops-web run typecheck
 
   test-unit:
     runs-on: ubuntu-latest
@@ -122,6 +124,12 @@ jobs:
       - uses: ./.github/actions/setup-node-ci
       - name: Noisy entity gate + baseline (no duplicate typecheck/e2e)
         run: pnpm run test:verification:noisy
+      - name: Meta / contract parity lane
+        run: pnpm run test:meta
+      - name: HTTP contract manifest parity
+        run: pnpm run verify:http-contracts
+      - name: Lookup-v2 active-pointer contract gate
+        run: pnpm run eval:lookup-v2:active-pointer:proof:contract
       - name: CI summary
         run: |
           {

@@ -155,5 +155,5 @@ Query API (RFC-014)
 | `epic-13-query-intelligence.md` | ConstraintSAT, Entropy abstain, BK-tree+Soundex | 4 |
 | `epic-14-decomposition-api.md` | LLM query decomp ("A vs B"), `retrieval_mode` override | 5 |
 | `epic-15-drinking-window.md` | LightGBM drink_from/drink_to regression + ONNX serving | 5 |
-| `epic-16-security-batch.md` | Prompt injection (LLM-as-judge), `/v1/batch-search` 207 | 5 |
+| `epic-16-security-batch.md` | Prompt injection (LLM-as-judge), batch schema (historical `/v1/batch-search` 207 — route removed) | 5 |
 | `epic-17-agentic-async.md` | Claude tool-use, Redis watchlist webhook, confidence refusal | 6 |

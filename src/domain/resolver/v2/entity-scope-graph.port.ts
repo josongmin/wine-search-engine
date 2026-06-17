@@ -28,4 +28,8 @@ export interface EntityScopeGraphPort {
   getSemanticDescriptor?(
     entityId: string,
   ): LookupSemanticEntityDescriptor | undefined;
+
+  countEdgesByRelation?(
+    relationKind: LookupScopeGraphRelationKind,
+  ): number;
 }

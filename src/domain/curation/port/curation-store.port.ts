@@ -85,6 +85,13 @@ export interface CurationHealth {
   readonly queueByStatus: Readonly<Record<ProposalStatus, number>>;
   readonly queueByKind: Readonly<Record<ProposalKind, number>>;
   readonly totalProposals: number;
+  /** Published proposals not yet materialized into a snapshot build. */
+  readonly publishedAwaitingMaterialization: number;
+  /**
+   * Legacy transitional rows: `approved` + `abbreviation` consumed by ETL overlay
+   * but not materialization-tracked until ops publish.
+   */
+  readonly legacyApprovedAbbreviationBacklog: number;
 }
 
 export interface CurationStorePort {

@@ -11,10 +11,19 @@ const metaTestInclude = [
   'src/interface/http/routes/__tests__/http-contract-manifest-script.test.ts',
   // E5-T12: SSoT gate — verifies SOFT_CONSTRAINT_ATTRIBUTES has exactly one definition
   'test/meta/constraint-attributes-ssot.test.ts',
+  'test/meta/fuzzy-match-confidence-ssot.test.ts',
+  'test/meta/lookup-v2-critical-artifacts.meta.test.ts',
+  'test/meta/meta-config-exhaustiveness.meta.test.ts',
+  'test/meta/ci-verification-core-parity.meta.test.ts',
+  'test/meta/lookup-v2-git-tracked.meta.test.ts',
   'test/meta/vespa-hit-summary-readraw-parity.test.ts',
   // Entity Lookup V2 cutover gate — per-class no-regression + eval_cases fingerprint pin
   'test/unit/entity-lookup-v2/cutover-gate.test.ts',
   'test/meta/lookup-v2-cutover-gate.meta.test.ts',
+  'test/meta/lookup-v2-runtime-registry-context.meta.test.ts',
+  'test/meta/lookup-v2-active-pointer-proof.meta.test.ts',
+  'test/unit/meta/curation-integration-lane-parity.test.ts',
+  'test/unit/meta/bench-smoke-lookup-v2-contract.meta.test.ts',
 ] as const;
 
 export default defineConfig({

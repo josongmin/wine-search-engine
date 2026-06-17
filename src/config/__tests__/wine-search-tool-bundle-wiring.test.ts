@@ -50,11 +50,6 @@ vi.mock('../container-features.js', () => ({
   buildFeatureContainerServices: vi.fn(() => ({
     entityLookupV2UseCase: { execute: vi.fn() } as never,
     searchUseCase: { execute: vi.fn() } as never,
-    decomposedSearchUseCase: { execute: vi.fn() } as never,
-    interpretUseCase: {} as never,
-    hybridUseCase: {} as never,
-    batchSearchUseCase: {} as never,
-    drinkingWindowUseCase: { check: vi.fn() } as never,
     evalRunner: null,
   })),
 }));

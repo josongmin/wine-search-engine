@@ -557,7 +557,7 @@ export class SearchUseCase {
   }
 
   /**
-   * Hybrid route: delegates to the shared pipeline used by HybridUseCase.
+   * Hybrid route: shared ranked-route pipeline for POST /v1/search/hybrid and auto-route hybrid plans.
    *
    * Primitive search callers can force retrieval lane selection at the HTTP
    * edge, while non-primitive/internal callers still arrive here with the

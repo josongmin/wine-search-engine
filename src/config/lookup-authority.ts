@@ -19,12 +19,18 @@ import type { CalibrationStore } from '../domain/resolver/port/calibration-store
 import type { Resolver } from '../domain/resolver/service/resolver.js';
 import type { SearchSnapshotAliasMatcher } from '../infrastructure/adapter/search-snapshot-alias-matcher.js';
 import type { LookupResolverProjectionPort } from '../application/search/port/search-pipeline-deps.port.js';
+import {
+  buildLookupV2SubstrateCapabilitySnapshot,
+  type LookupV2SubstrateCapabilitySnapshot,
+  type LookupV2UnwiredRecallSubstrateId,
+} from '../domain/resolver/v2/lookup-v2-substrate-capabilities.js';
 
 export interface LookupAuthorityBootstrapProfile {
   readonly runtimeBundleMs: number;
   readonly ltrModelsMs: number;
   readonly ltrSupportStatus: 'unsupported';
   readonly ltrSupportReason: 'lookup_domain_model_absent';
+  readonly substrateCapabilities: LookupV2SubstrateCapabilitySnapshot;
   readonly calibrationPreloadKickoffMs: number;
   readonly usecaseWireMs: number;
   readonly runtimeBundleLoadProfile: LookupRuntimeBundleLoadProfile;
@@ -35,6 +41,8 @@ export interface LookupAuthorityRuntimeMetadata {
   readonly searchSnapshotManifestPath: string;
   readonly runtimeBundleCacheKey: string;
   readonly searchSnapshotId?: string | undefined;
+  /** Snapshot-published scope graph family-edge count at bootstrap (0 = dormant family_graph). */
+  readonly familyGraphEdgeCount: number;
 }
 
 export interface LookupAuthorityRuntimeProbe {
@@ -47,6 +55,31 @@ export interface LookupAuthorityServices {
   readonly bootstrapProfile: LookupAuthorityBootstrapProfile;
   readonly metadata: LookupAuthorityRuntimeMetadata;
   readonly runtimeProbe: LookupAuthorityRuntimeProbe;
+}
+
+/** Operator-plane snapshot of lookup runtime substrate health (coverage-health). */
+export interface LookupOpsRuntimeHealthView {
+  readonly searchSnapshotId?: string | undefined;
+  readonly familyGraphEdgeCount: number;
+  readonly ltrSupportStatus: 'unsupported';
+  readonly ltrSupportReason: 'lookup_domain_model_absent';
+  readonly unwiredSubstrateIds: readonly LookupV2UnwiredRecallSubstrateId[];
+}
+
+export function buildLookupOpsRuntimeHealthView(
+  authority: Pick<LookupAuthorityServices, 'metadata' | 'bootstrapProfile'>,
+): LookupOpsRuntimeHealthView {
+  return {
+    ...(authority.metadata.searchSnapshotId !== undefined
+      ? { searchSnapshotId: authority.metadata.searchSnapshotId }
+      : {}),
+    familyGraphEdgeCount: authority.metadata.familyGraphEdgeCount,
+    ltrSupportStatus: authority.bootstrapProfile.ltrSupportStatus,
+    ltrSupportReason: authority.bootstrapProfile.ltrSupportReason,
+    unwiredSubstrateIds: authority.bootstrapProfile.substrateCapabilities.unwiredSubstrates.map(
+      (row) => row.id,
+    ),
+  };
 }
 
 export interface LookupV2LtrSupportState {
@@ -66,7 +99,7 @@ export function startCalibrationPreload(
   if (!(calibrationStore instanceof MemoizedCalibrationStore)) {
     return;
   }
-  void calibrationStore.preload(QUERY_CLASSES).catch((error) => {
+  void calibrationStore.preload(QUERY_CLASSES).catch((error: unknown) => {
     bootstrapLogger.warn(
       {
         component: 'LookupAuthorityServices',
@@ -164,7 +197,28 @@ export async function createLookupAuthorityServices(
     config,
   );
 
-  const aliasRegistryVersion = aliasMatcher.getRegistryVersion?.();
+  const aliasRegistryVersion = aliasMatcher.getRegistryVersion();
+  const familyGraphEdgeCount = entityScopeGraph.countEdgesByRelation('family');
+  if (familyGraphEdgeCount === 0) {
+    bootstrapLogger.warn(
+      {
+        component: 'LookupAuthorityServices',
+        searchSnapshotId: runtime.searchSnapshotId,
+        familyGraphEdgeCount,
+        runtimeSource: 'lookup_scope_graph_runtime',
+      },
+      '[lookup-authority] family_graph substrate has zero family edges; channel may fire with hitCount=0 until snapshot scope graph is populated',
+    );
+  } else {
+    bootstrapLogger.info(
+      {
+        component: 'LookupAuthorityServices',
+        searchSnapshotId: runtime.searchSnapshotId,
+        familyGraphEdgeCount,
+      },
+      '[lookup-authority] family_graph substrate loaded from snapshot scope graph',
+    );
+  }
   const usecaseWireStartedAt = performance.now();
   const entityLookupV2UseCase = new EntityLookupV2UseCase({
     admissionGate: new ConceptAdmissionGate(conceptRedirectRegistry),
@@ -196,6 +250,10 @@ export async function createLookupAuthorityServices(
       ltrModelsMs,
       ltrSupportStatus: ltrSupportState.status,
       ltrSupportReason: ltrSupportState.reason,
+      substrateCapabilities: buildLookupV2SubstrateCapabilitySnapshot({
+        ltrSupportStatus: ltrSupportState.status,
+        ltrSupportReason: ltrSupportState.reason,
+      }),
       calibrationPreloadKickoffMs,
       usecaseWireMs,
       runtimeBundleLoadProfile: runtimeBundle.loadProfile,
@@ -204,6 +262,7 @@ export async function createLookupAuthorityServices(
     metadata: {
       searchSnapshotManifestPath: manifestPath,
       runtimeBundleCacheKey,
+      familyGraphEdgeCount,
       ...(runtime.searchSnapshotId !== undefined ? { searchSnapshotId: runtime.searchSnapshotId } : {}),
     },
     resolverProjectionLookup,

@@ -70,6 +70,9 @@ export const LTR_FEATURE_DIMENSION = LTR_FEATURE_SCHEMA.dimension;
 export const LTR_UNIFORM_FEATURE_WEIGHT = 1 / LTR_FEATURE_DIMENSION;
 export const LTR_FEATURE_SCHEMA_HASH = LTR_FEATURE_SCHEMA.hash;
 
+/** LTR ordinal encoding for identity exactness tiers (higher = more exact). */
+const LTR_IDENTITY_EXACTNESS_ALIAS_PHONETIC_SCORE = 0.25;
+
 function encodeIdentityExactnessTier(
   tier: IdentityExactnessTier | undefined,
 ): number {
@@ -80,6 +83,8 @@ function encodeIdentityExactnessTier(
       return 2 / 3;
     case 'alias_fuzzy':
       return 1 / 3;
+    case 'alias_phonetic':
+      return LTR_IDENTITY_EXACTNESS_ALIAS_PHONETIC_SCORE;
     case 'none':
     case undefined:
       return 0.0;

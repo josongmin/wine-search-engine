@@ -67,6 +67,16 @@ describe('HTTP route contract registry', () => {
         successStatusCodes: [200],
         errorStatusCodes: [400, 403, 408, 429, 500, 503],
       },
+      {
+        method: 'POST',
+        url: '/v2/entity-lookup',
+        operationId: 'entity.lookup.v2',
+        hasBody: true,
+        hasParams: false,
+        responseStatusCodes: [200, 400, 403, 408, 429, 500, 503],
+        successStatusCodes: [200],
+        errorStatusCodes: [400, 403, 408, 429, 500, 503],
+      },
     ]));
 
     // V2-only cutover: /v1/lookup/wine is removed; the sole public lookup

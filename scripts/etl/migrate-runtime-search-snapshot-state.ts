@@ -43,7 +43,11 @@ function parseArgs(argv: readonly string[]): {
       i += 1;
     }
   }
-  return { runtimeStatePath, activeNlMappingsPath, manifestPath };
+  return {
+    runtimeStatePath,
+    activeNlMappingsPath,
+    ...(manifestPath !== undefined ? { manifestPath } : {}),
+  };
 }
 
 function buildBackupPath(runtimeStatePath: string): string {

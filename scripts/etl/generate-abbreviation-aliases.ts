@@ -512,12 +512,11 @@ function toLlmProposal(
  *
  * Architectural note (migration 016 invariant — see
  * `test/regression/runtime-plane-insert-authority.regression.test.ts`):
- * `scripts/etl/publish-runtime-substrates.ts` is the **only** authorized
- * writer to the runtime-plane `aliases` table. This ETL writes to
- * `alias_proposals` instead. The operator then uses the existing
- * `publish-runtime-substrates` ETL (or the curator promotion pipeline)
- * to materialize approved proposals into `aliases` on the next snapshot
- * publish.
+ * runtime-plane `aliases` rows are materialized only through snapshot ETL
+ * (`build-search-snapshot` → `publish-search-snapshot`). This script stages
+ * into `alias_proposals`; `load-published-curation-proposals.ts` consumes
+ * legacy `approved` abbreviation rows (and ops `published` rows) on the
+ * next snapshot build. See `docs/runbook-curation-materialization.md`.
  *
  * The proposal evidence shape is:
  *   { abbreviationRule, normalizedSurface, aliasScope }
@@ -554,10 +553,8 @@ export async function commitProposals(
           proposal.surface,
           proposal.entityId,
           // `alias_proposals.proposed_type` is TEXT — we persist
-          // 'abbreviation' verbatim; the downstream
-          // publish-runtime-substrates lane validates the type via
-          // the same closed-world enum as the runtime CHECK constraint
-          // (migration 021).
+          // 'abbreviation' verbatim; snapshot ETL consumes legacy approved rows via
+          // `load-published-curation-proposals.ts` (ops `published` is materialization-tracked).
           'abbreviation',
           JSON.stringify({
             abbreviationRule: proposal.rule ?? 'unknown',
@@ -707,8 +704,9 @@ async function run(): Promise<void> {
           `(approved=${String(proposals.filter((p) => p.status === 'approved').length)})`,
       );
       console.log(
-        'Next step: run `pnpm tsx scripts/etl/publish-runtime-substrates.ts` to publish ' +
-          'the approved proposals into the runtime-plane `aliases` table on the next snapshot.',
+        'Next step: ops-publish through the curation plane (preferred) or run '
+        + '`pnpm run etl:build-search-snapshot` then `pnpm run etl:publish-search-snapshot` '
+        + 'to materialize staging rows into snapshot artifacts (see docs/runbook-curation-materialization.md).',
       );
     } finally {
       await closePgPool(pool);

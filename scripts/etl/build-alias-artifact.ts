@@ -1,4 +1,5 @@
 import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
+import { computeAliasPhoneticKeys } from '../../src/domain/alias/service/alias-phonetic-keys.js';
 import { Transliterator } from '../../src/domain/alias/service/transliterator.js';
 import type { EnrichedSilverRecord } from './types.js';
 import { inferTransliterationSourceLang } from './transliteration-helpers.js';
@@ -28,6 +29,7 @@ function buildAliasRecord(
   sourceTrust: number = 1.0,
 ): AliasSnapshotRecord {
   const normalizedValue = normalizeForMatch(value);
+  const phoneticKeys = computeAliasPhoneticKeys(normalizedValue);
   return {
     aliasId: buildAliasId(entityId, normalizedValue, type, scope),
     entityId,
@@ -39,6 +41,7 @@ function buildAliasRecord(
     source,
     sourceTrust,
     confidencePrior,
+    ...(phoneticKeys.length > 0 ? { phoneticKeys } : {}),
   };
 }
 

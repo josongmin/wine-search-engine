@@ -1,6 +1,18 @@
-# Bench Status (2026-06-08)
+# Bench Status (2026-06-17)
 
 이 폴더의 current SSOT는 이 문서다.
+
+## Current Truth Update (2026-06-17)
+
+- **CI / contract gates (no live runtime required):**
+  - `pnpm run test:meta` — cutover gate, runtime-registry CLI parity, active-pointer proof wiring, curation PG lane parity
+  - `pnpm run eval:lookup-v2:active-pointer:proof:contract` — authority/parity/latency scripts wired (`bench-smoke` + meta)
+  - nightly `curation-pg` — `PgCurationStore` live PG integration (`PG_TEST_URL`)
+  - P0 policy-collision stretch parity — `라뚜르/그랜지/베가 시실리아/자코모 콘테르노/라피트/무통` registry ↔ corpus `ambiguous`
+- **lookup substrate SSoT:** `src/domain/resolver/v2/lookup-v2-substrate-capabilities.ts`
+  - wired: snapshot alias matcher + scope graph (`family/line/vintage`) + reviewed family recall (`dense` reuse only)
+  - unwired: `PgAliasMatcher` trigram/edit-distance, lookup LTR (`lookup_domain_model_absent`)
+- **active runtime pointer proof (live, operator):** `pnpm run eval:lookup-v2:active-pointer:proof` — still requires active snapshot + PG/Vespa; not run in default CI
 
 ## Current Truth Update (2026-06-08)
 

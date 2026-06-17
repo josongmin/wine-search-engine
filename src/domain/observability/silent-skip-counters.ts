@@ -104,7 +104,16 @@ export type SilentSkipKind =
   // scoring is silently operating on a thinned candidate set.
   | 'candidate_attributes_hydration_missing'
   | 'candidate_attributes_hydration_parse_failure'
-  | 'candidate_attributes_hydration_batch_failure';
+  | 'candidate_attributes_hydration_batch_failure'
+  // Entity Lookup V2 multi-channel retrieval: a single alias channel threw;
+  // the union degrades to an empty channel run (firing=false).
+  | 'lookup_retrieval_channel_failure'
+  // Entity Lookup V2 scope-graph lanes (family/line/vintage): expansion threw;
+  // alias recall stands but the graph channel is dormant for this request.
+  | 'lookup_scope_graph_channel_failure'
+  // Entity Lookup V2 use case: the retrieval engine threw before returning
+  // timed provenance — caller falls back to planner anchor re-projection.
+  | 'lookup_retrieval_engine_failure';
 
 export type LtrInferenceComponentScoreField =
   | 'semantic'
@@ -174,6 +183,9 @@ const SILENT_SKIP_KINDS: readonly SilentSkipKind[] = [
   'candidate_attributes_hydration_missing',
   'candidate_attributes_hydration_parse_failure',
   'candidate_attributes_hydration_batch_failure',
+  'lookup_retrieval_channel_failure',
+  'lookup_scope_graph_channel_failure',
+  'lookup_retrieval_engine_failure',
 ] as const;
 
 const SILENT_SKIP_KIND_SET: ReadonlySet<string> = new Set(SILENT_SKIP_KINDS);

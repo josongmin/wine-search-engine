@@ -33,6 +33,7 @@ import {
 import {
   hasExactMatchCandidate,
   hasUniqueFuzzyIdentityWitness,
+  hasUniquePhoneticIdentityWitness,
   type DecisionInput,
 } from '../model/decision-input.js';
 import type { DecisionOutput } from '../model/decision-output.js';
@@ -437,6 +438,7 @@ export class DecisionEngine {
       requireEffectiveRetrievalMode(input) === 'no_match_detection'
       && !hasExactMatchCandidate(input.evidenceSummary)
       && !hasUniqueFuzzyIdentityWitness(input.evidenceSummary, input.resolveResult.decisionTrace)
+      && !hasUniquePhoneticIdentityWitness(input.evidenceSummary, input.resolveResult.decisionTrace)
     ) {
       rulesApplied.push('NO_MATCH_DETECTION_FAIL_CLOSED');
       return {
@@ -444,7 +446,7 @@ export class DecisionEngine {
         nextAction: 'fail',
         rulesApplied: [...rulesApplied],
         finalReason:
-          'Planner classified the query as no_match_detection and no exact or unique fuzzy identity witness exists; ' +
+          'Planner classified the query as no_match_detection and no exact, unique fuzzy, or unique phonetic identity witness exists; ' +
           'decision short-circuited to FAILED.',
       };
     }
@@ -903,6 +905,11 @@ export class DecisionEngine {
       return state;
     }
 
+    if (hasUniquePhoneticIdentityWitness(input.evidenceSummary, input.resolveResult.decisionTrace)) {
+      rulesApplied.push('CALIBRATION_TRUST_GATE_UNIQUE_PHONETIC_IDENTITY');
+      return state;
+    }
+
     // Exploratory-mode substitute trust: when the route is a list-shaped one
     // (recommendation / similar_items / compare_candidates / *_browse) AND
     // the constraint extractor recognised ≥1 category, the resolved verdict
@@ -1066,11 +1073,21 @@ export class DecisionEngine {
     }
 
     const exactnessTier = input.evidenceSummary?.identityEvidence?.exactnessTier ?? 'none';
-    if (exactnessTier !== 'alias_fuzzy') {
+    if (exactnessTier !== 'alias_fuzzy' && exactnessTier !== 'alias_phonetic') {
       return state;
     }
 
     const resolverTrace = input.resolveResult.decisionTrace;
+    if (hasUniqueFuzzyIdentityWitness(input.evidenceSummary, resolverTrace)) {
+      rulesApplied.push('NOISY_SHORT_QUERY_GUARD_BYPASSED_UNIQUE_FUZZY_IDENTITY');
+      return state;
+    }
+
+    if (hasUniquePhoneticIdentityWitness(input.evidenceSummary, resolverTrace)) {
+      rulesApplied.push('NOISY_SHORT_QUERY_GUARD_BYPASSED_UNIQUE_PHONETIC_IDENTITY');
+      return state;
+    }
+
     const requiredGap = Math.max(dynamicGapThreshold, NOISY_SHORT_QUERY_GAP_FLOOR);
     // C2 (fail-loud): singleton → no runner-up → no gap. A singleton on a
     // noisy short query can still bypass the guard via high confidence,
@@ -1093,7 +1110,7 @@ export class DecisionEngine {
       nextAction: 'clarify',
       rulesApplied: [...rulesApplied],
       finalReason:
-        `Short query resolved through alias_fuzzy identity evidence without enough margin ` +
+        `Short query resolved through ${exactnessTier} identity evidence without enough margin ` +
         `(C=${resolverTrace.decisionConfidenceC.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)}, gap=${gapLog}).`,
     };
   }

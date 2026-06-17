@@ -272,10 +272,10 @@ export function buildLookupRuntimeOverlayAliases(
       value: row.surface,
       normalizedValue: normalizeForMatch(row.surface),
       promotionClass: row.promotionClass,
-      aliasType: 'observed_query_alias',
-      source: 'registry:lookup_exact_safe_v1',
-      sourceTrust: 1,
-      confidencePrior: 0.98,
+      aliasType: 'observed_query_alias' as const,
+      source: 'registry:lookup_exact_safe_v1' as const,
+      sourceTrust: 1 as const,
+      confidencePrior: 0.98 as const,
     }))
     .sort((left, right) =>
       left.entityId.localeCompare(right.entityId)

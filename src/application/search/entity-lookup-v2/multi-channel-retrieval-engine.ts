@@ -41,6 +41,7 @@ import {
   type AliasMatchResult,
 } from '../../../domain/query/service/anchor-extractor.js';
 import type { CanonicalEntityId } from '../../../domain/shared/types/index.js';
+import { globalSilentSkipCounter } from '../../../domain/observability/silent-skip-counters.js';
 import { clamp01 } from '../../../domain/shared/utils/clamp.js';
 import { mapLookupStrategyToChannel } from '../../../domain/resolver/v2/channel-provenance.js';
 import type {
@@ -115,6 +116,9 @@ function queryContainsSurface(
   return probe.compactQuery.includes(surface.replace(/\s+/gu, ''));
 }
 
+/** Scope descriptor axes counted for qualifier agreement (line, region, appellation, vintage). */
+const SCOPE_QUALIFIER_AXIS_COUNT = 4;
+
 function computeScopeFeatureHints(args: {
   readonly probe: ReturnType<typeof buildLookupQuerySemanticProbe>;
   readonly descriptor: ReturnType<NonNullable<EntityScopeGraphPort['getSemanticDescriptor']>> | undefined;
@@ -142,7 +146,7 @@ function computeScopeFeatureHints(args: {
   return {
     lineGraphProximity: channelBest(args.channelHits, 'line_graph'),
     vintageGraphProximity: channelBest(args.channelHits, 'vintage_graph'),
-    scopeQualifierAgreement: qualifierMatches > 0 ? qualifierMatches / 4 : 0,
+    scopeQualifierAgreement: qualifierMatches > 0 ? qualifierMatches / SCOPE_QUALIFIER_AXIS_COUNT : 0,
     scopeAxisAgreement,
   };
 }
@@ -365,7 +369,11 @@ export class MultiChannelRetrievalEngine implements LookupCandidateRetrievalPort
             }
           }
         } catch (err) {
-          void err;
+          globalSilentSkipCounter.increment('lookup_scope_graph_channel_failure', {
+            channel: graphRun.channel,
+            relationKind: graphRun.relationKind,
+            message: err instanceof Error ? err.message : 'unknown',
+          });
         } finally {
           stageTimer?.end(`retrieval.${graphRun.channel}`);
         }
@@ -463,9 +471,14 @@ export class MultiChannelRetrievalEngine implements LookupCandidateRetrievalPort
         scope: 'span',
         ...(stageTimer !== undefined ? { stageTimer } : {}),
       });
-    } catch {
+    } catch (err) {
       // A single channel failure must not sink the union — record an empty,
       // timed run (firing=false) and let the other channels stand.
+      globalSilentSkipCounter.increment('lookup_retrieval_channel_failure', {
+        channel,
+        view,
+        message: err instanceof Error ? err.message : 'unknown',
+      });
       matches = [];
     }
     return { channel, view, latencyMs: Math.max(0, performance.now() - startedAt), matches };

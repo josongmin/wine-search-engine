@@ -10,16 +10,11 @@ import { buildCoreContainerServices } from './container-core.js';
 import { buildFeatureContainerServices } from './container-features.js';
 import type { RuntimeHandles } from './runtime-handles.js';
 import type { RuntimeReadinessSnapshot } from './container-runtime-support.js';
-import type { DrinkingWindowUseCasePort } from '../application/drinking-window/port/drinking-window-usecase.port.js';
 import type { DrinkingWindowPredictorPort } from '../domain/drinking-window/port/drinking-window-predictor.port.js';
 import type { SearchExecutorPort } from '../application/search/port/search-executor.port.js';
 import type { CurationUseCase } from '../application/curation/curation.usecase.js';
 import type {
-  BatchSearchUseCasePort,
-  DecomposedSearchUseCasePort,
   EntityLookupV2UseCasePort,
-  HybridUseCasePort,
-  InterpretUseCasePort,
 } from '../application/search/port/search-route-usecases.port.js';
 import type {
   CandidatePoolPort,
@@ -63,7 +58,7 @@ import { AgentSessionService } from '../application/wine-search/agent-session-se
 import { AgentUseCase } from '../application/wine-search/agent-usecase.js';
 import type { AgentUseCasePort } from '../application/wine-search/port/agent-usecase.port.js';
 import { bindLiveSearchSnapshotRuntimeHandles } from './runtime-handles.js';
-import { createLookupAuthorityServices } from './lookup-authority.js';
+import { createLookupAuthorityServices, buildLookupOpsRuntimeHealthView, type LookupOpsRuntimeHealthView } from './lookup-authority.js';
 export interface Container {
   /** Chat LLM when an OpenAI credential pool or Codex ChatGPT login token is available. */
   readonly chatLlm?: ChatLlmPort;
@@ -74,15 +69,11 @@ export interface Container {
   readonly responseBuilder: ResponseBuilderPort;
   readonly mixedSolver: MixedSolverPort;
   readonly searchUseCase: SearchExecutorPort;
-  readonly interpretUseCase: InterpretUseCasePort;
   readonly entityLookupV2UseCase: EntityLookupV2UseCasePort;
   /** Operator curation plane (T-ELV2-07); present only when a PG pool is wired. */
   readonly curationUseCase?: CurationUseCase | undefined;
-  readonly hybridUseCase: HybridUseCasePort;
-  readonly decomposedSearchUseCase: DecomposedSearchUseCasePort;
-  readonly drinkingWindowUseCase: DrinkingWindowUseCasePort;
+  readonly lookupOpsRuntime?: LookupOpsRuntimeHealthView | undefined;
   readonly drinkingWindowPredictor: DrinkingWindowPredictorPort;
-  readonly batchSearchUseCase: BatchSearchUseCasePort;
   readonly evalRunner: EvalRunnerContract | null;
   readonly calibrationStore: CalibrationStore;
   readonly runtimeReadiness: RuntimeReadinessSnapshot;
@@ -229,11 +220,7 @@ function buildWineSearchContainerServices(
   //       (CLAUDE.md rule 30 — SSoT for tool ports).
   const wineAgentLoopToolBundle = buildWineAgentLoopToolBundle({
     searchUseCase: searchAdapter,
-    // Dedicated lookup authority (V2). `lookup_wine` dispatches here directly;
-    // `searchUseCase` is reserved for discovery + similar_to_entity.
     lookupWine: features.entityLookupV2UseCase,
-    decomposedSearchUseCase: features.decomposedSearchUseCase,
-    drinkingWindowUseCase: features.drinkingWindowUseCase,
   });
 
   // ── 4b) Comparison LLM fallback. One-shot grounded synthesis for stalled
@@ -367,6 +354,7 @@ export async function createContainer(
     drinkingWindowPredictor: core.drinkingWindowPredictor,
     calibrationStore: core.calibrationStore,
     runtimeReadiness: core.runtimeReadiness,
+    lookupOpsRuntime: buildLookupOpsRuntimeHealthView(lookupAuthority),
     ...(wineSearch !== undefined ? { wineSearch } : {}),
   };
 }

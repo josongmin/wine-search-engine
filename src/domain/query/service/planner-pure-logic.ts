@@ -13,6 +13,7 @@ import type {
   ConstraintAtom,
   NormalizedConstraint,
 } from '../../shared/types/index.js';
+import { hasExactEntityLookupKeyword } from './exact-entity-metadata-signals.js';
 import type { QueryIntent } from '../model/query-intent.js';
 import type { QueryRoute } from '../model/query-route.js';
 import type { RetrievalMode } from '../model/retrieval-mode.js';
@@ -36,6 +37,7 @@ import {
   PAIRING_SOFT_CONSTRAINT_MAPPING_VERSION,
 } from './planner-constants.js';
 import {
+  hasOntologyOnlySoftConstraintEvidence,
   hasSensoryPreferenceConstraint,
   hasOnlySemanticDiscoveryCompatibleHardConstraints,
 } from './planner-helpers.js';
@@ -140,10 +142,16 @@ export function shouldApplyFuzzyAnchorFallback(
     return true;
   }
 
+  if (constraints.hard.length > 0 || constraints.inferred.length > 0) {
+    return false;
+  }
+
   if (
-    constraints.hard.length > 0
-    || constraints.soft.length > 0
-    || constraints.inferred.length > 0
+    constraints.soft.length > 0
+    && !(
+      isShortEntityLikeSurface(normalizedQuery)
+      && hasOntologyOnlySoftConstraintEvidence(constraints)
+    )
   ) {
     return false;
   }
@@ -156,6 +164,33 @@ export function shouldApplyFuzzyAnchorFallback(
   }
 
   return isShortEntityLikeSurface(normalizedQuery);
+}
+
+/**
+ * Two-token identity-shaped surfaces (`Barolo Giacomo`) are partial producer-label
+ * lookups, not category discovery (`Barolo` alone). Keep entity posture even
+ * before fuzzy anchor recovery runs.
+ */
+export function shouldTreatSemanticDiscoveryAsShortEntitySurface(
+  normalizedQuery: string,
+  intent: QueryIntent,
+  anchors: readonly AnchorCandidate[],
+): boolean {
+  if (intent !== 'semantic_discovery' || anchors.length > 0) {
+    return false;
+  }
+  if (hasExactEntityLookupKeyword(normalizedQuery)) {
+    return false;
+  }
+  if (!isShortEntityLikeSurface(normalizedQuery)) {
+    return false;
+  }
+  const tokenCount = normalizedQuery
+    .trim()
+    .split(/\s+/)
+    .filter((token) => token.length > 0)
+    .length;
+  return tokenCount >= 2;
 }
 
 export function computeFuzzyFallbackConfidence(

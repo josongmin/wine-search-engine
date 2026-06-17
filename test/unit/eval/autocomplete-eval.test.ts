@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   assertAutocompleteQualityThresholds,
   buildPerfectAutocompletePredictions,
-  evaluateAutocompleteBenchmarkWithUseCase,
+  evaluateAutocompleteBenchmarkWithRunner,
   extractAutocompleteRankedEntityIds,
   extractAutocompleteStatus,
   getAutocompleteQualityViolations,
@@ -199,8 +199,8 @@ describe('autocomplete benchmark eval', () => {
   });
 
   it('runs the autocomplete benchmark against the in-process test container', async () => {
-    const { container } = createTestContainer();
-    const report = await evaluateAutocompleteBenchmarkWithUseCase(container.autocompleteUseCase, {
+    const { autocompleteQueryRunner } = createTestContainer();
+    const report = await evaluateAutocompleteBenchmarkWithRunner(autocompleteQueryRunner, {
       input: resolveDataPath('data/autocomplete-benchmark.jsonl'),
       concurrency: 3,
     });

@@ -109,6 +109,8 @@ class FakeStore implements CurationStorePort {
       queueByStatus: { pending: 0, approved: 0, rejected: 0, published: 0 },
       queueByKind: { alias: 0, ambiguity: 0, suppression: 0 },
       totalProposals: 0,
+      publishedAwaitingMaterialization: 0,
+      legacyApprovedAbbreviationBacklog: 0,
     };
   }
 }
@@ -118,7 +120,7 @@ const aliasInput: CreateAliasProposalInput = {
   targetEntityId: 'ent-dp',
   proposedType: 'misspelling',
   confidence: 0.9,
-  evidence: { reason: 'hole' },
+  evidence: {},
 };
 
 describe('CurationUseCase', () => {
@@ -133,6 +135,40 @@ describe('CurationUseCase', () => {
   it('submits an alias proposal as pending', async () => {
     const p = await uc.submitAliasProposal(aliasInput);
     expect(p.status).toBe('pending');
+  });
+
+  it('accepts legacy ops-console evidence with note key', async () => {
+    const p = await uc.submitAliasProposal({
+      ...aliasInput,
+      evidence: { source: 'ops_console', note: 'menu verified' },
+    });
+    expect(p.status).toBe('pending');
+    expect(p.evidence).toEqual({
+      source: 'ops_console',
+      operatorNote: 'menu verified',
+    });
+  });
+
+  it('drops unknown evidence keys before staging write', async () => {
+    const p = await uc.submitAliasProposal({
+      ...aliasInput,
+      evidence: { source: 'ops_console', note: 'ok', extra: true },
+    });
+    expect(p.evidence).toEqual({
+      source: 'ops_console',
+      operatorNote: 'ok',
+    });
+  });
+
+  it('accepts RFC-014 snake_case operator_note before staging write', async () => {
+    const p = await uc.submitAliasProposal({
+      ...aliasInput,
+      evidence: { source: 'ops_console', operator_note: 'wire verified' },
+    });
+    expect(p.evidence).toEqual({
+      source: 'ops_console',
+      operatorNote: 'wire verified',
+    });
   });
 
   it('approves a pending proposal and stamps the reviewer', async () => {
@@ -187,5 +223,14 @@ describe('CurationUseCase', () => {
     await expect(
       uc.reviewProposal({ kind: 'alias', proposalId: created.proposalId, decision: 'approve', reviewedBy: 'op', decisionReason: 'x' }),
     ).rejects.toBeInstanceOf(IllegalProposalTransitionError);
+  });
+
+  it('normalizes ambiguity normalizedForm before staging write', async () => {
+    const p = await uc.submitAmbiguityProposal({
+      normalizedForm: 'Opus One',
+      memberEntityIds: ['ent-a', 'ent-b'],
+      evidence: { severity: 'medium' },
+    });
+    expect(p.normalizedForm).toBe('opus one');
   });
 });

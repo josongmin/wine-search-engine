@@ -22,6 +22,8 @@ import { pipelineDebug } from '../../../domain/observability/request-pipeline-de
 import { PipelineDebugStep } from '../../../domain/observability/pipeline-debug-steps.js';
 import type { NextAction } from '../../../domain/shared/types/index.js';
 import { createCanonicalEntityId } from '../../../domain/shared/types/index.js';
+import { isQueryClass, type QueryClass } from '../../../domain/shared/types/query-class.js';
+import { DEFAULT_THRESHOLD_PROFILE } from '../../../domain/query/model/threshold-profile.js';
 import type { RequestExecutionContext } from '../../../domain/shared/request-execution-context.js';
 import {
   buildSearchExecutionLaneTrace,
@@ -34,6 +36,12 @@ import {
 import type { EntityLookupV2UseCasePort } from '../port/search-route-usecases.port.js';
 import type { ResolverCandidate } from '../../../domain/resolver/model/resolved-candidate.js';
 import type { EntityLookupV2Result } from './entity-lookup-v2.dto.js';
+import {
+  projectV2AdvisoryTopConfidence,
+  projectV2RankOneCandidate,
+  projectV2ResolvedCandidate,
+  projectV2ResolverCandidates,
+} from './entity-lookup-v2-candidate-projection.js';
 
 const LOOKUP_V2_REDIRECT_DISCOVERY_REASON = 'redirect_discovery';
 
@@ -61,13 +69,31 @@ function mapLookupV2StatusToNextAction(status: LookupV2Status): NextAction {
 }
 
 function projectV2Candidates(v2Result: EntityLookupV2Result): readonly ResolvedCandidate[] {
-  return v2Result.candidates.map((candidate) => ({
-    entityId: createCanonicalEntityId(candidate.entityId),
-    canonicalLabel: candidate.canonicalLabel,
-    calibratedScore: candidate.calibratedScore,
-    rank: candidate.rank,
-    evidenceRefs: [],
-  }));
+  return v2Result.candidates.map(projectV2ResolvedCandidate);
+}
+
+function resolveBridgeThresholdQueryClass(
+  plan: QueryPlanV1,
+  evidenceQueryClass: string,
+): QueryClass {
+  if (isQueryClass(evidenceQueryClass)) {
+    return evidenceQueryClass;
+  }
+  if (isQueryClass(plan.queryClass)) {
+    return plan.queryClass;
+  }
+  return 'short_entity';
+}
+
+function resolveAppliedThresholds(queryClass: QueryClass): {
+  readonly resolveThreshold: number;
+  readonly gapThreshold: number;
+} {
+  const entry = DEFAULT_THRESHOLD_PROFILE.perQueryClass[queryClass];
+  return {
+    resolveThreshold: entry.resolveTau,
+    gapThreshold: entry.gapTau,
+  };
 }
 
 function projectAmbiguityTypes(
@@ -90,15 +116,22 @@ export function buildEntityResolveResultFromLookupV2(
 ): EntityResolveResult {
   const status = mapLookupV2StatusToWireDecisionStatus(v2Result.status);
   const candidates = projectV2Candidates(v2Result);
-  const top1CalibratedScore = v2Result.evidenceSummary.topConfidence
-    ?? v2Result.topCandidate?.calibratedScore
-    ?? 0;
+  const advisoryHead = projectV2RankOneCandidate(v2Result);
+  const top1CalibratedScore = projectV2AdvisoryTopConfidence(
+    advisoryHead,
+    v2Result.evidenceSummary.topConfidence,
+  );
   const top2Candidate = candidates.find((candidate) => candidate.rank === 2);
   const top2CalibratedScore = top2Candidate?.calibratedScore;
   const calibratedGap = top2CalibratedScore !== undefined
     ? top1CalibratedScore - top2CalibratedScore
     : undefined;
   const decisionConfidenceC = top1CalibratedScore;
+  const thresholdQueryClass = resolveBridgeThresholdQueryClass(
+    plan,
+    v2Result.evidenceSummary.queryClass,
+  );
+  const appliedThresholds = resolveAppliedThresholds(thresholdQueryClass);
   const ambiguityTypes = projectAmbiguityTypes(v2Result.evidenceSummary.ambiguityTypes);
   const ambiguityDetected = v2Result.status === 'ambiguous' || ambiguityTypes.length > 0;
   const outcomeReasonCodes = [
@@ -110,12 +143,12 @@ export function buildEntityResolveResultFromLookupV2(
     status,
     recommendedNextAction: mapLookupV2StatusToNextAction(v2Result.status),
     decisionConfidenceC,
-    ...(v2Result.topCandidate !== null
+    ...(advisoryHead !== undefined
       ? {
           topEntity: {
-            entityId: createCanonicalEntityId(v2Result.topCandidate.entityId),
-            canonicalLabel: v2Result.topCandidate.canonicalLabel,
-            calibratedScore: v2Result.topCandidate.calibratedScore,
+            entityId: createCanonicalEntityId(advisoryHead.entityId),
+            canonicalLabel: advisoryHead.canonicalLabel,
+            calibratedScore: top1CalibratedScore,
           },
         }
       : {}),
@@ -138,7 +171,7 @@ export function buildEntityResolveResultFromLookupV2(
       calibrationTrusted: v2Result.evidenceSummary.calibrationTrusted,
       ambiguityDetected,
       ambiguityTypes,
-      appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
+      appliedThresholds,
       outcomeReasonCodes,
     },
     ...(v2Result.status === 'redirect_discovery'
@@ -169,54 +202,16 @@ function buildEntityLookupV2Command(
   };
 }
 
-/**
- * Run the entity-only search route through the V2 lookup authority and project
- * the outcome into {@link EntityRouteResult}.
- */
-/**
- * Hybrid / dual-lane anchor resolution through the V2 lookup authority.
- * Returns the resolver-shaped head plus an empty raw-candidate list — V2 owns
- * hydration internally (same contract as {@link executeEntityRouteViaLookupV2}).
- */
-export async function resolveEntityRouteForPlanViaLookupV2(
+function buildEntityRouteResultFromLookupV2(
+  v2Result: EntityLookupV2Result,
   plan: QueryPlanV1,
   compiled: CompiledWineQuery,
-  useCase: EntityLookupV2UseCasePort,
-  options?: RequestExecutionContext,
-): Promise<{
-  readonly resolveResult: EntityResolveResult;
-  readonly resolverCandidates: readonly ResolverCandidate[];
-}> {
-  const route = await executeEntityRouteViaLookupV2(plan, compiled, useCase, options);
-  return {
-    resolveResult: route.identityResolveResult,
-    resolverCandidates: [],
-  };
-}
-
-export async function executeEntityRouteViaLookupV2(
-  plan: QueryPlanV1,
-  compiled: CompiledWineQuery,
-  useCase: EntityLookupV2UseCasePort,
-  options?: RequestExecutionContext,
-): Promise<EntityRouteResult> {
-  pipelineDebug(
-    {
-      step: PipelineDebugStep.ROUTE_ENTITY_ONLY_START,
-      query_class: plan.queryClass,
-      lookup_authority: 'entity_lookup_v2',
-    },
-    'pipeline entity-only route (lookup v2)',
-  );
-
-  const v2Result = await useCase.execute(
-    buildEntityLookupV2Command(plan, compiled),
-    options,
-  );
+): EntityRouteResult {
+  const resolverCandidates = projectV2ResolverCandidates(v2Result.candidates);
   const resolveResult = buildEntityResolveResultFromLookupV2(v2Result, plan);
-  const rankedResults = buildEntityRouteRankedResults(plan, resolveResult, []);
+  const rankedResults = buildEntityRouteRankedResults(plan, resolveResult, resolverCandidates);
   const laneArtifacts = {
-    identity: liftEntityResolveResultToLaneArtifacts(plan, resolveResult, []),
+    identity: liftEntityResolveResultToLaneArtifacts(plan, resolveResult, resolverCandidates),
     general: [],
     fused: [],
   };
@@ -266,4 +261,52 @@ export async function executeEntityRouteViaLookupV2(
     sparseExecuted: false,
     specializedRouteExecuted: null,
   };
+}
+
+/**
+ * Hybrid / dual-lane anchor resolution through the V2 lookup authority.
+ * Returns the resolver-shaped head plus channel-projected raw candidates.
+ */
+export async function resolveEntityRouteForPlanViaLookupV2(
+  plan: QueryPlanV1,
+  compiled: CompiledWineQuery,
+  useCase: EntityLookupV2UseCasePort,
+  options?: RequestExecutionContext,
+): Promise<{
+  readonly resolveResult: EntityResolveResult;
+  readonly resolverCandidates: readonly ResolverCandidate[];
+}> {
+  const v2Result = await useCase.execute(
+    buildEntityLookupV2Command(plan, compiled),
+    options,
+  );
+  const resolverCandidates = projectV2ResolverCandidates(v2Result.candidates);
+
+  return {
+    resolveResult: buildEntityResolveResultFromLookupV2(v2Result, plan),
+    resolverCandidates,
+  };
+}
+
+export async function executeEntityRouteViaLookupV2(
+  plan: QueryPlanV1,
+  compiled: CompiledWineQuery,
+  useCase: EntityLookupV2UseCasePort,
+  options?: RequestExecutionContext,
+): Promise<EntityRouteResult> {
+  pipelineDebug(
+    {
+      step: PipelineDebugStep.ROUTE_ENTITY_ONLY_START,
+      query_class: plan.queryClass,
+      lookup_authority: 'entity_lookup_v2',
+    },
+    'pipeline entity-only route (lookup v2)',
+  );
+
+  const v2Result = await useCase.execute(
+    buildEntityLookupV2Command(plan, compiled),
+    options,
+  );
+
+  return buildEntityRouteResultFromLookupV2(v2Result, plan, compiled);
 }

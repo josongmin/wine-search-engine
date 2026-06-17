@@ -162,12 +162,11 @@ export function buildLookupV2RuntimeSurfaceOwnerEvidence(
       typeof document.attributeHints === 'object'
       && document.attributeHints !== null
       && typeof (document.attributeHints as Record<string, unknown>)['appellation'] === 'string'
-      && ((document.attributeHints as Record<string, unknown>)['appellation'] as string).trim().length > 0
     ) {
-      entityAppellations.set(
-        document.entityId,
-        (document.attributeHints as Record<string, string>)['appellation'],
-      );
+      const appellation = ((document.attributeHints as Record<string, unknown>)['appellation'] as string).trim();
+      if (appellation.length > 0) {
+        entityAppellations.set(document.entityId, appellation);
+      }
     }
     const surfaces: readonly {
       readonly value: unknown;

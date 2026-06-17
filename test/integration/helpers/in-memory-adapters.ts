@@ -10,6 +10,7 @@ import type { BlockingPort } from '../../../src/domain/resolver/port/blocking.po
 import type {
   CalibrationStore,
   CalibrationParams,
+  FreshCalibrationLoadResult,
 } from '../../../src/domain/resolver/port/calibration-store.port.js';
 import type {
   SearchIndexPort,
@@ -44,6 +45,7 @@ import {
   matchesAliasPrefixTerm,
 } from '../../../src/domain/query/service/alias-prefix-terms.js';
 import { buildNormalizedQueryViews } from '../../../src/domain/query/service/query-normalizer.js';
+import { doubleMetaphoneKeys } from '../../../src/domain/alias/service/double-metaphone.js';
 import { buildHangulJamoKey } from '../../../src/domain/shared/utils/hangul.js';
 import { pickHigherTrustAliasType } from '../../../src/domain/alias/service/conflict-resolver.js';
 import {
@@ -214,6 +216,26 @@ export class InMemoryCalibrationStore implements CalibrationStore {
 
   async save(queryClass: QueryClass, params: CalibrationParams): Promise<void> {
     this.params.set(queryClass, params);
+  }
+
+  async loadIfFresh(
+    queryClass: QueryClass,
+    ttlDays: number,
+    now: Date = new Date(),
+  ): Promise<FreshCalibrationLoadResult> {
+    const params = this.params.get(queryClass) ?? null;
+    if (params === null) {
+      return { trusted: false, reason: 'missing', params: null };
+    }
+    if (params.fittedAt === undefined) {
+      return { trusted: false, reason: 'never_fitted', params };
+    }
+    const ageMs = now.getTime() - params.fittedAt.getTime();
+    const ttlMs = ttlDays * 24 * 60 * 60 * 1000;
+    if (ageMs > ttlMs) {
+      return { trusted: false, reason: 'stale', params };
+    }
+    return { trusted: true, params };
   }
 }
 
@@ -483,6 +505,16 @@ export class InMemoryAliasMatcher implements AliasMatcher {
       syllableBoundaryOffsets: ReadonlySet<number>;
     }>
   >();
+  private readonly doubleMetaphoneIndex = new Map<
+    string,
+    Array<{
+      entityId: EntityId;
+      surfaceForm: string;
+      normalizedForm: string;
+      confidence: number;
+      provenance: InMemoryAliasProvenance;
+    }>
+  >();
 
   // entityId → document for smart alias generation
   private readonly documents = new Map<EntityId, RetrievalDocument>();
@@ -519,6 +551,56 @@ export class InMemoryAliasMatcher implements AliasMatcher {
     existing.push({ entityId, surfaceForm, confidence, provenance });
     this.aliases.set(normalized, existing);
     this.indexHangulCompletionSurface(surfaceForm, normalized, entityId, confidence);
+    this.indexDoubleMetaphoneSurface(surfaceForm, normalized, entityId, confidence, provenance);
+  }
+
+  private indexDoubleMetaphoneSurface(
+    surfaceForm: string,
+    normalizedForm: string,
+    entityId: EntityId,
+    confidence: number,
+    provenance: InMemoryAliasProvenance,
+  ): void {
+    const surfacesToIndex = [
+      surfaceForm,
+      normalizedForm,
+      ...buildNormalizedQueryViews(surfaceForm).lookupVariants,
+    ];
+    const seenKeys = new Set<string>();
+    for (const surface of surfacesToIndex) {
+      for (const dmKey of doubleMetaphoneKeys(surface)) {
+        if (dmKey.length === 0 || seenKeys.has(dmKey)) {
+          continue;
+        }
+        seenKeys.add(dmKey);
+        const bucket = this.doubleMetaphoneIndex.get(dmKey) ?? [];
+        bucket.push({
+          entityId,
+          surfaceForm,
+          normalizedForm,
+          confidence,
+          provenance,
+        });
+        this.doubleMetaphoneIndex.set(dmKey, bucket);
+      }
+      for (const token of surface.split(/\s+/).filter((part) => part.length > 0)) {
+        for (const dmKey of doubleMetaphoneKeys(token)) {
+          if (dmKey.length === 0 || seenKeys.has(dmKey)) {
+            continue;
+          }
+          seenKeys.add(dmKey);
+          const bucket = this.doubleMetaphoneIndex.get(dmKey) ?? [];
+          bucket.push({
+            entityId,
+            surfaceForm,
+            normalizedForm,
+            confidence,
+            provenance,
+          });
+          this.doubleMetaphoneIndex.set(dmKey, bucket);
+        }
+      }
+    }
   }
 
   /**
@@ -742,6 +824,42 @@ export class InMemoryAliasMatcher implements AliasMatcher {
         phoneticResults.sort((a, b) => b.matchConfidence - a.matchConfidence);
         return phoneticResults;
       }
+    }
+
+    const doubleMetaphoneResults: AliasMatchResult[] = [];
+    const queryDmKeys = new Set<string>();
+    for (const variant of views.lookupVariants) {
+      for (const dmKey of doubleMetaphoneKeys(variant)) {
+        queryDmKeys.add(dmKey);
+      }
+    }
+    for (const token of views.punctuationStripped.split(/\s+/).filter(Boolean)) {
+      for (const dmKey of doubleMetaphoneKeys(token)) {
+        queryDmKeys.add(dmKey);
+      }
+    }
+    for (const dmKey of queryDmKeys) {
+      const entries = this.doubleMetaphoneIndex.get(dmKey);
+      if (entries === undefined) {
+        continue;
+      }
+      for (const entry of entries) {
+        const entityIds = [entry.entityId];
+        doubleMetaphoneResults.push({
+          surfaceForm: entry.surfaceForm,
+          normalizedForm: entry.normalizedForm,
+          entityIds,
+          matchConfidence: entry.confidence * 0.86,
+          lookupStrategy: 'phonetic_exact',
+          ...(this.pickAliasTypeForEntries([entry]) !== undefined
+            ? { aliasType: this.pickAliasTypeForEntries([entry]) }
+            : {}),
+        });
+      }
+    }
+    if (doubleMetaphoneResults.length > 0) {
+      doubleMetaphoneResults.sort((a, b) => b.matchConfidence - a.matchConfidence);
+      return doubleMetaphoneResults;
     }
 
     // Stage 2: Substring/token match in pre-registered aliases

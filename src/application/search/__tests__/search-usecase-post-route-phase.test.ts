@@ -298,7 +298,7 @@ describe('runSearchPostRoutePhase', () => {
         plannerVersion: '1.0.0',
       } as never,
       compiled: makeTestCompiled(),
-      // Forced by toLookupWineRequest for /v1/lookup/wine callers.
+      // Lookup-style request shape (legacy /v1/lookup/wine callers removed post-V2 cutover).
       request: { query: 'chateau margaux 2016', options: { mode: 'auto', explain: false, clarification: false } },
       requestId: 'req-lookup-bypass',
       startTime: Date.now(),

@@ -14,6 +14,7 @@ import { loadSearchSnapshotRuntimeState } from '../../src/infrastructure/health/
 // cache does not affect readiness probes running on separate pools.
 import { getCurrentFeatureSchemaHash } from '../../src/domain/ranking/service/feature-parity-hash.js';
 import { buildSearchSnapshot } from './build-search-snapshot.js';
+import { markPublishedCurationProposalsMaterialized } from './load-published-curation-proposals.js';
 import {
   promoteRuntimeSubstrateArtifacts,
   publishRuntimeSubstrates,
@@ -25,7 +26,6 @@ import { verifyRuntimeGoldCatalogCoverage } from './verify-runtime-gold-catalog-
 import { resolveDefaultFixtureRepoRoot } from './snapshot-entity-identity.js';
 import { atomicWriteFile } from './etl-utils.js';
 import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
-import { SEARCH_SNAPSHOT_SCHEMA_VERSION } from '../../src/domain/shared/constants/search-snapshot.js';
 import { parseNdjson } from './ndjson.js';
 import { hashStableJson } from '../../src/domain/shared/utils/stable-json.js';
 import {
@@ -704,13 +704,6 @@ async function loadSnapshotEntityIds(entitiesPath: string): Promise<readonly str
     .sort((left, right) => left.localeCompare(right));
 }
 
-async function loadPreparedFeedDocIds(preparedFeedPath: string): Promise<readonly string[]> {
-  const raw = await fs.readFile(preparedFeedPath, 'utf8');
-  return parsePreparedVespaFeedDocuments(raw, preparedFeedPath)
-    .map((doc) => doc.id)
-    .sort((left, right) => left.localeCompare(right));
-}
-
 async function loadCurrentRuntimeEntityIds(snapshotId: string): Promise<readonly string[]> {
   const config = loadConfig();
   if (!shouldUsePgPool(config.pg)) {
@@ -1357,6 +1350,7 @@ async function run(): Promise<void> {
         // Full publish always builds a fresh snapshot id; re-publishing over the
         // current active snapshot stays guarded (operator must rollback first).
         refreshActiveRuntimeSubstrates: false,
+        artifactOnlyPromote: false,
       });
       publishState.advance('runtime_substrates_published');
       console.log('✅ Verifying search snapshot readiness');
@@ -1404,6 +1398,10 @@ async function run(): Promise<void> {
         runtimeStatePath: args.runtimeStatePath,
         manifestPath: built.manifestPath,
         requirePointerParity: true,
+      });
+      await markPublishedCurationProposalsMaterialized({
+        snapshotId: built.manifest.snapshotId,
+        consumed: built.consumedCuration,
       });
       console.log('🧹 Reaping stale snapshot rows (retain active + previous for rollback)');
       const reapPool = createReapSnapshotsPool(config.pg);

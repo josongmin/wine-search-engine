@@ -9,7 +9,7 @@
  * dedup preserving relative to the V2 lookup contract.
  *
  * Production code under test (catalog key_files):
- *  - src/application/search/autocomplete.usecase.ts (AutocompleteUseCase)
+ *  - src/application/search/autocomplete-query-runner.ts (AutocompleteQueryRunner)
  *
  * Shared scorer/extractor helpers exercised by both the live API and the offline
  * eval runner (scripts/eval/run-autocomplete-eval.ts) are property-tested too,
@@ -53,7 +53,7 @@
 
 import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
-import { AutocompleteUseCase } from '../../src/application/search/autocomplete.usecase.js';
+import { buildAutocompleteQueryRunner } from '../../src/application/search/autocomplete-query-runner.js';
 import { createEntityId, type CanonicalEntityId } from '../../src/domain/shared/types/index.js';
 import {
   extractAutocompleteRankedEntityIds,
@@ -246,7 +246,7 @@ describe('Property: autocomplete projection determinism', () => {
       fc.asyncProperty(lookupV2ResponseArb(), async ({ response }) => {
         const resolveA = makeEntityLookupV2Stub(response);
         const lookupA = makeResolverProjectionStub(new Map());
-        const ucA = new AutocompleteUseCase({ entityLookupV2UseCase: resolveA.port, resolverProjectionLookup: lookupA.port });
+        const ucA = buildAutocompleteQueryRunner({ entityLookupV2UseCase: resolveA.port, resolverProjectionLookup: lookupA.port });
 
         const first = await ucA.execute({ query: 'opu' });
         const second = await ucA.execute({ query: 'opu' });
@@ -265,7 +265,7 @@ describe('Property: faithful 1:1 projection (cardinality, order, rank, identity)
       fc.asyncProperty(lookupV2ResponseArb(), async ({ response, candidates }) => {
         const resolve = makeEntityLookupV2Stub(response);
         const lookup = makeResolverProjectionStub(new Map());
-        const uc = new AutocompleteUseCase({ entityLookupV2UseCase: resolve.port, resolverProjectionLookup: lookup.port });
+        const uc = buildAutocompleteQueryRunner({ entityLookupV2UseCase: resolve.port, resolverProjectionLookup: lookup.port });
 
         const result = await uc.execute({ query: 'q' });
 
@@ -309,7 +309,7 @@ describe('Property: canonical label hydration + fallback', () => {
           }
           const resolve = makeEntityLookupV2Stub(response);
           const lookup = makeResolverProjectionStub(docs);
-          const uc = new AutocompleteUseCase({ entityLookupV2UseCase: resolve.port, resolverProjectionLookup: lookup.port });
+          const uc = buildAutocompleteQueryRunner({ entityLookupV2UseCase: resolve.port, resolverProjectionLookup: lookup.port });
 
           const result = await uc.execute({ query: 'q' });
 
@@ -333,7 +333,7 @@ describe('Property: status / trace-ref / request-id mapping fidelity', () => {
       fc.asyncProperty(lookupV2ResponseArb(), async ({ response }) => {
         const lookupV2 = makeEntityLookupV2Stub(response);
         const lookup = makeResolverProjectionStub(new Map());
-        const uc = new AutocompleteUseCase({ entityLookupV2UseCase: lookupV2.port, resolverProjectionLookup: lookup.port });
+        const uc = buildAutocompleteQueryRunner({ entityLookupV2UseCase: lookupV2.port, resolverProjectionLookup: lookup.port });
 
         const result = await uc.execute({ query: 'q' });
         const traceRef = buildEntityLookupV2AutocompleteTraceRef(response);
@@ -361,7 +361,7 @@ describe('Property: NFC/NFD Korean prefix transparency', () => {
           const query = prefix.normalize(form === 'NFC' ? 'NFC' : 'NFD');
           const lookupV2 = makeEntityLookupV2Stub(buildLookupV2Result('resolved', []));
           const lookup = makeResolverProjectionStub(new Map());
-          const uc = new AutocompleteUseCase({ entityLookupV2UseCase: lookupV2.port, resolverProjectionLookup: lookup.port });
+          const uc = buildAutocompleteQueryRunner({ entityLookupV2UseCase: lookupV2.port, resolverProjectionLookup: lookup.port });
 
           await uc.execute({ query });
 
@@ -391,7 +391,7 @@ describe('Property: NFC/NFD Korean prefix transparency', () => {
         const runForm = async (form: 'NFC' | 'NFD'): Promise<string | undefined> => {
           const lookupV2 = makeEntityLookupV2Stub(buildResponse(form));
           const lookup = makeResolverProjectionStub(new Map());
-          const uc = new AutocompleteUseCase({ entityLookupV2UseCase: lookupV2.port, resolverProjectionLookup: lookup.port });
+          const uc = buildAutocompleteQueryRunner({ entityLookupV2UseCase: lookupV2.port, resolverProjectionLookup: lookup.port });
           const result = await uc.execute({ query: prefix });
           return result.suggestions[0]?.entity.canonical_label;
         };
@@ -420,7 +420,7 @@ describe('Property: empty-candidate and empty-prefix safety', () => {
         async (query, status) => {
           const lookupV2 = makeEntityLookupV2Stub(buildLookupV2Result(status, []));
           const lookup = makeResolverProjectionStub(new Map());
-          const uc = new AutocompleteUseCase({ entityLookupV2UseCase: lookupV2.port, resolverProjectionLookup: lookup.port });
+          const uc = buildAutocompleteQueryRunner({ entityLookupV2UseCase: lookupV2.port, resolverProjectionLookup: lookup.port });
 
           const result = await uc.execute({ query });
           expect(result.suggestions).toEqual([]);
@@ -441,7 +441,7 @@ describe('Property: calibrated score forwarded verbatim within [0,1]', () => {
       fc.asyncProperty(lookupV2ResponseArb(), async ({ response, candidates }) => {
         const resolve = makeEntityLookupV2Stub(response);
         const lookup = makeResolverProjectionStub(new Map());
-        const uc = new AutocompleteUseCase({ entityLookupV2UseCase: resolve.port, resolverProjectionLookup: lookup.port });
+        const uc = buildAutocompleteQueryRunner({ entityLookupV2UseCase: resolve.port, resolverProjectionLookup: lookup.port });
 
         const result = await uc.execute({ query: 'q' });
         for (let i = 0; i < candidates.length; i += 1) {

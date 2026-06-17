@@ -49,7 +49,7 @@ flowchart TB
   rank --> RELAX["0건 + hard constraints => constraint relaxation retry"]
 ```
 
-- **진입:** `SearchUseCase.executeHybridRoute`와 `HybridUseCase` 모두 현재는 `executeHybridRouteRankingPipeline(plan, deps, resolveEntity, compiled?, requestContext?)`로 수렴한다.  
+- **진입:** `SearchUseCase.executeHybridRoute` → `executeHybridRouteRankingPipeline(plan, deps, resolveEntity, compiled?, requestContext?)`.
 - **후보:** `retrieveHybridCandidatesForPlan`은 `compiled.execution.effectiveRetrievalMode ?? plan.retrievalMode` 기준으로 전문 browse/compare를 먼저 시도하고, 실패 시 `candidatePool.execute?()` 또는 `generate()`로 폴백한다. 반환형은 단순 `HybridCandidate[]`가 아니라 `routeDegradation` / `specializedRouteObservability`를 포함하는 `HybridCandidateRetrievalResult`다.  
 - **이후:** `runHybridRankingPipeline`은 `RankingInput`만 조립해 `ranker.rank()`에 위임한다. cross-encoder rerank, rerank gate, learned LTR은 별도 helper가 아니라 `Ranker.rank()` 내부 SSOT(`applyLearnedLtrRerank`)에서 처리된다. 반환 시에는 `RankingMetadata`를 우선 사용하고, 필요 시 legacy getter fallback으로 degradation / funnel metrics를 회수한다.  
 - **복구:** `executeHybridRouteRankingPipeline`은 retrieval/ranking degradation을 병합하고, `specializedRouteObservability`를 보존하며, 0건 + hard constraint 조합이면 최대 4단계 constraint relaxation retry까지 수행한다.
@@ -97,7 +97,7 @@ export async function dispatchSearchRouteExecution(
 }
 ```
 
-메인 검색의 하이브리드 경로도 이제 공유 파이프라인 호출만 담당한다.
+메인 검색의 하이브리드 경로는 `SearchUseCase.executeHybridRoute`가 공유 파이프라인을 호출한다. `compiled`와 `requestContext(stageTimer/abortSignal/requestId)`를 함께 전달한다.
 
 ```416:430:src/application/search/search.usecase.ts
   private async executeHybridRoute(
@@ -118,30 +118,7 @@ export async function dispatchSearchRouteExecution(
   }
 ```
 
-`HybridUseCase`도 pre-route 이후 같은 공유 파이프라인을 호출하되, `compiled`와 `requestContext(stageTimer/abortSignal/requestId)`를 함께 전달한다.
-
-```162:181:src/application/search/hybrid.usecase.ts
-      hybridPipelineResult = await executeHybridRouteRankingPipeline(
-        plan,
-        {
-          candidatePool: this.deps.candidatePool,
-          browseRetriever: this.deps.browseRetriever,
-          compareRetriever: this.deps.compareRetriever,
-          ranker: this.deps.ranker,
-          entityLookupV2UseCase: this.deps.entityLookupV2UseCase,
-        },
-        (resolverPlan) => resolveEntityRouteForPlan(resolverPlan, {
-          entityLookupV2UseCase: this.deps.entityLookupV2UseCase,
-        }, hybridSurfaceCompiled),
-        hybridSurfaceCompiled,
-        {
-          stageTimer,
-          ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
-          requestId,
-          requestStartTimeMs: startTime,
-        },
-      );
-```
+> **Note (2026-06 cutover):** `HybridUseCase` duplicate stack removed. Hybrid primitive traffic is `POST /v1/search/hybrid` → `SearchUseCase` only.
 
 ---
 
@@ -499,7 +476,7 @@ export function buildRanker(
 
 **런타임 인덱스:** `VespaSearchIndex` (`src/infrastructure/vespa/vespa-search-index.ts`) — `SearchIndexPort` 구현.
 **LTR 모델 로드:** `container-runtime-support.ts`가 registry에서 `ltrModels`를 로드하고, `buildRanker(..., support)` 경유로 `Ranker`에 주입한다.
-**실제 use case 주입:** `SearchUseCase`와 `HybridUseCase`는 bare `Ranker`가 아니라 보통 `RankingStagePipeline`으로 감싼 `core.ranker`를 받는다. 그래서 `funnelMetrics`는 production wiring에서는 대체로 채워지고, bare-ranker warning은 방어적 fallback에 가깝다.
+**실제 use case 주입:** `SearchUseCase`는 bare `Ranker`가 아니라 보통 `RankingStagePipeline`으로 감싼 `core.ranker`를 받는다. 그래서 `funnelMetrics`는 production wiring에서는 대체로 채워지고, bare-ranker warning은 방어적 fallback에 가깝다.
 
 ---
 
@@ -612,7 +589,6 @@ export function buildRanker(
 |------|
 | `search-usecase-route-dispatch.ts` |
 | `search.usecase.ts` |
-| `hybrid.usecase.ts` |
 | `search-usecase-hybrid-candidates.ts` |
 | `search-usecase-hybrid-ranking-pipeline.ts` |
 | `search-usecase-hybrid-route.ts` (합성 resolve) |

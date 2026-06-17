@@ -102,23 +102,15 @@ structured logs. The TS type definition is in `src/domain/observability/pipeline
 | Step | Fields | Source |
 |------|--------|--------|
 | `entity_lookup_v2.use_case.start` | `query_preview` (optional), `request_id` (optional) | `entity-lookup-v2.usecase.ts` |
-| `entity_lookup_v2.constraint_sat.contradicted` | `contradiction_reason` | `entity-lookup-v2.usecase.ts` |
+| `entity_lookup_v2.constraint_sat.contradicted` | `contradiction_reason` (reserved — not yet emitted) | — |
 | `entity_lookup_v2.use_case.done` | `resolve_status`, `decision_status`, `candidate_count` | `entity-lookup-v2.usecase.ts` |
-| `interpret.planner.done` | `query_class`, `planner_status` | `interpret-planner.ts` |
-
-### Hybrid execution (use case entry)
-
-| Step | Fields | Source |
-|------|--------|--------|
-| `hybrid.execute.start` | `query_class`, `retrieval_mode` | `hybrid.usecase.ts` |
-| `hybrid.execute.ranked` | `ranked_count`, `latency_ms` | `hybrid.usecase.ts` |
-| `hybrid.execute.stage_timings` | _(per-stage `latency_ms` map)_ | `hybrid.usecase.ts` |
+| `interpret.planner.done` | `query_class`, `route`, `retrieval_mode` | `interpret-query-runner.ts` |
 
 ### Batch
 
 | Step | Fields | Source |
 |------|--------|--------|
-| `batch.search.start` | `batch_size` | `batch-search.usecase.ts` |
+| `batch.search.start` | `batch_size` | `batch-search-runner.ts` |
 
 ### Infrastructure HTTP steps
 

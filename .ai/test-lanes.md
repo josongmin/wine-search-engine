@@ -202,8 +202,8 @@ Repo-local rules for choosing test lanes. This file is for agents and operators.
     - otherwise it falls back to `git:prepush`
 
 - `pnpm run git:prepush`
-  - `typecheck + test:unit + verify:http-contracts`
-  - Main default pre-push gate.
+  - `typecheck + typecheck:etl + security-patterns + test:unit + web test + integration matrix + noisy + deadcode`
+  - HTTP contract parity: CI `verification-core` always; local `git:prepush:smart` runs `verify:http-contracts` on HTTP-sensitive diffs
 
 - `pnpm run git:prepush:heavy`
   - `git:prepush + test:heavy`

@@ -2,73 +2,46 @@ id: retrieval.entity-lookup-v2
 name: Entity Lookup V2 (Dedicated Resolution Stack)
 category: retrieval
 summary: |
-  Single kernel: `lookup-authority.ts` → `EntityLookupV2UseCase` for HTTP/agent/CLI/
-  autocomplete/search-entity delegate. `POST /v2/entity-lookup` dedicated stack:
+  Single kernel: `lookup-authority.ts` → `EntityLookupV2UseCase` for HTTP/agent/CLI,
+  eval-only autocomplete projection, and search-entity bridge. `POST /v2/entity-lookup`
   admission/concept gate + multi-channel provenance + calibrated-abstain 4-state
   (resolved|ambiguous|failed|redirect_discovery). Precision-first: abstain over wrong-positive.
 target_architecture: |
   Entity resolve SSoT is one kernel: `src/config/lookup-authority.ts` wires
   `EntityLookupV2UseCase` and is the shared entry for HTTP (`POST /v2/entity-lookup`),
-  agent tools, CLI, autocomplete, and search-entity delegation. Autocomplete and
-  search-entity surfaces delegate to this kernel; they are not parallel resolver pipelines.
-  Legacy `POST /v1/entity/resolve` exists only as a regression harness (not live HTTP).
+  agent tools, CLI, and eval-only autocomplete projection. Autocomplete is not a
+  parallel resolver pipeline and has no live HTTP route after the V2 cutover.
+  Legacy `POST /v1/entity/resolve` was removed — ResolveResponse shape is kept
+  only as a mapping-only regression rail (`executeResolveViaEntityLookupV2`).
 
 maturity: 4
 maturity_rationale: |
-  **2026-06-10 갱신 (Phase 0–5 complete).** 단일 커널 마무리: views/ambiguity/witness
-  dedup, alias recall 단일 패스, `resolverProjectionLookup`-only hydration,
-  `LookupDecisionEngine` 추출, exact-safe registry fast path(timed recall skip),
-  resolve route/autocomplete/search-entity → V2 authority, cutover gate meta lane.
-  Public HTTP is `/v2/entity-lookup` only; legacy `/v1/entity/resolve` is regression harness.
-  maturity 5 미달: alias registry v2 심화 substrate·long-tail stretch 잔여.
+  **2026-06-10 (KIL + planner hardening).** In-memory substrate parity: document alias
+  materialization, Double Metaphone recall, romanee-conti-2015 fixture alignment.
+  KIL noisy benchmark recall@3 ~0.95 (phonetic/producer_label/accent floors green).
+  Planner: partial producer-label identity posture + ontology-only fuzzy recovery.
+  LookupDecisionEngine: unique jamo_phonetic singleton witness (symmetric to fuzzy).
+  Identity exactness tier `alias_phonetic` wired through entity-route ranked results,
+  decision calibration-trust + noisy-short-query bypasses, and PG `phonetic_keys`
+  recall substrate (migration 034).
 
-  **2026-06-03 (curation UX + API playground).** `EntityPicker` 기반 curation 워크벤치
-  (LIVE alias + in-flight proposal 인라인, proposal queue 필터, ambiguity/suppression
-  제출). `/ops/playground`에서 V2 ops surface 11개를 카탈로그 선택·JSON 발사·curl
-  렌더. web vitest 25 케이스로 고정.
+  **2026-06-17 (ELV2 closeout).** Curation publish→snapshot ETL (033, pin convergence,
+  publish-time materialize). Silent-skip counters for scope-graph/retrieval degradation.
+  family_graph SSoT = snapshot EntityScopeGraphPort (PgFamilyGraph deprecated for lookup).
+  Meta gates: runtime-registry CLI parity + active-pointer proof. Ops-web reject +
+  abbreviation alias parity. line/vintage graph + candidate-projection tests.
 
-  **2026-06-02 (T-ELV2-07 operator plane 완료, DoD #6 충족).** 운영자가
-  query 하나로 admission/candidates/scores/decision을 trusted plane(브라우저)에서
-  보고, alias/ambiguity/suppression을 staging(proposal→review→publish) 기반으로
-  운영할 수 있다:
+  **2026-06-10 (Phase 0–5).** 단일 커널: views/ambiguity dedup, resolverProjectionLookup-only
+  hydration, LookupDecisionEngine, exact-safe fast path, cutover meta lane. `/v2/entity-lookup`
+  only. maturity 5 미달: alias registry v2 심화 + long-tail stretch (T-ELV2-08).
 
-    - **trusted read plane** — `POST /v2/entity-lookup/ops/inspect` (X-Debug-Key
-      게이트)가 full decision spine을 diagnostic 모드로 반환.
-    - **curation write plane** — `/v2/entity-lookup/ops/{alias-audit,coverage-
-      health,proposals[/submit|/review|/publish]}`. read는 X-Debug-Key, write/
-      publish는 **별도** X-Ops-Write-Key로 게이트(leaked read key가 staged runtime
-      변경을 유발 못함, RFC §5). proposal 전이 그래프는 도메인 SSoT
-      (pending→approved/rejected, approved→published; rejected/published terminal),
-      pg 어댑터는 optimistic guarded UPDATE + JSONB Zod 검증 + crypto.randomUUID.
-      publish는 staging 마커일 뿐 — runtime 반영은 snapshot ETL이 소비.
-    - **web ops console** — Next.js `/ops/{inspect,curation,coverage}`; 키는 탭
-      sessionStorage에만, 서버 미저장.
-    - migration 030: alias_proposals lifecycle 컬럼 + ambiguity/suppression
-      staging 테이블 + 4-state status CHECK (RDS 적용 검증).
+  **2026-06-03.** EntityPicker curation UX, ambiguity/suppression submit, ops playground.
 
-  ---
-  (T-01~05 코어 스파인)
-  코어 스파인이 production에 wiring되고(container → route → catalog v7.1.0)
-  단위 회귀로 고정됨. 4개 티켓이 완료되어 RFC 전역 DoD 중 #1/#3/#4/#5를 충족:
+  **2026-06-02 (T-ELV2-07).** Ops inspect + curation write plane (X-Debug-Key /
+  X-Ops-Write-Key), proposal lifecycle SSoT, Next.js `/ops/*`, migration 030.
 
-    1. **T-ELV2-01 dedicated contract** — `/v2/entity-lookup`가 primitive-search
-       스키마를 재사용하지 않는 전용 request/response. 4-state superRefine 불변식
-       (resolved ⇔ top_candidate, clarify ⇔ ambiguous)으로 wire 경계에서 정직성
-       강제. catalog fingerprint 게이트 통과.
-    2. **T-ELV2-02 admission/concept gate** — `concept-lexicon.ts`가 기존
-       GRAPE/REGION/COUNTRY attribute vocab + `KOREAN_GRAPE_ALIASES`(까쇼 포함)를
-       SSoT 재사용(rule 25/30, 중복 없음). concept-only 쿼리는 retrieval 이전에
-       redirect_discovery로 닫힘 → `까쇼`류가 entity lane에 진입하지 않음(DoD #3).
-       producer 토큰은 residual로 남아 admit (false-positive guard, rule 23).
-    3. **T-ELV2-05 calibrated-abstain 결정 권한** — `CalibratedAbstainDecider`가
-       resolver의 advisory status 위에 precision-first downgrade-only 가드를 적용:
-       confidence floor / top1-top2 margin / calibration-trust 게이트(미신뢰 시
-       raw score를 확률로 취급하지 않음). `opu one`류 noisy typo가 wrong-resolve
-       대신 failed/ambiguous로 닫힘(DoD #1/#5). 절대 upgrade 안 함 → V2는 resolver
-       보다 결코 덜 보수적이지 않음.
-    4. **T-ELV2-04 다채널 provenance** — 기존 anchor recall을 7개 선언 채널
-       (exact/compact/transliteration/jamo-phonetic/fuzzy/family/dense)로 분해,
-       candidate별 channel-hit UNION + per-channel coverage rail(DoD #4).
+  **T-01~05 코어.** T-ELV2-01 contract, T-ELV2-02 concept gate, T-ELV2-04 multi-channel
+  provenance, T-ELV2-05 calibrated abstain — DoD #1/#3/#4/#5 충족.
 
   maturity 4 잔여: (a) 다채널 timed native retrieval은 `LookupCandidateRetrievalPort`
   seam 다음 단계, (b) parity gate는 drift만 막고 long-tail quality를 보장하지 않음,
@@ -76,7 +49,7 @@ maturity_rationale: |
 
 status: active
 since: 2026-06
-last_reviewed: 2026-06-10
+last_reviewed: 2026-06-17
 
 surfaces:
   - "POST /v2/entity-lookup"
@@ -93,42 +66,80 @@ key_files:
   - src/domain/resolver/v2/channel-provenance.ts
   - src/domain/resolver/v2/coverage-report.ts
   - src/domain/curation/model/proposal.ts
+  - src/domain/curation/model/curation-proposal-evidence.ts
   - src/domain/curation/port/curation-store.port.ts
   - src/infrastructure/curation/pg-curation-store.ts
+  - src/infrastructure/curation/curation-materialization-capability.ts
   - src/application/curation/curation.usecase.ts
   - src/interface/http/schemas/entity-lookup-v2.schema.ts
   - src/interface/http/schemas/entity-lookup-v2-ops.schema.ts
+  - src/application/search/entity-lookup-v2/entity-lookup-v2-candidate-projection.ts
   - src/application/search/entity-lookup-v2/entity-lookup-v2.usecase.ts
+  - src/domain/resolver/model/fuzzy-match-confidence.ts
+  - src/domain/alias/model/ops-curated-alias-types.ts
   - src/interface/http/routes/entity-lookup-v2.route.ts
   - src/interface/http/routes/entity-lookup-v2-ops.route.ts
   - src/interface/http/middleware/http-ops-write-mode.ts
   - src/infrastructure/db/migrations/030_lookup_v2_curation_write_plane.sql
+  - src/infrastructure/db/migrations/033_lookup_v2_curation_materialization.sql
+  - src/domain/alias/service/alias-phonetic-keys.ts
+  - src/infrastructure/db/migrations/034_aliases_phonetic_keys.sql
+  - src/infrastructure/db/migrations/rollback/033_lookup_v2_curation_materialization_rollback.sql
+  - app/entity-lookup-ops-web/src/lib/api.ts
+  - docs/runbook-curation-materialization.md
   - web/src/features/ops/ui/inspect-view.tsx
+  - web/src/shared/constants/ops-curated-alias-types.ts
   - web/src/features/ops/ui/curation-view.tsx
   - web/src/features/ops/ui/coverage-view.tsx
+  - web/src/features/ops/ui/__tests__/coverage-view.test.tsx
   - web/src/features/ops/ui/entity-picker.tsx
   - web/src/features/ops/ui/playground-view.tsx
+  - src/domain/resolver/v2/lookup-v2-substrate-capabilities.ts
+  - src/domain/resolver/v2/coverage-report.ts
   - src/config/lookup-authority.ts
+  - scripts/etl/load-published-curation-proposals.ts
   - scripts/eval/lookup-v2-parity-metrics.ts
   - scripts/eval/run-lookup-v2-parity.ts
 
 tests:
   unit:
+    - test/unit/etl/load-published-curation-proposals.test.ts
+    - test/unit/entity-lookup-v2/scope-graph-substrate.test.ts
     - test/unit/entity-lookup-v2/entity-lookup-v2-contract.test.ts
     - test/unit/entity-lookup-v2/concept-admission-gate.test.ts
     - test/unit/entity-lookup-v2/calibrated-abstain-decider.test.ts
     - test/unit/entity-lookup-v2/channel-provenance.test.ts
     - src/config/__tests__/lookup-authority.test.ts
     - test/unit/entity-lookup-v2/parity-metrics.test.ts
-    - test/unit/entity-lookup-v2/cutover-gate.test.ts
+    - test/unit/entity-lookup-v2/multi-channel-retrieval-engine.test.ts
+    - src/application/search/entity-lookup-v2/__tests__/entity-lookup-v2-candidate-projection.test.ts
+    - test/meta/lookup-v2-runtime-registry-context.meta.test.ts
+    - test/meta/lookup-v2-active-pointer-proof.meta.test.ts
+    - test/meta/fuzzy-match-confidence-ssot.test.ts
+    - test/meta/lookup-v2-critical-artifacts.meta.test.ts
+    - test/meta/meta-config-exhaustiveness.meta.test.ts
+    - test/meta/lookup-v2-git-tracked.meta.test.ts
+    - test/meta/ci-verification-core-parity.meta.test.ts
     - test/unit/entity-lookup-v2/coverage-report.test.ts
     - test/unit/curation/proposal-transitions.test.ts
+    - test/unit/curation/curation-proposal-evidence.test.ts
+    - test/unit/curation/curation-materialization-capability.test.ts
     - test/unit/curation/curation-usecase.test.ts
+    - test/unit/meta/curation-integration-lane-parity.test.ts
+    - test/unit/meta/smart-lane-noisy-gate-parity.test.ts
+    - test/unit/meta/bench-smoke-lookup-v2-contract.meta.test.ts
+    - src/domain/resolver/v2/__tests__/lookup-v2-substrate-capabilities.test.ts
   integration:
     - test/integration/http/routes/entity-lookup-v2-ops.route.test.ts
     - test/integration/http/middleware/http-ops-write-mode.test.ts
     - test/integration/curation/pg-curation-store.integration.test.ts
   regression:
+    - test/regression/curation-proposal-etl-consumption.regression.test.ts
+    - test/regression/lookup-v2-p0-policy-collision-stretch.regression.test.ts
+    - test/regression/lookup-v2-operator-bucket-ssot.regression.test.ts
+    - test/regression/lookup-v2-silent-skip-kinds.regression.test.ts
+    - src/domain/alias/service/__tests__/alias-phonetic-keys.test.ts
+    - test/regression/lookup-v2-ops-curated-alias-types.regression.test.ts
     - test/regression/http-contract-catalog-properties.regression.test.ts
 
 depends_on:
@@ -139,12 +150,13 @@ related_rfcs:
 
 known_limitations:
   - "parity rail은 authority drift를 막지만 long-tail quality/coverage green을 의미하지는 않음"
-  - "DoD #2: alias registry v2 VERSION-IDENTITY는 됨(meta.alias_registry: schema_version+source+snapshot_id+alias_count, 라이브 read 경로 배선). 미완은 (a) resolver가 공유 snapshot 대신 읽는 SEPARATE 큐레이션 registry 아티팩트(Option-B fork) + (b) 심층 curation substrate (T-ELV2-03 심화)"
-  - "curation publish는 staging 마커만 — runtime 반영은 snapshot ETL 소비 경로에 의존(직접 runtime write 없음, RFC §5 의도)"
-  - "family_graph 채널: 코드/배선/테스트 완료(migration 031 + PgFamilyGraph + 엔진 채널 + REAL-producer-only builder/publisher). entity_family population은 operator가 `pnpm run etl:family-graph:publish` 실행(live-PG, infra-gated) — 미실행 시 채널 dormant·familyGraphProximity=0으로 degrade"
+  - "legacy approved abbreviation rows: coverage-health exposes `legacy_approved_abbreviation_backlog`; ops publish still required for materialization tracking"
+  - "curation publish는 staging 마커 — runtime 반영은 snapshot build→publish 파이프라인 재실행 필요"
+  - "family_graph runtime source는 snapshot `lookup_scope_graph_runtime` (PG `entity_family`/`PgFamilyGraph`는 lookup lane 미배선). family edge count=0이면 채널은 fire하나 hitCount=0"
 next_steps:
-  - "T-ELV2-08: parity rail 유지 + stretch quality/coverage residue 축소"
-  - "T-ELV2-03 심화: dedicated alias registry v2 schema/migration + published proposal을 소비하는 ETL publish 경로"
+  - "T-ELV2-08: parity rail 유지 + stretch quality/coverage residue 축소 (scope_target_missing 등 operator registry expansion)"
+  - "Lookup LTR domain model + dense channel activation (precision-first gate 유지)"
+  - "eval:lookup-v2:active-pointer:proof in live env after snapshot republish"
 
 tags:
   - retrieval
