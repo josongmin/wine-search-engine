@@ -1,5 +1,6 @@
 import type { Config } from './env.js';
 import type { RuntimeHandles } from './runtime-handles.js';
+import { roundElapsedMs } from './round-elapsed-ms.js';
 import { QuerySanitizer } from '../domain/security/service/query-sanitizer.js';
 import { bootstrapLogger } from '../domain/shared/bootstrap-logger.js';
 import { PgBlockingAdapter } from '../infrastructure/adapter/pg-blocking-adapter.js';
@@ -112,7 +113,7 @@ export function startCalibrationPreload(
 }
 
 function roundMs(value: number): number {
-  return Number(value.toFixed(3));
+  return roundElapsedMs(value);
 }
 
 export function resolveLookupV2LtrSupportState(

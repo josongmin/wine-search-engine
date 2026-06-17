@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import { z } from 'zod';
+import { roundElapsedMs } from './round-elapsed-ms.js';
 import { SearchSnapshotAliasMatcher } from '../infrastructure/adapter/search-snapshot-alias-matcher.js';
 import { SearchSnapshotAmbiguityDictionary } from '../infrastructure/adapter/search-snapshot-ambiguity-dictionary.js';
 import { SearchSnapshotConceptRedirectRegistry } from '../infrastructure/adapter/search-snapshot-concept-redirect-registry.js';
@@ -331,7 +332,7 @@ function buildReviewedFamilyRecallEntries(
 }
 
 function roundMs(value: number): number {
-  return Number(value.toFixed(3));
+  return roundElapsedMs(value);
 }
 
 function materializeLookupRuntimeBundleFromPayload(
@@ -372,7 +373,7 @@ function materializeLookupRuntimeBundleFromPayload(
   const semanticScopeRegistry = new SearchSnapshotSemanticScopeRegistry(
     payload.semanticScopeEntries.map(([, entry]) => entry),
     new Map(
-      Object.entries(payload.semanticScopeComponentSurfaces ?? {}).map(
+      Object.entries(payload.semanticScopeComponentSurfaces).map(
         ([key, surfaces]) => [key, new Set(surfaces)] as const,
       ),
     ),

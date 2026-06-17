@@ -55,7 +55,39 @@ function buildExactSafePacketSourceEvidence(
   registryPath: string,
 ): string {
   const registryName = path.basename(registryPath);
-  return `${row.sourceEvidence} [semantic_policy_registry=${registryName} semantic_conflict=${row.semanticConflictKey} reviewedBy=${registryRow.reviewedBy} decision=${registryRow.decisionReason}]`;
+  return `${row.sourceEvidence} [semantic_policy_registry=${registryName} semantic_conflict=${resolveSemanticConflictKey(row)} reviewedBy=${registryRow.reviewedBy} decision=${registryRow.decisionReason}]`;
+}
+
+function resolveSemanticConflictKey(row: LookupV2PolicyReviewPacketRow): string {
+  const key = row.semanticConflictKey ?? row.policyConflictSurface;
+  if (key === undefined || key.trim().length === 0) {
+    throw new Error(`policy-review row is missing semanticConflictKey for surface=${JSON.stringify(row.surface)}`);
+  }
+  return key;
+}
+
+function normalizeRegistryDecision(
+  decision: LookupV2SemanticPolicyRegistryRow['decision'] | 'keep_policy_conflict' | 'needs_target',
+): LookupV2SemanticPolicyRegistryRow['decision'] {
+  if (decision === 'keep_policy_conflict') {
+    return 'keep_ambiguous';
+  }
+  if (decision === 'needs_target') {
+    return 'needs_scope_target';
+  }
+  return decision;
+}
+
+function isKeptPolicyConflictProposalStatus(
+  proposalStatus: LookupV2PolicyReviewPacketRow['proposalStatus'],
+): boolean {
+  return proposalStatus === 'kept_ambiguous' || proposalStatus === 'kept_policy_conflict';
+}
+
+function isNeedsScopeTargetProposalStatus(
+  proposalStatus: LookupV2PolicyReviewPacketRow['proposalStatus'],
+): boolean {
+  return proposalStatus === 'needs_scope_target' || proposalStatus === 'needs_target';
 }
 
 export function applyLookupV2PolicyReviewPacket(args: {
@@ -70,7 +102,10 @@ export function applyLookupV2PolicyReviewPacket(args: {
   let pendingRows = 0;
 
   for (const row of args.packetRows) {
-    if (row.reviewTarget !== 'lookup_semantic_policy_registry_v1') {
+    if (
+      row.reviewTarget !== 'lookup_semantic_policy_registry_v1'
+      && row.reviewTarget !== 'lookup_policy_conflict_registry_v1'
+    ) {
       throw new Error(`unsupported reviewTarget=${JSON.stringify(row.reviewTarget)} for surface=${JSON.stringify(row.surface)}`);
     }
 
@@ -78,33 +113,29 @@ export function applyLookupV2PolicyReviewPacket(args: {
       pendingRows += 1;
       continue;
     }
-    if (row.proposalStatus === 'kept_ambiguous') {
+    if (isKeptPolicyConflictProposalStatus(row.proposalStatus)) {
       if (row.benchmarkGoldEntityId === undefined) {
         throw new Error(`kept policy-review row is missing benchmarkGoldEntityId for surface=${JSON.stringify(row.surface)}`);
       }
-      if (row.semanticConflictKey === undefined) {
-        throw new Error(`kept policy-review row is missing semanticConflictKey for surface=${JSON.stringify(row.surface)}`);
-      }
+      const semanticConflictKey = resolveSemanticConflictKey(row);
       const registryDecision = args.policyFamilyDecisionMap.get(
-        buildLookupV2SemanticPolicyRegistryKey(row.semanticConflictKey, row.benchmarkGoldEntityId),
+        buildLookupV2SemanticPolicyRegistryKey(semanticConflictKey, row.benchmarkGoldEntityId),
       );
-      if (registryDecision?.decision !== 'keep_ambiguous') {
+      if (registryDecision === undefined || normalizeRegistryDecision(registryDecision.decision) !== 'keep_ambiguous') {
         throw new Error(`kept policy-review row does not match reviewed policy-family registry for surface=${JSON.stringify(row.surface)}`);
       }
       keptPolicyConflictRows += 1;
       continue;
     }
-    if (row.proposalStatus === 'needs_scope_target') {
+    if (isNeedsScopeTargetProposalStatus(row.proposalStatus)) {
       if (row.benchmarkGoldEntityId === undefined) {
         throw new Error(`needs_scope_target policy-review row is missing benchmarkGoldEntityId for surface=${JSON.stringify(row.surface)}`);
       }
-      if (row.semanticConflictKey === undefined) {
-        throw new Error(`needs_scope_target policy-review row is missing semanticConflictKey for surface=${JSON.stringify(row.surface)}`);
-      }
+      const semanticConflictKey = resolveSemanticConflictKey(row);
       const registryDecision = args.policyFamilyDecisionMap.get(
-        buildLookupV2SemanticPolicyRegistryKey(row.semanticConflictKey, row.benchmarkGoldEntityId),
+        buildLookupV2SemanticPolicyRegistryKey(semanticConflictKey, row.benchmarkGoldEntityId),
       );
-      if (registryDecision?.decision !== 'needs_scope_target') {
+      if (registryDecision === undefined || normalizeRegistryDecision(registryDecision.decision) !== 'needs_scope_target') {
         throw new Error(`needs_scope_target policy-review row does not match reviewed policy-family registry for surface=${JSON.stringify(row.surface)}`);
       }
       needsTargetRows += 1;
@@ -118,11 +149,9 @@ export function applyLookupV2PolicyReviewPacket(args: {
     if (row.benchmarkGoldEntityIdSource === undefined) {
       throw new Error(`approved policy-review row is missing benchmarkGoldEntityIdSource for surface=${JSON.stringify(row.surface)}`);
     }
-    if (row.semanticConflictKey === undefined) {
-      throw new Error(`approved policy-review row is missing semanticConflictKey for surface=${JSON.stringify(row.surface)}`);
-    }
+    const semanticConflictKey = resolveSemanticConflictKey(row);
     const registryDecision = args.policyFamilyDecisionMap.get(
-      buildLookupV2SemanticPolicyRegistryKey(row.semanticConflictKey, row.benchmarkGoldEntityId),
+      buildLookupV2SemanticPolicyRegistryKey(semanticConflictKey, row.benchmarkGoldEntityId),
     );
     if (registryDecision?.decision !== 'promote_exact_safe') {
       throw new Error(`approved policy-review row does not match reviewed policy-family registry for surface=${JSON.stringify(row.surface)}`);

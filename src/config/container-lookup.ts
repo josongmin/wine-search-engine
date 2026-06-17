@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
 import type { Config } from './env.js';
+import { roundElapsedMs } from './round-elapsed-ms.js';
 import type { RuntimeHandles } from './runtime-handles.js';
 import { bindLiveSearchSnapshotRuntimeHandles } from './runtime-handles.js';
 import type { EntityLookupV2UseCasePort } from '../application/search/port/search-route-usecases.port.js';
@@ -37,7 +38,7 @@ export async function createLookupDirectContainer(
   const runtimeHandles = await bindLiveSearchSnapshotRuntimeHandles(
     normalizeRuntimeHandles(runtime),
   );
-  const runtimeHandlesMs = Number((performance.now() - runtimeHandlesStartedAt).toFixed(3));
+  const runtimeHandlesMs = roundElapsedMs(performance.now() - runtimeHandlesStartedAt);
   const authority = await createLookupAuthorityServices(config, runtimeHandles);
 
   return {

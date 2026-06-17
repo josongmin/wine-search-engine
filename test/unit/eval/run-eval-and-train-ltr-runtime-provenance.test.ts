@@ -6,12 +6,14 @@ import { linkEvalTrainingReleaseToRuntimeState } from '../../../scripts/eval/run
 import { SEARCH_SNAPSHOT_STATE_VERSION } from '../../../src/domain/shared/constants/search-snapshot.js';
 import { loadSearchSnapshotRuntimeState } from '../../../src/infrastructure/health/search-snapshot-readiness.js';
 import { hashText } from '../../../src/domain/shared/utils/stable-json.js';
+import { buildMinimalLookupRuntimeStatePlane } from '../../helpers/minimal-search-snapshot-runtime-state.js';
 
 async function makeTempDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'eval-training-runtime-provenance-'));
 }
 
 function runtimeStatePayload(runtimeStatePathDir: string, snapshotId: string) {
+  const lookupPlane = buildMinimalLookupRuntimeStatePlane(runtimeStatePathDir);
   return {
     schemaVersion: SEARCH_SNAPSHOT_STATE_VERSION,
     snapshotId,
@@ -19,19 +21,21 @@ function runtimeStatePayload(runtimeStatePathDir: string, snapshotId: string) {
     publishedAt: '2026-04-17T00:00:00.000Z',
     manifestPath: path.join(runtimeStatePathDir, 'manifest.json'),
     nlMappingsRuntimePath: path.join(runtimeStatePathDir, 'nl-mappings.json'),
-    lookupAliasRuntimePath: path.join(runtimeStatePathDir, 'lookup-alias-runtime.json'),
-    lookupResolverProjectionPath: path.join(runtimeStatePathDir, 'lookup-resolver-projection.json'),
-    lookupEntityProjectionPath: path.join(runtimeStatePathDir, 'lookup-entity-projection.json'),
-    lookupAmbiguityRuntimePath: path.join(runtimeStatePathDir, 'lookup-ambiguity-runtime.json'),
-    lookupConceptRedirectRuntimePath: path.join(runtimeStatePathDir, 'lookup-concept-redirect-runtime.json'),
+    lookupAliasRuntimePath: lookupPlane.lookupAliasRuntimePath,
+    lookupExactSafeRuntimePath: lookupPlane.lookupExactSafeRuntimePath,
+    lookupResolverProjectionPath: lookupPlane.lookupResolverProjectionPath,
+    lookupEntityProjectionPath: lookupPlane.lookupEntityProjectionPath,
+    lookupSemanticScopeRuntimePath: lookupPlane.lookupSemanticScopeRuntimePath,
+    lookupReviewedFamilyRecallRuntimePath: lookupPlane.lookupReviewedFamilyRecallRuntimePath,
+    lookupScopeGraphRuntimePath: lookupPlane.lookupScopeGraphRuntimePath,
+    lookupAmbiguityRuntimePath: lookupPlane.lookupAmbiguityRuntimePath,
+    lookupConceptRedirectRuntimePath: lookupPlane.lookupConceptRedirectRuntimePath,
     counts: {
       entities: 10,
       aliases: 12,
+      ...lookupPlane.lookupRuntimeCounts,
       lookupAliasRuntimeAliases: 12,
-      lookupResolverProjectionDocuments: 10,
-      lookupEntityProjectionDocuments: 10,
       lookupAmbiguityRuntimeEntries: 2,
-      lookupConceptRedirectRuntimeEntries: 0,
       ambiguityRegistry: 2,
       nlMappings: 1,
       activeLtrModels: 1,
@@ -39,11 +43,7 @@ function runtimeStatePayload(runtimeStatePathDir: string, snapshotId: string) {
     hashes: {
       entities: 'entities-hash',
       aliases: 'aliases-hash',
-      lookupAliasRuntime: 'lookup-alias-runtime-hash',
-      lookupResolverProjection: 'lookup-resolver-projection-hash',
-      lookupEntityProjection: 'lookup-entity-projection-hash',
-      lookupAmbiguityRuntime: 'lookup-ambiguity-runtime-hash',
-      lookupConceptRedirectRuntime: 'lookup-concept-redirect-runtime-hash',
+      ...lookupPlane.lookupRuntimeHashes,
       ambiguityRegistry: 'ambiguity-hash',
       nlMappings: 'nl-hash',
       activeLtrModels: 'ltr-hash',

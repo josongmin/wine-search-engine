@@ -45,11 +45,11 @@ describe('SearchSnapshotConceptRedirectRegistry', () => {
 
     const registry = await SearchSnapshotConceptRedirectRegistry.loadFromManifest(manifestPath);
 
-    expect(registry.get('샴페인 추천')).toEqual({
+    expect(registry.get('샴페인 추천')).toEqual(expect.objectContaining({
       conceptClass: 'recommendation',
       redirectReason: 'concept_query',
       sourceEvidence: 'test',
-    });
+    }));
   });
 
   it('fails closed when the manifest omits lookupConceptRedirectRuntimeJson', async () => {

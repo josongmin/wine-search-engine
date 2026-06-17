@@ -81,7 +81,7 @@ describe('applyLookupV2PolicyReviewPacket', () => {
         entityId: 'wine-ce-latour',
         proposalStatus: 'approved',
         reviewTarget: 'lookup_exact_safe_registry_v1',
-        benchmarkGoldEntityIdSource: 'policy_family_decision_registry',
+        benchmarkGoldEntityIdSource: 'semantic_policy_registry',
         reviewedBy: 'registry',
         decisionReason: 'approved in registry',
       }),

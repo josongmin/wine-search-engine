@@ -15,6 +15,6 @@ describe('lookup-v2-benchmark-gold-map', () => {
     const map = loadLookupV2BenchmarkGoldHintMapSync();
 
     expect(map.get('Latour')).toBeUndefined();
-    expect(map.get('latour')).toBe('wine-ce-ecff2ce36910240d9c0a7b46dfbe578fcf4fffd2d995ab9d2fc3c3ef06ec8f96');
+    expect(map.get('chateau latour')).toBe('wine-ce-ecff2ce36910240d9c0a7b46dfbe578fcf4fffd2d995ab9d2fc3c3ef06ec8f96');
   });
 });

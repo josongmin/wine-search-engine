@@ -37,7 +37,7 @@ describe('applyLookupV2PolicyFamilyDecisionRegistry', () => {
     expect(result.registryConflictRows).toBe(0);
     expect(result.mergedRows).toEqual([
       expect.objectContaining({
-        policyConflictSurface: '라뚜르',
+        semanticConflictKey: '라뚜르',
         entityId: 'wine-ce-latour',
         decision: 'promote_exact_safe',
       }),
@@ -55,7 +55,7 @@ describe('applyLookupV2PolicyFamilyDecisionRegistry', () => {
           stretchExpectedStatus: 'ambiguous',
           benchmarkGoldEntityId: 'wine-ce-latour',
           benchmarkGoldEntityIdSources: ['policy_registry_authority'],
-          proposalStatus: 'kept_policy_conflict',
+          proposalStatus: 'kept_ambiguous',
           reviewTarget: 'lookup_policy_conflict_registry_v1',
           benchmarkGoldHints: ['latour'],
           sampleSurfaces: ['라뚜르 2009'],
@@ -72,7 +72,8 @@ describe('applyLookupV2PolicyFamilyDecisionRegistry', () => {
       ],
       existingRegistryRows: [
         {
-          policyConflictSurface: '라뚜르',
+          semanticConflictKey: '라뚜르',
+          conflictClass: 'short_form_collision',
           entityId: 'wine-ce-latour',
           decision: 'promote_exact_safe',
           reviewedBy: 'codex',

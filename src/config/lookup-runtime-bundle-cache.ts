@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { deserialize, serialize } from 'node:v8';
+import { roundElapsedMs } from './round-elapsed-ms.js';
 import type { LookupResolverProjection } from '../application/search/port/search-pipeline-deps.port.js';
 import type { AmbiguityInfo } from '../domain/query/port/ambiguity-dictionary.port.js';
 import type {
@@ -202,7 +203,7 @@ function validateLookupRuntimeBundleCachePayload(
     throw new Error('cache artifactPaths is not an object');
   }
   for (const [key, expectedValue] of Object.entries(expected.artifactPaths)) {
-    if ((payload.artifactPaths as Record<string, unknown>)[key] !== expectedValue) {
+    if (payload.artifactPaths[key] !== expectedValue) {
       throw new Error(`cache artifactPaths.${key} mismatch`);
     }
   }
@@ -246,7 +247,7 @@ function validateLookupRuntimeBundleCachePayload(
 }
 
 function roundMs(value: number): number {
-  return Number(value.toFixed(3));
+  return roundElapsedMs(value);
 }
 
 export async function readLookupRuntimeBundleCacheProfiled(args: {

@@ -95,7 +95,7 @@
     "verify:drinking-window-model": "tsx scripts/verify-drinking-window-model.ts",
     "verify:openai-injection-wiring": "tsx scripts/verify-openai-injection-wiring.ts",
     "verify:anthropic-wiring": "tsx scripts/verify-anthropic-wiring.ts",
-    "verify:all": "pnpm run verify:anthropic-wiring && pnpm run verify:openai-injection-wiring && pnpm run verify:drinking-window-model",
+    "verify:all": "pnpm run verify:anthropic-wiring && pnpm run verify:openai-injection-wiring && pnpm run verify:drinking-window-model && pnpm run verify:http-contracts",
     "verify:security-local": "pnpm run verify:openai-injection-wiring && pnpm run semgrep",
     "calibrate:resolver": "tsx --env-file=.env scripts/calibrate/fit-resolver-calibration.ts",
     "calibrate:resolver:dry": "tsx --env-file=.env scripts/calibrate/fit-resolver-calibration.ts --dry-run",

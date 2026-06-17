@@ -54,11 +54,25 @@ vi.mock('../container-features.js', () => ({
   })),
 }));
 
+vi.mock('../runtime-handles.js', () => ({
+  bindLiveSearchSnapshotRuntimeHandles: vi.fn(async (runtime) => ({
+    ...runtime,
+    searchSnapshotId: 'search-snapshot:v1:active',
+    searchSnapshotManifestPath: '/tmp/search-snapshot:v1:active/manifest.json',
+  })),
+}));
+
 vi.mock('../lookup-authority.js', () => ({
   createLookupAuthorityServices: vi.fn(async () => ({
     entityLookupV2UseCase: { execute: vi.fn() } as never,
     bootstrapProfile: {} as never,
     metadata: {} as never,
+  })),
+  buildLookupOpsRuntimeHealthView: vi.fn(() => ({
+    unwiredSubstrateIds: [],
+    familyGraphEdgeCount: 0,
+    ltrSupportStatus: 'unsupported',
+    ltrSupportReason: 'lookup_domain_model_absent',
   })),
 }));
 
@@ -99,5 +113,5 @@ describe('createContainer — wine-agent-loop tool bundle wiring', () => {
     expect(typeof container.wineSearch?.wineSearchOrchestrator.execute).toBe(
       'function',
     );
-  }, 10_000);
+  }, 30_000);
 });

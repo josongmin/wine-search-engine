@@ -38,6 +38,7 @@ import {
 import type {
   SearchSnapshotRuntimeState,
 } from '../../scripts/etl/search-snapshot-schema.js';
+import { buildMinimalLookupRuntimeStatePlane } from '../helpers/minimal-search-snapshot-runtime-state.js';
 
 const PUBLISHER_PATH = fileURLToPath(
   new URL('../../scripts/etl/publish-runtime-substrates.ts', import.meta.url),
@@ -49,6 +50,12 @@ async function makeTempDir(): Promise<string> {
 }
 
 function makeRuntimeState(overrides: Partial<SearchSnapshotRuntimeState> = {}): SearchSnapshotRuntimeState {
+  const {
+    lookupRuntimeCounts,
+    lookupRuntimeHashes,
+    lookupManifestArtifacts: _lookupManifestArtifacts,
+    ...lookupPaths
+  } = buildMinimalLookupRuntimeStatePlane('/tmp');
   return {
     schemaVersion: SEARCH_SNAPSHOT_STATE_VERSION,
     snapshotId: 'search-snapshot:v1:regression',
@@ -56,9 +63,11 @@ function makeRuntimeState(overrides: Partial<SearchSnapshotRuntimeState> = {}): 
     publishedAt: '2026-05-21T00:00:00.000Z',
     manifestPath: '/tmp/manifest.json',
     nlMappingsRuntimePath: '/tmp/nl-mappings.json',
+    ...lookupPaths,
     counts: {
       entities: 3,
       aliases: 4,
+      ...lookupRuntimeCounts,
       ambiguityRegistry: 1,
       nlMappings: 2,
       activeLtrModels: 1,
@@ -66,6 +75,7 @@ function makeRuntimeState(overrides: Partial<SearchSnapshotRuntimeState> = {}): 
     hashes: {
       entities: 'h-entities',
       aliases: 'h-aliases',
+      ...lookupRuntimeHashes,
       ambiguityRegistry: 'h-ambiguity',
       nlMappings: 'h-nl',
       activeLtrModels: 'h-ltr',
