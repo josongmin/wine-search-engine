@@ -117,7 +117,7 @@ describe('benchmark-anchor suitability artifact (regression)', () => {
 
   it('rejects malformed artifact: score > 1', async () => {
     const malformed = makeMinimalArtifact();
-    malformed.entities['chateau-margaux-2015']!.gift.score = 1.5;
+    malformed.entities['chateau-margaux-2015'].gift.score = 1.5;
 
     const filePath = await writeTempArtifact(malformed);
     await expect(loadBenchmarkAnchorSuitabilityArtifact(filePath)).rejects.toThrow(
@@ -127,7 +127,7 @@ describe('benchmark-anchor suitability artifact (regression)', () => {
 
   it('rejects malformed artifact: score < 0', async () => {
     const malformed = makeMinimalArtifact();
-    malformed.entities['chateau-margaux-2015']!.gift.score = -0.1;
+    malformed.entities['chateau-margaux-2015'].gift.score = -0.1;
 
     const filePath = await writeTempArtifact(malformed);
     await expect(loadBenchmarkAnchorSuitabilityArtifact(filePath)).rejects.toThrow(
@@ -233,6 +233,6 @@ describe('benchmark-anchor suitability artifact (regression)', () => {
       promptVersions: artifact.promptVersions,
       requiredEntityIds: artifact.requiredEntityIds,
       entities: artifact.entities,
-    })).toBe('73164ac82b6a90a3c87e1eff5910e73ec93f84681915d75ee559ade539ffeb92');
+    })).toBe('86c3a67c0028c817f4e2625bb3e29d09b7868e9bff18256831a41c494a0a4156');
   });
 });

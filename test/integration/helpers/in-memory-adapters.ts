@@ -42,7 +42,10 @@ import {
   buildAliasPrefixTerms,
   isEligiblePrefixQuery,
   isDisallowedWholeLeadingTokenExpansion,
+  isDisallowedNonLeadingTokenFragment,
+  isGenericWineLabelPrefixToken,
   matchesAliasPrefixTerm,
+  shouldSkipPerTokenPhoneticFanout,
 } from '../../../src/domain/query/service/alias-prefix-terms.js';
 import { buildNormalizedQueryViews } from '../../../src/domain/query/service/query-normalizer.js';
 import { doubleMetaphoneKeys } from '../../../src/domain/alias/service/double-metaphone.js';
@@ -807,6 +810,13 @@ export class InMemoryAliasMatcher implements AliasMatcher {
         if (aliasViews.phoneticCompact !== views.phoneticCompact) {
           continue;
         }
+        const candidateSurface = entries[0]?.surfaceForm ?? normalized;
+        if (
+          isDisallowedNonLeadingTokenFragment(views.punctuationStripped, candidateSurface)
+          || isDisallowedNonLeadingTokenFragment(views.punctuationStripped, normalized)
+        ) {
+          continue;
+        }
 
         const entityIds = entries.map((entry) => entry.entityId);
         const maxConfidence = maxConfidenceOf(entries);
@@ -833,7 +843,11 @@ export class InMemoryAliasMatcher implements AliasMatcher {
         queryDmKeys.add(dmKey);
       }
     }
-    for (const token of views.punctuationStripped.split(/\s+/).filter(Boolean)) {
+    const queryTokens = views.punctuationStripped.split(/\s+/).filter(Boolean);
+    for (const token of queryTokens) {
+      if (shouldSkipPerTokenPhoneticFanout(token, queryTokens.length)) {
+        continue;
+      }
       for (const dmKey of doubleMetaphoneKeys(token)) {
         queryDmKeys.add(dmKey);
       }
@@ -845,6 +859,12 @@ export class InMemoryAliasMatcher implements AliasMatcher {
       }
       for (const entry of entries) {
         const entityIds = [entry.entityId];
+        if (
+          isDisallowedNonLeadingTokenFragment(views.punctuationStripped, entry.surfaceForm)
+          || isDisallowedNonLeadingTokenFragment(views.punctuationStripped, entry.normalizedForm)
+        ) {
+          continue;
+        }
         doubleMetaphoneResults.push({
           surfaceForm: entry.surfaceForm,
           normalizedForm: entry.normalizedForm,
@@ -1084,10 +1104,22 @@ export class InMemoryAliasMatcher implements AliasMatcher {
         matchedTerms.add(potentialVintage.toString());
       }
 
-      // Only consider matches with sufficient term coverage
-      // Require at least 50% of query terms matched OR 2+ matched
-      const minMatches = Math.max(2, Math.ceil(queryTerms.length * 0.5));
-      const hasEnoughMatches = matchedTerms.size >= minMatches;
+      // Only consider matches with sufficient term coverage.
+      // Require at least 50% of query terms matched OR 2+ matched, but generic
+      // label prefixes and standalone vintage years do not count as identity terms.
+      const identityTerms = queryTerms.filter((term) =>
+        !isGenericWineLabelPrefixToken(term)
+        && !/^(?:19|20)\d{2}$/.test(term),
+      );
+      const matchedIdentityTerms = [...matchedTerms].filter((term) =>
+        !isGenericWineLabelPrefixToken(term)
+        && !/^(?:19|20)\d{2}$/.test(term),
+      );
+      const minMatches = identityTerms.length <= 1 && productorMatch
+        ? 1
+        : Math.max(2, Math.ceil(identityTerms.length * 0.5));
+      const hasEnoughMatches = matchedIdentityTerms.length >= minMatches
+        && (identityTerms.length === 0 || matchedIdentityTerms.length > 0);
 
       if (hasEnoughMatches && score > 0.35) {
         // Normalize score to [0, 0.8] for smart matches (lower than pre-registered aliases)

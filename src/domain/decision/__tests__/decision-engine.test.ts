@@ -1122,6 +1122,39 @@ describe('DecisionEngine', () => {
     });
 
     it.each([
+      ['alias_fuzzy', 'alias_fuzzy' as const],
+      ['alias_phonetic', 'alias_phonetic' as const],
+    ])(
+      'requireExact=true with unique singleton %s witness still resolves',
+      async (_label, exactnessTier) => {
+        const base = makeResolverResult(0.995, 0.20, false);
+        const input = makeInput({
+          resolveResult: {
+            ...base,
+            decisionTrace: {
+              ...base.decisionTrace,
+              calibratedGap: undefined,
+              top2CalibratedScore: undefined,
+            },
+          },
+          policy: makeClarifyPolicy({
+            requireExact: true,
+            allowApproximate: false,
+          }),
+          evidenceSummary: makeStrongIdentityEvidence({
+            identityEvidence: {
+              exactnessTier,
+            },
+          }),
+        });
+        const output = await engine.decide(input, TEST_SNAPSHOT);
+        expect(output.decisionStatus).toBe('resolved');
+        expect(output.decisionTrace.rulesApplied).toContain('POLICY_REQUIRE_EXACT_SATISFIED');
+        expect(output.decisionTrace.rulesApplied).not.toContain('POLICY_REQUIRE_EXACT_DOWNGRADE');
+      },
+    );
+
+    it.each([
       [
         'requireExact=true and exact identity artifact exists → resolves',
         'exact',

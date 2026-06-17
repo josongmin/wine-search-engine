@@ -1,6 +1,7 @@
 import { Transliterator } from '../../alias/service/transliterator.js';
 import { buildNormalizedQueryViews } from './query-normalizer.js';
 import { expandKoreanWineTypoVariants } from './korean-wine-aliases.js';
+import { isVintageYearToken } from '../../shared/utils/vintage.js';
 
 const HANGUL_RE = /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/u;
 
@@ -96,6 +97,27 @@ export function isDisallowedWholeLeadingTokenExpansion(
   );
 }
 
+/**
+ * True when a single-token query equals only a non-leading token of a multi-token
+ * alias (`one` -> `opus one`). These fragments must not promote via phonetic recall.
+ */
+export function isDisallowedNonLeadingTokenFragment(
+  querySurface: string,
+  candidateSurface: string,
+): boolean {
+  const queryTokens = tokenizeSurface(querySurface);
+  const candidateTokens = tokenizeSurface(candidateSurface);
+  if (queryTokens.length !== 1 || candidateTokens.length <= 1) {
+    return false;
+  }
+  const queryToken = queryTokens[0];
+  if (queryToken === undefined) {
+    return false;
+  }
+  const tokenIndex = candidateTokens.indexOf(queryToken);
+  return tokenIndex > 0;
+}
+
 function isDisallowedWholeLeadingPhraseExpansion(
   querySurface: string,
   candidateSurface: string,
@@ -147,4 +169,48 @@ export function matchesAliasPrefixTerm(
   }
 
   return true;
+}
+
+/** Wine-label prefixes that must not fan out phonetic recall on multi-token queries. */
+const GENERIC_WINE_LABEL_PREFIX_TOKENS = new Set([
+  'chateau',
+  'château',
+  'domaine',
+  'bodega',
+  'cantina',
+  'weingut',
+  'tenuta',
+  'quinta',
+  'castello',
+  'clos',
+  'mas',
+  'dom',
+  'schloss',
+  'cellars',
+  'winery',
+  'wines',
+  'wine',
+]);
+
+export function isGenericWineLabelPrefixToken(token: string): boolean {
+  return GENERIC_WINE_LABEL_PREFIX_TOKENS.has(token.trim().toLowerCase());
+}
+
+/**
+ * Per-token phonetic / Double-Metaphone fanout on multi-token queries must not
+ * treat generic label prefixes or standalone vintage years as identity anchors
+ * (`chateau` -> every château wine, `2015` -> every 2015 vintage).
+ */
+export function shouldSkipPerTokenPhoneticFanout(
+  queryToken: string,
+  queryTokenCount: number,
+): boolean {
+  if (queryTokenCount < 2) {
+    return false;
+  }
+  const normalized = queryToken.trim().toLowerCase();
+  if (normalized.length === 0) {
+    return true;
+  }
+  return isGenericWineLabelPrefixToken(normalized) || isVintageYearToken(normalized);
 }

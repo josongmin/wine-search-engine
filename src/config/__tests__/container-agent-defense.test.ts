@@ -55,6 +55,12 @@ vi.mock('../lookup-authority.js', () => ({
     bootstrapProfile: {} as never,
     metadata: {} as never,
   })),
+  buildLookupOpsRuntimeHealthView: vi.fn(() => ({
+    unwiredSubstrateIds: [],
+    familyGraphEdgeCount: 0,
+    ltrSupportStatus: 'unsupported',
+    ltrSupportReason: 'lookup_domain_model_absent',
+  })),
 }));
 
 describe('createContainer defense-in-depth', () => {

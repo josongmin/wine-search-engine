@@ -50,6 +50,11 @@ vi.mock('../lookup-authority.js', () => ({
       metadata: {} as never,
     };
   }),
+  buildLookupOpsRuntimeHealthView: vi.fn(() => ({
+    lookupRuntimeBundleHash: 'test-hash',
+    lookupRuntimeArtifactCount: 0,
+    lookupRuntimeBundlePath: '/tmp/lookup-runtime',
+  })),
 }));
 
 vi.mock('../runtime-handles.js', () => ({

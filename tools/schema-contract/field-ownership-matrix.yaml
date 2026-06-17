@@ -235,6 +235,12 @@ fields:
     fail_action: warn
     rationale: "Either Track C step1 criticProxy.proxyScore/100 or vivino ratingAvg/5. Near-100% because almost every wine has a Vivino rating."
 
+  - field: critic_confidence_weight
+    source: derived(index-to-vespa.ts via criticConfidenceWeight)
+    coverage_required: 0.5
+    fail_action: warn
+    rationale: "Optional per-wine critic trust weight from Track C step1 criticProxy.confidenceWeight; absent when no critic proxy is available (ranker defaults to 1.0 in wine_entity.sd)."
+
   - field: price_usd
     source: silver(vivino-to-silver.ts)
     coverage_required: 0.85

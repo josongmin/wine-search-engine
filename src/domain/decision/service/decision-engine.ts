@@ -1003,9 +1003,13 @@ export class DecisionEngine {
     // require_exact: if resolved but the richer identity trail does not
     // support an exact match, downgrade
     if (input.policy.requireExact && state.status === 'resolved') {
+      const resolverTrace = input.resolveResult.decisionTrace;
       const hasExactMatch = hasExactMatchCandidate(input.evidenceSummary);
+      const hasUniqueApproximateWitness =
+        hasUniqueFuzzyIdentityWitness(input.evidenceSummary, resolverTrace)
+        || hasUniquePhoneticIdentityWitness(input.evidenceSummary, resolverTrace);
 
-      if (!hasExactMatch) {
+      if (!hasExactMatch && !hasUniqueApproximateWitness) {
         rulesApplied.push('POLICY_REQUIRE_EXACT_DOWNGRADE');
         return {
           status: 'ambiguous',
