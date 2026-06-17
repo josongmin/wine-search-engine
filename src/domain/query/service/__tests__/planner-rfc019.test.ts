@@ -94,7 +94,7 @@ describe('Planner RFC-019 semantic compiler path', () => {
     const plan = await planner.plan('까쇼 추천해줘');
 
     expect(plan.intent).toBe('semantic_discovery');
-    expect(plan.queryClass).toBe('semantic_preference');
+    expect(plan.queryClass).toBe('short_entity');
     expect(plan.constraints.hard.some((constraint) => constraint.attribute === 'grape_primary')).toBe(false);
     expect(plan.constraints.soft).toEqual(
       expect.arrayContaining([
