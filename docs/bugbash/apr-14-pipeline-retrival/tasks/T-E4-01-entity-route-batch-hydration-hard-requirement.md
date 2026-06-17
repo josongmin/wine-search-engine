@@ -8,7 +8,7 @@ entity route에서 `getDocuments()` batch hydration을 기본/필수 경로로 �
 
 - unresolved hydration은 이미 loud fail이다: [search-usecase-resolver-candidates.ts](</Users/songmin/Documents/code-wine/wine-search-engine/src/application/search/search-usecase-resolver-candidates.ts:216>)
 - 하지만 batch 후 single-fetch 보완 seam이 남아 있다: [search-usecase-resolver-candidates.ts](</Users/songmin/Documents/code-wine/wine-search-engine/src/application/search/search-usecase-resolver-candidates.ts:192>)
-- application port는 batch lookup 지원을 전제로 가고 있다: [search-pipeline-deps.port.ts](</Users/songmin/Documents/code-wine/wine-search-engine/src/application/search/port/search-pipeline-deps.port.ts:70>)
+- application hydration uses `LookupResolverProjectionPort.getResolverProjections()` as the required batch path: [search-pipeline-deps.port.ts](</Users/songmin/Documents/code-wine/wine-search-engine/src/application/search/port/search-pipeline-deps.port.ts>)
 
 ## 선행 티켓
 
@@ -22,14 +22,14 @@ entity route에서 `getDocuments()` batch hydration을 기본/필수 경로로 �
 
 ## 구현 범위
 
-1. entity route에서 `entityLookup.getDocuments`를 hard requirement로 승격한다.
+1. entity route에서 `resolverProjectionLookup.getResolverProjections()` batch hydration을 hard requirement로 유지한다.
 2. adapter가 batch를 제공하지 못하면 production에서는 loud fail, test seam에서만 fallback 허용으로 분리한다.
 3. hydration failure taxonomy를 `batch_lookup_failed`, `document_missing`, `partial_resolution_forbidden` 수준으로 정리한다.
 
 ## 수정 대상 파일
 
 - [search-usecase-resolver-candidates.ts](</Users/songmin/Documents/code-wine/wine-search-engine/src/application/search/search-usecase-resolver-candidates.ts:176>)
-- [search-pipeline-deps.port.ts](</Users/songmin/Documents/code-wine/wine-search-engine/src/application/search/port/search-pipeline-deps.port.ts:70>)
+- [search-pipeline-deps.port.ts](</Users/songmin/Documents/code-wine/wine-search-engine/src/application/search/port/search-pipeline-deps.port.ts>) (`LookupResolverProjectionPort`)
 - 필요 시: [vespa-search-index.ts](</Users/songmin/Documents/code-wine/wine-search-engine/src/infrastructure/vespa/vespa-search-index.ts:590>)
 - 테스트: [search-usecase-resolver-candidates.test.ts](</Users/songmin/Documents/code-wine/wine-search-engine/test/unit/application/search/search-usecase-resolver-candidates.test.ts:97>)
 
@@ -42,7 +42,7 @@ entity route에서 `getDocuments()` batch hydration을 기본/필수 경로로 �
 ## 예상 충돌 파일
 
 - [search-usecase-resolver-candidates.ts](</Users/songmin/Documents/code-wine/wine-search-engine/src/application/search/search-usecase-resolver-candidates.ts:176>)
-- [search-pipeline-deps.port.ts](</Users/songmin/Documents/code-wine/wine-search-engine/src/application/search/port/search-pipeline-deps.port.ts:70>)
+- [search-pipeline-deps.port.ts](</Users/songmin/Documents/code-wine/wine-search-engine/src/application/search/port/search-pipeline-deps.port.ts>) (`LookupResolverProjectionPort`)
 - [vespa-search-index.ts](</Users/songmin/Documents/code-wine/wine-search-engine/src/infrastructure/vespa/vespa-search-index.ts:590>)
 
 ## 착수 전 확인

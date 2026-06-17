@@ -7,7 +7,7 @@ import {
   registerEntityLookupV2OpsRoute,
   registerEntityLookupV2Route,
 } from '../../../../src/interface/http/routes/entity-lookup-v2.route.js';
-import type { ResolveRouteDeps } from '../../../../src/interface/http/routes/route-deps.js';
+import type { EntityLookupV2RouteDeps } from '../../../../src/interface/http/routes/route-deps.js';
 import type { EntityLookupV2Result } from '../../../../src/application/search/entity-lookup-v2/entity-lookup-v2.dto.js';
 
 const DEBUG_SECRET = 'test-debug-secret-1234567890';
@@ -51,7 +51,7 @@ function post(app: FastifyInstance, url: string, payload: unknown, headers: Reco
 describe('/v2/entity-lookup route wiring (T-ELV2-01/07)', () => {
   let app: FastifyInstance;
   let execute: ReturnType<typeof vi.fn>;
-  let deps: ResolveRouteDeps;
+  let deps: EntityLookupV2RouteDeps;
 
   beforeEach(async () => {
     app = Fastify();

@@ -1,33 +1,32 @@
 id: tools.resolve
-name: Resolve Route (Entity Lookup V2 Authority)
+name: Resolve Wire Projection (V2 mapping)
 category: tools
 summary: |
-  Internal `POST /v1/entity/resolve` surface for agent tools and regression. The
-  route delegates directly to Entity Lookup V2 via
-  `executeResolveViaEntityLookupV2` — no standalone ResolveUseCase.
+  Legacy ResolveResponse wire shape projected from Entity Lookup V2 via
+  `executeResolveViaEntityLookupV2` / `mapEntityLookupV2ResultToResolveResponse`.
+  The former `POST /v1/entity/resolve` HTTP route was removed after the V2 cutover.
+  Public entity resolve is `POST /v2/entity-lookup`.
 
 maturity: 4
 maturity_rationale: |
-  HONEST 4. route boundary 계약을 fast-check property suite (numRuns=100, 9 tests)
-  로 락업: determinism, output-envelope conformance (ResolveResponseSchema .strict()),
-  abstention surfacing, Korean NFC/NFD transparency, input schema .strict(), empty/
-  adversarial safety. V2 authority mapping tests cover command projection and
-  error propagation. 남은 maturity 5 과제: production abstention rate + coverage
-  SLA dashboard (ops/monitoring gap, code 결함 아님).
+  HONEST 4. Mapping-only fast-check property suite (numRuns=100) locks determinism,
+  ResolveResponseSchema conformance on snake_case wire, abstention surfacing,
+  Korean NFC/NFD transparency, LookupWineRequestSchema strict validation, and
+  adversarial query safety. Live HTTP harness removed — mapping is the contract rail.
 
-status: active
+status: deprecated
 since: 2025-10
 last_reviewed: 2026-06-10
 owner: core
 
 surfaces:
-  - "POST /v1/entity/resolve (internal)"
-  - "Agent tools.resolve"
+  - "Mapping: executeResolveViaEntityLookupV2 → ResolveResponse wire"
+  - "Schema: ResolveResponseSchema (historical / agent-compat shape)"
 
 key_files:
-  - src/interface/http/routes/resolve.route.ts
   - src/application/search/entity-lookup-v2/entity-lookup-v2-resolve-mapping.ts
   - src/application/search/entity-lookup-v2/entity-lookup-v2-request-mapping.ts
+  - src/application/search/resolve-response.dto.ts
 
 tests:
   unit:
@@ -41,12 +40,13 @@ depends_on:
 related_rfcs: []
 
 known_limitations:
+  - "ResolveResponse is not the public HTTP contract — V2 4-state response is canonical"
   - "Abstention rate 모니터링 없음"
-  - "Coverage SLA 없음"
 
 next_steps:
-  - "Coverage / abstention dashboard"
+  - "Coverage / abstention dashboard (retrieval.entity-lookup-v2 scope)"
 
 tags:
   - entity-resolution
   - abstention
+  - mapping-only

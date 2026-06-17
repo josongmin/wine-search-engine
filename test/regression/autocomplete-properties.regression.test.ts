@@ -1,7 +1,7 @@
 /**
  * Property-based regression tests for the Autocomplete (typeahead) use case.
  *
- * Feature: tools.autocomplete — POST /v1/entity/autocomplete. The use case is a
+ * Feature: tools.autocomplete — eval-only typeahead use case over Entity Lookup V2.
  * deterministic projection over Entity Lookup V2: it hydrates each V2 candidate
  * with an optional retrieval document and emits an AutocompleteSuggestion card,
  * preserving the V2 rank ordering. It powers a low-latency hot path, so the
@@ -62,7 +62,7 @@ import {
 } from '../../scripts/eval/run-autocomplete-eval.ts';
 import type { EntityLookupV2UseCasePort } from '../../src/application/search/port/search-route-usecases.port.js';
 import type { LookupResolverProjectionPort } from '../../src/application/search/port/search-pipeline-deps.port.js';
-import { wrapEntityDocumentLookupAsResolverProjection } from '../../src/application/search/__tests__/resolver-projection-lookup.stub.js';
+import { wrapEntityDocumentBatchLookupAsResolverProjection } from '../../src/application/search/__tests__/resolver-projection-lookup.stub.js';
 import type { EntityLookupV2Command, EntityLookupV2Result } from '../../src/application/search/entity-lookup-v2/entity-lookup-v2.dto.js';
 import {
   buildEntityLookupV2AutocompleteTraceRef,
@@ -157,7 +157,7 @@ function makeResolverProjectionStub(docs: ReadonlyMap<CanonicalEntityId, Retriev
   readonly requestedIds: CanonicalEntityId[][];
 } {
   const requestedIds: CanonicalEntityId[][] = [];
-  const port = wrapEntityDocumentLookupAsResolverProjection({
+  const port = wrapEntityDocumentBatchLookupAsResolverProjection({
     getDocuments: (entityIds) => {
       requestedIds.push([...entityIds]);
       return Promise.resolve(docs);

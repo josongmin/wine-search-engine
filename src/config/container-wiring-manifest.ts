@@ -34,7 +34,6 @@ export type SubContainerId =
 
 /** Ports surfaced on the root `Container` type. Keep alphabetised. */
 export type ContainerPortId =
-  | 'autocompleteUseCase'
   | 'batchSearchUseCase'
   | 'calibrationStore'
   | 'candidatePool'
@@ -98,7 +97,6 @@ export const WIRING_MANIFEST: readonly SubContainerSpec[] = [
     produces: [
       'searchUseCase',
       'interpretUseCase',
-      'autocompleteUseCase',
       'hybridUseCase',
       'decomposedSearchUseCase',
       'drinkingWindowUseCase',

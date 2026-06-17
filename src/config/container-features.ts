@@ -7,7 +7,6 @@ import type {
 } from '../application/drinking-window/port/drinking-window-usecase.port.js';
 import type { SearchExecutorPort } from '../application/search/port/search-executor.port.js';
 import type {
-  AutocompleteUseCasePort,
   BatchSearchUseCasePort,
   DecomposedSearchUseCasePort,
   EntityLookupV2UseCasePort,
@@ -27,7 +26,6 @@ interface FeatureContainerServices {
   readonly interpretUseCase: InterpretUseCasePort;
   readonly entityLookupV2UseCase: EntityLookupV2UseCasePort;
   readonly curationUseCase?: CurationUseCase | undefined;
-  readonly autocompleteUseCase: AutocompleteUseCasePort;
   readonly hybridUseCase: HybridUseCasePort;
   readonly decomposedSearchUseCase: DecomposedSearchUseCasePort;
   readonly drinkingWindowUseCase: DrinkingWindowUseCasePort;

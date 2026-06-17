@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { wrapEntityDocumentLookupAsResolverProjection, type EntityDocumentBatchLookup } from '../../../../src/application/search/__tests__/resolver-projection-lookup.stub.js';
+import { wrapEntityDocumentBatchLookupAsResolverProjection, type EntityDocumentBatchLookup } from '../../../../src/application/search/__tests__/resolver-projection-lookup.stub.js';
 import { buildResolverCandidatesFromGenerator } from '../../../../src/application/search/search-usecase-resolver-candidates.js';
 import { createEntityId } from '../../../../src/domain/shared/types/index.js';
 import type { CanonicalEntityId } from '../../../../src/domain/shared/types/index.js';
@@ -58,7 +58,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
     };
     const lookup = makeBatchLookup(async () => doc);
 
-    const candidates = await buildResolverCandidatesFromGenerator(makeGeneratorInput(), wrapEntityDocumentLookupAsResolverProjection(lookup));
+    const candidates = await buildResolverCandidatesFromGenerator(makeGeneratorInput(), wrapEntityDocumentBatchLookupAsResolverProjection(lookup));
 
     expect(lookup.getDocuments).toHaveBeenCalledWith([entityId]);
     expect(candidates).toEqual([
@@ -172,7 +172,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
           },
         ],
       },
-      wrapEntityDocumentLookupAsResolverProjection(lookup),
+      wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
     );
 
     expect(candidates).toHaveLength(1);
@@ -219,7 +219,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
           },
         ],
       },
-      wrapEntityDocumentLookupAsResolverProjection(lookup),
+      wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
     );
 
     const signals = candidates[0]?.sourceSignals;
@@ -275,7 +275,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
           },
         ],
       },
-      wrapEntityDocumentLookupAsResolverProjection(lookup),
+      wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
     );
 
     const grandVin = candidates.find((candidate) => candidate.entityId === grandVinId);
@@ -313,7 +313,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
           },
         ],
       },
-      wrapEntityDocumentLookupAsResolverProjection(lookup),
+      wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
     );
 
     expect(candidates).toHaveLength(1);
@@ -358,7 +358,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
           },
         ],
       },
-      wrapEntityDocumentLookupAsResolverProjection(lookup),
+      wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
     );
 
     expect(candidates).toHaveLength(1);
@@ -408,7 +408,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
           },
         ],
       },
-      wrapEntityDocumentLookupAsResolverProjection(lookup),
+      wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
     );
 
     expect(candidates).toHaveLength(1);
@@ -451,7 +451,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
           },
         ],
       },
-      wrapEntityDocumentLookupAsResolverProjection(lookup),
+      wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
     );
 
     expect(candidates).toHaveLength(1);
@@ -487,7 +487,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
           },
         ],
       },
-      wrapEntityDocumentLookupAsResolverProjection(lookup),
+      wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
     );
 
     expect(candidates).toHaveLength(1);
@@ -530,7 +530,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
           },
         ],
       },
-      wrapEntityDocumentLookupAsResolverProjection(lookup),
+      wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
     );
 
     expect(candidates).toHaveLength(1);
@@ -565,7 +565,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
           },
         ],
       },
-      wrapEntityDocumentLookupAsResolverProjection(lookup),
+      wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
     );
 
     expect(candidates).toHaveLength(1);
@@ -590,7 +590,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
 
     const candidates = await buildResolverCandidatesFromGenerator(
       makeGeneratorInput(),
-      wrapEntityDocumentLookupAsResolverProjection({ getDocuments }),
+      wrapEntityDocumentBatchLookupAsResolverProjection({ getDocuments }),
     );
 
     expect(getDocuments).toHaveBeenCalledWith([entityId]);
@@ -639,7 +639,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
     };
 
     await expect(
-      buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection({ getDocuments })),
+      buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection({ getDocuments })),
     ).rejects.toMatchObject({
       code: 'INTERNAL_INCONSISTENCY',
       message: expect.stringContaining('partial_resolution_forbidden'),
@@ -682,7 +682,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
           lookupStrategies: ['exact'],
           aliasType: 'derived_initialism',
         }),
-        wrapEntityDocumentLookupAsResolverProjection(lookup),
+        wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
       );
       expect(candidates[0]?.aliasMatches[0]?.aliasType).toBe('derived_initialism');
     });
@@ -696,7 +696,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
           candidateEntityIds: [entityId],
           lookupStrategies: ['exact'],
         }),
-        wrapEntityDocumentLookupAsResolverProjection(lookup),
+        wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
       );
       expect(candidates[0]?.aliasMatches[0]).toEqual({
         aliasValue: 'CM',
@@ -713,7 +713,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
           candidateEntityIds: [entityId],
           lookupStrategies: ['substring'],
         }),
-        wrapEntityDocumentLookupAsResolverProjection(lookup),
+        wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
       );
       expect(candidates[0]?.aliasMatches[0]?.aliasType).toBeUndefined();
       expect(candidates[0]?.sourceSignals.aliasFuzzyMatch).toBeGreaterThan(0);
@@ -728,7 +728,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
           candidateEntityIds: [entityId],
           lookupStrategies: ['phonetic_fuzzy'],
         }),
-        wrapEntityDocumentLookupAsResolverProjection(lookup),
+        wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
       );
       expect(candidates[0]?.aliasMatches[0]?.aliasType).toBeUndefined();
       expect(candidates[0]?.sourceSignals.phoneticMatch).toBeGreaterThan(0);
@@ -766,7 +766,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
             },
           ],
         },
-        wrapEntityDocumentLookupAsResolverProjection(lookup),
+        wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
       );
       const types = candidates[0]?.aliasMatches.map((m) => m.aliasType) ?? [];
       expect(types).toContain('canonical');
@@ -826,7 +826,7 @@ describe('mergeSignals — 수학적 속성 (교환법칙 · 멱등법칙 · 3-a
           },
         ],
       },
-      wrapEntityDocumentLookupAsResolverProjection(lookup),
+      wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
     );
 
     // B-then-A (순서 반전)
@@ -855,7 +855,7 @@ describe('mergeSignals — 수학적 속성 (교환법칙 · 멱등법칙 · 3-a
           },
         ],
       },
-      wrapEntityDocumentLookupAsResolverProjection(lookup),
+      wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
     );
 
     // sourceSignals 는 merge 결과 — 교환법칙: 순서 무관하게 동일해야 함
@@ -878,12 +878,12 @@ describe('mergeSignals — 수학적 속성 (교환법칙 · 멱등법칙 · 3-a
     // 동일 anchor 1회
     const r1 = await buildResolverCandidatesFromGenerator(
       { rawQuery: 'opus one', normalizedQuery: 'opus one', anchors: [sameAnchor] },
-      wrapEntityDocumentLookupAsResolverProjection(lookup),
+      wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
     );
     // 동일 anchor 2회 (중복)
     const r2 = await buildResolverCandidatesFromGenerator(
       { rawQuery: 'opus one', normalizedQuery: 'opus one', anchors: [sameAnchor, sameAnchor] },
-      wrapEntityDocumentLookupAsResolverProjection(lookup),
+      wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
     );
 
     // max(0.85, 0.85) = 0.85 — 멱등
@@ -933,7 +933,7 @@ describe('mergeSignals — 수학적 속성 (교환법칙 · 멱등법칙 · 3-a
           },
         ],
       },
-      wrapEntityDocumentLookupAsResolverProjection(lookup),
+      wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
     );
 
     expect(candidates).toHaveLength(1);
@@ -964,7 +964,7 @@ describe('mergeSignals — 수학적 속성 (교환법칙 · 멱등법칙 · 3-a
             source: 'alias' as const,
           })),
         },
-        wrapEntityDocumentLookupAsResolverProjection(lookup),
+        wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
       );
 
     // 세 순서 모두 동일 결과
@@ -981,12 +981,6 @@ describe('mergeSignals — 수학적 속성 (교환법칙 · 멱등법칙 · 3-a
 
   it('hydrates exact-safe certificates from resolver projections even when preloadedDocs already filled the doc map', async () => {
     const entityId = createEntityId('haut-brion-1967');
-    const lookup = makeBatchLookup(async () => ({
-      entityId,
-      entityType: 'wine',
-      canonicalLabel: '1967 Château Haut-Brion Pessac-Léognan (Premier Grand Cru Classé)',
-      aliasesIdentitySafe: ['Haut-Brion', '오브리옹'],
-    } as unknown as RetrievalDocument));
     const resolverProjectionLookup: LookupResolverProjectionPort = {
       getResolverProjections: vi.fn(async (ids) => new Map(ids.map((id) => [id, {
         entityId: id,

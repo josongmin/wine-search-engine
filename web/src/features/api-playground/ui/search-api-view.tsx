@@ -3,8 +3,8 @@
 /**
  * Product search API tester. Fires the real, public search surface directly —
  * hybrid/lexical/semantic primitive search, the agentic Plan-then-Execute
- * search (`/v1/agent`), entity resolve, and the V2 entity lookup — and shows
- * the verbatim response. No credentials required (these are public endpoints).
+ * search (`/v1/agent`), and the V2 entity lookup — and shows the verbatim
+ * response. No credentials required (these are public endpoints).
  */
 
 import { ApiPlaygroundPanel, prettyJson, type EndpointSpec } from './api-playground';
@@ -45,14 +45,6 @@ const SEARCH_ENDPOINTS: readonly EndpointSpec[] = [
     template: prettyJson({
       messages: [{ role: 'user', content: '5만원 이하 이탈리아 레드 추천해줘' }],
     }),
-  },
-  {
-    id: 'resolve',
-    label: 'Entity resolve',
-    method: 'POST',
-    path: '/v1/entity/resolve',
-    auth: 'none',
-    template: prettyJson({ query: 'sassicaia' }),
   },
   {
     id: 'lookup',

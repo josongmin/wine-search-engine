@@ -9,8 +9,9 @@ summary: |
 target_architecture: |
   Entity resolve SSoT is one kernel: `src/config/lookup-authority.ts` wires
   `EntityLookupV2UseCase` and is the shared entry for HTTP (`POST /v2/entity-lookup`),
-  agent tools, CLI, autocomplete, and search-entity delegation.   `POST /v1/entity/resolve` (internal tooling) and autocomplete/search-entity
-  surfaces delegate to this kernel; they are not parallel resolver pipelines.
+  agent tools, CLI, autocomplete, and search-entity delegation. Autocomplete and
+  search-entity surfaces delegate to this kernel; they are not parallel resolver pipelines.
+  Legacy `POST /v1/entity/resolve` exists only as a regression harness (not live HTTP).
 
 maturity: 4
 maturity_rationale: |
@@ -18,6 +19,7 @@ maturity_rationale: |
   dedup, alias recall 단일 패스, `resolverProjectionLookup`-only hydration,
   `LookupDecisionEngine` 추출, exact-safe registry fast path(timed recall skip),
   resolve route/autocomplete/search-entity → V2 authority, cutover gate meta lane.
+  Public HTTP is `/v2/entity-lookup` only; legacy `/v1/entity/resolve` is regression harness.
   maturity 5 미달: alias registry v2 심화 substrate·long-tail stretch 잔여.
 
   **2026-06-03 (curation UX + API playground).** `EntityPicker` 기반 curation 워크벤치
@@ -75,7 +77,6 @@ maturity_rationale: |
 status: active
 since: 2026-06
 last_reviewed: 2026-06-10
-owner: core
 
 surfaces:
   - "POST /v2/entity-lookup"

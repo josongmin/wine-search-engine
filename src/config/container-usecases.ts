@@ -4,7 +4,6 @@ import type { HydeGenerator } from '../domain/retrieval/service/hyde-generator.j
 import { InterpretUseCase } from '../application/search/interpret.usecase.js';
 import { CurationUseCase } from '../application/curation/curation.usecase.js';
 import { PgCurationStore } from '../infrastructure/curation/pg-curation-store.js';
-import { AutocompleteUseCase } from '../application/search/autocomplete.usecase.js';
 import { HybridUseCase } from '../application/search/hybrid.usecase.js';
 import { DecomposedSearchUseCase } from '../application/search/decomposed-search.usecase.js';
 import { DecomposedSearchAdapter } from '../application/search/decomposed-search-adapter.js';
@@ -16,7 +15,6 @@ import type {
 } from '../application/drinking-window/port/drinking-window-usecase.port.js';
 import type { SearchExecutorPort } from '../application/search/port/search-executor.port.js';
 import type {
-  AutocompleteUseCasePort,
   BatchSearchUseCasePort,
   DecomposedSearchUseCasePort,
   EntityLookupV2UseCasePort,
@@ -32,7 +30,6 @@ export interface UseCaseContainerServices {
   readonly interpretUseCase: InterpretUseCasePort;
   /** Operator curation plane (T-ELV2-07); present only when a PG pool is wired. */
   readonly curationUseCase?: CurationUseCase | undefined;
-  readonly autocompleteUseCase: AutocompleteUseCasePort;
   readonly hybridUseCase: HybridUseCasePort;
   readonly decomposedSearchUseCase: DecomposedSearchUseCasePort;
   readonly drinkingWindowUseCase: DrinkingWindowUseCasePort;
@@ -62,7 +59,7 @@ export function buildUseCaseContainerServices(
   extensions: UseCaseExtensions = {},
   overrides: UseCaseContainerOverrides,
 ): UseCaseContainerServices {
-  const { entityLookupV2UseCase, resolverProjectionLookup } = overrides;
+  const { entityLookupV2UseCase } = overrides;
   const drinkingWindowUseCase = new DrinkingWindowUseCase(core.drinkingWindowPredictor);
   const queryEntrySecurityObserver = getQueryEntrySecurityMetricsCollector();
 
@@ -128,10 +125,6 @@ export function buildUseCaseContainerServices(
       judgeFailureMode: config.queryEntrySecurity.judgeFailureMode,
       judgeTimeoutMs: config.queryEntrySecurity.judgeTimeoutMs,
       queryEntrySecurityObserver,
-    }),
-    autocompleteUseCase: new AutocompleteUseCase({
-      entityLookupV2UseCase,
-      resolverProjectionLookup: resolverProjectionLookup,
     }),
     hybridUseCase: new HybridUseCase({
       queryPlanner: core.queryPlanner,

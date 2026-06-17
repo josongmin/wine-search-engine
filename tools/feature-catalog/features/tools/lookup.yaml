@@ -8,7 +8,8 @@ summary: |
 
 maturity: 3
 maturity_rationale: |
-  HTTP route 와이어링 + 12-test regression suite 완료 (`test/integration/http/routes/lookup.route.test.ts`).
+  HTTP route 와이어링 + entity-lookup-v2 regression suite 완료
+  (`test/integration/http/routes/entity-lookup-v2.route.test.ts`).
   핵심 invariants 명세 + 검증:
     - retrieval_mode 강제 'entity' (override 차단)
     - "not found" semantics: 404 가 아닌 200 + empty results + failure_reason
@@ -24,7 +25,7 @@ maturity_rationale: |
 
 status: deprecated
 since: 2025-10
-last_reviewed: 2026-05-21
+last_reviewed: 2026-06-10
 owner: core
 
 surfaces:

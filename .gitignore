@@ -24,8 +24,9 @@ src/**/*.d.ts.map
 test/**/*.d.ts
 test/**/*.d.ts.map
 
-# Ad-hoc throwaway scripts (repro/check/diag). Keep gitignored — these are local-only.
+# Ad-hoc throwaway scripts (repro/check/diag). Keep gitignored — local-only.
 .tmp/
+.tmp-ops/
 
 # Environment & secrets
 .env

@@ -1,15 +1,13 @@
 /**
  * Entity Lookup V2 → ResolveResponse projection.
  *
- * `POST /v1/entity/resolve` is an internal regression/tooling surface; the
- * public exact-entity path is `POST /v2/entity-lookup`. This adapter keeps
- * resolve-only callers on the V2 lookup authority without duplicating the
- * resolver pipeline.
+ * Legacy resolve wire shape is validated by mapping-only regression tests.
+ * Public exact-entity HTTP is `POST /v2/entity-lookup`.
+ * lookup authority without duplicating the resolver pipeline.
  */
 
 import { createCanonicalEntityId } from '../../../domain/shared/types/index.js';
-import type { DecisionStatus } from '../../../domain/shared/types/index.js';
-import type { LookupV2Status } from '../../../domain/resolver/v2/lookup-v2-types.js';
+import { mapLookupV2StatusToWireDecisionStatus } from './entity-lookup-v2-mapping.js';
 import type { RequestExecutionContext } from '../../../domain/shared/request-execution-context.js';
 import type { EntityLookupV2UseCasePort } from '../port/search-route-usecases.port.js';
 import type { ResolveRequest } from '../resolve-request.dto.js';
@@ -18,18 +16,8 @@ import type { EntityLookupV2Result } from './entity-lookup-v2.dto.js';
 import { mapResolveRequestToEntityLookupV2Command } from './entity-lookup-v2-request-mapping.js';
 import { buildEntityLookupV2AutocompleteTraceRef } from './entity-lookup-v2-autocomplete-mapping.js';
 
-export function mapLookupV2StatusToResolveStatus(status: LookupV2Status): DecisionStatus {
-  switch (status) {
-    case 'resolved':
-      return 'resolved';
-    case 'ambiguous':
-      return 'ambiguous';
-    case 'redirect_discovery':
-    case 'failed':
-    default:
-      return 'failed';
-  }
-}
+/** Compatibility alias — prefer {@link mapLookupV2StatusToWireDecisionStatus}. */
+export const mapLookupV2StatusToResolveStatus = mapLookupV2StatusToWireDecisionStatus;
 
 export async function executeResolveViaEntityLookupV2(
   entityLookupV2UseCase: EntityLookupV2UseCasePort,
@@ -46,7 +34,7 @@ export function mapEntityLookupV2ResultToResolveResponse(
   request: ResolveRequest,
 ): ResolveResponse {
   const traceRef = buildEntityLookupV2AutocompleteTraceRef(result);
-  const status = mapLookupV2StatusToResolveStatus(result.status);
+  const status = mapLookupV2StatusToWireDecisionStatus(result.status);
 
   return {
     status,

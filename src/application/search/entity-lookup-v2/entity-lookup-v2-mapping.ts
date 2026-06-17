@@ -36,6 +36,26 @@ export function mapResolverStatusToLookupStatus(
   }
 }
 
+/** Wire-facing 3-state decision vocabulary shared by resolve/autocomplete/search-bridge projections. */
+export type LookupV2WireDecisionStatus = Extract<DecisionStatus, 'resolved' | 'ambiguous' | 'failed'>;
+
+/**
+ * Map V2 terminal status into the legacy resolve/autocomplete/search 3-state wire
+ * vocabulary. `redirect_discovery` is not a wire status — it maps to `failed`.
+ */
+export function mapLookupV2StatusToWireDecisionStatus(status: LookupV2Status): LookupV2WireDecisionStatus {
+  switch (status) {
+    case 'resolved':
+      return 'resolved';
+    case 'ambiguous':
+      return 'ambiguous';
+    case 'redirect_discovery':
+    case 'failed':
+    default:
+      return 'failed';
+  }
+}
+
 /** Project a domain {@link NormalizedQueryViews} into the wire-facing artifact. */
 export function projectNormalizedQueryViews(v: NormalizedQueryViews): NormalizedQueryViewsView {
   return {

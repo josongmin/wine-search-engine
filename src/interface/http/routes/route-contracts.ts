@@ -2,13 +2,11 @@ import { z } from 'zod';
 import {
   HybridSearchRequestSchema,
   LexicalSearchRequestSchema,
-  LookupWineRequestSchema,
   SemanticSearchRequestSchema,
 } from '../schemas/primitive-search.schema.js';
 import {
   ComparisonSearchResponseSchema,
   ErrorResponseSchema,
-  ResolveResponseSchema,
   SearchResponseSchema,
 } from '../schemas/search-response.schema.js';
 import {
@@ -128,21 +126,6 @@ export const ReadyRouteContract = defineRouteContract({
   responses: {
     [HTTP_STATUS_OK]: ReadyResponseSchema,
     [HTTP_STATUS_SERVICE_UNAVAILABLE]: ReadyResponseSchema,
-  },
-});
-
-export const ResolveRouteContract = defineRouteContract({
-  operationId: 'entity.resolve',
-  body: LookupWineRequestSchema,
-  capabilities: ['security', 'planner', 'resolver_only'],
-  responses: {
-    [HTTP_STATUS_OK]: ResolveResponseSchema,
-    [HTTP_STATUS_BAD_REQUEST]: ErrorResponseSchema,
-    [HTTP_STATUS_FORBIDDEN]: ErrorResponseSchema,
-    [HTTP_STATUS_REQUEST_TIMEOUT]: ErrorResponseSchema,
-    [HTTP_STATUS_TOO_MANY_REQUESTS]: ErrorResponseSchema,
-    [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
-    [HTTP_STATUS_SERVICE_UNAVAILABLE]: ErrorResponseSchema,
   },
 });
 

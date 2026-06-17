@@ -77,10 +77,10 @@ export const PipelineDebugStep = {
   // Batch
   BATCH_SEARCH_START: 'batch.search.start',
 
-  // Resolve / interpret
-  RESOLVE_USE_CASE_START: 'resolve.use_case.start',
-  RESOLVE_CONSTRAINT_SAT_CONTRADICTED: 'resolve.constraint_sat.contradicted',
-  RESOLVE_USE_CASE_DONE: 'resolve.use_case.done',
+  // Entity Lookup V2 / interpret
+  ENTITY_LOOKUP_V2_USE_CASE_START: 'entity_lookup_v2.use_case.start',
+  ENTITY_LOOKUP_V2_CONSTRAINT_SAT_CONTRADICTED: 'entity_lookup_v2.constraint_sat.contradicted',
+  ENTITY_LOOKUP_V2_USE_CASE_DONE: 'entity_lookup_v2.use_case.done',
   INTERPRET_PLANNER_DONE: 'interpret.planner.done',
 
   // Infrastructure HTTP
@@ -149,9 +149,9 @@ export const PIPELINE_STAGE_STEPS: Readonly<Record<PipelineStage, readonly Pipel
     PipelineDebugStep.PRE_ROUTE_CONTINUE,
   ],
   resolve_interpret: [
-    PipelineDebugStep.RESOLVE_USE_CASE_START,
-    PipelineDebugStep.RESOLVE_CONSTRAINT_SAT_CONTRADICTED,
-    PipelineDebugStep.RESOLVE_USE_CASE_DONE,
+    PipelineDebugStep.ENTITY_LOOKUP_V2_USE_CASE_START,
+    PipelineDebugStep.ENTITY_LOOKUP_V2_CONSTRAINT_SAT_CONTRADICTED,
+    PipelineDebugStep.ENTITY_LOOKUP_V2_USE_CASE_DONE,
     PipelineDebugStep.INTERPRET_PLANNER_DONE,
   ],
   route_dispatch: [

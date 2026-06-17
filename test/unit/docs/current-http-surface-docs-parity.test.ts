@@ -97,6 +97,7 @@ describe('current HTTP surface docs parity', () => {
     expect(agenticOverview).toContain('`POST /v1/search/lexical`');
     expect(agenticOverview).toContain('`POST /v2/entity-lookup`');
     expect(agenticOverview).not.toContain('`POST /v1/lookup/wine`');
+    expect(agenticOverview).not.toContain('`POST /v1/entity/resolve`');
     expect(agenticOverview).toContain('`POST /v1/agent`');
     expect(agenticOverview).not.toContain('| `POST /v1/search` |');
     expect(agenticOverview).not.toContain('| `POST /v1/search/interpret` |');

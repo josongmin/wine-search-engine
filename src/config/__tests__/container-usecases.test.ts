@@ -60,6 +60,7 @@ describe('buildUseCaseContainerServices', () => {
       judgeFailureMode: 'fail_open',
       judgeTimeoutMs: config.queryEntrySecurity.judgeTimeoutMs,
       queryEntrySecurityObserver,
+      entityLookupV2UseCase: { execute: expect.any(Function) },
     }));
     expect((useCases.interpretUseCase as any).deps).toEqual(expect.objectContaining({
       injectionJudge,

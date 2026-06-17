@@ -54,7 +54,6 @@ vi.mock('../container-features.js', () => ({
     interpretUseCase: {} as never,
     hybridUseCase: {} as never,
     batchSearchUseCase: {} as never,
-    autocompleteUseCase: {} as never,
     drinkingWindowUseCase: { check: vi.fn() } as never,
     evalRunner: null,
   })),

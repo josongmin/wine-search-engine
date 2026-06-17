@@ -13,13 +13,14 @@ import type { EntityResolveResult } from '../../../domain/resolver/model/resolve
 import type { ResolvedCandidate } from '../../../domain/resolver/model/resolved-candidate.js';
 import { AMBIGUITY_TYPES, type AmbiguityType } from '../../../domain/resolver/model/ambiguity-state.js';
 import type { LookupV2Status } from '../../../domain/resolver/v2/lookup-v2-types.js';
+import { mapLookupV2StatusToWireDecisionStatus } from './entity-lookup-v2-mapping.js';
 import {
   computeConformalSetSize,
   DEFAULT_ALPHA,
 } from '../../../domain/resolver/service/resolver-conformal.js';
 import { pipelineDebug } from '../../../domain/observability/request-pipeline-debug.js';
 import { PipelineDebugStep } from '../../../domain/observability/pipeline-debug-steps.js';
-import type { DecisionStatus, NextAction } from '../../../domain/shared/types/index.js';
+import type { NextAction } from '../../../domain/shared/types/index.js';
 import { createCanonicalEntityId } from '../../../domain/shared/types/index.js';
 import type { RequestExecutionContext } from '../../../domain/shared/request-execution-context.js';
 import {
@@ -42,23 +43,8 @@ function isAmbiguityType(value: string): value is AmbiguityType {
   return ambiguityTypeSet.has(value);
 }
 
-/**
- * Project V2 terminal status into the resolver/decision {@link DecisionStatus}
- * vocabulary. `redirect_discovery` is not a resolver status — it maps to
- * `failed` with `recommendedNextAction: hybrid_search` downstream.
- */
-export function mapLookupV2StatusToResolverStatus(status: LookupV2Status): DecisionStatus {
-  switch (status) {
-    case 'resolved':
-      return 'resolved';
-    case 'ambiguous':
-      return 'ambiguous';
-    case 'failed':
-    case 'redirect_discovery':
-    default:
-      return 'failed';
-  }
-}
+/** Compatibility alias — prefer {@link mapLookupV2StatusToWireDecisionStatus}. */
+export const mapLookupV2StatusToResolverStatus = mapLookupV2StatusToWireDecisionStatus;
 
 function mapLookupV2StatusToNextAction(status: LookupV2Status): NextAction {
   switch (status) {
@@ -102,7 +88,7 @@ export function buildEntityResolveResultFromLookupV2(
   v2Result: EntityLookupV2Result,
   plan: QueryPlanV1,
 ): EntityResolveResult {
-  const status = mapLookupV2StatusToResolverStatus(v2Result.status);
+  const status = mapLookupV2StatusToWireDecisionStatus(v2Result.status);
   const candidates = projectV2Candidates(v2Result);
   const top1CalibratedScore = v2Result.evidenceSummary.topConfidence
     ?? v2Result.topCandidate?.calibratedScore

@@ -3,7 +3,7 @@ import type { RetrievalDocument } from '../../../domain/retrieval/model/retrieva
 import type { LookupResolverProjectionPort } from '../port/search-pipeline-deps.port.js';
 
 /**
- * Test-only batch document lookup for {@link wrapEntityDocumentLookupAsResolverProjection}.
+ * Test-only batch document lookup for {@link wrapEntityDocumentBatchLookupAsResolverProjection}.
  * Production hydration uses {@link LookupResolverProjectionPort} directly.
  */
 export interface EntityDocumentBatchLookup {
@@ -71,7 +71,7 @@ export function makeUniformEntityDocumentBatchLookup(
  * Test helper: adapt a batch entity-document lookup port into resolver projection
  * hydration for {@link buildResolverCandidatesFromGenerator}.
  */
-export function wrapEntityDocumentLookupAsResolverProjection(
+export function wrapEntityDocumentBatchLookupAsResolverProjection(
   lookup: EntityDocumentBatchLookup,
 ): LookupResolverProjectionPort {
   return {

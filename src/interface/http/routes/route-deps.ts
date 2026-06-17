@@ -13,13 +13,13 @@ export interface CurationOpsRouteDeps {
   readonly curationUseCase: CurationUseCase;
 }
 
-/** Dependencies for `/v1/entity/resolve` (internal) and `/v2/entity-lookup` (public). */
-export type ResolveRouteDeps = {
+/** Dependencies for `POST /v2/entity-lookup` and ops inspect routes. */
+export type EntityLookupV2RouteDeps = {
   readonly entityLookupV2UseCase: EntityLookupV2UseCasePort;
 };
 
 export interface HttpServerDeps
-  extends SearchRouteDeps, ResolveRouteDeps {
+  extends SearchRouteDeps, EntityLookupV2RouteDeps {
   readonly evalRunner: EvalRunnerContract | null;
   /**
    * Operator curation plane use case (T-ELV2-07). Optional so lightweight

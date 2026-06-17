@@ -12,7 +12,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { wrapEntityDocumentLookupAsResolverProjection, type EntityDocumentBatchLookup } from '../../src/application/search/__tests__/resolver-projection-lookup.stub.js';
+import { wrapEntityDocumentBatchLookupAsResolverProjection, type EntityDocumentBatchLookup } from '../../src/application/search/__tests__/resolver-projection-lookup.stub.js';
 import { DomainError } from '../../src/domain/shared/error/domain-error.js';
 import { buildResolverCandidatesFromGenerator } from '../../src/application/search/search-usecase-resolver-candidates.js';
 import { mapRankedResultsToResultItems } from '../../src/application/search/search-usecase-map-result-items.js';
@@ -114,11 +114,11 @@ describe('Batch Hydration Failure Taxonomy', () => {
 
     const input = makeInput([makeAnchor([id1])]);
     await expect(
-      buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(lookup)),
+      buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(lookup)),
     ).rejects.toThrow(DomainError);
 
     await expect(
-      buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(lookup)),
+      buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(lookup)),
     ).rejects.toThrow(/resolver_projection_overlay_failed/);
   });
 
@@ -132,11 +132,11 @@ describe('Batch Hydration Failure Taxonomy', () => {
 
     const input = makeInput([makeAnchor([id1, id2])]);
     await expect(
-      buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(lookup)),
+      buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(lookup)),
     ).rejects.toThrow(/document_missing/);
 
     await expect(
-      buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(lookup)),
+      buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(lookup)),
     ).rejects.toThrow(/partial_resolution_forbidden/);
   });
 
@@ -151,7 +151,7 @@ describe('Batch Hydration Failure Taxonomy', () => {
     };
 
     const input = makeInput([makeAnchor([id1, id2])]);
-    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(lookup));
+    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(lookup));
 
     expect(candidates).toHaveLength(2);
     expect(candidates.map((c) => c.entityId)).toContain(id1);

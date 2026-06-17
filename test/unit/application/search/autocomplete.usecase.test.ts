@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AutocompleteUseCase } from '../../../../src/application/search/autocomplete.usecase.js';
 import { createEntityId } from '../../../../src/domain/shared/types/index.js';
-import { wrapEntityDocumentLookupAsResolverProjection } from '../../../../src/application/search/__tests__/resolver-projection-lookup.stub.js';
+import { wrapEntityDocumentBatchLookupAsResolverProjection } from '../../../../src/application/search/__tests__/resolver-projection-lookup.stub.js';
 import type { LookupResolverProjectionPort } from '../../../../src/application/search/port/search-pipeline-deps.port.js';
 import type { EntityLookupV2UseCasePort } from '../../../../src/application/search/port/search-route-usecases.port.js';
 import type { EntityLookupV2Result } from '../../../../src/application/search/entity-lookup-v2/entity-lookup-v2.dto.js';
@@ -163,7 +163,7 @@ describe('AutocompleteUseCase', () => {
 
     const useCase = new AutocompleteUseCase({
       entityLookupV2UseCase,
-      resolverProjectionLookup: wrapEntityDocumentLookupAsResolverProjection({
+      resolverProjectionLookup: wrapEntityDocumentBatchLookupAsResolverProjection({
         getDocuments: vi.fn().mockResolvedValue(new Map()),
       }),
     });
@@ -200,7 +200,7 @@ describe('AutocompleteUseCase', () => {
 
     const useCase = new AutocompleteUseCase({
       entityLookupV2UseCase,
-      resolverProjectionLookup: wrapEntityDocumentLookupAsResolverProjection({
+      resolverProjectionLookup: wrapEntityDocumentBatchLookupAsResolverProjection({
         getDocuments: vi.fn().mockResolvedValue(new Map()),
       }),
     });

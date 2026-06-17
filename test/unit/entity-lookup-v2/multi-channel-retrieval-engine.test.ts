@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { MultiChannelRetrievalEngine } from '../../../src/application/search/entity-lookup-v2/multi-channel-retrieval-engine.js';
-import { wrapEntityDocumentLookupAsResolverProjection } from '../../../src/application/search/__tests__/resolver-projection-lookup.stub.js';
+import { wrapEntityDocumentBatchLookupAsResolverProjection } from '../../../src/application/search/__tests__/resolver-projection-lookup.stub.js';
 import { createEntityId } from '../../../src/domain/shared/types/index.js';
 import type { AliasMatcher, AliasMatchResult } from '../../../src/domain/query/service/anchor-extractor.js';
 import type { NormalizedQueryViews } from '../../../src/domain/query/model/query-views.js';
@@ -34,7 +34,7 @@ const entityDocumentLookup = {
     return m;
   }),
 };
-const resolverProjectionLookup = wrapEntityDocumentLookupAsResolverProjection(entityDocumentLookup);
+const resolverProjectionLookup = wrapEntityDocumentBatchLookupAsResolverProjection(entityDocumentLookup);
 
 describe('MultiChannelRetrievalEngine (T-ELV2-04 real)', () => {
   it('runs independent channels per view with REAL latency + scores and unions provenance', async () => {

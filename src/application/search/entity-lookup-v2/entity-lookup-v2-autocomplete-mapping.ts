@@ -7,7 +7,9 @@
  */
 
 import type { RetrievalDocument } from '../../../domain/retrieval/model/retrieval-document.js';
-import type { LookupV2Status } from '../../../domain/resolver/v2/lookup-v2-types.js';
+import {
+  mapLookupV2StatusToWireDecisionStatus,
+} from './entity-lookup-v2-mapping.js';
 import { AUTHORITY_TRACE_SCHEMA_VERSION } from '../../../domain/decision/model/id-schema-version.js';
 import { deterministicHash } from '../../../domain/shared/utils/hash.js';
 import type {
@@ -29,18 +31,8 @@ export type AutocompleteHydrationDocument = RetrievalDocument | LookupResolverPr
 
 export type AutocompleteStatus = AutocompleteResponse['status'];
 
-export function mapLookupV2StatusToAutocompleteStatus(status: LookupV2Status): AutocompleteStatus {
-  switch (status) {
-    case 'resolved':
-      return 'resolved';
-    case 'ambiguous':
-      return 'ambiguous';
-    case 'redirect_discovery':
-    case 'failed':
-    default:
-      return 'failed';
-  }
-}
+/** Compatibility alias — prefer {@link mapLookupV2StatusToWireDecisionStatus}. */
+export const mapLookupV2StatusToAutocompleteStatus = mapLookupV2StatusToWireDecisionStatus;
 
 export function buildEntityLookupV2AutocompleteTraceRef(result: EntityLookupV2Result): string {
   const digest = deterministicHash({
@@ -177,7 +169,7 @@ export function mapEntityLookupV2ResultToAutocompleteResponse(
   const traceRef = buildEntityLookupV2AutocompleteTraceRef(result);
 
   return {
-    status: mapLookupV2StatusToAutocompleteStatus(result.status),
+    status: mapLookupV2StatusToWireDecisionStatus(result.status),
     suggestions: result.candidates.map((candidate) =>
       toAutocompleteSuggestion(candidate, docs.get(candidate.entityId)),
     ),

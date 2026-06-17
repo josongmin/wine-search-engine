@@ -2,38 +2,29 @@ id: tools.autocomplete
 name: Autocomplete Use Case (Typeahead)
 category: tools
 summary: |
-  사용자 typing 중 prefix completion 제안. entity / region / grape / producer
-  완성 후보를 반환하는 internal autocomplete use case.
+  사용자 typing 중 prefix completion 제안. Entity Lookup V2 authority 위 thin
+  projection + resolver projection hydration. Eval / integration 전용 — production
+  Container 및 live HTTP surface에는 등록되지 않음.
 
 maturity: 4
 maturity_rationale: |
-  Use case 와이어링 완료 + dedicated eval script (run-autocomplete-eval) + HTTP
-  route regression suite (12 tests covering ASCII/Korean prefixes, NFC/NFD
-  invariance, RFC-014 validation envelopes, boundary length, no-match surface,
-  special-char preservation, requestId threading, AbortSignal plumbing).
-  추가로 property-based regression suite (autocomplete-properties, fast-check
-  numRuns=100, 한글 prefix 와/까베/샤르 first-class) 가 production projection 의
-  핵심 invariant 를 핀: 결정성(P1), faithful 1:1 cardinality·order·rank·entity-id
-  multiset 보존(P2-P4), document hydration label fallback(P5), status/trace-ref/
-  request_id passthrough(P6), 한글 NFC/NFD prefix transparency — resolver 로
-  byte-for-byte 전달, label 은 NFC 재정규화 후 동일(P7), empty-prefix/empty-
-  candidate safety + doc-lookup skip(P8), calibrated_score [0,1] verbatim 보존
-  (P9), 공유 scorer recall@k 단조성·MRR 일관성(P10), wire 추출 order/filter
-  invariant(P11). projection 은 휴리스틱 0 — resolver 계약을 충실히 투영.
-  HONEST 4 (5 아님): NDCG/satisfaction online calibration 없음, prefix decay
-  weight 미튜닝, 사용자 클릭 시그널 기반 online ranking 미도입 — offline
-  benchmark recall/MRR 만으로는 typeahead 만족도 SOTA++ 입증 불충분.
+  Use case + `buildAutocompleteUseCase()` eval factory 완료. Property-based regression
+  (autocomplete-properties, fast-check numRuns=100) + dedicated eval script
+  (`run-autocomplete-eval.ts`) + unit tests. Production HTTP route 없음 — internal
+  typeahead rail only. HONEST 4: NDCG/online calibration 없음.
 
 status: active
 since: 2025-10
-last_reviewed: 2026-05-21
+last_reviewed: 2026-06-10
 owner: core
 
 surfaces:
-  - "Internal autocomplete use case"
+  - "Eval-only: buildAutocompleteUseCase() + run-autocomplete-eval.ts"
 
 key_files:
   - src/application/search/autocomplete.usecase.ts
+  - src/config/build-autocomplete-usecase.ts
+  - src/application/search/entity-lookup-v2/entity-lookup-v2-autocomplete-mapping.ts
 
 tests:
   unit:
@@ -41,22 +32,22 @@ tests:
     - test/unit/eval/autocomplete-eval.test.ts
   regression:
     - test/regression/autocomplete-properties.regression.test.ts
+    - test/regression/lookup-wine-authority-surface.regression.test.ts
 
 depends_on:
-  - retrieval.entity-lookup
-  - nlu.anchor-extraction
+  - retrieval.entity-lookup-v2
 
 related_rfcs: []
 
 known_limitations:
+  - "No live HTTP route — eval/integration wiring only"
   - "Prefix decay weight 미튜닝"
   - "Suggestion satisfaction score 없음 (NDCG/online calibration 부재)"
-  - "online 클릭 시그널 기반 ranking 미도입 — offline recall/MRR benchmark 만 존재"
 
 next_steps:
+  - "Wire HTTP typeahead route or formalize eval-only status in OpenAPI catalog"
   - "사용자 클릭 시그널로 ranking 학습 (online calibration → maturity 5 게이트)"
-  - "prefix decay weight 튜닝 + NDCG 기반 satisfaction proxy 도입"
 
 tags:
-  - hot-path
   - typeahead
+  - eval-only

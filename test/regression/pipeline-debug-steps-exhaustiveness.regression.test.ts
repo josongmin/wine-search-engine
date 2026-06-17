@@ -62,6 +62,9 @@ const EXPECTED_SORTED_STEP_VALUES: readonly string[] = [
   'dispatch.hybrid.complete',
   'dispatch.mixed.complete',
   'dispatch.route',
+  'entity_lookup_v2.constraint_sat.contradicted',
+  'entity_lookup_v2.use_case.done',
+  'entity_lookup_v2.use_case.start',
   'http.embedding.http_error',
   'http.embedding.network_error',
   'http.embedding.ok',
@@ -84,9 +87,6 @@ const EXPECTED_SORTED_STEP_VALUES: readonly string[] = [
   'pre_route.continue',
   'pre_route.decomposed_comparison',
   'ranking.hybrid.complete',
-  'resolve.constraint_sat.contradicted',
-  'resolve.use_case.done',
-  'resolve.use_case.start',
   'resolver.anchor.done',
   'resolver.anchor.missing',
   'resolver.anchor.start',
@@ -188,9 +188,9 @@ function exhaustiveLabel(step: PipelineDebugStepId): string {
     case PipelineDebugStep.HYBRID_EXECUTE_RANKED:
     case PipelineDebugStep.HYBRID_EXECUTE_STAGE_TIMINGS:
     case PipelineDebugStep.BATCH_SEARCH_START:
-    case PipelineDebugStep.RESOLVE_USE_CASE_START:
-    case PipelineDebugStep.RESOLVE_CONSTRAINT_SAT_CONTRADICTED:
-    case PipelineDebugStep.RESOLVE_USE_CASE_DONE:
+    case PipelineDebugStep.ENTITY_LOOKUP_V2_USE_CASE_START:
+    case PipelineDebugStep.ENTITY_LOOKUP_V2_CONSTRAINT_SAT_CONTRADICTED:
+    case PipelineDebugStep.ENTITY_LOOKUP_V2_USE_CASE_DONE:
     case PipelineDebugStep.INTERPRET_PLANNER_DONE:
     case PipelineDebugStep.HTTP_EMBEDDING_OK:
     case PipelineDebugStep.HTTP_EMBEDDING_HTTP_ERROR:

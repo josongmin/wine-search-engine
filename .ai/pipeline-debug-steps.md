@@ -97,13 +97,13 @@ structured logs. The TS type definition is in `src/domain/observability/pipeline
 |------|--------|--------|
 | `search.execute.done` | `latency_ms`, `ranked_count`, `resolve_status` | `search.usecase.ts` |
 
-### Resolve / interpret (planner phase)
+### Entity Lookup V2 / interpret (planner phase)
 
 | Step | Fields | Source |
 |------|--------|--------|
-| `resolve.use_case.start` | `query_class`, `query_preview` (optional) | `entity-lookup-v2.usecase.ts` |
-| `resolve.constraint_sat.contradicted` | `contradiction_reason` | `entity-lookup-v2.usecase.ts` |
-| `resolve.use_case.done` | `resolve_status`, `candidate_count` | `entity-lookup-v2.usecase.ts` |
+| `entity_lookup_v2.use_case.start` | `query_preview` (optional), `request_id` (optional) | `entity-lookup-v2.usecase.ts` |
+| `entity_lookup_v2.constraint_sat.contradicted` | `contradiction_reason` | `entity-lookup-v2.usecase.ts` |
+| `entity_lookup_v2.use_case.done` | `resolve_status`, `decision_status`, `candidate_count` | `entity-lookup-v2.usecase.ts` |
 | `interpret.planner.done` | `query_class`, `planner_status` | `interpret-planner.ts` |
 
 ### Hybrid execution (use case entry)

@@ -44,7 +44,7 @@ import { DecomposedSearchUseCase } from '../../../../src/application/search/deco
 import { BatchSearchUseCase } from '../../../../src/application/search/batch-search.usecase.js';
 import { DrinkingWindowUseCase } from '../../../../src/application/drinking-window/drinking-window.usecase.js';
 import { InterpretUseCase } from '../../../../src/application/search/interpret.usecase.js';
-import { AutocompleteUseCase } from '../../../../src/application/search/autocomplete.usecase.js';
+import { buildAutocompleteUseCase } from '../../../../src/config/build-autocomplete-usecase.js';
 import { EntityLookupV2UseCase } from '../../../../src/application/search/entity-lookup-v2/entity-lookup-v2.usecase.js';
 import { MultiChannelRetrievalEngine } from '../../../../src/application/search/entity-lookup-v2/multi-channel-retrieval-engine.js';
 import { RuntimeLookupPlanner } from '../../../../src/application/search/entity-lookup-v2/runtime-lookup-planner.js';
@@ -398,7 +398,7 @@ export async function createVespaTestContainer(
     judgeTimeoutMs,
   });
   const decomposedSearchUseCase = new DecomposedSearchUseCase(searchUseCase);
-  const autocompleteUseCase = new AutocompleteUseCase({
+  const autocompleteUseCase = buildAutocompleteUseCase({
     entityLookupV2UseCase,
     resolverProjectionLookup,
   });

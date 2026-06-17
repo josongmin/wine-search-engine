@@ -6,6 +6,7 @@ import {
   mapEntityLookupV2ResultToResolveResponse,
   mapLookupV2StatusToResolveStatus,
 } from '../entity-lookup-v2-resolve-mapping.js';
+import { mapLookupV2StatusToWireDecisionStatus } from '../entity-lookup-v2-mapping.js';
 import type { EntityLookupV2Result } from '../entity-lookup-v2.dto.js';
 
 function makeV2Result(overrides: Partial<EntityLookupV2Result> = {}): EntityLookupV2Result {
@@ -67,7 +68,8 @@ describe('entity-lookup-v2-resolve-mapping', () => {
     expect(response.authority_trace_ref).toBe(response.decision_trace_ref);
   });
 
-  it('maps redirect_discovery to failed resolve status', () => {
+  it('maps redirect_discovery to failed resolve status via wire SSoT', () => {
+    expect(mapLookupV2StatusToWireDecisionStatus('redirect_discovery')).toBe('failed');
     expect(mapLookupV2StatusToResolveStatus('redirect_discovery')).toBe('failed');
     const response = mapEntityLookupV2ResultToResolveResponse(
       makeV2Result({ status: 'redirect_discovery', topCandidate: null, candidates: [] }),

@@ -4,7 +4,6 @@ import { parseEnv } from '../env.js';
 const buildUseCaseContainerServices = vi.fn(() => ({
   searchUseCase: { execute: vi.fn() } as never,
   interpretUseCase: {} as never,
-  autocompleteUseCase: {} as never,
   hybridUseCase: {} as never,
   decomposedSearchUseCase: {} as never,
   drinkingWindowUseCase: {} as never,
@@ -30,6 +29,7 @@ describe('buildFeatureContainerServices', () => {
     const config = parseEnv({ NODE_ENV: 'test' });
     const lookupAuthority = {
       entityLookupV2UseCase: { execute: vi.fn() },
+      resolverProjectionLookup: { getResolverProjections: vi.fn() },
       bootstrapProfile: {} as never,
       metadata: {} as never,
     };
@@ -45,7 +45,10 @@ describe('buildFeatureContainerServices', () => {
       expect.anything(),
       config,
       {},
-      { entityLookupV2UseCase: lookupAuthority.entityLookupV2UseCase },
+      {
+        entityLookupV2UseCase: lookupAuthority.entityLookupV2UseCase,
+        resolverProjectionLookup: lookupAuthority.resolverProjectionLookup,
+      },
     );
     expect(features.entityLookupV2UseCase).toBe(lookupAuthority.entityLookupV2UseCase);
     expect(features.evalRunner).toBe('eval-runner');

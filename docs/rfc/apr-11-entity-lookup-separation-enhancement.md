@@ -7,7 +7,7 @@
 # Entity Lookup Pipeline 분리 및 강화 계획 (2026-04-11)
 
 > **상태:** 제안 (Draft v3 — 3-reviewer 병렬 검증 반영) — **historical; superseded by V2**
-> **관련 파일:** `src/application/search/search.usecase.ts`, `src/domain/query/service/planner.ts`, `src/config/planner-v1-adapter.ts`, `src/interface/http/routes/lookup.route.ts`, `src/application/search/resolve.usecase.ts`
+> **관련 파일 (historical):** `src/application/search/search.usecase.ts`, `src/domain/query/service/planner.ts`, `src/config/planner-v1-adapter.ts` — live lookup: `entity-lookup-v2.route.ts`, `lookup-authority.ts`
 > **배경 문서:** `docs/system-overview/agentic-process.md`, `docs/rfc/pipeline-architecture.md`
 
 ---

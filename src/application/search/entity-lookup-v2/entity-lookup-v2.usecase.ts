@@ -143,7 +143,7 @@ export class EntityLookupV2UseCase {
 
       pipelineDebug(
         {
-          step: PipelineDebugStep.RESOLVE_USE_CASE_START,
+          step: PipelineDebugStep.ENTITY_LOOKUP_V2_USE_CASE_START,
           query_preview: sanitizeQueryForDebug(command.query),
           ...(command.requestId !== undefined ? { request_id: command.requestId } : {}),
         },
@@ -180,7 +180,7 @@ export class EntityLookupV2UseCase {
       if (admission.decision !== 'admit') {
         pipelineDebug(
           {
-            step: PipelineDebugStep.RESOLVE_USE_CASE_START,
+            step: PipelineDebugStep.ENTITY_LOOKUP_V2_USE_CASE_START,
             admission_reason: admission.reasonCode,
           },
           'pipeline entity-lookup-v2 admission stop (front-door, pre-planner)',
@@ -359,7 +359,7 @@ export class EntityLookupV2UseCase {
 
       pipelineDebug(
         {
-          step: PipelineDebugStep.RESOLVE_USE_CASE_DONE,
+          step: PipelineDebugStep.ENTITY_LOOKUP_V2_USE_CASE_DONE,
           resolve_status: result.status,
           decision_status: decision.status,
           decision_reason: decision.reasonCode,

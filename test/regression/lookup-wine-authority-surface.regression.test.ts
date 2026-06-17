@@ -47,6 +47,23 @@ describe('V2-only lookup cutover — removed surfaces stay removed', () => {
     expect(catalog).toContain("'/v2/entity-lookup'");
   });
 
+  it('legacy resolve/autocomplete HTTP routes and resolve.route.ts stay removed', () => {
+    expect(existsSync(join(process.cwd(), 'src/interface/http/routes/resolve.route.ts'))).toBe(false);
+    const server = read('src/interface/http/server.ts');
+    expect(server).not.toContain('registerResolveRoute');
+    const catalog = read('src/interface/http/routes/http-route-contract-catalog.ts');
+    expect(catalog).not.toContain("'/v1/entity/resolve'");
+    expect(catalog).not.toContain("'/v1/entity/autocomplete'");
+  });
+
+  it('production Container does not wire autocompleteUseCase (eval-only factory)', () => {
+    const containerTs = read('src/config/container.ts');
+    expect(containerTs).not.toContain('autocompleteUseCase');
+    expect(existsSync(join(process.cwd(), 'src/config/build-autocomplete-usecase.ts'))).toBe(true);
+    const usecases = read('src/config/container-usecases.ts');
+    expect(usecases).not.toContain('AutocompleteUseCase');
+  });
+
   it('the CLI lookup command dispatches the dedicated V2 lookup facade', () => {
     const cmd = read('src/application/cli/command/lookup/wine.command.ts');
     expect(cmd).toContain('facades.lookup.lookupWine');

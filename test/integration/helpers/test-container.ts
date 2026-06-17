@@ -38,7 +38,7 @@ import { DecomposedSearchAdapter } from '../../../src/application/search/decompo
 import { DecomposedSearchUseCase } from '../../../src/application/search/decomposed-search.usecase.js';
 import { BatchSearchUseCase } from '../../../src/application/search/batch-search.usecase.js';
 import { InterpretUseCase } from '../../../src/application/search/interpret.usecase.js';
-import { AutocompleteUseCase } from '../../../src/application/search/autocomplete.usecase.js';
+import { buildAutocompleteUseCase } from '../../../src/config/build-autocomplete-usecase.js';
 import { HybridUseCase } from '../../../src/application/search/hybrid.usecase.js';
 import { EntityLookupV2UseCase } from '../../../src/application/search/entity-lookup-v2/entity-lookup-v2.usecase.js';
 import { MultiChannelRetrievalEngine } from '../../../src/application/search/entity-lookup-v2/multi-channel-retrieval-engine.js';
@@ -448,7 +448,7 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
     injectionJudge,
     judgeTimeoutMs,
   });
-  const autocompleteUseCase = new AutocompleteUseCase({
+  const autocompleteUseCase = buildAutocompleteUseCase({
     entityLookupV2UseCase,
     resolverProjectionLookup,
   });

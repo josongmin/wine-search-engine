@@ -16,31 +16,15 @@ import {
   emptyEntityDocumentBatchLookup,
   makeEntityDocumentBatchLookupFromEntries,
   makeUniformEntityDocumentBatchLookup,
-  wrapEntityDocumentLookupAsResolverProjection,
+  wrapEntityDocumentBatchLookupAsResolverProjection,
   type EntityDocumentBatchLookup,
 } from '../../src/application/search/__tests__/resolver-projection-lookup.stub.js';
 import { buildResolverCandidatesFromGenerator } from '../../src/application/search/search-usecase-resolver-candidates.js';
 import type { EntityCandidateGeneratorInput } from '../../src/domain/resolver/model/entity-candidate-generator-input.js';
 import type { AnchorCandidate } from '../../src/domain/query/model/anchor-candidate.js';
-import type { EntityResolveResult } from '../../src/domain/resolver/model/resolve-result.js';
-import type { QueryPlanV1 } from '../../src/domain/query/model/query-plan.js';
 import { createEntityId } from '../../src/domain/shared/types/index.js';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
-
-function makePlan(overrides: Partial<QueryPlanV1> = {}): QueryPlanV1 {
-  return {
-    rawQuery: 'opus one 2019',
-    normalizedQuery: 'opus one 2019',
-    queryClass: 'entity_exact',
-    intent: 'entity',
-    anchors: [],
-    constraints: {},
-    policy: { requireExact: false, allowApproximate: true },
-    uncertainty: { level: 'low', signals: [] },
-    ...overrides,
-  } as unknown as QueryPlanV1;
-}
 
 function makeAnchor(overrides: Partial<AnchorCandidate> = {}): AnchorCandidate {
   const lookupStrategies = overrides.lookupStrategies ?? [];
@@ -66,17 +50,6 @@ function makeAnchor(overrides: Partial<AnchorCandidate> = {}): AnchorCandidate {
   };
 }
 
-function makeResolveResult(overrides: Partial<EntityResolveResult> = {}): EntityResolveResult {
-  return {
-    status: 'failed',
-    decisionConfidenceC: 0.3,
-    candidates: [],
-    decisionTrace: {} as EntityResolveResult['decisionTrace'],
-    conformalSetSize: 0,
-    ...overrides,
-  };
-}
-
 // ─── TA2-1: EntityCandidateGeneratorInput contract ────────────────────────────
 
 describe('EntityCandidateGeneratorInput (TA2-1)', () => {
@@ -91,7 +64,7 @@ describe('EntityCandidateGeneratorInput (TA2-1)', () => {
       anchors: [],
       // blockerOnlyIds 없음
     };
-    const result = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(emptyEntityDocumentBatchLookup()));
+    const result = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(emptyEntityDocumentBatchLookup()));
     const blockerSeeds = result.filter((c) => c.source === 'blocker_seed');
     expect(blockerSeeds).toHaveLength(0);
   });
@@ -107,7 +80,7 @@ describe('EntityCandidateGeneratorInput (TA2-1)', () => {
       anchors: [],
       blockerOnlyIds: [createEntityId('wine-blocker-only')],
     };
-    const result = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(makeUniformEntityDocumentBatchLookup('Opus One')));
+    const result = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(makeUniformEntityDocumentBatchLookup('Opus One')));
     expect(result).toHaveLength(1);
     expect(result[0]?.source).toBe('blocker_seed');
     expect(String(result[0]?.entityId)).toBe('wine-blocker-only');
@@ -162,7 +135,7 @@ describe("AnchorCandidate.source union (TA2-2)", () => {
       normalizedQuery: 'test',
       anchors: [makeAnchor({ source: 'blocker_seed', candidateEntityIds: [entityId] })],
     };
-    const result = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(makeUniformEntityDocumentBatchLookup('Test')));
+    const result = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(makeUniformEntityDocumentBatchLookup('Test')));
     expect(result[0]?.source).toBe('blocker_seed');
   });
 
@@ -181,7 +154,7 @@ describe("AnchorCandidate.source union (TA2-2)", () => {
         makeAnchor({ source: 'planner_heuristic', candidateEntityIds: [idB] }),
       ],
     };
-    const result = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(makeUniformEntityDocumentBatchLookup('Wine')));
+    const result = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(makeUniformEntityDocumentBatchLookup('Wine')));
     const aliasCandidate = result.find((c) => String(c.entityId) === String(idA));
     const heuristicCandidate = result.find((c) => String(c.entityId) === String(idB));
     expect(aliasCandidate?.source).toBe('alias');
@@ -204,7 +177,7 @@ describe('buildResolverCandidatesFromGenerator module (TA2-3)', () => {
       normalizedQuery: 'test',
       anchors: [makeAnchor({ candidateEntityIds: [existingId, missingId] })],
     };
-    await expect(buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection({
+    await expect(buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection({
       getDocuments: async (ids) => {
         const m = new Map();
         for (const id of ids) {
@@ -253,7 +226,7 @@ describe('buildResolverCandidatesFromGenerator module (TA2-3)', () => {
       anchors: [],
     };
     // resolver projection lookup provided but no IDs to look up
-    const result = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(emptyEntityDocumentBatchLookup()));
+    const result = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(emptyEntityDocumentBatchLookup()));
     expect(result).toHaveLength(0);
   });
 
@@ -271,7 +244,7 @@ describe('buildResolverCandidatesFromGenerator module (TA2-3)', () => {
     };
     const result = await buildResolverCandidatesFromGenerator(
       input,
-      wrapEntityDocumentLookupAsResolverProjection(makeUniformEntityDocumentBatchLookup('Opus One 2019')),
+      wrapEntityDocumentBatchLookupAsResolverProjection(makeUniformEntityDocumentBatchLookup('Opus One 2019')),
     );
     // The shared ID appears only once in output
     expect(result.filter((c) => String(c.entityId) === sharedId)).toHaveLength(1);
@@ -517,7 +490,7 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
       anchors: [makeAnchorFor('opus-one-2019', { source: 'alias', lookupStrategies: ['exact'] })],
     };
 
-    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(lookup));
+    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(lookup));
 
     expect(candidates).toHaveLength(1);
     expect(candidates[0]?.source).toBe('alias');
@@ -541,7 +514,7 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
       })],
     };
 
-    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(lookup));
+    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(lookup));
 
     expect(candidates[0]?.source).toBe('alias');
     // lookupStrategies must not be lost — signals derived from it
@@ -565,7 +538,7 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
       })],
     };
 
-    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(lookup));
+    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(lookup));
 
     expect(candidates[0]?.source).toBe('planner_heuristic');
     expect(candidates[0]?.sources).toContain('planner_heuristic');
@@ -590,7 +563,7 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
       })],
     };
 
-    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(lookup));
+    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(lookup));
 
     expect(candidates[0]?.source).toBe('planner_heuristic');
     expect(candidates[0]?.sourceSignals.aliasFuzzyMatch).toBeGreaterThan(0);
@@ -612,7 +585,7 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
       })],
     };
 
-    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(lookup));
+    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(lookup));
 
     expect(candidates[0]?.source).toBe('planner_heuristic');
     expect(candidates[0]?.sourceSignals.aliasFuzzyMatch).toBeGreaterThan(0);
@@ -627,7 +600,7 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
       blockerOnlyIds: [createEntityId('opus-one-2019')],
     };
 
-    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(lookup));
+    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(lookup));
 
     expect(candidates[0]?.source).toBe('blocker_seed');
     expect(candidates[0]?.sources).toEqual(['blocker_seed']);
@@ -652,7 +625,7 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
       })],
     };
 
-    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(lookup));
+    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(lookup));
 
     expect(candidates[0]?.source).toBe('entity_lookup');
     expect(candidates[0]?.sources).toContain('entity_lookup');
@@ -672,7 +645,7 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
       ],
     };
 
-    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(lookup));
+    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(lookup));
 
     expect(candidates).toHaveLength(1); // merged, not duplicated
     expect(candidates[0]?.entityId).toEqual(id);
@@ -703,7 +676,7 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
       blockerOnlyIds: [id], // same entity in blockerOnlyIds
     };
 
-    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(lookup));
+    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(lookup));
 
     // Only one candidate (not two)
     expect(candidates).toHaveLength(1);
@@ -728,7 +701,7 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
       })],
     };
 
-    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(lookup));
+    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(lookup));
 
     expect(candidates[0]?.source).toBe('alias');
     expect(candidates[0]?.sourceSignals.phoneticMatch).toBeGreaterThan(0);
@@ -752,7 +725,7 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
       })],
     };
 
-    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(lookup));
+    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(lookup));
 
     expect(candidates[0]?.sourceSignals.phoneticMatch).toBeGreaterThan(0);
     expect(candidates[0]?.sourceSignals.editDistanceScore).toBeGreaterThan(0);
@@ -776,7 +749,7 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
       blockerOnlyIds: [id1, id2, id3],
     };
 
-    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(lookup));
+    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(lookup));
 
     expect(candidates).toHaveLength(3);
     for (const candidate of candidates) {
@@ -799,7 +772,7 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
       ],
     };
 
-    await expect(buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(lookup))).rejects.toMatchObject({
+    await expect(buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(lookup))).rejects.toMatchObject({
       code: 'INTERNAL_INCONSISTENCY',
     });
   });
@@ -828,7 +801,7 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
       preloadedDocs: preloadedDocs as EntityCandidateGeneratorInput['preloadedDocs'],
     };
 
-    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(lookup));
+    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(lookup));
 
     // Prefetch covers canonical fields; overlay fetch runs once for identity projection only.
     expect(getDocumentsSpy).toHaveBeenCalledTimes(1);
@@ -863,8 +836,8 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
       })],
     };
 
-    const candidatesWith = await buildResolverCandidatesFromGenerator(withVariants, wrapEntityDocumentLookupAsResolverProjection(lookup));
-    const candidatesWithout = await buildResolverCandidatesFromGenerator(withoutVariants, wrapEntityDocumentLookupAsResolverProjection(lookup));
+    const candidatesWith = await buildResolverCandidatesFromGenerator(withVariants, wrapEntityDocumentBatchLookupAsResolverProjection(lookup));
+    const candidatesWithout = await buildResolverCandidatesFromGenerator(withoutVariants, wrapEntityDocumentBatchLookupAsResolverProjection(lookup));
 
     expect(candidatesWith[0]?.sourceSignals).toEqual(candidatesWithout[0]?.sourceSignals);
   });

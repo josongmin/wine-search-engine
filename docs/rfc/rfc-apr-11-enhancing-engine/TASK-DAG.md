@@ -1,6 +1,11 @@
 # RFC Task DAG
 
-> 상태: 계획  
+> **⚠️ Superseded (2026-06 Entity Lookup V2 cutover).** TA3 corrective-retry and
+> ResolveUseCase-as-lookup tasks below are historical. Live authority:
+> `EntityLookupV2UseCase` + `POST /v2/entity-lookup`. See
+> `tools/feature-catalog/features/retrieval/entity-lookup-v2.yaml`.
+
+> 상태: 계획 (historical)  
 > 목적: EPIC / TRACK-A를 실제 구현 태스크 단위로 쪼개고 선행 관계를 DAG로 고정  
 > 원칙: 기존 substrate 재활용 우선, 병렬 truth 생성 금지, exact recovery 우선
 
