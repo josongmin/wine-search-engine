@@ -3,29 +3,25 @@ name: Redis Cache Layer (Embedding / Phrase / Query)
 category: infra
 summary: |
   Redis 기반 3-축 cache: embedding cache (OpenAI vector 재호출 방지), phrase cache
-  (alias/transliteration), query cache (search result). 70% hit rate on repeated query.
+  (alias/transliteration), query cache (search result).
 
-maturity: 5
+  **Official runtime stack status (2026-06): EXCLUDED** together with
+  `infra.redis`. Production/dev deploy uses in-process fallback only until cache
+  policy is re-approved.
+
+maturity: 3
 maturity_rationale: |
-  3 cache 모두 production wired, circuit breaker 통합. TTL 정책이 `cache-ttl-config.ts`
-  SSoT 모듈로 정형화됨 (EMBEDDING 7d / PHRASE 1d / QUERY 5min, 각 값에 도메인 근거 주석).
-  Telemetry hook으로 `getStats()` surface가 `{hits, misses, sets}` 확장 — 운영자가
-  write-amplification과 hit-rate를 독립적으로 모니터링 가능.
-  Property-based 보증 (fast-check numRuns:100)으로 핵심 invariant를 *법칙* 수준으로 고정:
-  (1) TTL 정렬·양수성 (EMBEDDING ≥ PHRASE ≥ QUERY, 안정성 정렬), (2) cache-key 결정성
-  (content-addressable: 동일 입력 → 동일 redisKey, constraint 순서 무관), (3) 임의 op
-  시퀀스 후 getStats() hit/miss/set 정확도, (4) 한글 키 NFC 안정성·round-trip, (5) default
-  SET이 cache별 올바른 EX TTL 사용, (6) absent key 무예외 (null/undefined), (7) set→get
-  round-trip 값 보존 (signed-zero는 JSON 직렬화상 +0으로 수렴 — 값-동등성 계약 문서화).
-  eviction strategy는 여전히 Redis LRU만.
+  Implementation exists and is tested, but the layer is not wired in official
+  deploy env (`REDIS_URL` unset, `KILL_SWITCH_QUERY_CACHE=true` recommended).
+  Maturity reduced pending cache-policy redesign and operational sign-off.
 
-status: active
+status: deprecated
 since: 2025-09
-last_reviewed: 2026-05-21
+last_reviewed: 2026-06-10
 owner: core
 
 surfaces:
-  - "Internal"
+  - "Internal (disabled in official deploy)"
 
 key_files:
   - src/infrastructure/cache/cache-ttl-config.ts
@@ -46,12 +42,13 @@ depends_on:
 related_rfcs: []
 
 known_limitations:
+  - "OFFICIAL STACK EXCLUDED (prod/dev/CI) — Redis cache layer must not be enabled until policy sign-off"
   - "LFU / 가중치 eviction 없음 (Redis LRU only)"
   - "TTL은 정적 default — adaptive TTL (popularity-based) 미도입"
 
 next_steps:
-  - "LFU eviction 도입"
-  - "Adaptive TTL: popular key는 자동 연장"
+  - "Blocker: retrieval.cache-policy redesign + invalidation contract"
+  - "Re-enable after infra.redis official-stack approval"
   - "Prometheus exporter로 sets/hits/misses 카운터 노출"
 
 tags:

@@ -21,12 +21,10 @@ import type {
   EntityLookupV2UseCasePort,
   HybridUseCasePort,
   InterpretUseCasePort,
-  ResolveUseCasePort,
 } from '../application/search/port/search-route-usecases.port.js';
 import type {
   CandidatePoolPort,
   DecisionEnginePort,
-  EntityResolverPort,
   MixedSolverPort,
   QueryPlannerPort,
   RankingPort,
@@ -35,7 +33,6 @@ import type {
 import type { EvalRunnerContract } from './container-eval-contracts.js';
 import type { ChatLlmPort } from '../domain/ai/port/chat-llm.port.js';
 import type { CalibrationStore } from '../domain/resolver/port/calibration-store.port.js';
-import type { EntityDocumentLookupPort } from '../application/search/port/search-pipeline-deps.port.js';
 // ── Plan-then-Execute (wine-search) wiring — canonical agentic entry point
 // after the 3.0.0 cutover. Construction lives inside
 // `buildWineSearchContainerServices`.
@@ -72,16 +69,13 @@ export interface Container {
   /** Chat LLM when an OpenAI credential pool or Codex ChatGPT login token is available. */
   readonly chatLlm?: ChatLlmPort;
   readonly queryPlanner: QueryPlannerPort;
-  readonly entityResolver: EntityResolverPort;
   readonly candidatePool: CandidatePoolPort;
   readonly ranker: RankingPort;
   readonly decisionEngine: DecisionEnginePort;
   readonly responseBuilder: ResponseBuilderPort;
   readonly mixedSolver: MixedSolverPort;
-  readonly entityLookup: EntityDocumentLookupPort;
   readonly searchUseCase: SearchExecutorPort;
   readonly interpretUseCase: InterpretUseCasePort;
-  readonly resolveUseCase: ResolveUseCasePort;
   readonly entityLookupV2UseCase: EntityLookupV2UseCasePort;
   /** Operator curation plane (T-ELV2-07); present only when a PG pool is wired. */
   readonly curationUseCase?: CurationUseCase | undefined;
@@ -242,7 +236,6 @@ function buildWineSearchContainerServices(
     lookupWine: features.entityLookupV2UseCase,
     decomposedSearchUseCase: features.decomposedSearchUseCase,
     drinkingWindowUseCase: features.drinkingWindowUseCase,
-    entityLookup: _core.entityLookup,
   });
 
   // ── 4b) Comparison LLM fallback. One-shot grounded synthesis for stalled
@@ -367,8 +360,6 @@ export async function createContainer(
   return {
     ...(core.chatLlm !== undefined ? { chatLlm: core.chatLlm } : {}),
     queryPlanner: core.queryPlanner,
-    entityResolver: core.entityResolver,
-    entityLookup: core.entityLookup,
     candidatePool: core.candidatePool,
     ranker: core.ranker,
     decisionEngine: core.decisionEngine,

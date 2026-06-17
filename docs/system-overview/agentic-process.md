@@ -118,50 +118,25 @@ HTTP 요청
 
 ```
 effectiveRoute 기준으로 세 경로 중 하나 실행:
-  'entity' → executeEntityRoute()   (EntityResolver 직접 조회 + TA3 Corrective Retry; 아래 상세)
+  'entity' → executeEntityRouteViaLookupV2()   (Entity Lookup V2 authority; 아래 상세)
   'hybrid' → executeHybridRoute()   (CandidatePool + Ranker; 학습 LTR은 게이트 통과 시 RankedResult 구성 이후 Step 6b)
   'mixed'  → executeMixedRoute()    (비교 쿼리 → 서브쿼리 분해 후 각각 실행)
 ```
 
-### Entity Route — Corrective Retry (TA3)
+### Entity Route — Entity Lookup V2
 
-**파일:** `src/application/search/search-usecase-corrective-retry.ts`
+**파일:** `src/application/search/entity-lookup-v2/entity-lookup-v2-search-bridge.ts`, `src/config/lookup-authority.ts`
 
-Entity 라우트에서 1차 해소가 실패하거나 신뢰도가 낮을 때, **2-pass 재시도 + 후방 신뢰도 보정(TA5)**을 수행합니다.
+Entity 라우트와 hybrid/dual-lane 앵커 해소는 모두 **Entity Lookup V2** 단일 커널을 통합니다. SearchUseCase는 legacy resolver/blocker/corrective-retry 경로를 더 이상 호출하지 않습니다.
 
 ```
-Pass 1: EntityResolver 직접 조회 (기존 방식)
-  │
-  ├─ shouldTriggerCorrectiveRetry(plan, result) 평가
-  │    조건: (앵커 0개 OR 신뢰도 < CORRECTIVE_RETRY_CONFIDENCE_THRESHOLD)
-  │           AND 모호성/clarify/fail 권고 없음
-  │
-  └─ 트리거 시 → Pass 2: broader blocker 호출
-       blocker?.execute(plan, { broader: true })
-       앵커 제외 diff 로직으로 추가 시딩
-       │
-       ├─ resolveCorrectiveRetryOutcome(retryResult)
-       │    → 'accept': 재시도 결과 채택
-       │    → 'clarify': 모호성 유지 → clarify 응답
-       │    → 'fail': 후보 없음
-       │
-       └─ computeCorrectiveRetryCalibration(retryResult, outcome)  (TA5)
-            공식: calibratedConfidence = 0.5 + 0.4 × (1 − normalizedRank)
-            - Rank 1 of N → 0.9
-            - Rank N of N → 0.5
-            → correctiveRetryCalibration 필드로 Post-Route에 전달
+executeEntityRouteViaLookupV2(plan, compiled, entityLookupV2UseCase)
+  → EntityLookupV2UseCase.execute({ query, maxCandidates, mode })
+  → admission → plan/recall → resolve → calibrated 4-state
+  → buildEntityResolveResultFromLookupV2() 로 Search/Resolver 계약에 투영
 ```
 
-> **주의:** Hybrid 라우트에서는 TA3 재시도를 수행하지 않습니다. Hybrid는 constraint relaxation(§5)으로 0건 복구를 처리합니다.
-
-### Blocker 통합 (TA2-4)
-
-**파일:** `src/application/search/search.usecase.ts`
-
-`SearchUseCase`에 `blocker?: BlockingUseCasePort` 의존성이 추가되었습니다. Entity route와 Hybrid route 양쪽에서 **앵커 기반 alias 매칭을 넘어선 후보 시딩**에 사용됩니다.
-
-- Entity route: TA3 corrective retry의 Pass 2에서 `runBlockerForPlan(plan, { broader: true })` 호출
-- Hybrid route: `resolveEntityRouteForPlan()`에 blocker를 주입하여 single-pass resolution에 시딩
+Hybrid compare/browse 등 specialized 경로의 앵커 해소도 `resolveEntityRouteForPlanViaLookupV2()`로 동일 커널을 재사용합니다.
 
 ### Post-Route Phase 실제 순서 (`runSearchPostRoutePhase`)
 
@@ -205,8 +180,7 @@ Pass 1: EntityResolver 직접 조회 (기존 방식)
    ├─ rerank_decision_trace      ← rerankDecision 존재 시
    ├─ abstain_policy_trace       ← abstainDecision 존재 시 (항상)
    ├─ hard_filter_drop_log       ← drop log 존재 시, top AUDIT_DROP_LOG_MAX=5 by score desc
-   ├─ resolver_provenance_trace  ← blocker seed 정보 존재 시 (TA3-1)
-   └─ corrective_retry_calibrated_confidence ← TA5 보정 값 존재 시 [0.5, 0.9]
+   └─ resolver_provenance_trace  ← V2 resolver provenance (blocker seed 등) 존재 시
 
 6. 구조화 로그 기록 (두 경로 합류 후)
    responseSnapshot !== undefined 일 때 logSearchEvent() 재호출
@@ -1119,8 +1093,7 @@ rankedResults[]
 | `rerank_decision_trace` | rerankDecision 존재 | Ranking §7 |
 | `abstain_policy_trace` | abstainDecision 존재 (항상) | Abstain §10 |
 | `hard_filter_drop_log` | drop log 존재, top 5 by score desc | Retrieval §6 |
-| `resolver_provenance_trace` | blocker seed 정보 존재 (TA3-1) | Entity §2 |
-| `corrective_retry_calibrated_confidence` | TA5 보정 값 존재 [0.5, 0.9] | Entity §2 |
+| `resolver_provenance_trace` | V2 resolver provenance (blocker seed 등) | Entity §2 |
 | `fallback_trace` | 에이전트 합성 시 (§9) | Agent §9 |
 
 **상수:** `AUDIT_RERANK_SNAPSHOT_COUNT = 5`, `AUDIT_DROP_LOG_MAX = 5`
@@ -1348,8 +1321,6 @@ HTTP 200 SearchResponseV1
 | `ANCHOR_PROTECTION_SIMILARITY_THRESHOLD` | 0.85 | `src/domain/ranking/service/rerank-safety.ts` | 보호 후보 anchorSimilarity 임계값 |
 | `PROTECTED_CANDIDATE_EVICTION_SLACK` | 2 | 위와 동일 | 보호 후보 최대 순위 하락 허용 |
 | `MAX_RELAXATION_STEPS` | 4 | `src/application/search/search-usecase-hybrid-ranking-pipeline.ts` | constraint relaxation 최대 재시도 |
-| `TA5_CALIBRATION_BASE` | 0.5 | `src/application/search/search-usecase-corrective-retry.ts` | TA5 보정 하한 |
-| `TA5_CALIBRATION_RANGE` | 0.4 | 위와 동일 | TA5 보정 범위 (base+range=0.9 최대) |
 | `AUDIT_RERANK_SNAPSHOT_COUNT` | 5 | `src/application/search/search-usecase-post-route-phase.ts` | rerank 전후 스냅샷 top-K |
 | `AUDIT_DROP_LOG_MAX` | 5 | 위와 동일 | drop log 샘플링 상한 |
 | `FILTER_STRING_MAX_LEN` | 100 | `src/application/agent/agent-tools.ts` | 에이전트 필터 문자열 최대 길이 |
@@ -1384,7 +1355,7 @@ HTTP 200 SearchResponseV1
 
 - [x] §1 HTTP 라우팅 & 스키마 — 계약 URL·operationId·`SearchRequestSchema` (R7, R13)
 - [x] §2 Pre-Route 실행 순서 — benchmark 바이패스 포함 (R3, R10, R14)
-- [x] §2 Route Dispatch — entity(TA3 retry)/hybrid/mixed 3개 경로 + Blocker(TA2-4) (R6, R14)
+- [x] §2 Route Dispatch — entity(V2 lookup)/hybrid/mixed 3개 경로 (R6, R14)
 - [x] §2 Post-Route 실행 순서 — TypedAbstainDecision + AuditExtension 빌드 포함 (R3, R8, R11, R12, R14)
 - [x] §3 Intent Detection 12개 분기 — `planner-intent-detection.ts` 전체 파일 직접 확인 (R2, R10)
 - [x] §3 Stage 번호 + `QueryPlanV2` 출력 구조 (R9)

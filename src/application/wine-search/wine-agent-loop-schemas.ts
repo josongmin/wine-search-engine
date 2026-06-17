@@ -32,7 +32,6 @@ import type { SearchUseCasePort } from './execution-runner.js';
 import type { SearchUseCaseInput } from './execution-plan-schemas.js';
 import type { DecomposedSearchUseCasePort, EntityLookupV2UseCasePort } from '../search/port/search-route-usecases.port.js';
 import type { DrinkingWindowUseCasePort } from '../drinking-window/port/drinking-window-usecase.port.js';
-import type { EntityDocumentLookupPort } from '../search/port/search-pipeline-deps.port.js';
 import type { WineSearchAnalysis } from './wine-search-schemas.js';
 
 // ---------------------------------------------------------------------------
@@ -222,7 +221,6 @@ export interface WineAgentLoopToolPorts {
   readonly lookupWine: EntityLookupV2UseCasePort;
   readonly decomposedSearchUseCase?: DecomposedSearchUseCasePort | undefined;
   readonly drinkingWindowUseCase?: DrinkingWindowUseCasePort | undefined;
-  readonly entityLookup?: EntityDocumentLookupPort | undefined;
 }
 
 // ---------------------------------------------------------------------------

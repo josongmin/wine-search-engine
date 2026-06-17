@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AutocompleteUseCase } from '../../../../src/application/search/autocomplete.usecase.js';
 import { createEntityId } from '../../../../src/domain/shared/types/index.js';
-import type { EntityDocumentLookupPort } from '../../../../src/application/search/port/search-pipeline-deps.port.js';
+import { wrapEntityDocumentLookupAsResolverProjection } from '../../../../src/application/search/__tests__/resolver-projection-lookup.stub.js';
+import type { LookupResolverProjectionPort } from '../../../../src/application/search/port/search-pipeline-deps.port.js';
 import type { EntityLookupV2UseCasePort } from '../../../../src/application/search/port/search-route-usecases.port.js';
 import type { EntityLookupV2Result } from '../../../../src/application/search/entity-lookup-v2/entity-lookup-v2.dto.js';
 
@@ -78,36 +79,30 @@ describe('AutocompleteUseCase', () => {
         },
       })),
     };
-    const entityLookup: EntityDocumentLookupPort = {
-      getDocuments: vi.fn().mockResolvedValue(new Map([
+    const resolverProjectionLookup: LookupResolverProjectionPort = {
+      getResolverProjections: vi.fn().mockResolvedValue(new Map([
         [entityId, {
           entityId,
           entityType: 'wine',
           canonicalLabel: 'Opus One 2018',
           aliasesIdentitySafe: ['Opus One 2018'],
-          aliasesNoisyRecall: ['opus one'],
+          identitySafeKeys: ['opus one'],
           producer: 'Opus One',
-          region: 'Napa Valley',
-          country: 'United States',
-          appellation: 'Oakville',
-          grapes: ['Cabernet Sauvignon'],
-          searchTextKo: '오푸스원 2018 나파 밸리',
-          searchTextEn: 'Opus One 2018 Napa Valley',
-          semanticSummary: 'Flagship Napa Valley Bordeaux blend.',
-          style: 'full red',
-          priceBand: 'luxury',
-          pairing: ['steak'],
-          availability: true,
-          popularityScore: 0.98,
-          vintageYear: 2018,
-          wineType: 'red',
+          attributeHints: {
+            region: 'Napa Valley',
+            country: 'United States',
+            appellation: 'Oakville',
+            vintage: 2018,
+            wine_type: 'red',
+            grapes: ['Cabernet Sauvignon'],
+          },
         }],
       ])),
     };
 
     const useCase = new AutocompleteUseCase({
       entityLookupV2UseCase,
-      entityLookup,
+      resolverProjectionLookup,
     });
 
     const result = await useCase.execute({
@@ -124,7 +119,7 @@ describe('AutocompleteUseCase', () => {
       },
       undefined,
     );
-    expect(entityLookup.getDocuments).toHaveBeenCalledWith([entityId]);
+    expect(resolverProjectionLookup.getResolverProjections).toHaveBeenCalledWith([entityId]);
     expect(result.status).toBe('resolved');
     expect(result.request_id).toBe('req-autocomplete-1');
     expect(result.decision_trace_ref).toBe(result.authority_trace_ref);
@@ -141,7 +136,6 @@ describe('AutocompleteUseCase', () => {
           vintage: 2018,
           wine_type: 'red',
           grapes: ['Cabernet Sauvignon'],
-          availability: true,
         },
         calibrated_score: 0.97,
         rank: 1,
@@ -169,9 +163,9 @@ describe('AutocompleteUseCase', () => {
 
     const useCase = new AutocompleteUseCase({
       entityLookupV2UseCase,
-      entityLookup: {
+      resolverProjectionLookup: wrapEntityDocumentLookupAsResolverProjection({
         getDocuments: vi.fn().mockResolvedValue(new Map()),
-      },
+      }),
     });
 
     const result = await useCase.execute({ query: 'myst' });
@@ -206,6 +200,9 @@ describe('AutocompleteUseCase', () => {
 
     const useCase = new AutocompleteUseCase({
       entityLookupV2UseCase,
+      resolverProjectionLookup: wrapEntityDocumentLookupAsResolverProjection({
+        getDocuments: vi.fn().mockResolvedValue(new Map()),
+      }),
     });
 
     const result = await useCase.execute({ query: 'full bodied red' });

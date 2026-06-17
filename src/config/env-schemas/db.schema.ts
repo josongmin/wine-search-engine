@@ -35,8 +35,8 @@ export const DbEnvSchema = z.object({
     .positive()
     .default(DEFAULT_PG_POOL_CONNECTION_TIMEOUT_MS),
 
-  // Redis
-  // Redis is optional. Set REDIS_URL="" or omit to disable.
+  // Redis — optional. Official runtime stack excludes Redis until cache policy
+  // is re-approved (see README / feature catalog infra.redis). Unset = no client.
   REDIS_URL: z.preprocess(
     (v) => (typeof v === 'string' && v.length > 0 ? v : undefined),
     z.string().url().optional(),

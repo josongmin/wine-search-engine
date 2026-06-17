@@ -1,8 +1,5 @@
 import type { AnchorCandidate } from '../../../domain/query/model/anchor-candidate.js';
 import type { CanonicalEntityId } from '../../../domain/shared/types/index.js';
-import {
-  mapLookupStrategyToChannel,
-} from '../../../domain/resolver/v2/channel-provenance.js';
 import type {
   LookupCandidate,
   LookupRetrievalChannel,
@@ -43,8 +40,7 @@ function buildAnchorFromLookupCandidate(
   const lookupStrategies = [
     ...new Set(
       candidate.channelHits
-        .map((hit) => mapLookupStrategyToChannel(hit.channel) ?? hit.channel)
-        .map((channel) => CHANNEL_TO_LOOKUP_STRATEGY[channel] ?? channel),
+        .map((hit) => CHANNEL_TO_LOOKUP_STRATEGY[hit.channel] ?? hit.channel),
     ),
   ];
   const confidence = candidate.channelHits.reduce(

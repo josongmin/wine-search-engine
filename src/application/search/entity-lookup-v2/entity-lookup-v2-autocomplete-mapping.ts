@@ -13,20 +13,17 @@ import { deterministicHash } from '../../../domain/shared/utils/hash.js';
 import type {
   LookupResolverProjection,
 } from '../port/search-pipeline-deps.port.js';
-import type { ResolveRequest } from '../resolve-request.dto.js';
 import type {
   AutocompleteEntitySummary,
   AutocompleteResponse,
   AutocompleteSuggestion,
 } from '../autocomplete-response.dto.js';
 import type {
-  EntityLookupV2Command,
   EntityLookupV2Result,
   LookupV2CandidateView,
 } from './entity-lookup-v2.dto.js';
 
-/** Typeahead default candidate window — mirrors LOOKUP_V2_DEFAULT_MAX_CANDIDATES (10). */
-const AUTOCOMPLETE_DEFAULT_MAX_CANDIDATES = 10;
+export { mapResolveRequestToEntityLookupV2Command } from './entity-lookup-v2-request-mapping.js';
 
 export type AutocompleteHydrationDocument = RetrievalDocument | LookupResolverProjection;
 
@@ -43,15 +40,6 @@ export function mapLookupV2StatusToAutocompleteStatus(status: LookupV2Status): A
     default:
       return 'failed';
   }
-}
-
-export function mapResolveRequestToEntityLookupV2Command(request: ResolveRequest): EntityLookupV2Command {
-  return {
-    query: request.query,
-    maxCandidates: request.queryBudget?.maxCandidates ?? AUTOCOMPLETE_DEFAULT_MAX_CANDIDATES,
-    mode: 'default',
-    ...(request.requestId !== undefined ? { requestId: request.requestId } : {}),
-  };
 }
 
 export function buildEntityLookupV2AutocompleteTraceRef(result: EntityLookupV2Result): string {

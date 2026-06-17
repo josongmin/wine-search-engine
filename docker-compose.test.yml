@@ -1,4 +1,5 @@
 # Ephemeral CI / test lane (tmpfs PG, alternate ports). Project: wine-search-test.
+# Redis excluded — same as prod/dev official stack.
 name: wine-search-test
 
 services:
@@ -15,16 +16,6 @@ services:
       interval: 3s
       timeout: 3s
       retries: 10
-
-  redis:
-    image: redis:7-alpine
-    command: ["redis-server", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
-    ports: ["6380:6379"]
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 3s
-      timeout: 3s
-      retries: 5
 
   vespa:
     image: vespaengine/vespa:8

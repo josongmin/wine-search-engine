@@ -11,12 +11,9 @@ import type { RankingInput } from '../../domain/ranking/model/ranking-input.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
 import type { ResolverCandidate } from '../../domain/resolver/model/resolved-candidate.js';
 import type {
-  BlockingUseCasePort,
   BrowseRetrieverPort,
   CandidatePoolPort,
   CompareRetrieverPort,
-  EntityDocumentLookupPort,
-  EntityResolverPort,
   RankingPort,
 } from './port/search-pipeline-deps.port.js';
 import { pipelineDebug } from '../../domain/observability/request-pipeline-debug.js';
@@ -35,9 +32,9 @@ import {
   type SearchExecutionLaneArtifacts,
   type SearchRouteExecutionResult,
 } from './search-usecase-route-dispatch.js';
-import { buildResolverCandidatesFromGenerator } from './search-usecase-resolver-candidates.js';
-import { shouldSuppressBlockerSeedExpansion } from './search-usecase-blocker-seed-policy.js';
 import { liftEntityResolveResultToLaneArtifacts } from './search-usecase-entity-ranked-results.js';
+import { resolveEntityRouteForPlanViaLookupV2 } from './entity-lookup-v2/entity-lookup-v2-search-bridge.js';
+import type { EntityLookupV2UseCasePort } from './port/search-route-usecases.port.js';
 import type { MultiQueryGenerator } from '../../domain/retrieval/service/multi-query-generator.js';
 import type { HydeGenerator } from '../../domain/retrieval/service/hyde-generator.js';
 import { buildRetrievalPlan } from '../../domain/retrieval/service/retrieval-plan-builder.js';
@@ -74,10 +71,7 @@ export interface HybridRankingRouteDeps {
 }
 
 export interface RankedRouteEntityResolutionDeps {
-  readonly entityResolver?: EntityResolverPort | undefined;
-  readonly entityLookup?: EntityDocumentLookupPort | undefined;
-  /** TA2-4: Optional blocker for seeding candidates beyond alias anchors. */
-  readonly blocker?: BlockingUseCasePort | undefined;
+  readonly entityLookupV2UseCase: EntityLookupV2UseCasePort;
 }
 
 export interface HybridRankedRoutePipelineDeps
@@ -219,46 +213,6 @@ function bindHybridRankingExecutionContract(
   }
 }
 
-function capAnchorResolverBlockerSeedIds(
-  plan: QueryPlanV1,
-  blockerOnlyIds: readonly CanonicalEntityId[],
-  compiled: CompiledWineQuery,
-): readonly CanonicalEntityId[] {
-  const maxCandidates = compiled.execution.budget.maxCandidates;
-
-  const anchorCoveredIds = new Set(
-    plan.anchors.flatMap((anchor) => anchor.candidateEntityIds.map(String)),
-  );
-  const remainingSlots = Math.max(0, maxCandidates - anchorCoveredIds.size);
-  return blockerOnlyIds.slice(0, remainingSlots);
-}
-
-function buildMissingEntityResolverResult(plan: QueryPlanV1): EntityResolveResult {
-  return {
-    status: 'failed',
-    candidates: [],
-    decisionTrace: {
-      queryClass: plan.queryClass,
-      top1CalibratedScore: 0,
-      top2CalibratedScore: undefined,
-      calibratedGap: undefined,
-      decisionConfidenceC: 0,
-      // The missing-resolver fallback never invoked the trained Calibrator,
-      // so `decisionConfidenceC=0` is a sentinel, not a calibrated
-      // probability. Flag the trace as untrusted so the AdmissionGate's
-      // confidence-refusal floor (RFC-016 §3, Epic 17.3) skips enforcement
-      // instead of refusing the sentinel against a fixed threshold.
-      calibrationTrusted: false,
-      ambiguityDetected: false,
-      ambiguityTypes: [],
-      appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
-      outcomeReasonCodes: ['HYBRID_ROUTE_MISSING_ENTITY_RESOLVER'],
-    },
-    conformalSetSize: 1,
-    degradation: { reasons: ['entity_resolver_unavailable'] },
-  };
-}
-
 export function buildRelaxedCompiledQuery(
   compiled: CompiledWineQuery,
   relaxedPlan: QueryPlanV1,
@@ -388,82 +342,14 @@ export async function resolveEntityRouteForPlanExecution(
   plan: QueryPlanV1,
   deps: RankedRouteEntityResolutionDeps,
   compiled: CompiledWineQuery,
+  requestContext?: RequestExecutionContext,
 ): Promise<EntityRoutePlanResolutionExecution> {
-  if (deps.entityResolver === undefined) {
-    pipelineDebug(
-      { step: PipelineDebugStep.RESOLVER_ANCHOR_MISSING, query_class: plan.queryClass },
-      'pipeline hybrid anchor resolver unavailable',
-    );
-    return {
-      resolveResult: buildMissingEntityResolverResult(plan),
-      resolverCandidates: [],
-    };
-  }
-
-  // TA2-4: Invoke blocker to surface entity IDs not covered by alias anchors.
-  let blockerOnlyIds: readonly CanonicalEntityId[] = [];
-  if (
-    deps.blocker !== undefined
-    && !shouldSuppressBlockerSeedExpansion(plan.anchors)
-  ) {
-    const allBlockerIds = await deps.blocker.block(plan.rawQuery, plan.normalizedQuery);
-    const anchorCoveredIds = new Set(
-      plan.anchors.flatMap((a) => a.candidateEntityIds.map(String)),
-    );
-    blockerOnlyIds = capAnchorResolverBlockerSeedIds(
-      plan,
-      allBlockerIds.filter((id) => !anchorCoveredIds.has(String(id))),
-      compiled,
-    );
-  }
-
-  const candidateEntities = await buildResolverCandidatesFromGenerator(
-    {
-      rawQuery: plan.rawQuery,
-      normalizedQuery: plan.normalizedQuery,
-      anchors: plan.anchors,
-      ...(blockerOnlyIds.length > 0 ? { blockerOnlyIds } : {}),
-    },
-    deps.entityLookup,
+  return resolveEntityRouteForPlanViaLookupV2(
+    plan,
+    compiled,
+    deps.entityLookupV2UseCase,
+    requestContext,
   );
-
-  pipelineDebug(
-    {
-      step: PipelineDebugStep.RESOLVER_ANCHOR_START,
-      query_class: plan.queryClass,
-      resolver_candidate_count: candidateEntities.length,
-      blocker_seed_count: blockerOnlyIds.length,
-    },
-    'pipeline hybrid anchor resolve',
-  );
-
-  const resolveResult = await deps.entityResolver.resolve({
-    rawQuery: plan.rawQuery,
-    normalizedQuery: plan.normalizedQuery,
-    ...(plan.normalizedQueryViews !== undefined
-      ? { normalizedQueryViews: plan.normalizedQueryViews }
-      : {}),
-    queryClass: plan.queryClass,
-    policy: plan.policy,
-    anchorCandidates: plan.anchors,
-    uncertainty: plan.uncertainty,
-    candidateEntities,
-    blockingPolicy: 'trust_candidate_pool',
-  });
-
-  pipelineDebug(
-    {
-      step: PipelineDebugStep.RESOLVER_ANCHOR_DONE,
-      resolve_status: resolveResult.status,
-      candidate_count: resolveResult.candidates.length,
-    },
-    'pipeline hybrid anchor resolve',
-  );
-
-  return {
-    resolveResult,
-    resolverCandidates: candidateEntities,
-  };
 }
 
 export async function resolveEntityRouteForPlan(
@@ -696,8 +582,7 @@ export async function executeHybridRouteRankingPipeline(
   }
 
   const generalOnlyIdentityExecution = shouldBootstrapGeneralOnlyIdentityExecution(plan, compiled)
-    && deps.entityResolver !== undefined
-    ? await resolveEntityRouteForPlanExecution(plan, deps, compiled)
+    ? await resolveEntityRouteForPlanExecution(plan, deps, compiled, requestContext)
     : undefined;
   const effectiveAnchorEntityId =
     anchorEntityId ?? generalOnlyIdentityExecution?.resolveResult.topEntity?.entityId;

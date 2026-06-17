@@ -13,7 +13,6 @@ import type {
   EntityLookupV2UseCasePort,
   HybridUseCasePort,
   InterpretUseCasePort,
-  ResolveUseCasePort,
 } from '../application/search/port/search-route-usecases.port.js';
 import type { CurationUseCase } from '../application/curation/curation.usecase.js';
 import { buildEvalRunner } from './container-aux-features.js';
@@ -26,7 +25,6 @@ import type { LookupAuthorityServices } from './lookup-authority.js';
 interface FeatureContainerServices {
   readonly searchUseCase: SearchExecutorPort;
   readonly interpretUseCase: InterpretUseCasePort;
-  readonly resolveUseCase: ResolveUseCasePort;
   readonly entityLookupV2UseCase: EntityLookupV2UseCasePort;
   readonly curationUseCase?: CurationUseCase | undefined;
   readonly autocompleteUseCase: AutocompleteUseCasePort;
@@ -46,6 +44,7 @@ export function buildFeatureContainerServices(
 ): FeatureContainerServices {
   const useCases = buildUseCaseContainerServices(core, config, useCaseExtensions, {
     entityLookupV2UseCase: lookupAuthority.entityLookupV2UseCase,
+    resolverProjectionLookup: lookupAuthority.resolverProjectionLookup,
   });
   const evalRunner = buildEvalRunner(runtime.pool, useCases.searchUseCase);
 

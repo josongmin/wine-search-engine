@@ -4,7 +4,6 @@ import type { MatchSignalSet } from '../../domain/resolver/model/match-signal-se
 import type { CanonicalEntityId } from '../../domain/shared/types/index.js';
 import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
 import type {
-  EntityDocumentLookupPort,
   LookupResolverProjection,
   LookupResolverProjectionPort,
 } from './port/search-pipeline-deps.port.js';
@@ -548,21 +547,14 @@ function describeEntityIds(ids: readonly CanonicalEntityId[]): string {
  * The scorer's attribute-hint pathway populates their effective score.
  *
  * @param input  Shared generator contract
- * @param entityLookup  Port for fetching entity documents by ID
+ * @param resolverProjectionLookup  Batch resolver projection hydration port
  */
 export async function buildResolverCandidatesFromGenerator(
   input: EntityCandidateGeneratorInput,
-  entityLookup: EntityDocumentLookupPort | undefined,
-  resolverProjectionLookup?: LookupResolverProjectionPort | undefined,
+  resolverProjectionLookup: LookupResolverProjectionPort,
 ): Promise<readonly ResolverCandidate[]> {
   if (input.anchors.length === 0 && (input.blockerOnlyIds == null || input.blockerOnlyIds.length === 0)) {
     return [];
-  }
-  if (entityLookup === undefined && resolverProjectionLookup === undefined) {
-    throw new DomainError(
-      'INTERNAL_INCONSISTENCY',
-      'Entity candidate generation requires entityLookup or resolverProjectionLookup when anchors or blocker seeds are present.',
-    );
   }
 
   // Collect all unique entity IDs: from anchors + blocker-only additions
@@ -597,11 +589,11 @@ export async function buildResolverCandidatesFromGenerator(
   // Single-fetch supplement has been removed (T-E4-01): getDocuments() is the
   // only production hydration path. Partial resolution is forbidden -- any
   // unresolved IDs are a loud error.
-  const projectionOverlayIds = resolverProjectionLookup !== undefined
-    ? [...allEntityIds].filter((id) => docMap.get(id)?.identityCertificates === undefined)
-    : [];
+  const projectionOverlayIds = [...allEntityIds].filter(
+    (id) => docMap.get(id)?.identityCertificates === undefined,
+  );
 
-  if (projectionOverlayIds.length > 0 && resolverProjectionLookup !== undefined) {
+  if (projectionOverlayIds.length > 0) {
     try {
       const docs = await resolverProjectionLookup.getResolverProjections(projectionOverlayIds);
       for (const [id, doc] of docs) {
@@ -619,16 +611,9 @@ export async function buildResolverCandidatesFromGenerator(
   const missingIds = [...allEntityIds].filter((id) => !docMap.has(id));
   if (missingIds.length > 0) {
     try {
-      if (resolverProjectionLookup !== undefined) {
-        const docs = await resolverProjectionLookup.getResolverProjections(missingIds);
-        for (const [id, doc] of docs) {
-          docMap.set(id, mergeResolverProjectionLike(docMap.get(id), doc));
-        }
-      } else if (entityLookup !== undefined) {
-        const docs = await entityLookup.getDocuments(missingIds);
-        for (const [id, doc] of docs) {
-          docMap.set(id, adaptRetrievalDocumentToResolverProjection(doc));
-        }
+      const docs = await resolverProjectionLookup.getResolverProjections(missingIds);
+      for (const [id, doc] of docs) {
+        docMap.set(id, mergeResolverProjectionLike(docMap.get(id), doc));
       }
     } catch (error: unknown) {
       // Failure taxonomy: batch_lookup_failed -- the entire batch fetch errored.

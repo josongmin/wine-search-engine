@@ -233,7 +233,7 @@
     "git:prepush:smart": "node scripts/test/prepush-smart.mjs",
     "git:prepush:quick": "pnpm run typecheck && pnpm run typecheck:etl && pnpm run test:unit",
     "git:prepush:heavy": "pnpm run typecheck && pnpm run typecheck:etl && pnpm run test:unit && pnpm run test:verification:noisy && pnpm run test:heavy",
-    "dev:full": "concurrently --names \"api,web\" --prefix-colors \"magenta,cyan\" \"REDIS_URL=redis://localhost:6379 PORT=4000 pnpm run dev\" \"cd web && NEXT_PUBLIC_API_URL=http://localhost:4000 pnpm run dev\"",
+    "dev:full": "concurrently --names \"api,web\" --prefix-colors \"magenta,cyan\" \"PORT=4000 KILL_SWITCH_QUERY_CACHE=true pnpm run dev\" \"cd web && NEXT_PUBLIC_API_URL=http://localhost:4000 pnpm run dev\"",
     "catalog:build": "tsx tools/feature-catalog/bin/catalog.ts build",
     "catalog:validate": "tsx tools/feature-catalog/bin/catalog.ts validate",
     "catalog:stats": "tsx tools/feature-catalog/bin/catalog.ts stats",

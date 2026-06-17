@@ -1,10 +1,13 @@
 #!/usr/bin/env tsx
 /**
- * Reap stale runtime-plane snapshot rows.
+ * Reap stale snapshot-plane rows (runtime + canonical).
  *
- * Deletes rows from entities/aliases/ambiguity_registry whose
- * search_snapshot_id is neither the active nor the previous snapshot (as
- * recorded in active_search_snapshot).
+ * Deletes rows whose search_snapshot_id is neither the active nor the previous
+ * snapshot (as recorded in active_search_snapshot). Child tables are reaped
+ * before parents so FK CASCADE does not skew per-table delete counts.
+ *
+ * Tables: aliases, entities, ambiguity_registry, canonical_aliases,
+ * entity_source_links, canonical_entities.
  *
  * Default: --dry-run. Destructive execution requires --force.
  *
@@ -21,7 +24,7 @@
  */
 
 import 'dotenv/config';
-import { loadConfig } from '../../src/config/env.js';
+import { loadConfig, type Config } from '../../src/config/env.js';
 import { createPgPool, shouldUsePgPool } from '../../src/infrastructure/db/pg-pool.js';
 import { bootstrapLogger } from '../../src/domain/shared/bootstrap-logger.js';
 
@@ -34,6 +37,32 @@ interface Args {
 
 const DEFAULT_GRACE_PERIOD_HOURS = 24;
 const MS_PER_HOUR = 60 * 60 * 1000;
+/** Batch size for destructive reaps — keeps each DELETE under RDS statement_timeout. */
+export const REAP_DELETE_BATCH_SIZE = 10_000;
+/**
+ * Post-publish reap skips the CLI grace window: publish already verified readiness
+ * and retains `previous_snapshot_id` for rollback.
+ */
+export const POST_PUBLISH_REAP_GRACE_PERIOD_HOURS = 0;
+
+/** Pool for batched DELETE lanes — no app query/statement ceilings. */
+export function createReapSnapshotsPool(pg: Config['pg']): import('pg').Pool {
+  return createPgPool(pg, {
+    statementTimeoutMs: 0,
+    idleInTransactionSessionTimeoutMs: 0,
+    queryTimeoutMs: 0,
+  });
+}
+
+/** GC hook for `publish-search-snapshot` after pointer promote + readiness pass. */
+export async function reapStaleSnapshotsAfterPublish(
+  pool: import('pg').Pool,
+): Promise<ReapSummary> {
+  return reapSnapshots(
+    { force: true, gracePeriodHours: POST_PUBLISH_REAP_GRACE_PERIOD_HOURS },
+    pool,
+  );
+}
 
 function parseArgs(argv: readonly string[]): Args {
   let force = false;
@@ -62,7 +91,15 @@ interface TableReport {
   readonly deletedRowCount: number;
 }
 
-const REAPABLE_TABLES = ['entities', 'aliases', 'ambiguity_registry'] as const;
+/** FK-safe order: children before parents within each plane. */
+export const REAPABLE_TABLES = [
+  'aliases',
+  'entities',
+  'ambiguity_registry',
+  'canonical_aliases',
+  'entity_source_links',
+  'canonical_entities',
+] as const;
 
 interface ReapSummary {
   readonly performed: 'dry-run' | 'force' | 'skipped';
@@ -72,11 +109,51 @@ interface ReapSummary {
   readonly reports: readonly TableReport[];
 }
 
+type PgClient = Pick<import('pg').PoolClient, 'query'>;
+
+async function countStaleCandidates(
+  client: PgClient,
+  table: (typeof REAPABLE_TABLES)[number],
+  protectedIds: readonly string[],
+): Promise<number> {
+  const candidate = await client.query<{ c: string }>(
+    `SELECT COUNT(*)::text AS c FROM ${table}
+     WHERE search_snapshot_id <> ALL($1::text[])`,
+    [protectedIds],
+  );
+  return Number(candidate.rows[0]?.c ?? '0');
+}
+
+async function deleteStaleBatched(
+  client: PgClient,
+  table: (typeof REAPABLE_TABLES)[number],
+  protectedIds: readonly string[],
+  batchSize: number,
+): Promise<number> {
+  let deletedRowCount = 0;
+  for (;;) {
+    const del = await client.query(
+      `DELETE FROM ${table}
+       WHERE ctid IN (
+         SELECT ctid FROM ${table}
+         WHERE search_snapshot_id <> ALL($1::text[])
+         LIMIT $2
+       )`,
+      [protectedIds, batchSize],
+    );
+    const batchDeleted = del.rowCount ?? 0;
+    deletedRowCount += batchDeleted;
+    if (batchDeleted < batchSize) {
+      break;
+    }
+    log.info({ table, deletedRowCount }, 'reap batch progress');
+  }
+  return deletedRowCount;
+}
+
 export async function reapSnapshots(args: Args, pool: import('pg').Pool): Promise<ReapSummary> {
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
-
     const { rows: pointerRows } = await client.query<{
       active_snapshot_id: string;
       previous_snapshot_id: string | null;
@@ -88,7 +165,6 @@ export async function reapSnapshots(args: Args, pool: import('pg').Pool): Promis
     );
     const pointer = pointerRows[0];
     if (pointer === undefined) {
-      await client.query('ROLLBACK');
       return {
         performed: 'skipped',
         skipReason: 'active_search_snapshot is empty',
@@ -98,7 +174,6 @@ export async function reapSnapshots(args: Args, pool: import('pg').Pool): Promis
       };
     }
     if (pointer.previous_snapshot_id === null) {
-      await client.query('ROLLBACK');
       return {
         performed: 'skipped',
         skipReason: 'previous_snapshot_id is NULL (first publish); nothing safe to reap',
@@ -110,7 +185,6 @@ export async function reapSnapshots(args: Args, pool: import('pg').Pool): Promis
     const gracePeriodMs = args.gracePeriodHours * MS_PER_HOUR;
     const promotedAtMs = pointer.promoted_at.getTime();
     if (Date.now() - promotedAtMs < gracePeriodMs) {
-      await client.query('ROLLBACK');
       return {
         performed: 'skipped',
         skipReason: `pointer promoted within grace period (${args.gracePeriodHours}h)`,
@@ -124,37 +198,25 @@ export async function reapSnapshots(args: Args, pool: import('pg').Pool): Promis
     const reports: TableReport[] = [];
 
     for (const table of REAPABLE_TABLES) {
-       
-      const candidate = await client.query<{ c: string }>(
-        `SELECT COUNT(*)::text AS c FROM ${table}
-         WHERE search_snapshot_id <> ALL($1::text[])`,
-        [protectedIds],
-      );
-      const candidateRowCount = Number(candidate.rows[0]?.c ?? '0');
+      const candidateRowCount = await countStaleCandidates(client, table, protectedIds);
       let deletedRowCount = 0;
       if (args.force && candidateRowCount > 0) {
-        const del = await client.query(
-          `DELETE FROM ${table}
-           WHERE search_snapshot_id <> ALL($1::text[])`,
-          [protectedIds],
+        await client.query('BEGIN');
+        await client.query("SET LOCAL statement_timeout = '0'");
+        deletedRowCount = await deleteStaleBatched(
+          client,
+          table,
+          protectedIds,
+          REAP_DELETE_BATCH_SIZE,
         );
-        deletedRowCount = del.rowCount ?? 0;
+        await client.query('COMMIT');
+        log.warn({ table, candidateRowCount, deletedRowCount }, 'reap table complete');
       }
       reports.push({ table, candidateRowCount, deletedRowCount });
     }
 
-    if (args.force) {
-      await client.query('COMMIT');
-      return {
-        performed: 'force',
-        activeSnapshotId: pointer.active_snapshot_id,
-        previousSnapshotId: pointer.previous_snapshot_id,
-        reports,
-      };
-    }
-    await client.query('ROLLBACK');
     return {
-      performed: 'dry-run',
+      performed: args.force ? 'force' : 'dry-run',
       activeSnapshotId: pointer.active_snapshot_id,
       previousSnapshotId: pointer.previous_snapshot_id,
       reports,
@@ -170,10 +232,13 @@ async function main(): Promise<void> {
   if (!shouldUsePgPool(config.pg)) {
     throw new Error('Postgres configuration is required to reap snapshots');
   }
-  const pool = createPgPool(config.pg);
+  // Long-running batched DELETEs — disable app pool query/statement ceilings.
+  const pool = createReapSnapshotsPool(config.pg);
   try {
     const summary = await reapSnapshots(args, pool);
     log.warn({ summary }, 'reap-snapshots complete');
+    // Machine-readable audit line for operators / cron capture.
+    console.log(JSON.stringify(summary));
   } finally {
     await pool.end();
   }

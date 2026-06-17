@@ -7,6 +7,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { wrapEntityDocumentLookupAsResolverProjection } from '../../src/application/search/__tests__/resolver-projection-lookup.stub.js';
 import { buildResolverCandidatesFromGenerator } from '../../src/application/search/search-usecase-resolver-candidates.js';
 import { VespaCandidateAttributes } from '../../src/infrastructure/vespa/vespa-candidate-attributes.js';
 import type { EntityId } from '../../src/domain/shared/types/index.js';
@@ -77,7 +78,7 @@ describe('Promise.all → allSettled resilience (regression)', () => {
         getDocuments: vi.fn(async () => new Map([[goodId, doc]])),
       };
 
-      await expect(buildResolverCandidatesFromGenerator(input, entityLookup)).rejects.toMatchObject({
+      await expect(buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(entityLookup))).rejects.toMatchObject({
         code: 'INTERNAL_INCONSISTENCY',
       });
     });
@@ -90,7 +91,7 @@ describe('Promise.all → allSettled resilience (regression)', () => {
         }),
       };
 
-      await expect(buildResolverCandidatesFromGenerator(input, entityLookup)).rejects.toMatchObject({
+      await expect(buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(entityLookup))).rejects.toMatchObject({
         code: 'INTERNAL_INCONSISTENCY',
       });
     });

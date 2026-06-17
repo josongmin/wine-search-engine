@@ -378,15 +378,11 @@ export async function createServer(
   registerLexicalSearchRoute(app, deps);
   // BREAKING (V2-only cutover): POST /v1/lookup/wine is removed. The sole public
   // lookup surface is POST /v2/entity-lookup (4-state V2-native contract).
-  // T-ELV2-01: dedicated entity-lookup V2 surface. Always present in production
-  // (the container always constructs the use case); guarded so lightweight
-  // server-construction tests can omit it.
-  if (deps.entityLookupV2UseCase !== undefined) {
-    const elv2Deps = { entityLookupV2UseCase: deps.entityLookupV2UseCase };
-    registerEntityLookupV2Route(app, elv2Deps);
-    // Trusted operator read plane — X-Debug-Key gated at the handler (T-ELV2-07).
-    registerEntityLookupV2OpsRoute(app, elv2Deps);
-  }
+  // T-ELV2-01: dedicated entity-lookup V2 surface (sole public lookup authority).
+  const elv2Deps = { entityLookupV2UseCase: deps.entityLookupV2UseCase };
+  registerEntityLookupV2Route(app, elv2Deps);
+  // Trusted operator read plane — X-Debug-Key gated at the handler (T-ELV2-07).
+  registerEntityLookupV2OpsRoute(app, elv2Deps);
   // T-ELV2-07: operator curation plane (alias-audit/coverage-health/proposals).
   // Reads X-Debug-Key gated, writes X-Ops-Write-Key gated — registered when the
   // curation use case is wired (requires a PG pool).

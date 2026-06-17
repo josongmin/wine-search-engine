@@ -143,9 +143,7 @@ export async function executeDualLaneSearch(
   const dualLaneCompiled = assertDualLaneExecutionContract(compiled);
 
   const entityResolutionDeps = {
-    entityResolver: deps.entityResolver,
-    entityLookup: deps.entityLookup,
-    blocker: deps.blocker,
+    entityLookupV2UseCase: deps.entityLookupV2UseCase,
   } as const;
 
   const identityResolutionPromise = resolveEntityRouteForPlanExecution(
@@ -247,9 +245,7 @@ export async function executeDualLaneHybridRoute(
       resolveEntityRouteForPlan(
         candidatePlan,
         {
-          entityResolver: deps.entityResolver,
-          entityLookup: deps.entityLookup,
-          blocker: deps.blocker,
+          entityLookupV2UseCase: deps.entityLookupV2UseCase,
         },
         dualLaneCompiled,
       ),

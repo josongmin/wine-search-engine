@@ -8,7 +8,7 @@
  */
 
 import type { FastifyInstance } from 'fastify';
-import type { EntityLookupV2RouteDeps } from './route-deps.js';
+import type { ResolveRouteDeps } from './route-deps.js';
 import { parseContractBody, sendRouteContractResponse } from './contract-response.js';
 import { registerContractRoute } from './register-contract-route.js';
 import { EntityLookupV2OpsInspectRouteContract, EntityLookupV2RouteContract } from './route-contracts.js';
@@ -20,7 +20,7 @@ import { DomainError } from '../../../domain/shared/error/domain-error.js';
 import { POLICY_BLOCKED_CODE } from '../../../domain/shared/error/policy-blocked.js';
 import type { EntityLookupV2Command } from '../../../application/search/entity-lookup-v2/entity-lookup-v2.dto.js';
 
-export function registerEntityLookupV2Route(app: FastifyInstance, deps: EntityLookupV2RouteDeps): void {
+export function registerEntityLookupV2Route(app: FastifyInstance, deps: ResolveRouteDeps): void {
   registerContractRoute(app, {
     method: 'POST',
     url: '/v2/entity-lookup',
@@ -65,7 +65,7 @@ export function registerEntityLookupV2Route(app: FastifyInstance, deps: EntityLo
  * to RFC DoD §6 — "operator가 query 하나로 admission/candidates/scores/decision을
  * trusted plane에서 본다".
  */
-export function registerEntityLookupV2OpsRoute(app: FastifyInstance, deps: EntityLookupV2RouteDeps): void {
+export function registerEntityLookupV2OpsRoute(app: FastifyInstance, deps: ResolveRouteDeps): void {
   registerContractRoute(app, {
     method: 'POST',
     url: '/v2/entity-lookup/ops/inspect',

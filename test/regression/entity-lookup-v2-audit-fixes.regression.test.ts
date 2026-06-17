@@ -107,9 +107,14 @@ describe('audit HIGH — trusted calibration still requires identity-grade evide
       admissionGate: new ConceptAdmissionGate(),
       lookupPlanner,
       entityResolver: resolver,
-      entityLookup: {
-        getDocument: vi.fn().mockResolvedValue(doc),
-        getDocuments: vi.fn().mockResolvedValue(new Map([[eid, doc]])),
+      resolverProjectionLookup: {
+        getResolverProjections: vi.fn().mockResolvedValue(new Map([[eid, {
+          entityId: eid,
+          entityType: 'wine',
+          canonicalLabel: doc.canonicalLabel,
+          aliasesIdentitySafe: [],
+          identitySafeKeys: [],
+        }]])),
       },
       querySanitizer: { sanitize: vi.fn((q: string) => ({ safe: true, sanitizedQuery: q })) } as never,
     });
@@ -198,9 +203,16 @@ describe('audit MED — max_candidates caps the surfaced candidate list', () => 
       admissionGate: new ConceptAdmissionGate(),
       lookupPlanner,
       entityResolver: resolver,
-      entityLookup: {
-        getDocument: vi.fn().mockImplementation(async (id) => doc(id)),
-        getDocuments: vi.fn(async (xs: readonly ReturnType<typeof createEntityId>[]) => new Map(xs.map((id) => [id, doc(id)]))),
+      resolverProjectionLookup: {
+        getResolverProjections: vi.fn(async (xs: readonly ReturnType<typeof createEntityId>[]) => new Map(
+          xs.map((id) => [id, {
+            entityId: id,
+            entityType: 'wine',
+            canonicalLabel: doc(id).canonicalLabel,
+            aliasesIdentitySafe: [],
+            identitySafeKeys: [],
+          }]),
+        )),
       },
       querySanitizer: { sanitize: vi.fn((q: string) => ({ safe: true, sanitizedQuery: q })) } as never,
     });
@@ -248,9 +260,14 @@ describe('audit R2 HIGH — untrusted resolve is not forgeable by a recall strat
       admissionGate: new ConceptAdmissionGate(),
       lookupPlanner,
       entityResolver: resolver,
-      entityLookup: {
-        getDocument: vi.fn().mockResolvedValue(doc),
-        getDocuments: vi.fn().mockResolvedValue(new Map([[eid, doc]])),
+      resolverProjectionLookup: {
+        getResolverProjections: vi.fn().mockResolvedValue(new Map([[eid, {
+          entityId: eid,
+          entityType: 'wine',
+          canonicalLabel: doc.canonicalLabel,
+          aliasesIdentitySafe: [],
+          identitySafeKeys: [],
+        }]])),
       },
       querySanitizer: { sanitize: vi.fn((q: string) => ({ safe: true, sanitizedQuery: q })) } as never,
     });

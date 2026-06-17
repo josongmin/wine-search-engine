@@ -47,7 +47,7 @@ export interface ResolvedCandidate {
    * pipeline via `blockerOnlyIds` — i.e. the blocker found the entity but the
    * alias extractor did not. Absent (undefined) for anchor-sourced candidates.
    *
-   * Used downstream for provenance tagging and corrective retry logging.
+   * Used downstream for provenance tagging and audit traces.
    */
   readonly blockerSeed?: true | undefined;
 

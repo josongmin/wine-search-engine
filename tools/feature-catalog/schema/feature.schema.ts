@@ -73,6 +73,8 @@ export const FeatureSchema = z
     name: z.string().min(1).max(100),
     category: CategorySchema,
     summary: z.string().min(10).max(500),
+    /** Optional architecture note (kernel wiring, SSoT entrypoints). */
+    target_architecture: z.string().min(10).max(1000).optional(),
 
     maturity: MaturitySchema,
     /** Free-form justification for the maturity score. Required so reviewers can audit drift.

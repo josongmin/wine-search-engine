@@ -53,7 +53,6 @@ key_files:
   - src/infrastructure/db/agent-session-store.ts
   - src/config/agent-session-store.ts
   - src/interface/http/routes/agent.route.ts
-  - src/interface/http/routes/agent-session-response-builders.ts
   - src/interface/http/schemas/agent.schema.ts
   - src/config/container.ts
 

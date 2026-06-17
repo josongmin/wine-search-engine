@@ -36,12 +36,6 @@ const envelopeArb: fc.Arbitrary<AuditExtensionEnvelope> = fc.record(
     schema_version: fc.constantFrom(...AUDIT_EXTENSION_SCHEMA_VERSIONS),
     request_id: fc.string({ minLength: 1, maxLength: 64 }),
     fallback_trace: fallbackTraceArb,
-    corrective_retry_calibrated_confidence: fc.double({
-      min: 0.5,
-      max: 0.9,
-      noNaN: true,
-      noDefaultInfinity: true,
-    }),
     determinism_fingerprint: fc.string({
       unit: fc.constantFrom(
         '0', '1', '2', '3', '4', '5', '6', '7',
@@ -67,7 +61,6 @@ describe('audit-trace-extension property-based regression', () => {
                 'schema_version',
                 'request_id',
                 'fallback_trace',
-                'corrective_retry_calibrated_confidence',
                 'determinism_fingerprint',
                 'message',
               ].includes(key),
@@ -256,7 +249,7 @@ describe('audit-trace-extension property-based regression', () => {
       expect(parsed.fallback_trace?.fallback_applied).toBeNull();
     });
 
-    it('optional fields (request_id, message, determinism_fingerprint, corrective_retry_calibrated_confidence) may be omitted', () => {
+    it('optional fields (request_id, message, determinism_fingerprint) may be omitted', () => {
       const minimal = {
         fallback_trace: {
           fallback_applied: null,
@@ -269,7 +262,6 @@ describe('audit-trace-extension property-based regression', () => {
       expect(parsed.request_id).toBeUndefined();
       expect(parsed.message).toBeUndefined();
       expect(parsed.determinism_fingerprint).toBeUndefined();
-      expect(parsed.corrective_retry_calibrated_confidence).toBeUndefined();
     });
 
     it('all optional fields can be supplied together', () => {
@@ -282,7 +274,6 @@ describe('audit-trace-extension property-based regression', () => {
           failed_synthesis_attempts: 0,
           fallback_search_used: true,
         },
-        corrective_retry_calibrated_confidence: 0.7,
         determinism_fingerprint: 'abcdef0123456789',
         message: 'ok',
       };

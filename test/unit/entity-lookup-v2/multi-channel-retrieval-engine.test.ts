@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { MultiChannelRetrievalEngine } from '../../../src/application/search/entity-lookup-v2/multi-channel-retrieval-engine.js';
+import { wrapEntityDocumentLookupAsResolverProjection } from '../../../src/application/search/__tests__/resolver-projection-lookup.stub.js';
 import { createEntityId } from '../../../src/domain/shared/types/index.js';
 import type { AliasMatcher, AliasMatchResult } from '../../../src/domain/query/service/anchor-extractor.js';
 import type { NormalizedQueryViews } from '../../../src/domain/query/model/query-views.js';
@@ -26,14 +27,14 @@ function matcherReturning(byView: Record<string, AliasMatchResult[]>): AliasMatc
   };
 }
 
-const entityLookup = {
-  getDocument: vi.fn(),
+const entityDocumentLookup = {
   getDocuments: vi.fn(async (ids: readonly ReturnType<typeof createEntityId>[]) => {
     const m = new Map();
     for (const id of ids) m.set(id, { entityId: id, entityType: 'wine', canonicalLabel: 'Opus One 2018' });
     return m;
   }),
 };
+const resolverProjectionLookup = wrapEntityDocumentLookupAsResolverProjection(entityDocumentLookup);
 
 describe('MultiChannelRetrievalEngine (T-ELV2-04 real)', () => {
   it('runs independent channels per view with REAL latency + scores and unions provenance', async () => {
@@ -41,7 +42,7 @@ describe('MultiChannelRetrievalEngine (T-ELV2-04 real)', () => {
       'opus one': [{ surfaceForm: 'Opus One', normalizedForm: 'opus one', entityIds: [opus], matchConfidence: 0.97, lookupStrategy: 'exact' }],
       opusone: [{ surfaceForm: 'OpusOne', normalizedForm: 'opusone', entityIds: [opus], matchConfidence: 0.93, lookupStrategy: 'compact_exact' }],
     });
-    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, entityLookup });
+    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, resolverProjectionLookup });
 
     const result = await engine.retrieve(input());
 
@@ -65,14 +66,14 @@ describe('MultiChannelRetrievalEngine (T-ELV2-04 real)', () => {
     const matcher = matcherReturning({
       'opus one': [{ surfaceForm: 'Opus One', normalizedForm: 'opus one', entityIds: [opus], matchConfidence: 0.97 }],
     });
-    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, entityLookup });
+    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, resolverProjectionLookup });
     const result = await engine.retrieve(input({ views: views({ transliterated: 'opus uno' }) }));
     const translit = result.coverage.find((c) => c.channel === 'transliteration_exact');
     expect(translit?.firing).toBe(false);
     expect(translit?.hitCount).toBe(0);
   });
 
-  it('hydrates candidates from resolver projections without requiring entityLookup', async () => {
+  it('hydrates candidates from resolver projections directly', async () => {
     const matcher = matcherReturning({
       'opus one': [{ surfaceForm: 'Opus One', normalizedForm: 'opus one', entityIds: [opus], matchConfidence: 0.97, lookupStrategy: 'exact' }],
     });
@@ -105,7 +106,7 @@ describe('MultiChannelRetrievalEngine (T-ELV2-04 real)', () => {
     const matcher = matcherReturning({
       'opus one': ids.map((id, i) => ({ surfaceForm: `E${i}`, normalizedForm: 'opus one', entityIds: [id], matchConfidence: 0.9 - i * 0.1 })),
     });
-    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, entityLookup });
+    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, resolverProjectionLookup });
     const result = await engine.retrieve(input({ maxCandidates: 2 }));
     expect(result.candidates).toHaveLength(2);
   });
@@ -117,7 +118,7 @@ describe('MultiChannelRetrievalEngine (T-ELV2-04 real)', () => {
         return [{ surfaceForm: 'Opus One', normalizedForm: q, entityIds: [opus], matchConfidence: 0.97 }];
       }),
     };
-    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, entityLookup });
+    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, resolverProjectionLookup });
     const result = await engine.retrieve(input());
     expect(result.candidates).toHaveLength(1);
     const compact = result.coverage.find((c) => c.channel === 'compact_exact');
@@ -131,7 +132,7 @@ describe('MultiChannelRetrievalEngine (T-ELV2-04 real)', () => {
     const matcher = matcherReturning({
       'opus one': [{ surfaceForm: 'Opus One', normalizedForm: 'opus one', entityIds: [opus], matchConfidence: 0.8, ...(strategy !== undefined ? { lookupStrategy: strategy } : {}) }],
     });
-    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, entityLookup });
+    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, resolverProjectionLookup });
     return engine.retrieve(input()).then((r) => (r.candidates[0]?.channelHits ?? []).map((h) => h.channel).sort());
   }
 
@@ -185,7 +186,7 @@ describe('MultiChannelRetrievalEngine — family_graph channel', () => {
       'opus one': [{ surfaceForm: 'Opus One', normalizedForm: 'opus one', entityIds: [opus], matchConfidence: 0.97, lookupStrategy: 'exact' }],
     });
     const familyGraph = familyGraphReturning({ 'opus-one-2018': [{ entityId: 'opus-one-2019', edgeWeight: 0.5 }] });
-    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, entityLookup, entityScopeGraph: familyGraph });
+    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, resolverProjectionLookup, entityScopeGraph: familyGraph });
     const result = await engine.retrieve(input());
     const sibling = result.candidates.find((c) => String(c.entityId) === 'opus-one-2019');
     expect(sibling).toBeDefined();
@@ -206,7 +207,7 @@ describe('MultiChannelRetrievalEngine — family_graph channel', () => {
     });
     // e1 has a family sibling 'e1-sib' at edge weight 0.5 (below both anchors).
     const familyGraph = familyGraphReturning({ e1: [{ entityId: 'e1-sib', edgeWeight: 0.5 }] });
-    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, entityLookup, entityScopeGraph: familyGraph });
+    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, resolverProjectionLookup, entityScopeGraph: familyGraph });
     // maxCandidates=2: a pure best-score slice would keep {e1, e2} and drop the sibling.
     const result = await engine.retrieve(input({ maxCandidates: 2 }));
     const keys = result.candidates.map((c) => String(c.entityId));
@@ -218,7 +219,7 @@ describe('MultiChannelRetrievalEngine — family_graph channel', () => {
     const matcher = matcherReturning({
       'opus one': [{ surfaceForm: 'Opus One', normalizedForm: 'opus one', entityIds: [opus], matchConfidence: 0.97 }],
     });
-    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, entityLookup });
+    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, resolverProjectionLookup });
     const result = await engine.retrieve(input());
     expect(result.coverage.some((c) => c.channel === 'family_graph')).toBe(false);
   });
@@ -228,7 +229,7 @@ describe('MultiChannelRetrievalEngine — family_graph channel', () => {
       'opus one': [{ surfaceForm: 'Opus One', normalizedForm: 'opus one', entityIds: [opus], matchConfidence: 1, lookupStrategy: 'exact' }],
     });
     const familyGraph = familyGraphReturning({ 'opus-one-2018': [{ entityId: 'opus-one-2019', edgeWeight: 0.5 }] });
-    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, entityLookup, entityScopeGraph: familyGraph });
+    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, resolverProjectionLookup, entityScopeGraph: familyGraph });
     const result = await engine.retrieve(input({ suppressFamilyGraphExpansion: true }));
     expect(result.candidates.map((candidate) => String(candidate.entityId))).not.toContain('opus-one-2019');
     expect(result.coverage.some((c) => c.channel === 'family_graph')).toBe(false);
@@ -239,7 +240,7 @@ describe('MultiChannelRetrievalEngine — family_graph channel', () => {
       'opus one': [{ surfaceForm: 'Opus One', normalizedForm: 'opus one', entityIds: [opus], matchConfidence: 0.97 }],
     });
     const familyGraph = { async getRelatedEntitiesBatch(): Promise<never> { throw new Error('family graph down'); } };
-    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, entityLookup, entityScopeGraph: familyGraph });
+    const engine = new MultiChannelRetrievalEngine({ aliasMatcher: matcher, resolverProjectionLookup, entityScopeGraph: familyGraph });
     const result = await engine.retrieve(input());
     expect(result.candidates).toHaveLength(1);
     const fam = result.coverage.find((c) => c.channel === 'family_graph');
@@ -259,7 +260,7 @@ describe('MultiChannelRetrievalEngine — family_graph channel', () => {
     };
     const engine = new MultiChannelRetrievalEngine({
       aliasMatcher: matcher,
-      entityLookup,
+      resolverProjectionLookup,
       reviewedFamilyRecall,
     });
 
@@ -299,7 +300,7 @@ describe('MultiChannelRetrievalEngine — family_graph channel', () => {
     };
     const engine = new MultiChannelRetrievalEngine({
       aliasMatcher: matcher,
-      entityLookup,
+      resolverProjectionLookup,
       reviewedFamilyRecall,
     });
 

@@ -64,6 +64,8 @@ import {
 } from '../../src/interface/http/schemas/search-response.schema.js';
 import { MAX_RESOLVE_CANDIDATES } from '../../src/interface/http/constants.js';
 import { MAX_QUERY_LENGTH } from '../../src/domain/shared/constants.js';
+import type { EntityLookupV2Result } from '../../src/application/search/entity-lookup-v2/entity-lookup-v2.dto.js';
+import type { LookupV2Status } from '../../src/domain/resolver/v2/lookup-v2-types.js';
 
 // ---------------------------------------------------------------------------
 // Named constants (CLAUDE.md test-discipline rule 15: no magic numbers).
@@ -124,34 +126,70 @@ interface SyntheticResolverResult {
   readonly topEntity?: Record<string, unknown> | undefined;
 }
 
-/**
- * Builds the use-case-shaped object (camelCase, pre-serialization). Mirrors the
- * exact shape ResolveUseCase.execute() returns: status + candidates + topEntity
- * (possibly undefined) + the two equal trace refs + request_id.
- */
-function buildUseCaseResponse(
-  result: SyntheticResolverResult,
-  requestId: string,
-): Record<string, unknown> {
-  const hasTop = result.topEntity !== undefined;
+const BASE_V2_VIEWS = {
+  raw: 'q',
+  strict: 'q',
+  accentless: 'q',
+  compact: 'q',
+  vintageCanonicalized: 'q',
+  vintageStripped: 'q',
+  lookupVariants: ['q'],
+} as const;
+
+const BASE_V2_EVIDENCE = {
+  admissionReasonCode: 'admitted',
+  decisionReasonCode: 'exact_identity',
+  calibrationTrusted: true,
+  queryClass: 'exact_entity',
+  candidatePoolSize: 1,
+  channelCoverage: [],
+} as const;
+
+const BASE_V2_META = {
+  queryTimeMs: 1,
+  version: 'entity-lookup-v2/1.0.0',
+  engineSchemaVersion: 'entity_lookup_v2',
+} as const;
+
+/** Builds a V2 lookup authority result the resolve route maps to ResolveResponse. */
+function buildV2FromSynthetic(result: SyntheticResolverResult): EntityLookupV2Result {
+  const status: LookupV2Status =
+    result.status === 'resolved' || result.status === 'ambiguous'
+      ? result.status
+      : 'failed';
+
   return {
-    status: result.status,
-    candidates: result.candidates,
-    // Omit topEntity entirely when absent so the snake-case serializer never
-    // emits `top_entity: undefined` — matches the use case's conditional spread.
-    ...(hasTop ? { topEntity: result.topEntity } : {}),
-    decision_trace_ref: CANONICAL_TRACE_REF,
-    authority_trace_ref: CANONICAL_TRACE_REF,
-    request_id: requestId,
+    status,
+    decisionReason: 'synthetic',
+    normalizedQueryViews: BASE_V2_VIEWS,
+    candidates: result.candidates.map((candidate, index) => ({
+      entityId: asStringField(candidate.entityId, 'e'),
+      canonicalLabel: asStringField(candidate.canonicalLabel, 'L'),
+      calibratedScore: Number(candidate.calibratedScore ?? 0),
+      rank: typeof candidate.rank === 'number' ? candidate.rank : index + 1,
+      channelAgreement: 1,
+      channelHits: [],
+    })),
+    topCandidate: result.topEntity !== undefined
+      ? {
+          entityId: asStringField(result.topEntity.entityId, 'e'),
+          canonicalLabel: asStringField(result.topEntity.canonicalLabel, 'L'),
+          calibratedScore: Number(result.topEntity.calibratedScore ?? 0),
+        }
+      : null,
+    clarificationOptions: [],
+    evidenceSummary: BASE_V2_EVIDENCE,
+    meta: BASE_V2_META,
   };
 }
 
-function depsReturning(result: SyntheticResolverResult): ResolveRouteDeps {
-  const execute = vi.fn().mockImplementation(
-    async (req: { requestId?: string }) =>
-      buildUseCaseResponse(result, req.requestId ?? 'unknown'),
-  );
-  return { resolveUseCase: { execute } };
+type MockedResolveRouteDeps = ResolveRouteDeps & {
+  readonly entityLookupV2UseCase: { readonly execute: ReturnType<typeof vi.fn> };
+};
+
+function depsReturning(result: SyntheticResolverResult): MockedResolveRouteDeps {
+  const execute = vi.fn().mockImplementation(async () => buildV2FromSynthetic(result));
+  return { entityLookupV2UseCase: { execute } };
 }
 
 async function post(app: FastifyInstance, payload: unknown) {
@@ -366,7 +404,7 @@ describe('tools.resolve route — Korean Unicode transparency', () => {
           try {
             const res = await post(app, { query: koreanQuery });
             expect(res.statusCode).toBe(200);
-            const calls = (deps.resolveUseCase.execute as ReturnType<typeof vi.fn>).mock.calls;
+            const calls = deps.entityLookupV2UseCase.execute.mock.calls;
             const forwarded = (calls[0]?.[0] as { query: string }).query;
             // Verbatim: identical string, identical normalization form, identical length.
             expect(forwarded).toBe(koreanQuery);
@@ -465,7 +503,7 @@ describe('tools.resolve route — input validation envelope', () => {
             expect(ErrorResponseSchema.safeParse(body).success).toBe(true);
             expect(body.error.code).toBe('VALIDATION_ERROR');
             expect(body.error.request_id.length).toBeGreaterThan(0);
-            expect(deps.resolveUseCase.execute).not.toHaveBeenCalled();
+            expect(deps.entityLookupV2UseCase.execute).not.toHaveBeenCalled();
           } finally {
             await app.close();
           }
@@ -495,7 +533,7 @@ describe('tools.resolve route — input validation envelope', () => {
           const body = res.json();
           expect(ErrorResponseSchema.safeParse(body).success).toBe(true);
           expect(body.error.code).toBe('VALIDATION_ERROR');
-          expect(deps.resolveUseCase.execute).not.toHaveBeenCalled();
+          expect(deps.entityLookupV2UseCase.execute).not.toHaveBeenCalled();
         } finally {
           await app.close();
         }
@@ -563,7 +601,7 @@ describe('tools.resolve route — adversarial input safety', () => {
             expect(res.statusCode).toBeLessThan(500);
             const parsed = res.json();
             expect(ErrorResponseSchema.safeParse(parsed).success).toBe(true);
-            expect(deps.resolveUseCase.execute).not.toHaveBeenCalled();
+            expect(deps.entityLookupV2UseCase.execute).not.toHaveBeenCalled();
           } finally {
             await app.close();
           }
@@ -596,7 +634,7 @@ describe('tools.resolve route — adversarial input safety', () => {
             const body = res.json();
             expect(ErrorResponseSchema.safeParse(body).success).toBe(true);
             expect(body.error.request_id.length).toBeGreaterThan(0);
-            expect(deps.resolveUseCase.execute).not.toHaveBeenCalled();
+            expect(deps.entityLookupV2UseCase.execute).not.toHaveBeenCalled();
             // Sanity: the global Object prototype was not polluted.
             expect(({} as Record<string, unknown>).polluted).toBeUndefined();
           } finally {

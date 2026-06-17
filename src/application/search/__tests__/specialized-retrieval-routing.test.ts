@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SearchUseCase, type SearchUseCaseDeps } from '../search.usecase.js';
+import { makeMinimalLookupV2FailedResult, makeStubEntityLookupV2UseCase } from './entity-lookup-v2-use-case.stub.js';
 import { QuerySanitizer } from '../../../domain/security/service/query-sanitizer.js';
 import type { QueryPlanV1 } from '../../../domain/query/model/query-plan.js';
 import type { HybridCandidate } from '../../../domain/retrieval/model/hybrid-candidate.js';
@@ -84,54 +85,36 @@ function makeRankedResult(entityId: string, label: string): RankedResult {
 
 describe('SearchUseCase specialized retrieval routing', () => {
   let deps: SearchUseCaseDeps;
+  const entityLookupV2Execute = vi.fn();
 
   beforeEach(() => {
+    entityLookupV2Execute.mockReset();
+    entityLookupV2Execute.mockResolvedValue(
+      makeMinimalLookupV2FailedResult({
+        status: 'resolved',
+        topCandidate: {
+          entityId: 'wine-1',
+          canonicalLabel: 'Opus One 2018',
+          calibratedScore: 0.95,
+          rank: 1,
+          channelAgreement: 1,
+          channelHits: [],
+        },
+        candidates: [{
+          entityId: 'wine-1',
+          canonicalLabel: 'Opus One 2018',
+          calibratedScore: 0.95,
+          rank: 1,
+          channelAgreement: 1,
+          channelHits: [],
+        }],
+      }),
+    );
     deps = {
       allowCompiledFallback: true,
+      entityLookupV2UseCase: makeStubEntityLookupV2UseCase(entityLookupV2Execute),
       queryPlanner: {
         plan: vi.fn(),
-      },
-      entityResolver: {
-        resolve: vi.fn().mockResolvedValue({
-          status: 'resolved',
-          topEntity: {
-            entityId: 'wine-1',
-            canonicalLabel: 'Opus One 2018',
-            calibratedScore: 0.95,
-          },
-          candidates: [],
-          decisionConfidenceC: 0.95,
-          decisionTrace: {
-            queryClass: 'catalog_browse',
-            top1CalibratedScore: 0.95,
-            top2CalibratedScore: 0.2,
-            calibratedGap: 0.75,
-            decisionConfidenceC: 0.95,
-            ambiguityDetected: false,
-            ambiguityTypes: [],
-            appliedThresholds: { resolveThreshold: 0.5, gapThreshold: 0.1 },
-            outcomeReasonCodes: ['TEST'],
-          },
-          conformalSetSize: 1,
-        }),
-      },
-      entityLookup: {
-        getDocument: vi.fn().mockImplementation(async (id: unknown) => ({
-          entityId: id,
-          entityType: 'wine',
-          canonicalLabel: 'Opus One 2018',
-        })),
-        getDocuments: vi.fn().mockImplementation(async (ids: readonly unknown[]) => {
-          const map = new Map();
-          for (const id of ids) {
-            map.set(id, {
-              entityId: id,
-              entityType: 'wine',
-              canonicalLabel: 'Opus One 2018',
-            });
-          }
-          return map;
-        }),
       },
       candidatePool: {
         generate: vi.fn(),
@@ -307,34 +290,24 @@ describe('SearchUseCase specialized retrieval routing', () => {
     );
   });
 
-  it('hydrates entity-route resolver candidates from entityLookup before resolve', async () => {
+  it('delegates entity-route resolution to Entity Lookup V2', async () => {
     const plan = makePlan({
+      rawQuery: 'Opus One',
+      normalizedQuery: 'opus one',
       route: 'entity',
       retrievalMode: 'entity_lookup',
     });
     vi.mocked(deps.queryPlanner.plan).mockResolvedValue(plan);
-    const wine1Doc = {
-      entityId: createEntityId('wine-1'),
-      entityType: 'wine' as const,
-      canonicalLabel: 'Opus One 2018',
-    };
-    vi.mocked(deps.entityLookup!.getDocuments).mockResolvedValue(
-      new Map([[createEntityId('wine-1'), wine1Doc]]),
-    );
 
     const useCase = new SearchUseCase(deps);
     await useCase.execute({ query: 'Opus One' }, 'req-entity');
 
-    expect(deps.entityLookup?.getDocuments).toHaveBeenCalledWith([createEntityId('wine-1')]);
-    expect(deps.entityResolver.resolve).toHaveBeenCalledWith(
+    expect(entityLookupV2Execute).toHaveBeenCalledWith(
       expect.objectContaining({
-        candidateEntities: [
-          expect.objectContaining({
-            entityId: 'wine-1',
-            canonicalLabel: 'Opus One 2018',
-          }),
-        ],
+        query: 'Opus One',
+        mode: 'default',
       }),
+      expect.any(Object),
     );
   });
 
@@ -386,7 +359,7 @@ describe('SearchUseCase specialized retrieval routing', () => {
     const useCase = new SearchUseCase(deps);
     await useCase.execute({ query: 'bordeaux cabernet' }, 'req-dual-lane-contract');
 
-    expect(deps.entityResolver.resolve).toHaveBeenCalledTimes(1);
+    expect(entityLookupV2Execute).toHaveBeenCalledTimes(1);
     expect(deps.candidatePool.generate).toHaveBeenCalledTimes(1);
     expect(deps.responseBuilder.build).toHaveBeenCalledWith(
       expect.objectContaining({

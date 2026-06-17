@@ -58,7 +58,6 @@ import type {
 import type { SearchUseCaseInput } from '../execution-plan-schemas.js';
 import type { DecomposedSearchUseCasePort } from '../../search/port/search-route-usecases.port.js';
 import type { DrinkingWindowUseCasePort } from '../../drinking-window/port/drinking-window-usecase.port.js';
-import type { EntityDocumentLookupPort } from '../../search/port/search-pipeline-deps.port.js';
 import type { WineSearchAnalysis } from '../wine-search-schemas.js';
 import type { ComparisonSearchResponse } from '../../../domain/response/model/comparison-response.js';
 import type { DrinkingWindowBlock } from '../../../domain/response/model/result-item.js';
@@ -265,30 +264,6 @@ function makeDrinkingWindowPort(
   } as unknown as DrinkingWindowUseCasePort & { readonly checkMock: ReturnType<typeof vi.fn> };
 }
 
-function makeEntityLookupPort(): EntityDocumentLookupPort & {
-  readonly getDrinkingWindowDocumentsMock: ReturnType<typeof vi.fn>;
-} {
-  const entityId = createCanonicalEntityId('wine-1');
-  const getDrinkingWindowDocumentsMock = vi.fn(async () =>
-    new Map([
-      [entityId, {
-        vintageYear: 2018,
-        grapePrimaryEnc: 11,
-        regionEnc: 22,
-        countryEnc: 33,
-        tannin: 0.6,
-        acidity: 0.5,
-        body: 0.7,
-      }],
-    ]),
-  );
-  return {
-    getDocuments: async () => new Map(),
-    getDrinkingWindowDocuments: (entityIds) => getDrinkingWindowDocumentsMock(entityIds),
-    getDrinkingWindowDocumentsMock,
-  };
-}
-
 function makeToolPorts(overrides?: Partial<WineAgentLoopToolPorts>): WineAgentLoopToolPorts {
   return {
     searchUseCase: overrides?.searchUseCase ?? makeSearchPort(),
@@ -299,7 +274,6 @@ function makeToolPorts(overrides?: Partial<WineAgentLoopToolPorts>): WineAgentLo
     ...(overrides?.drinkingWindowUseCase !== undefined
       ? { drinkingWindowUseCase: overrides.drinkingWindowUseCase }
       : {}),
-    ...(overrides?.entityLookup !== undefined ? { entityLookup: overrides.entityLookup } : {}),
   };
 }
 
@@ -834,7 +808,6 @@ describe('WineAgentLoopRunner — removed convenience tools are unsupported (T-I
 
   it('check_drinking_window hits the unsupported default branch and never calls the drinking-window use case', async () => {
     const drinkingWindowPort = makeDrinkingWindowPort();
-    const entityLookup = makeEntityLookupPort();
     const llm = makeStubLlm([
       async () => asToolUseResult([
         toolUse('check_drinking_window', { entity_id: 'wine-1', target_year: 2026 }),
@@ -845,14 +818,12 @@ describe('WineAgentLoopRunner — removed convenience tools are unsupported (T-I
     const out = await runner.run(makeInput({
       toolPorts: makeToolPorts({
         drinkingWindowUseCase: drinkingWindowPort,
-        entityLookup,
       }),
       maxSteps: 4,
     }));
 
     expect(out.terminationReason).toBe('answer');
-    // Removed tool: neither hydration nor the drinking-window use case fire.
-    expect(entityLookup.getDrinkingWindowDocumentsMock).not.toHaveBeenCalled();
+    // Removed tool: the drinking-window use case MUST NOT be dispatched.
     expect(drinkingWindowPort.checkMock).not.toHaveBeenCalled();
     const dwStep = out.steps.find((s) =>
       s.toolCalls.some((c) => c.tool === 'check_drinking_window'),

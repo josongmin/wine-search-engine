@@ -69,7 +69,6 @@ export function deriveAuditExtension(
   abstainDecision?: TypedAbstainDecision | false,
   channelDegradation?: ChannelDegradationSummary,
   hardFilterDropLog?: readonly CandidateDropRecord[],
-  correctiveRetryCalibration?: number,
   resolverProvenanceTrace?: AuditExtension['resolver_provenance_trace'],
 ): AuditExtension | undefined {
   const plannerTrace = compiled.plannerTrace;
@@ -88,8 +87,6 @@ export function deriveAuditExtension(
     && (scoreDriftRecord !== undefined || (plannerTrace?.length ?? 0) > 0);
   // E4: Drop log present when at least one candidate was hard-filtered out.
   const hasDropLog = hardFilterDropLog !== undefined && hardFilterDropLog.length > 0;
-  // TA5: Corrective retry calibration present when retry was accepted.
-  const hasRetryCalibration = correctiveRetryCalibration !== undefined && Number.isFinite(correctiveRetryCalibration);
 
   if (
     executionTrace === undefined
@@ -99,7 +96,6 @@ export function deriveAuditExtension(
     && constraintResolutionTrace === undefined
     && !hasAbstainTrace
     && !hasDropLog
-    && !hasRetryCalibration
     && resolverProvenanceTrace === undefined
   ) {
     return undefined;
@@ -175,9 +171,6 @@ export function deriveAuditExtension(
             })
             .slice(0, AUDIT_DROP_LOG_MAX),
         }
-      : {}),
-    ...(hasRetryCalibration
-      ? { corrective_retry_calibrated_confidence: correctiveRetryCalibration }
       : {}),
     ...(resolverProvenanceTrace !== undefined
       ? { resolver_provenance_trace: resolverProvenanceTrace }

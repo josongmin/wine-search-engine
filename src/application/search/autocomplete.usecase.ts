@@ -4,7 +4,6 @@ import type { ResolveRequest } from './resolve-request.dto.js';
 import type { AutocompleteResponse } from './autocomplete-response.dto.js';
 import type { RequestExecutionContext } from '../../domain/shared/request-execution-context.js';
 import type {
-  EntityDocumentLookupPort,
   LookupResolverProjectionPort,
 } from './port/search-pipeline-deps.port.js';
 import type { EntityLookupV2UseCasePort } from './port/search-route-usecases.port.js';
@@ -16,8 +15,7 @@ import {
 
 interface AutocompleteUseCaseDeps {
   readonly entityLookupV2UseCase: EntityLookupV2UseCasePort;
-  readonly resolverProjectionLookup?: LookupResolverProjectionPort | undefined;
-  readonly entityLookup?: EntityDocumentLookupPort | undefined;
+  readonly resolverProjectionLookup: LookupResolverProjectionPort;
 }
 
 async function hydrateAutocompleteDocuments(
@@ -28,25 +26,12 @@ async function hydrateAutocompleteDocuments(
     return new Map();
   }
 
-  if (deps.resolverProjectionLookup !== undefined) {
-    const projections = await deps.resolverProjectionLookup.getResolverProjections(candidateIds);
-    const docs = new Map<string, AutocompleteHydrationDocument>();
-    for (const [entityId, projection] of projections) {
-      docs.set(String(entityId), projection);
-    }
-    return docs;
+  const projections = await deps.resolverProjectionLookup.getResolverProjections(candidateIds);
+  const docs = new Map<string, AutocompleteHydrationDocument>();
+  for (const [entityId, projection] of projections) {
+    docs.set(String(entityId), projection);
   }
-
-  if (deps.entityLookup !== undefined) {
-    const documents = await deps.entityLookup.getDocuments(candidateIds);
-    const docs = new Map<string, AutocompleteHydrationDocument>();
-    for (const [entityId, document] of documents) {
-      docs.set(String(entityId), document);
-    }
-    return docs;
-  }
-
-  return new Map();
+  return docs;
 }
 
 export class AutocompleteUseCase {

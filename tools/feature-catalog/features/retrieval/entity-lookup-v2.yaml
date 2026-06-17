@@ -2,26 +2,28 @@ id: retrieval.entity-lookup-v2
 name: Entity Lookup V2 (Dedicated Resolution Stack)
 category: retrieval
 summary: |
-  `POST /v2/entity-lookup` — wine entity lookup를 generic search wrapper가 아니라
-  전용 entity-resolution stack으로 재구축. 전용 contract + front-door admission/
-  concept gate + 다채널 candidate provenance + calibrated-abstain 4-state 결정
-  (resolved | ambiguous | failed | redirect_discovery). precision-first:
-  wrong-positive보다 abstain을 우선.
+  Single kernel: `lookup-authority.ts` → `EntityLookupV2UseCase` for HTTP/agent/CLI/
+  autocomplete/search-entity delegate. `POST /v2/entity-lookup` dedicated stack:
+  admission/concept gate + multi-channel provenance + calibrated-abstain 4-state
+  (resolved|ambiguous|failed|redirect_discovery). Precision-first: abstain over wrong-positive.
+target_architecture: |
+  Entity resolve SSoT is one kernel: `src/config/lookup-authority.ts` wires
+  `EntityLookupV2UseCase` and is the shared entry for HTTP (`POST /v2/entity-lookup`),
+  agent tools, CLI, autocomplete, and search-entity delegation.   `POST /v1/entity/resolve` (internal tooling) and autocomplete/search-entity
+  surfaces delegate to this kernel; they are not parallel resolver pipelines.
 
 maturity: 4
 maturity_rationale: |
-  **2026-06-03 갱신 (curation console UX 하드닝 + API playground).** curation 탭을
-  raw 폼에서 키워드 관리 워크벤치로 재설계: 운영자가 slug를 외워 입력하는 대신
-  `EntityPicker`(ops/inspect 기반 와인 검색 + "현재 어디로 라우팅되나" 미리보기)로
-  엔티티를 고르고, 그 엔티티의 LIVE alias + in-flight proposal을 인라인으로 본 뒤,
-  type(드롭다운)·confidence(0~1 가드)로 키워드를 추가한다. proposal queue에
-  status/kind 필터, ambiguity/suppression 제출 폼 노출. 추가로 **API Playground 탭**
-  (`/ops/playground`): V2 surface 11개 엔드포인트(health/public-lookup/inspect/
-  alias-audit/coverage-health/proposals[list/submit×3/review/publish])를 카탈로그에서
-  골라 JSON body 편집 후 직접 발사, 원본 status+응답(4xx/5xx 봉투 포함)을 표시하고
-  auth 헤더를 게이트별 자동 첨부 + copy-paste curl 렌더. `rawApiCall`(client.ts)은
-  비-2xx에서 throw 않고 status+body를 그대로 반환. web vitest 25 케이스(entity-picker
-  5 + curation-view 6 + playground 8 + raw-api-call 6)로 고정.
+  **2026-06-10 갱신 (Phase 0–5 complete).** 단일 커널 마무리: views/ambiguity/witness
+  dedup, alias recall 단일 패스, `resolverProjectionLookup`-only hydration,
+  `LookupDecisionEngine` 추출, exact-safe registry fast path(timed recall skip),
+  resolve route/autocomplete/search-entity → V2 authority, cutover gate meta lane.
+  maturity 5 미달: alias registry v2 심화 substrate·long-tail stretch 잔여.
+
+  **2026-06-03 (curation UX + API playground).** `EntityPicker` 기반 curation 워크벤치
+  (LIVE alias + in-flight proposal 인라인, proposal queue 필터, ambiguity/suppression
+  제출). `/ops/playground`에서 V2 ops surface 11개를 카탈로그 선택·JSON 발사·curl
+  렌더. web vitest 25 케이스로 고정.
 
   **2026-06-02 (T-ELV2-07 operator plane 완료, DoD #6 충족).** 운영자가
   query 하나로 admission/candidates/scores/decision을 trusted plane(브라우저)에서
@@ -42,12 +44,8 @@ maturity_rationale: |
     - migration 030: alias_proposals lifecycle 컬럼 + ambiguity/suppression
       staging 테이블 + 4-state status CHECK (RDS 적용 검증).
 
-  maturity 5가 아닌 이유(정직): DoD #2의 dedicated alias registry v2 schema/심층
-  curation substrate(T-ELV2-03 심화)는 여전히 미완이다. 다만 authority cutover는
-  완료되었고, 현재 검증 레일은 shadow가 아니라 shared-authority parity다.
-
   ---
-  (이전 rationale, T-01~05 코어 스파인)
+  (T-01~05 코어 스파인)
   코어 스파인이 production에 wiring되고(container → route → catalog v7.1.0)
   단위 회귀로 고정됨. 4개 티켓이 완료되어 RFC 전역 DoD 중 #1/#3/#4/#5를 충족:
 
@@ -70,16 +68,13 @@ maturity_rationale: |
        (exact/compact/transliteration/jamo-phonetic/fuzzy/family/dense)로 분해,
        candidate별 channel-hit UNION + per-channel coverage rail(DoD #4).
 
-  maturity 4가 아닌 이유(정직): (a) 다채널은 기존 anchor recall을 **재투영**한
-  것이고 독립 timed retrieval runtime(per-channel native score)은 아직
-  `LookupCandidateRetrievalPort` seam 뒤의 다음 단계다. (b) parity gate는
-  full-container vs direct-authority drift를 막지만 long-tail quality 향상 자체를
-  보장하지는 않는다. (c) DoD #2(`dom perignon` coverage hole)와 #6(operator plane)은
-  미구현.
+  maturity 4 잔여: (a) 다채널 timed native retrieval은 `LookupCandidateRetrievalPort`
+  seam 다음 단계, (b) parity gate는 drift만 막고 long-tail quality를 보장하지 않음,
+  (c) DoD #2 alias registry v2 심화 substrate 미완.
 
 status: active
 since: 2026-06
-last_reviewed: 2026-06-03
+last_reviewed: 2026-06-10
 owner: core
 
 surfaces:
@@ -124,6 +119,7 @@ tests:
     - test/unit/entity-lookup-v2/channel-provenance.test.ts
     - src/config/__tests__/lookup-authority.test.ts
     - test/unit/entity-lookup-v2/parity-metrics.test.ts
+    - test/unit/entity-lookup-v2/cutover-gate.test.ts
     - test/unit/entity-lookup-v2/coverage-report.test.ts
     - test/unit/curation/proposal-transitions.test.ts
     - test/unit/curation/curation-usecase.test.ts

@@ -7,7 +7,56 @@ import {
 import type { CompiledWineQuery } from '../../../../src/domain/query/model/compiled-wine-query.js';
 import type { QueryPlanV1 } from '../../../../src/domain/query/model/query-plan.js';
 import type { EntityResolveResult } from '../../../../src/domain/resolver/model/resolve-result.js';
+import { makeStubEntityLookupV2UseCase } from '../../../../src/application/search/__tests__/entity-lookup-v2-use-case.stub.js';
+import type { EntityLookupV2Result } from '../../../../src/application/search/entity-lookup-v2/entity-lookup-v2.dto.js';
 import { createEntityId } from '../../../../src/domain/shared/types/index.js';
+
+function makeResolvedLookupV2Result(entityId: string, label = 'Anchor Wine'): EntityLookupV2Result {
+  return {
+    status: 'resolved',
+    decisionReason: 'resolved',
+    normalizedQueryViews: {
+      raw: 'Opus One',
+      strict: 'opus one',
+      accentless: 'opus one',
+      compact: 'opusone',
+      vintageCanonicalized: 'opus one',
+      vintageStripped: 'opus one',
+      lookupVariants: ['opus one'],
+    },
+    candidates: [{
+      entityId,
+      canonicalLabel: label,
+      calibratedScore: 0.96,
+      rank: 1,
+      channelAgreement: 1,
+      channelHits: [],
+    }],
+    topCandidate: {
+      entityId,
+      canonicalLabel: label,
+      calibratedScore: 0.96,
+      rank: 1,
+      channelAgreement: 1,
+      channelHits: [],
+    },
+    clarificationOptions: [],
+    evidenceSummary: {
+      admissionReasonCode: 'admitted_entity_reference',
+      decisionReasonCode: 'resolved_singleton',
+      topConfidence: 0.96,
+      calibrationTrusted: true,
+      queryClass: 'known_item',
+      candidatePoolSize: 1,
+      channelCoverage: [],
+    },
+    meta: {
+      queryTimeMs: 1,
+      version: 'test',
+      engineSchemaVersion: 'entity_lookup_v2',
+    },
+  };
+}
 
 function minimalPlan(): QueryPlanV1 {
   return {
@@ -389,12 +438,11 @@ describe('executeHybridRouteRankingPipeline', () => {
     vi.useRealTimers();
   });
 
-  it('caps hybrid anchor blocker recall using compiled execution budget', async () => {
+  it('forwards compiled execution budget to lookup v2 during hybrid anchor resolution', async () => {
     const anchorEntityId = createEntityId('anchor-entity');
-    const blockerEntityIdA = createEntityId('blocker-a');
-    const blockerEntityIdB = createEntityId('blocker-b');
     const plan: QueryPlanV1 = {
       ...minimalPlan(),
+      rawQuery: 'Opus One',
       anchors: [{
         surfaceForm: 'Opus One',
         normalizedForm: 'opus one',
@@ -416,61 +464,37 @@ describe('executeHybridRouteRankingPipeline', () => {
         },
       },
     };
-    const getDocuments = vi.fn().mockResolvedValue(new Map([
-      [anchorEntityId, {
-        entityId: anchorEntityId,
-        entityType: 'wine',
-        canonicalLabel: 'Anchor Wine',
-      }],
-      [blockerEntityIdA, {
-        entityId: blockerEntityIdA,
-        entityType: 'wine',
-        canonicalLabel: 'Blocker Wine A',
-      }],
-      [blockerEntityIdB, {
-        entityId: blockerEntityIdB,
-        entityType: 'wine',
-        canonicalLabel: 'Blocker Wine B',
-      }],
-    ]));
-    const resolve = vi.fn().mockResolvedValue(minimalResolveResult());
-    const blocker = {
-      block: vi.fn().mockResolvedValue([blockerEntityIdA, blockerEntityIdB]),
-    };
+    const execute = vi.fn().mockResolvedValue(makeResolvedLookupV2Result(String(anchorEntityId)));
 
-    await resolveEntityRouteForPlan(
+    const result = await resolveEntityRouteForPlan(
       plan,
       {
-        entityResolver: { resolve } as never,
-        entityLookup: { getDocument: vi.fn(), getDocuments } as never,
-        blocker: blocker as never,
+        entityLookupV2UseCase: { execute },
       },
       compiled,
     );
 
-    expect(blocker.block).toHaveBeenCalledTimes(1);
-    expect(getDocuments).toHaveBeenCalledWith([anchorEntityId, blockerEntityIdA]);
-    expect(resolve.mock.calls[0]?.[0]?.candidateEntities).toHaveLength(2);
-    expect(resolve.mock.calls[0]?.[0]?.candidateEntities).toEqual(expect.arrayContaining([
-      expect.objectContaining({ entityId: anchorEntityId }),
-      expect.objectContaining({ entityId: blockerEntityIdA }),
-    ]));
+    expect(execute).toHaveBeenCalledWith({
+      query: 'Opus One',
+      maxCandidates: 2,
+      mode: 'default',
+    }, undefined);
+    expect(result.status).toBe('resolved');
+    expect(result.topEntity?.entityId).toBe(anchorEntityId);
   });
 
-  it('marks missing entity resolver as failed with undefined runner-up fields', async () => {
+  it('returns failed resolve result when lookup v2 cannot resolve the anchor', async () => {
     const plan = minimalPlan();
 
     const result = await resolveEntityRouteForPlan(
       plan,
       {
-        entityLookup: { getDocument: vi.fn(), getDocuments: vi.fn() } as never,
+        entityLookupV2UseCase: makeStubEntityLookupV2UseCase(),
       },
       buildCompiled(plan),
     );
 
     expect(result.status).toBe('failed');
-    expect(result.degradation?.reasons).toEqual(['entity_resolver_unavailable']);
-    expect(result.decisionTrace.outcomeReasonCodes).toEqual(['HYBRID_ROUTE_MISSING_ENTITY_RESOLVER']);
     expect(result.decisionTrace.top2CalibratedScore).toBeUndefined();
     expect(result.decisionTrace.calibratedGap).toBeUndefined();
   });

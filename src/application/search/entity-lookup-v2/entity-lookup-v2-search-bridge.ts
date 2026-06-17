@@ -3,8 +3,8 @@
  * contract ({@link EntityRouteResult} / {@link EntityResolveResult}).
  *
  * Used when production wiring passes `entityLookupV2UseCase` into
- * {@link SearchUseCase} so `executeEntityRoute` can delegate to the V2 lookup
- * authority instead of the legacy resolver + corrective-retry loop.
+ * {@link SearchUseCase} so `executeEntityRoute` delegates to the V2 lookup
+ * authority.
  */
 
 import type { QueryPlanV1 } from '../../../domain/query/model/query-plan.js';
@@ -31,6 +31,7 @@ import {
   liftEntityResolveResultToLaneArtifacts,
 } from '../search-usecase-entity-ranked-results.js';
 import type { EntityLookupV2UseCasePort } from '../port/search-route-usecases.port.js';
+import type { ResolverCandidate } from '../../../domain/resolver/model/resolved-candidate.js';
 import type { EntityLookupV2Result } from './entity-lookup-v2.dto.js';
 
 const LOOKUP_V2_REDIRECT_DISCOVERY_REASON = 'redirect_discovery';
@@ -186,6 +187,27 @@ function buildEntityLookupV2Command(
  * Run the entity-only search route through the V2 lookup authority and project
  * the outcome into {@link EntityRouteResult}.
  */
+/**
+ * Hybrid / dual-lane anchor resolution through the V2 lookup authority.
+ * Returns the resolver-shaped head plus an empty raw-candidate list — V2 owns
+ * hydration internally (same contract as {@link executeEntityRouteViaLookupV2}).
+ */
+export async function resolveEntityRouteForPlanViaLookupV2(
+  plan: QueryPlanV1,
+  compiled: CompiledWineQuery,
+  useCase: EntityLookupV2UseCasePort,
+  options?: RequestExecutionContext,
+): Promise<{
+  readonly resolveResult: EntityResolveResult;
+  readonly resolverCandidates: readonly ResolverCandidate[];
+}> {
+  const route = await executeEntityRouteViaLookupV2(plan, compiled, useCase, options);
+  return {
+    resolveResult: route.identityResolveResult,
+    resolverCandidates: [],
+  };
+}
+
 export async function executeEntityRouteViaLookupV2(
   plan: QueryPlanV1,
   compiled: CompiledWineQuery,
@@ -222,7 +244,6 @@ export async function executeEntityRouteViaLookupV2(
       resolve_status: resolveResult.status,
       candidate_count: resolveResult.candidates.length,
       ranked_count: rankedResults.length,
-      corrective_retry: false,
       ...(resolveResult.decisionTrace.outcomeReasonCodes.length > 0
         ? { outcome_reason_codes: resolveResult.decisionTrace.outcomeReasonCodes }
         : {}),

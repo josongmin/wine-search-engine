@@ -120,27 +120,27 @@ export async function dispatchSearchRouteExecution(
 
 `HybridUseCase`도 pre-route 이후 같은 공유 파이프라인을 호출하되, `compiled`와 `requestContext(stageTimer/abortSignal/requestId)`를 함께 전달한다.
 
-```136:157:src/application/search/hybrid.usecase.ts
-    const { plan, compiled } = preRoute;
-    hybridPipelineResult = await executeHybridRouteRankingPipeline(
-      plan,
-      {
-        candidatePool: this.deps.candidatePool,
-        browseRetriever: this.deps.browseRetriever,
-        compareRetriever: this.deps.compareRetriever,
-        ranker: this.deps.ranker,
-      },
-      (resolverPlan) => resolveEntityRouteForPlan(resolverPlan, {
-        entityResolver: this.deps.entityResolver,
-        entityLookup: this.deps.entityLookup,
-      }),
-      compiled,
-      {
-        stageTimer,
-        ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
-        requestId,
-      },
-    );
+```162:181:src/application/search/hybrid.usecase.ts
+      hybridPipelineResult = await executeHybridRouteRankingPipeline(
+        plan,
+        {
+          candidatePool: this.deps.candidatePool,
+          browseRetriever: this.deps.browseRetriever,
+          compareRetriever: this.deps.compareRetriever,
+          ranker: this.deps.ranker,
+          entityLookupV2UseCase: this.deps.entityLookupV2UseCase,
+        },
+        (resolverPlan) => resolveEntityRouteForPlan(resolverPlan, {
+          entityLookupV2UseCase: this.deps.entityLookupV2UseCase,
+        }, hybridSurfaceCompiled),
+        hybridSurfaceCompiled,
+        {
+          stageTimer,
+          ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
+          requestId,
+          requestStartTimeMs: startTime,
+        },
+      );
 ```
 
 ---

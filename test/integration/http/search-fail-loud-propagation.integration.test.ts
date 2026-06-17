@@ -69,6 +69,9 @@ function createMockDeps(response: ReturnType<typeof buildFailLoudSearchResponse>
     searchUseCase: {
       execute: vi.fn().mockResolvedValue(response),
     },
+    entityLookupV2UseCase: {
+      execute: vi.fn(),
+    },
     evalRunner: null,
   };
 }

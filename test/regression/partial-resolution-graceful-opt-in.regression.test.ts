@@ -8,10 +8,10 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { wrapEntityDocumentLookupAsResolverProjection, type EntityDocumentBatchLookup } from '../../src/application/search/__tests__/resolver-projection-lookup.stub.js';
 import { buildResolverCandidatesFromGenerator } from '../../src/application/search/search-usecase-resolver-candidates.js';
 import { createEntityId } from '../../src/domain/shared/types/index.js';
 import type { RetrievalDocument } from '../../src/domain/retrieval/model/retrieval-document.js';
-import type { EntityDocumentLookupPort } from '../../src/application/search/port/search-pipeline-deps.port.js';
 
 function makeDoc(id: string): RetrievalDocument {
   return {
@@ -37,7 +37,7 @@ function makeAnchor(ids: readonly string[]) {
   } as never;
 }
 
-function makePartialLookup(presentIds: readonly string[]): EntityDocumentLookupPort {
+function makePartialLookup(presentIds: readonly string[]): EntityDocumentBatchLookup {
   return {
     async getDocuments(ids) {
       const present = new Set(presentIds);
@@ -71,7 +71,7 @@ describe('partial_resolution is strict fail-closed', () => {
     } as never;
     const lookup = makePartialLookup(['e1']);  // e2 missing
     await expect(
-      buildResolverCandidatesFromGenerator(input, lookup),
+      buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(lookup)),
     ).rejects.toThrow(/partial_resolution_forbidden/);
   });
 
@@ -85,7 +85,7 @@ describe('partial_resolution is strict fail-closed', () => {
       preloadedDocs: null,
     } as never;
     const lookup = makePartialLookup(['e1']);
-    await expect(buildResolverCandidatesFromGenerator(input, lookup)).rejects.toThrow(
+    await expect(buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(lookup))).rejects.toThrow(
       /partial_resolution_forbidden/,
     );
   });
@@ -100,7 +100,7 @@ describe('partial_resolution is strict fail-closed', () => {
       preloadedDocs: null,
     } as never;
     const lookup = makePartialLookup(['e1', 'e2']);  // all present
-    const result = await buildResolverCandidatesFromGenerator(input, lookup);
+    const result = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(lookup));
     expect(result.length).toBe(2);
   });
 });

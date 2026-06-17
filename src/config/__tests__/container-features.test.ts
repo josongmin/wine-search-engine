@@ -4,7 +4,6 @@ import { parseEnv } from '../env.js';
 const buildUseCaseContainerServices = vi.fn(() => ({
   searchUseCase: { execute: vi.fn() } as never,
   interpretUseCase: {} as never,
-  resolveUseCase: {} as never,
   autocompleteUseCase: {} as never,
   hybridUseCase: {} as never,
   decomposedSearchUseCase: {} as never,

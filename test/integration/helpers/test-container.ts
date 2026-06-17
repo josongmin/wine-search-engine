@@ -38,7 +38,6 @@ import { DecomposedSearchAdapter } from '../../../src/application/search/decompo
 import { DecomposedSearchUseCase } from '../../../src/application/search/decomposed-search.usecase.js';
 import { BatchSearchUseCase } from '../../../src/application/search/batch-search.usecase.js';
 import { InterpretUseCase } from '../../../src/application/search/interpret.usecase.js';
-import { ResolveUseCase } from '../../../src/application/search/resolve.usecase.js';
 import { AutocompleteUseCase } from '../../../src/application/search/autocomplete.usecase.js';
 import { HybridUseCase } from '../../../src/application/search/hybrid.usecase.js';
 import { EntityLookupV2UseCase } from '../../../src/application/search/entity-lookup-v2/entity-lookup-v2.usecase.js';
@@ -49,6 +48,7 @@ import type {
   LookupExactSafeRegistryPort,
 } from '../../../src/domain/resolver/v2/lookup-v2-types.js';
 import type { Container } from '../../../src/config/container.js';
+import { buildResolverProjectionLookupFromSearchIndex } from './search-index-resolver-projection-lookup.js';
 import type { SnapshotVersions } from '../../../src/application/search/search.usecase.js';
 import {
   InMemoryAmbiguityDictionary,
@@ -401,10 +401,28 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
     return impl;
   });
 
+  const lookupPlanner = new RuntimeLookupPlanner({
+    aliasMatcher,
+    ambiguityDictionary: ambiguityDict,
+    exactSafeRegistry,
+  });
+  const resolverProjectionLookup = buildResolverProjectionLookupFromSearchIndex(searchIndex);
+  const entityLookupV2UseCase = new EntityLookupV2UseCase({
+    admissionGate: new ConceptAdmissionGate(),
+    lookupPlanner,
+    entityResolver,
+    resolverProjectionLookup,
+    candidateRetrieval: new MultiChannelRetrievalEngine({
+      aliasMatcher,
+      resolverProjectionLookup,
+    }),
+    ambiguityDictionary: ambiguityDict,
+    querySanitizer,
+  });
+
   const searchUseCase = new SearchUseCase({
     queryPlanner,
-    entityResolver,
-    entityLookup: searchIndex,
+    entityLookupV2UseCase,
     candidatePool,
     browseRetriever,
     compareRetriever,
@@ -430,42 +448,16 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
     injectionJudge,
     judgeTimeoutMs,
   });
-  const resolveUseCase = new ResolveUseCase({
-    queryPlanner,
-    entityResolver,
-    entityLookup: searchIndex,
-    querySanitizer,
-    injectionJudge,
-    judgeTimeoutMs,
-  });
-  const lookupPlanner = new RuntimeLookupPlanner({
-    aliasMatcher,
-    ambiguityDictionary: ambiguityDict,
-    exactSafeRegistry,
-  });
-  const entityLookupV2UseCase = new EntityLookupV2UseCase({
-    admissionGate: new ConceptAdmissionGate(),
-    lookupPlanner,
-    entityResolver,
-    entityLookup: searchIndex,
-    candidateRetrieval: new MultiChannelRetrievalEngine({
-      aliasMatcher,
-      entityLookup: searchIndex,
-    }),
-    ambiguityDictionary: ambiguityDict,
-    querySanitizer,
-  });
   const autocompleteUseCase = new AutocompleteUseCase({
     entityLookupV2UseCase,
-    entityLookup: searchIndex,
+    resolverProjectionLookup,
   });
   const hybridUseCase = new HybridUseCase({
     queryPlanner,
     candidatePool,
     browseRetriever,
     compareRetriever,
-    entityResolver,
-    entityLookup: searchIndex,
+    entityLookupV2UseCase,
     ranker,
     decisionEngine,
     responseBuilder,
@@ -480,16 +472,13 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
 
   const container = {
     queryPlanner,
-    entityResolver,
     candidatePool,
     ranker,
     decisionEngine,
     responseBuilder,
     mixedSolver,
     searchUseCase,
-    entityLookup: searchIndex,
     interpretUseCase,
-    resolveUseCase,
     entityLookupV2UseCase,
     autocompleteUseCase,
     hybridUseCase,

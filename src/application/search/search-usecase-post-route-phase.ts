@@ -123,8 +123,6 @@ interface SearchPostRouteExecutionContext {
   readonly retrievalFusionTrace?: RrfFusionTrace | undefined;
   /** E4: Hard-filter drop log from CandidatePoolService.getLastDropLog(). */
   readonly hardFilterDropLog?: readonly CandidateDropRecord[] | undefined;
-  /** TA5: Calibrated posterior confidence from corrective retry, when accepted. */
-  readonly correctiveRetryCalibration?: number | undefined;
   /** When true (options.explain=true), counterfactuals are always included. */
   readonly includeCounterfactuals?: boolean | undefined;
   /**
@@ -197,8 +195,6 @@ export interface RankedRouteDecisionPhaseContext {
   readonly retrievalFusionTrace?: RrfFusionTrace | undefined;
   /** E4: Hard-filter drop log from CandidatePoolService.getLastDropLog(). */
   readonly hardFilterDropLog?: readonly CandidateDropRecord[] | undefined;
-  /** TA5: Calibrated posterior confidence from corrective retry, when accepted. */
-  readonly correctiveRetryCalibration?: number | undefined;
   /**
    * ADR-015 Axis 2: critic rewrite trace forwarded from the ranking
    * pipeline through the route execution result. Optional; absent when
@@ -393,8 +389,7 @@ export async function runRankedRouteDecisionPhase(
    */
   // In the non-abstain ranked path, fusion trace is forwarded from ctx; abstain
   // decision is false (not abstaining), so abstain_policy_trace is omitted here.
-  // E4/TA5: hard_filter_drop_log and corrective_retry_calibrated_confidence are
-  // forwarded from ctx when available (entity-only route with corrective retry).
+  // E4: hard_filter_drop_log is forwarded from ctx when available (hybrid path).
   const auditExtension = deriveAuditExtension(
     ctx.compiled,
     ctx.rankingMetadata,
@@ -421,7 +416,6 @@ export async function runRankedRouteDecisionPhase(
     undefined,          // abstainDecision — no abstain in ranked path
     undefined,          // channelDegradation — not available in ranked phase context
     ctx.hardFilterDropLog,
-    ctx.correctiveRetryCalibration,
     buildResolverProvenanceTrace(ctx.resolveResult),
   );
   let built: SearchResponseV1;
@@ -610,9 +604,9 @@ export async function runSearchPostRoutePhase(
     reasonerOutput.atoms,
   );
 
-  // E4/E6/TA5: Derive AuditExtension after abstain evaluation so all traces
-  // (retrieval_fusion_trace, abstain_policy_trace, hard_filter_drop_log,
-  // corrective_retry_calibrated_confidence) can be populated in a single pass.
+  // E4/E6: Derive AuditExtension after abstain evaluation so all traces
+  // (retrieval_fusion_trace, abstain_policy_trace, hard_filter_drop_log)
+  // can be populated in a single pass.
   const auditExtension = deriveAuditExtension(
     ctx.compiled,
     ctx.rankingMetadata,
@@ -625,7 +619,6 @@ export async function runSearchPostRoutePhase(
     abstainDecision,
     channelDegradation,
     ctx.hardFilterDropLog,
-    ctx.correctiveRetryCalibration,
     buildResolverProvenanceTrace(ctx.resolveResult),
   );
 
@@ -871,7 +864,7 @@ export async function runSearchPostRoutePhase(
       ...(ctx.hardFilterDropLog !== undefined && ctx.hardFilterDropLog.length > 0
         ? { hardFilterDropLog: ctx.hardFilterDropLog }
         : {}),
-      ...(ctx.correctiveRetryCalibration !== undefined ? { correctiveRetryCalibration: ctx.correctiveRetryCalibration } : {}),
+
       ...(ctx.criticRewrites !== undefined && ctx.criticRewrites.length > 0
         ? { criticRewrites: ctx.criticRewrites }
         : {}),

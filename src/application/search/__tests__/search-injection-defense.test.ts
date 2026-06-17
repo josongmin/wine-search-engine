@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SearchUseCase, type SearchRequest, type SearchUseCaseDeps } from '../search.usecase.js';
+import { makeStubEntityLookupV2UseCase } from './entity-lookup-v2-use-case.stub.js';
 import { createCanonicalEntityId } from '../../../domain/shared/types/entity-id.js';
 import { QuerySanitizer } from '../../../domain/security/service/query-sanitizer.js';
 import type { InjectionJudgePort } from '../../../domain/security/port/injection-judge.port.js';
@@ -59,25 +60,6 @@ describe('SearchUseCase with Injection Defense', () => {
       judgeTimeoutMs: 45_000,
       queryPlanner: {
         plan: vi.fn(async (query: string) => makeMinimalPlan(query)),
-      } as any,
-      entityResolver: {
-        resolve: vi.fn().mockResolvedValue({
-          status: 'resolved',
-          candidates: [],
-          topEntity: undefined,
-          decisionTrace: {
-            queryClass: 'known_item',
-            top1CalibratedScore: 0.9,
-            top2CalibratedScore: 0.1,
-            calibratedGap: 0.8,
-            decisionConfidenceC: 0.9,
-            ambiguityDetected: false,
-            ambiguityTypes: [],
-            appliedThresholds: { resolveThreshold: 0.7, gapThreshold: 0.2 },
-            outcomeReasonCodes: [],
-          },
-          conformalSetSize: 0,
-        }),
       } as any,
       candidatePool: {
         generate: vi.fn().mockResolvedValue([]),
@@ -162,6 +144,7 @@ describe('SearchUseCase with Injection Defense', () => {
         })),
       } as any,
       mixedSolver: {} as any,
+      entityLookupV2UseCase: makeStubEntityLookupV2UseCase(),
     };
 
     useCase = new SearchUseCase(mockDeps as SearchUseCaseDeps);
@@ -211,7 +194,7 @@ describe('SearchUseCase with Injection Defense', () => {
         allowCompiledFallback: true,
         querySanitizer: mockDeps.querySanitizer as any,
         queryPlanner: mockDeps.queryPlanner as any,
-        entityResolver: mockDeps.entityResolver as any,
+        entityLookupV2UseCase: mockDeps.entityLookupV2UseCase as any,
         candidatePool: mockDeps.candidatePool as any,
         ranker: mockDeps.ranker as any,
         decisionEngine: mockDeps.decisionEngine as any,

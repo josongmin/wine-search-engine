@@ -2,9 +2,9 @@ id: infra.di-composition-root
 name: DI Composition Root (Container)
 category: infra
 summary: |
-  애플리케이션의 dependency injection composition root. container.ts + 13개 sub-container
-  (core / adapters / aux-features / eval-contracts / features / learning / runtime-support /
-  search-contracts / stubs / tool-contracts / usecases / watchlist). 모든 use case
+  애플리케이션의 dependency injection composition root. container.ts + sub-container
+  모듈(core / adapters / aux-features / eval-contracts / features / lookup-authority /
+  runtime-support / search-contracts / stubs / structured-llm / usecases). 모든 use case
   + adapter 와이어링.
 
 maturity: 5
@@ -17,7 +17,7 @@ maturity_rationale: |
 
 status: active
 since: 2025-09
-last_reviewed: 2026-05-21
+last_reviewed: 2026-06-10
 owner: core
 
 surfaces:
@@ -32,9 +32,10 @@ key_files:
   - src/config/container-usecases.ts
   - src/config/container-search-contracts.ts
   - src/config/container-eval-contracts.ts
-  - src/config/container-learning.ts
-  - src/config/container-watchlist.ts
+  - src/config/container-lookup.ts
+  - src/config/container-structured-llm.ts
   - src/config/container-runtime-support.ts
+  - src/config/lookup-authority.ts
   - src/config/container-stubs.ts
   - src/config/container-core-builders.ts
   - src/config/container-wiring-manifest.ts
@@ -42,7 +43,8 @@ key_files:
 
 tests:
   unit:
-    - src/__tests__/container-watchlist.test.ts
+    - src/config/__tests__/container-usecases.test.ts
+    - src/config/__tests__/lookup-authority.test.ts
   regression:
     - test/regression/di-composition-root.regression.test.ts
 

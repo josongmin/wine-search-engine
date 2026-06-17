@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildQueryPlanner } from '../../src/config/container-core-builders.js';
 import { PlannerV1Adapter } from '../../src/config/planner-v1-adapter.js';
-import { SearchUseCase } from '../../src/application/search/search.usecase.js';
+import { makeStubEntityLookupV2UseCase } from '../../src/application/search/__tests__/entity-lookup-v2-use-case.stub.js';
 import { InterpretUseCase } from '../../src/application/search/interpret.usecase.js';
+import { SearchUseCase } from '../../src/application/search/search.usecase.js';
 import { QuerySanitizer } from '../../src/domain/security/service/query-sanitizer.js';
 import type { ChatCompletionRequest, ChatCompletionResult, ChatLlmPort } from '../../src/domain/ai/port/chat-llm.port.js';
 import type { CoreAdapterServices } from '../../src/config/container-adapters.js';
@@ -245,8 +246,7 @@ async function buildHarness(branchLabel: 'Pinot Noir' | 'Pinot Gris'): Promise<P
 
   const searchUseCase = new SearchUseCase({
     queryPlanner: planner,
-    entityResolver: parts.container.entityResolver,
-    entityLookup: parts.searchIndex,
+    entityLookupV2UseCase: makeStubEntityLookupV2UseCase(),
     candidatePool: parts.container.candidatePool,
     browseRetriever: parts.browseRetriever,
     compareRetriever: parts.compareRetriever,

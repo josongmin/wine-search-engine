@@ -19,7 +19,6 @@ describe('buildUseCaseContainerServices', () => {
     const core = {
       queryPlanner: { plan: vi.fn() },
       entityResolver: { resolve: vi.fn() },
-      entityLookup: { getDocument: vi.fn() },
       candidatePool: { generate: vi.fn() },
       browseRetriever: { retrieve: vi.fn() },
       compareRetriever: { retrieve: vi.fn() },
@@ -43,7 +42,10 @@ describe('buildUseCaseContainerServices', () => {
       },
     };
 
-    const useCases = buildUseCaseContainerServices(core as never, config);
+    const useCases = buildUseCaseContainerServices(core as never, config, {}, {
+      entityLookupV2UseCase: { execute: vi.fn() },
+      resolverProjectionLookup: { getResolverProjections: vi.fn() },
+    });
     const queryEntrySecurityObserver = getQueryEntrySecurityMetricsCollector();
 
     expect((useCases.searchUseCase as any).deps).toEqual(expect.objectContaining({
@@ -51,6 +53,7 @@ describe('buildUseCaseContainerServices', () => {
       judgeFailureMode: 'fail_open',
       judgeTimeoutMs: config.queryEntrySecurity.judgeTimeoutMs,
       queryEntrySecurityObserver,
+      entityLookupV2UseCase: { execute: expect.any(Function) },
     }));
     expect((useCases.hybridUseCase as any).deps).toEqual(expect.objectContaining({
       injectionJudge,
@@ -59,12 +62,6 @@ describe('buildUseCaseContainerServices', () => {
       queryEntrySecurityObserver,
     }));
     expect((useCases.interpretUseCase as any).deps).toEqual(expect.objectContaining({
-      injectionJudge,
-      judgeFailureMode: 'fail_open',
-      judgeTimeoutMs: config.queryEntrySecurity.judgeTimeoutMs,
-      queryEntrySecurityObserver,
-    }));
-    expect((useCases.resolveUseCase as any).deps).toEqual(expect.objectContaining({
       injectionJudge,
       judgeFailureMode: 'fail_open',
       judgeTimeoutMs: config.queryEntrySecurity.judgeTimeoutMs,

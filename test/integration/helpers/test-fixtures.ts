@@ -463,6 +463,7 @@ export const TEST_ALIASES: readonly TestAlias[] = [
   { surfaceForm: 'Chateau Margaux', entityId: CHATEAU_MARGAUX_ID, confidence: 0.94 },
   { surfaceForm: '마고', entityId: CHATEAU_MARGAUX_ID, confidence: 0.70 },  // ambiguous with region
   { surfaceForm: '샤토 마고', entityId: CHATEAU_MARGAUX_ID, confidence: 0.95 },
+  { surfaceForm: '마고 샤또', entityId: CHATEAU_MARGAUX_ID, confidence: 0.93 },  // token-order variant
 
   // Romanée-Conti
   { surfaceForm: 'Romanée-Conti 2019', entityId: ROMANEE_CONTI_ID, confidence: 1.0 },

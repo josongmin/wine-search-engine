@@ -14,8 +14,6 @@ import type {
   CandidatePoolPort,
   CompareRetrieverPort,
   DecisionEnginePort,
-  EntityDocumentLookupPort,
-  EntityResolverPort,
   QueryPlannerPort,
   RankingPort,
   ResponseBuilderPort,
@@ -23,6 +21,7 @@ import type {
 import type { HybridSearchRequest } from './hybrid-request.dto.js';
 import type {
   DecomposedSearchUseCasePort,
+  EntityLookupV2UseCasePort,
   HybridExecutionOptions,
 } from './port/search-route-usecases.port.js';
 import {
@@ -52,8 +51,7 @@ interface HybridUseCaseDeps {
   readonly candidatePool: CandidatePoolPort;
   readonly browseRetriever?: BrowseRetrieverPort | undefined;
   readonly compareRetriever?: CompareRetrieverPort | undefined;
-  readonly entityResolver?: EntityResolverPort | undefined;
-  readonly entityLookup?: EntityDocumentLookupPort | undefined;
+  readonly entityLookupV2UseCase: EntityLookupV2UseCasePort;
   readonly ranker: RankingPort;
   readonly decisionEngine: DecisionEnginePort;
   readonly responseBuilder: ResponseBuilderPort;
@@ -168,10 +166,10 @@ export class HybridUseCase {
           browseRetriever: this.deps.browseRetriever,
           compareRetriever: this.deps.compareRetriever,
           ranker: this.deps.ranker,
+          entityLookupV2UseCase: this.deps.entityLookupV2UseCase,
         },
         (resolverPlan) => resolveEntityRouteForPlan(resolverPlan, {
-          entityResolver: this.deps.entityResolver,
-          entityLookup: this.deps.entityLookup,
+          entityLookupV2UseCase: this.deps.entityLookupV2UseCase,
         }, hybridSurfaceCompiled),
         hybridSurfaceCompiled,
         {

@@ -12,10 +12,10 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import { wrapEntityDocumentLookupAsResolverProjection, type EntityDocumentBatchLookup } from '../../src/application/search/__tests__/resolver-projection-lookup.stub.js';
 import { DomainError } from '../../src/domain/shared/error/domain-error.js';
 import { buildResolverCandidatesFromGenerator } from '../../src/application/search/search-usecase-resolver-candidates.js';
 import { mapRankedResultsToResultItems } from '../../src/application/search/search-usecase-map-result-items.js';
-import type { EntityDocumentLookupPort } from '../../src/application/search/port/search-pipeline-deps.port.js';
 import type { EntityCandidateGeneratorInput } from '../../src/domain/resolver/model/entity-candidate-generator-input.js';
 import type { AnchorCandidate } from '../../src/domain/query/model/anchor-candidate.js';
 import type { RetrievalDocument } from '../../src/domain/retrieval/model/retrieval-document.js';
@@ -107,24 +107,24 @@ describe('Batch Hydration Failure Taxonomy', () => {
   const id1 = 'wine-hydra-1' as CanonicalEntityId;
   const id2 = 'wine-hydra-2' as CanonicalEntityId;
 
-  it('getDocuments() throws → DomainError with batch_lookup_failed', async () => {
-    const lookup: EntityDocumentLookupPort = {
+  it('getDocuments() throws → DomainError with resolver_projection_overlay_failed', async () => {
+    const lookup: EntityDocumentBatchLookup = {
       getDocuments: vi.fn().mockRejectedValue(new Error('connection refused')),
     };
 
     const input = makeInput([makeAnchor([id1])]);
     await expect(
-      buildResolverCandidatesFromGenerator(input, lookup),
+      buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(lookup)),
     ).rejects.toThrow(DomainError);
 
     await expect(
-      buildResolverCandidatesFromGenerator(input, lookup),
-    ).rejects.toThrow(/batch_lookup_failed/);
+      buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(lookup)),
+    ).rejects.toThrow(/resolver_projection_overlay_failed/);
   });
 
   it('getDocuments() returns partial results → DomainError with document_missing for absent IDs', async () => {
     // Request 2 IDs but only return doc for id1
-    const lookup: EntityDocumentLookupPort = {
+    const lookup: EntityDocumentBatchLookup = {
       getDocuments: vi.fn().mockResolvedValue(
         new Map<CanonicalEntityId, RetrievalDocument>([[id1, makeDoc(id1)]]),
       ),
@@ -132,16 +132,16 @@ describe('Batch Hydration Failure Taxonomy', () => {
 
     const input = makeInput([makeAnchor([id1, id2])]);
     await expect(
-      buildResolverCandidatesFromGenerator(input, lookup),
+      buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(lookup)),
     ).rejects.toThrow(/document_missing/);
 
     await expect(
-      buildResolverCandidatesFromGenerator(input, lookup),
+      buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(lookup)),
     ).rejects.toThrow(/partial_resolution_forbidden/);
   });
 
   it('all IDs returned → no error, candidates hydrated', async () => {
-    const lookup: EntityDocumentLookupPort = {
+    const lookup: EntityDocumentBatchLookup = {
       getDocuments: vi.fn().mockResolvedValue(
         new Map<CanonicalEntityId, RetrievalDocument>([
           [id1, makeDoc(id1)],
@@ -151,7 +151,7 @@ describe('Batch Hydration Failure Taxonomy', () => {
     };
 
     const input = makeInput([makeAnchor([id1, id2])]);
-    const candidates = await buildResolverCandidatesFromGenerator(input, lookup);
+    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentLookupAsResolverProjection(lookup));
 
     expect(candidates).toHaveLength(2);
     expect(candidates.map((c) => c.entityId)).toContain(id1);

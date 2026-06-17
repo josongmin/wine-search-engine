@@ -17,8 +17,6 @@ export const PipelineDebugStep = {
   // Entity-only route
   ROUTE_ENTITY_ONLY_START: 'route.entity.only.start',
   ROUTE_ENTITY_ONLY_DONE: 'route.entity.only.done',
-  ROUTE_ENTITY_CORRECTIVE_RETRY_START: 'route.entity.corrective_retry.start',
-  ROUTE_ENTITY_CORRECTIVE_RETRY_CANDIDATES: 'route.entity.corrective_retry.candidates',
 
   // Hybrid anchor resolver (ranked routes)
   RESOLVER_ANCHOR_MISSING: 'resolver.anchor.missing',
@@ -165,8 +163,6 @@ export const PIPELINE_STAGE_STEPS: Readonly<Record<PipelineStage, readonly Pipel
   entity_route: [
     PipelineDebugStep.ROUTE_ENTITY_ONLY_START,
     PipelineDebugStep.ROUTE_ENTITY_ONLY_DONE,
-    PipelineDebugStep.ROUTE_ENTITY_CORRECTIVE_RETRY_START,
-    PipelineDebugStep.ROUTE_ENTITY_CORRECTIVE_RETRY_CANDIDATES,
   ],
   hybrid_execution: [
     PipelineDebugStep.HYBRID_EXECUTE_START,

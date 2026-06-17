@@ -5,8 +5,8 @@
 default:
     @just --list
 
-# Docker test stack overrides (wine-search-test: PG 5433, Redis 6380, Vespa 18080)
-_test_env := "PORT=4000 PG_HOST=localhost PG_PORT=5433 PG_DATABASE=wine_engine_test PG_USER=wine PG_PASSWORD=wine_test REDIS_URL=redis://localhost:6380 VESPA_URL=http://localhost:18080 KILL_SWITCH_LEARNING=true"
+# Docker test stack overrides (wine-search-test: PG 5433, Vespa 18080; no Redis)
+_test_env := "PORT=4000 PG_HOST=localhost PG_PORT=5433 PG_DATABASE=wine_engine_test PG_USER=wine PG_PASSWORD=wine_test VESPA_URL=http://localhost:18080 KILL_SWITCH_LEARNING=true KILL_SWITCH_QUERY_CACHE=true"
 
 # Dedicated app host deploy defaults
 dedicated_region := "ap-northeast-2"
@@ -44,7 +44,7 @@ full:
 
 # ── Docker infra ─────────────────────────────────────────────────────────────
 
-# Start test infra (PG 5433 / Redis 6380 / Vespa 18080)
+# Start test infra (PG 5433 / Vespa 18080)
 up:
     docker compose -f docker-compose.test.yml up -d
 

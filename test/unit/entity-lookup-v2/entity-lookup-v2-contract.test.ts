@@ -17,6 +17,7 @@ import type {
   EntityResolverPort,
 } from '../../../src/application/search/port/search-pipeline-deps.port.js';
 import type { LookupPlannerPort } from '../../../src/application/search/entity-lookup-v2/lookup-planner.port.js';
+import type { LookupQueryPlan } from '../../../src/application/search/entity-lookup-v2/lookup-query-plan.js';
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
@@ -49,7 +50,7 @@ function makePlan(overrides: Record<string, unknown> = {}) {
     // The stubbed resolver still dictates status; this anchor only supplies the
     // evidence grade. Abstain tests set the RESOLVER to failed/ambiguous, which
     // the decider honours before the evidence gate. (makeUseCase provides the
-    // matching entityLookup stub the anchor-driven generator needs.)
+    // matching resolverProjectionLookup stub the anchor-driven generator needs.)
     anchors: [
       {
         surfaceForm: 'opus one',
@@ -115,38 +116,70 @@ function makeResolver(
   };
 }
 
-function makeUseCase(
-  plannerPlan: Record<string, unknown>,
-  resolver: EntityResolverPort,
-  extra: Partial<{
-    reranker: unknown;
-    ambiguityDictionary: unknown;
-    aliasRegistryVersion: unknown;
-    candidateRetrieval: unknown;
-    semanticScopeRegistry: unknown;
-    entityLookup: unknown;
-  }> = {},
-): EntityLookupV2UseCase {
-  const lookupPlanner: LookupPlannerPort = { plan: vi.fn().mockResolvedValue(plannerPlan as never) };
-  // Anchor-driven candidate generation needs an entityLookup port. The stubbed
-  // resolver ignores the generated candidates (it returns a canned result), so
-  // this only satisfies the generator and lets the anchor supply evidence grade.
-  const entityLookup = extra.entityLookup ?? {
-    getDocuments: vi.fn(async (ids: readonly unknown[]) => {
+function makeResolverProjectionLookupStub() {
+  return {
+    getResolverProjections: vi.fn(async (ids: readonly unknown[]) => {
       const map = new Map<unknown, unknown>();
       for (const id of ids) {
-        map.set(id, { entityId: id, entityType: 'wine', canonicalLabel: 'Opus One 2018' });
+        map.set(id, {
+          entityId: id,
+          entityType: 'wine',
+          canonicalLabel: 'Opus One 2018',
+          aliasesIdentitySafe: [],
+        });
       }
       return map;
     }),
   };
+}
+
+function makeLookupPlannerPort(plannerPlan: Record<string, unknown>): LookupPlannerPort {
+  return {
+    plan: vi.fn().mockImplementation(async (_query, context) => {
+      const plan = plannerPlan as LookupQueryPlan;
+      if (context?.earlyExitOnly === true) {
+        if (context.persistedAmbiguity != null) {
+          return {
+            ...plan,
+            queryClass: 'ambiguous_short_form',
+            anchors: [],
+            persistedAmbiguity: context.persistedAmbiguity,
+          };
+        }
+        if (plan.queryClass === 'exact_entity' && plan.anchors.length > 0) {
+          return plan;
+        }
+        return {
+          ...plan,
+          queryClass: 'unknown',
+          anchors: [],
+        };
+      }
+      return plannerPlan;
+    }),
+  };
+}
+
+function makeUseCase(
+  plannerPlan: Record<string, unknown>,
+  resolver: EntityResolverPort,
+  extra: Partial<{
+    ambiguityDictionary: unknown;
+    aliasRegistryVersion: unknown;
+    candidateRetrieval: unknown;
+    semanticScopeRegistry: unknown;
+    resolverProjectionLookup: unknown;
+  }> = {},
+): EntityLookupV2UseCase {
+  const lookupPlanner = makeLookupPlannerPort(plannerPlan);
+  const resolverProjectionLookup = extra.resolverProjectionLookup
+    ?? makeResolverProjectionLookupStub();
   return new EntityLookupV2UseCase({
     admissionGate: new ConceptAdmissionGate(),
     lookupPlanner,
     entityResolver: resolver,
-    entityLookup: entityLookup as never,
+    resolverProjectionLookup: resolverProjectionLookup as never,
     querySanitizer: { sanitize: vi.fn((q: string) => ({ safe: true, sanitizedQuery: q })) } as never,
-    ...(extra.reranker !== undefined ? { reranker: extra.reranker as never } : {}),
     ...(extra.ambiguityDictionary !== undefined ? { ambiguityDictionary: extra.ambiguityDictionary as never } : {}),
     ...(extra.aliasRegistryVersion !== undefined ? { aliasRegistryVersion: extra.aliasRegistryVersion as never } : {}),
     ...(extra.candidateRetrieval !== undefined ? { candidateRetrieval: extra.candidateRetrieval as never } : {}),
@@ -390,31 +423,6 @@ describe('EntityLookupV2UseCase', () => {
     expect(resolver.resolve).not.toHaveBeenCalled();
   });
 
-  it('fails fast on contradictory hard constraints without calling the resolver', async () => {
-    const resolver = makeResolver('failed', []);
-    const useCase = makeUseCase(
-      makePlan({
-        constraints: {
-          hard: [
-            { attribute: 'price', operator: '<=', value: 20 },
-            { attribute: 'price', operator: '>=', value: 50 },
-          ],
-          soft: [],
-          inferred: [],
-        },
-      }),
-      resolver,
-    );
-
-    // Query must ADMIT past the front-door gate (a concept-only query like
-    // "cheap expensive merlot" would redirect before the planner); the stubbed
-    // plan carries the contradictory hard constraints that trip the SAT check.
-    const out = await useCase.execute({ query: 'Opus One', maxCandidates: 10, mode: 'default' });
-
-    expect(out.status).toBe('failed');
-    expect(out.evidenceSummary.decisionReasonCode).toBe('hard_constraint_violation');
-    expect(resolver.resolve).not.toHaveBeenCalled();
-  });
 });
 
 describe('T-ELV2-06 clarification contract on the wire', () => {
@@ -435,18 +443,12 @@ describe('T-ELV2-06 clarification contract on the wire', () => {
       { id: 'opus-one-2018', label: 'Opus One 2018', score: 0.6 },
       { id: 'opus-one-2019', label: 'Opus One 2019', score: 0.55 },
     ]);
-    const lookupPlanner: LookupPlannerPort = { plan: vi.fn().mockResolvedValue(makePlan() as never) };
+    const lookupPlanner = makeLookupPlannerPort(makePlan());
     const useCase = new EntityLookupV2UseCase({
       admissionGate: new ConceptAdmissionGate(),
       lookupPlanner,
       entityResolver: resolver,
-      entityLookup: {
-        getDocuments: vi.fn(async (ids: readonly unknown[]) => {
-          const map = new Map<unknown, unknown>();
-          for (const id of ids) map.set(id, { entityId: id, entityType: 'wine', canonicalLabel: 'Opus One 2018' });
-          return map;
-        }),
-      } as never,
+      resolverProjectionLookup: makeResolverProjectionLookupStub() as never,
       ambiguityDictionary: {
         isKnownAmbiguous: vi.fn().mockResolvedValue(true),
         getAmbiguityInfo: vi.fn().mockResolvedValue({ types: ['alias_collision'], severity: 'high' }),
@@ -464,15 +466,13 @@ describe('T-ELV2-06 clarification contract on the wire', () => {
       { id: 'latour-2018', label: 'Chateau Latour 2018', score: 0.6 },
       { id: 'latour-2019', label: 'Chateau Latour 2019', score: 0.55 },
     ]);
-    const lookupPlanner: LookupPlannerPort = {
-      plan: vi.fn().mockResolvedValue(makePlan({
-        rawQuery: '샤또',
-        normalizedQuery: '샤또',
-        normalizedQueryViews: makeViews('샤또'),
-        queryClass: 'short_entity',
-        anchors: [],
-      }) as never),
-    };
+    const lookupPlanner = makeLookupPlannerPort(makePlan({
+      rawQuery: '샤또',
+      normalizedQuery: '샤또',
+      normalizedQueryViews: makeViews('샤또'),
+      queryClass: 'short_entity',
+      anchors: [],
+    }));
     const ambiguityDictionary = {
       isKnownAmbiguous: vi.fn().mockResolvedValue(true),
       getAmbiguityInfo: vi.fn().mockResolvedValue({
@@ -485,9 +485,7 @@ describe('T-ELV2-06 clarification contract on the wire', () => {
       admissionGate: new ConceptAdmissionGate(),
       lookupPlanner,
       entityResolver: resolver,
-      entityLookup: {
-        getDocuments: vi.fn(async () => new Map()),
-      } as never,
+      resolverProjectionLookup: makeResolverProjectionLookupStub() as never,
       ambiguityDictionary: ambiguityDictionary as never,
       querySanitizer: { sanitize: vi.fn((q: string) => ({ safe: true, sanitizedQuery: q })) } as never,
     });
@@ -505,23 +503,21 @@ describe('T-ELV2-06 clarification contract on the wire', () => {
     const resolver = makeResolver('resolved', [
       { id: 'margaux-2015', label: 'Chateau Margaux 2015', score: 0.99 },
     ]);
-    const lookupPlanner: LookupPlannerPort = {
-      plan: vi.fn().mockResolvedValue(makePlan({
-        rawQuery: '마고',
-        normalizedQuery: '마고',
-        normalizedQueryViews: makeViews('마고'),
-        queryClass: 'known-item',
-        anchors: [{
-          surfaceForm: '마고',
-          normalizedForm: '마고',
-          candidateEntityIds: [createEntityId('margaux-2015')],
-          lookupStrategies: ['prefix_exact'],
-          aliasType: 'translation',
-          confidence: 0.82,
-          source: 'alias',
-        }],
-      }) as never),
-    };
+    const lookupPlanner = makeLookupPlannerPort(makePlan({
+      rawQuery: '마고',
+      normalizedQuery: '마고',
+      normalizedQueryViews: makeViews('마고'),
+      queryClass: 'known-item',
+      anchors: [{
+        surfaceForm: '마고',
+        normalizedForm: '마고',
+        candidateEntityIds: [createEntityId('margaux-2015')],
+        lookupStrategies: ['prefix_exact'],
+        aliasType: 'translation',
+        confidence: 0.82,
+        source: 'alias',
+      }],
+    }));
     const ambiguityDictionary = {
       isKnownAmbiguous: vi.fn().mockResolvedValue(true),
       getAmbiguityInfo: vi.fn().mockResolvedValue({
@@ -535,9 +531,7 @@ describe('T-ELV2-06 clarification contract on the wire', () => {
       admissionGate: new ConceptAdmissionGate(),
       lookupPlanner,
       entityResolver: resolver,
-      entityLookup: {
-        getDocuments: vi.fn(async () => new Map()),
-      } as never,
+      resolverProjectionLookup: makeResolverProjectionLookupStub() as never,
       ambiguityDictionary: ambiguityDictionary as never,
       querySanitizer: { sanitize: vi.fn((q: string) => ({ safe: true, sanitizedQuery: q })) } as never,
     });
@@ -554,23 +548,21 @@ describe('T-ELV2-06 clarification contract on the wire', () => {
     const resolver = makeResolver('failed', [
       { id: 'romanee-conti-2015', label: 'DRC Romanée-Conti 2015', score: 0.06 },
     ]);
-    const lookupPlanner: LookupPlannerPort = {
-      plan: vi.fn().mockResolvedValue(makePlan({
-        rawQuery: 'DRC',
-        normalizedQuery: 'drc',
-        normalizedQueryViews: makeViews('DRC'),
-        queryClass: 'ambiguous_short_form',
-        anchors: [{
-          surfaceForm: 'DRC',
-          normalizedForm: 'drc',
-          candidateEntityIds: [createEntityId('romanee-conti-2015')],
-          lookupStrategies: ['exact'],
-          aliasType: 'abbreviation',
-          confidence: 0.65,
-          source: 'alias',
-        }],
-      }) as never),
-    };
+    const lookupPlanner = makeLookupPlannerPort(makePlan({
+      rawQuery: 'DRC',
+      normalizedQuery: 'drc',
+      normalizedQueryViews: makeViews('DRC'),
+      queryClass: 'ambiguous_short_form',
+      anchors: [{
+        surfaceForm: 'DRC',
+        normalizedForm: 'drc',
+        candidateEntityIds: [createEntityId('romanee-conti-2015')],
+        lookupStrategies: ['exact'],
+        aliasType: 'abbreviation',
+        confidence: 0.65,
+        source: 'alias',
+      }],
+    }));
     const ambiguityDictionary = {
       isKnownAmbiguous: vi.fn().mockResolvedValue(true),
       getAmbiguityInfo: vi.fn().mockResolvedValue({
@@ -583,11 +575,7 @@ describe('T-ELV2-06 clarification contract on the wire', () => {
       admissionGate: new ConceptAdmissionGate(),
       lookupPlanner,
       entityResolver: resolver,
-      entityLookup: {
-        getDocuments: vi.fn(async (ids: readonly unknown[]) => new Map(
-          ids.map((id) => [id, { entityId: id, entityType: 'wine', canonicalLabel: 'DRC Romanée-Conti 2015' }]),
-        )),
-      } as never,
+      resolverProjectionLookup: makeResolverProjectionLookupStub() as never,
       ambiguityDictionary: ambiguityDictionary as never,
       querySanitizer: { sanitize: vi.fn((q: string) => ({ safe: true, sanitizedQuery: q })) } as never,
     }).execute({ query: 'DRC', maxCandidates: 10, mode: 'default' });
@@ -601,23 +589,21 @@ describe('T-ELV2-06 clarification contract on the wire', () => {
     const resolver = makeResolver('failed', [
       { id: 'w-louis-roederer-cristal-2014', label: 'Louis Roederer Cristal 2014', score: 0 },
     ]);
-    const lookupPlanner: LookupPlannerPort = {
-      plan: vi.fn().mockResolvedValue(makePlan({
-        rawQuery: '크리스탈',
-        normalizedQuery: '크리스탈',
-        normalizedQueryViews: makeViews('크리스탈'),
-        queryClass: 'short_entity',
-        anchors: [{
-          surfaceForm: '크리스탈',
-          normalizedForm: '크리스탈',
-          candidateEntityIds: [createEntityId('w-louis-roederer-cristal-2014')],
-          lookupStrategies: ['exact'],
-          aliasType: 'translation',
-          confidence: 1,
-          source: 'alias',
-        }],
-      }) as never),
-    };
+    const lookupPlanner = makeLookupPlannerPort(makePlan({
+      rawQuery: '크리스탈',
+      normalizedQuery: '크리스탈',
+      normalizedQueryViews: makeViews('크리스탈'),
+      queryClass: 'short_entity',
+      anchors: [{
+        surfaceForm: '크리스탈',
+        normalizedForm: '크리스탈',
+        candidateEntityIds: [createEntityId('w-louis-roederer-cristal-2014')],
+        lookupStrategies: ['exact'],
+        aliasType: 'translation',
+        confidence: 1,
+        source: 'alias',
+      }],
+    }));
     const ambiguityDictionary = {
       isKnownAmbiguous: vi.fn().mockResolvedValue(true),
       getAmbiguityInfo: vi.fn().mockResolvedValue({
@@ -630,11 +616,7 @@ describe('T-ELV2-06 clarification contract on the wire', () => {
       admissionGate: new ConceptAdmissionGate(),
       lookupPlanner,
       entityResolver: resolver,
-      entityLookup: {
-        getDocuments: vi.fn(async (ids: readonly unknown[]) => new Map(
-          ids.map((id) => [id, { entityId: id, entityType: 'wine', canonicalLabel: 'Louis Roederer Cristal 2014' }]),
-        )),
-      } as never,
+      resolverProjectionLookup: makeResolverProjectionLookupStub() as never,
       ambiguityDictionary: ambiguityDictionary as never,
       querySanitizer: { sanitize: vi.fn((q: string) => ({ safe: true, sanitizedQuery: q })) } as never,
     }).execute({ query: '크리스탈', maxCandidates: 10, mode: 'default' });
@@ -737,7 +719,7 @@ describe('T-ELV2-06 clarification contract on the wire', () => {
       { id: 'silver-oak-alexander', label: '1984 Silver Oak Alexander Valley Cabernet Sauvignon', score: 0 },
       { id: 'silver-oak-napa', label: '2014 Silver Oak Napa Valley Cabernet Sauvignon', score: 0 },
     ]);
-    const lookupPlanner: LookupPlannerPort = { plan: vi.fn().mockResolvedValue(plannerPlan as never) };
+    const lookupPlanner = makeLookupPlannerPort(plannerPlan);
     const candidateRetrieval = {
       retrieve: vi.fn().mockResolvedValue({
         candidates: [
@@ -773,16 +755,11 @@ describe('T-ELV2-06 clarification contract on the wire', () => {
         ],
       }),
     };
-    const entityLookup = {
-      getDocuments: vi.fn(async (ids: readonly unknown[]) => new Map(
-        ids.map((id) => [id, { entityId: id, entityType: 'wine', canonicalLabel: String(id) }]),
-      )),
-    };
     const out = await new EntityLookupV2UseCase({
       admissionGate: new ConceptAdmissionGate(),
       lookupPlanner,
       entityResolver: resolver,
-      entityLookup: entityLookup as never,
+      resolverProjectionLookup: makeResolverProjectionLookupStub() as never,
       candidateRetrieval: candidateRetrieval as never,
       querySanitizer: { sanitize: vi.fn((q: string) => ({ safe: true, sanitizedQuery: q })) } as never,
     }).execute({ query: '실버 오크', maxCandidates: 10, mode: 'default' });
@@ -853,26 +830,9 @@ describe('T-ELV2-06 clarification contract on the wire', () => {
       findMatches: vi.fn().mockReturnValue([]),
       getReviewedTargetEntityIds: vi.fn().mockReturnValue(new Set(['angelus-grand-vin'])),
     };
-    const entityLookup = {
-      getDocuments: vi.fn(async (ids: readonly unknown[]) => new Map(
-        ids.map((id) => [
-          id,
-          {
-            entityId: id,
-            entityType: 'wine',
-            canonicalLabel:
-              String(id) === 'angelus-grand-vin'
-                ? 'Chateau Angelus 2018'
-                : 'Carillon d Angelus 2018',
-          },
-        ]),
-      )),
-    };
-
     const out = await makeUseCase(plannerPlan, resolver, {
       candidateRetrieval,
       semanticScopeRegistry,
-      entityLookup,
     }).execute({ query: '샤또 앙젤뤼스', maxCandidates: 10, mode: 'default' });
 
     expect(out.status).toBe('resolved');
@@ -913,22 +873,8 @@ describe('T-ELV2-06 clarification contract on the wire', () => {
       ]),
       getReviewedTargetEntityIds: vi.fn().mockReturnValue(new Set()),
     };
-    const entityLookup = {
-      getDocuments: vi.fn(async (ids: readonly unknown[]) => new Map(
-        ids.map((id) => [
-          id,
-          {
-            entityId: id,
-            entityType: 'wine',
-            canonicalLabel: "2018 Antinori Tenuta Tignanello 'Solaia'",
-          },
-        ]),
-      )),
-    };
-
     const out = await makeUseCase(plannerPlan, resolver, {
       semanticScopeRegistry,
-      entityLookup,
     }).execute({ query: '솔라이아 2018', maxCandidates: 10, mode: 'default', locale: 'ko' });
 
     expect(out.status).toBe('resolved');
@@ -1167,31 +1113,6 @@ describe('T-ELV2-06 clarification contract on the wire', () => {
     const out = await makeUseCase(makePlan(), resolver).execute({ query: 'Opus One 2018', maxCandidates: 10, mode: 'default' });
     expect(out.status).toBe('resolved');
     expect(out.topCandidate?.entityId).toBe('opus-one-2018');
-  });
-
-  // T-06 Half A — the ambiguity-cluster-membership feature actually reaches the
-  // reranker's scored candidates (the un-hardcoded wiring, reranker-gated).
-  it('feeds real cluster-membership into the reranker feature vector', async () => {
-    const resolver = makeResolver('resolved', [
-      { id: 'a', label: 'Wine A', score: 0.9 },
-      { id: 'b', label: 'Wine B', score: 0.8 },
-    ]);
-    let capturedA: number | undefined;
-    const reranker = {
-      decide: vi.fn((input: { scored: ReadonlyArray<{ entityId: unknown; features: { ambiguityClusterMembership: number } }> }) => {
-        capturedA = input.scored.find((s) => String(s.entityId) === 'a')?.features.ambiguityClusterMembership;
-        return { status: 'resolved' as const, reasonCode: 'learned_rerank', detail: 'ok', topConfidence: 0.9, calibrationTrusted: false };
-      }),
-    };
-    const ambiguityDictionary = {
-      isKnownAmbiguous: vi.fn().mockResolvedValue(true),
-      // cluster of 2 members {a,b} → membership = 1 - 1/2 = 0.5 for a member.
-      getAmbiguityInfo: vi.fn().mockResolvedValue({ types: ['alias_collision'], severity: 'high', entityIds: ['a', 'b'] }),
-      getAmbiguityInfoBatch: vi.fn().mockResolvedValue(new Map()),
-    };
-    await makeUseCase(makePlan(), resolver, { reranker, ambiguityDictionary }).execute({ query: 'Opus One', maxCandidates: 10, mode: 'default' });
-    expect(reranker.decide).toHaveBeenCalled();
-    expect(capturedA).toBeCloseTo(0.5);
   });
 
   // T-03 — the alias-registry version stamp surfaces on meta (rule-33 wire proof).

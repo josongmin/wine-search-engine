@@ -2,7 +2,6 @@ import { SearchUseCase } from '../application/search/search.usecase.js';
 import type { MultiQueryGenerator } from '../domain/retrieval/service/multi-query-generator.js';
 import type { HydeGenerator } from '../domain/retrieval/service/hyde-generator.js';
 import { InterpretUseCase } from '../application/search/interpret.usecase.js';
-import { ResolveUseCase } from '../application/search/resolve.usecase.js';
 import { CurationUseCase } from '../application/curation/curation.usecase.js';
 import { PgCurationStore } from '../infrastructure/curation/pg-curation-store.js';
 import { AutocompleteUseCase } from '../application/search/autocomplete.usecase.js';
@@ -23,15 +22,14 @@ import type {
   EntityLookupV2UseCasePort,
   HybridUseCasePort,
   InterpretUseCasePort,
-  ResolveUseCasePort,
 } from '../application/search/port/search-route-usecases.port.js';
+import type { LookupResolverProjectionPort } from '../application/search/port/search-pipeline-deps.port.js';
 import type { CoreContainerServices } from './container-core.js';
 import type { Config } from './env.js';
 
 export interface UseCaseContainerServices {
   readonly searchUseCase: SearchExecutorPort;
   readonly interpretUseCase: InterpretUseCasePort;
-  readonly resolveUseCase: ResolveUseCasePort;
   /** Operator curation plane (T-ELV2-07); present only when a PG pool is wired. */
   readonly curationUseCase?: CurationUseCase | undefined;
   readonly autocompleteUseCase: AutocompleteUseCasePort;
@@ -54,16 +52,17 @@ export interface UseCaseExtensions {
 }
 
 export interface UseCaseContainerOverrides {
-  readonly entityLookupV2UseCase?: EntityLookupV2UseCasePort | undefined;
+  readonly entityLookupV2UseCase: EntityLookupV2UseCasePort;
+  readonly resolverProjectionLookup: LookupResolverProjectionPort;
 }
 
 export function buildUseCaseContainerServices(
   core: CoreContainerServices,
   config: Config,
   extensions: UseCaseExtensions = {},
-  overrides: UseCaseContainerOverrides = {},
+  overrides: UseCaseContainerOverrides,
 ): UseCaseContainerServices {
-  const entityLookupV2UseCase = overrides.entityLookupV2UseCase;
+  const { entityLookupV2UseCase, resolverProjectionLookup } = overrides;
   const drinkingWindowUseCase = new DrinkingWindowUseCase(core.drinkingWindowPredictor);
   const queryEntrySecurityObserver = getQueryEntrySecurityMetricsCollector();
 
@@ -81,9 +80,6 @@ export function buildUseCaseContainerServices(
   const searchUseCase = new SearchUseCase({
     queryPlanner: core.queryPlanner,
     entityLookupAnchorRefresh: core.entityLookupAnchorRefresh,
-    blocker: core.blocker,
-    entityResolver: core.entityResolver,
-    entityLookup: core.entityLookup,
     candidatePool: core.candidatePool,
     browseRetriever: core.browseRetriever,
     compareRetriever: core.compareRetriever,
@@ -110,26 +106,11 @@ export function buildUseCaseContainerServices(
     ...(extensions.hydeGenerator !== undefined
       ? { hydeGenerator: extensions.hydeGenerator }
       : {}),
-    ...(entityLookupV2UseCase !== undefined
-      ? { entityLookupV2UseCase }
-      : {}),
+    entityLookupV2UseCase,
   });
 
   decomposedRef.impl = new DecomposedSearchUseCase(searchUseCase);
   const decomposedSearchUseCase = decomposedRef.impl;
-  const resolveUseCase = new ResolveUseCase({
-    queryPlanner: core.queryPlanner,
-    blocker: core.blocker,
-    entityResolver: core.entityResolver,
-    entityLookup: core.entityLookup,
-    snapshotVersions: core.snapshotVersions,
-    querySanitizer: core.querySanitizer,
-    injectionJudge: core.injectionJudge,
-    judgeFailureMode: config.queryEntrySecurity.judgeFailureMode,
-    judgeTimeoutMs: config.queryEntrySecurity.judgeTimeoutMs,
-    queryEntrySecurityObserver,
-  });
-
   // T-ELV2-07: operator curation plane. DB-only — wired solely when a PG pool
   // exists (snapshot/in-memory modes leave it undefined and the ops routes are
   // not registered).
@@ -148,22 +129,16 @@ export function buildUseCaseContainerServices(
       judgeTimeoutMs: config.queryEntrySecurity.judgeTimeoutMs,
       queryEntrySecurityObserver,
     }),
-    resolveUseCase,
     autocompleteUseCase: new AutocompleteUseCase({
-      entityLookupV2UseCase: entityLookupV2UseCase ?? {
-        execute: () => Promise.reject(
-          new Error('[AutocompleteUseCase] EntityLookupV2UseCase is not wired'),
-        ),
-      },
-      entityLookup: core.entityLookup,
+      entityLookupV2UseCase,
+      resolverProjectionLookup: resolverProjectionLookup,
     }),
     hybridUseCase: new HybridUseCase({
       queryPlanner: core.queryPlanner,
       candidatePool: core.candidatePool,
       browseRetriever: core.browseRetriever,
       compareRetriever: core.compareRetriever,
-      entityResolver: core.entityResolver,
-      entityLookup: core.entityLookup,
+      entityLookupV2UseCase,
       ranker: core.ranker,
       decisionEngine: core.decisionEngine,
       responseBuilder: core.responseBuilder,

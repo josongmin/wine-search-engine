@@ -21,7 +21,6 @@ import type {
 import { computeMatcherFeatures } from './learned-matcher-features.js';
 import type { MatcherFeatureVector } from './learned-matcher-features.js';
 import { compareScoreWithTiebreaker } from '../../shared/utils/stable-comparator.js';
-import { CORRECTIVE_RETRY_CONFIDENCE_THRESHOLD as RESOLVER_CORRECTIVE_RETRY_CONFIDENCE_THRESHOLD } from '../model/corrective-retry-thresholds.js';
 import {
   MAX_RESOLVED_CANDIDATES,
   sanitizeRawScore,
@@ -403,7 +402,7 @@ export class Resolver {
     // C2 (fail-loud): when there is no runner-up, the gap is meaningless.
     // Treat gap-threshold as "not applicable" rather than silently reading
     // a synthetic 0 gap. Singletons below the confidence threshold still
-    // flow to corrective retry / failed paths below.
+    // flow to clarify / failed paths below.
     //
     // When hasRunnerUp=true the calibrator contract guarantees a defined
     // calibratedGap (see CalibratedResolutionScore). A `?? 0` fallback here
@@ -467,20 +466,16 @@ export class Resolver {
       return { status: 'ambiguous', nextAction: 'clarify', reasonCodes };
     }
 
-    // Low confidence, no ambiguity detected — check whether corrective retry
-    // is warranted (TA3-1): zero anchors OR confidence below retry threshold.
-    //
-    // corrective_retry takes precedence over hybrid_search: it is a targeted
-    // exact-recovery retry, not a broad fallback. The application layer
-    // (executeEntityRoute) honours this recommendation to run Pass 2.
+    // Low confidence, no ambiguity — fail closed. Exact-recovery is owned by
+    // Entity Lookup V2 (multi-channel recall + calibrated abstain), not a
+    // second in-request retry loop.
     const zeroAnchors = input.anchorCandidates.length === 0;
     const rawConfidence = calibrated.decisionConfidenceC;
     const confidenceFinite = Number.isFinite(rawConfidence) ? rawConfidence : 0;
-    const belowRetryThreshold = confidenceFinite < RESOLVER_CORRECTIVE_RETRY_CONFIDENCE_THRESHOLD;
 
-    if (zeroAnchors || belowRetryThreshold) {
-      reasonCodes.push('CORRECTIVE_RETRY_WARRANTED');
-      return { status: 'failed', nextAction: 'corrective_retry', reasonCodes };
+    if (zeroAnchors || confidenceFinite <= 0) {
+      reasonCodes.push('LOW_CONFIDENCE_NO_VIABLE_ANCHOR');
+      return { status: 'failed', nextAction: 'fail', reasonCodes };
     }
 
     if (calibrated.decisionConfidenceC > 0) {

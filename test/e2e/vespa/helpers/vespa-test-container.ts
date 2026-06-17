@@ -44,7 +44,6 @@ import { DecomposedSearchUseCase } from '../../../../src/application/search/deco
 import { BatchSearchUseCase } from '../../../../src/application/search/batch-search.usecase.js';
 import { DrinkingWindowUseCase } from '../../../../src/application/drinking-window/drinking-window.usecase.js';
 import { InterpretUseCase } from '../../../../src/application/search/interpret.usecase.js';
-import { ResolveUseCase } from '../../../../src/application/search/resolve.usecase.js';
 import { AutocompleteUseCase } from '../../../../src/application/search/autocomplete.usecase.js';
 import { EntityLookupV2UseCase } from '../../../../src/application/search/entity-lookup-v2/entity-lookup-v2.usecase.js';
 import { MultiChannelRetrievalEngine } from '../../../../src/application/search/entity-lookup-v2/multi-channel-retrieval-engine.js';
@@ -86,6 +85,7 @@ import {
   InMemoryCandidateAttributes,
 } from '../../../integration/helpers/in-memory-adapters.js';
 import type { EntityId } from '../../../../src/domain/shared/types/index.js';
+import { buildResolverProjectionLookupFromSearchIndex } from '../../../integration/helpers/search-index-resolver-projection-lookup.js';
 
 const VESPA_NAMESPACE = 'wine';
 const VESPA_DOC_TYPE = 'wine_entity';
@@ -357,10 +357,27 @@ export async function createVespaTestContainer(
     options.drinkingWindowPredictor ?? defaultDrinkingWindowPredictor;
   const drinkingWindowUseCase = new DrinkingWindowUseCase(drinkingWindowPredictor);
 
+  const lookupPlanner = new RuntimeLookupPlanner({
+    aliasMatcher,
+    ambiguityDictionary: ambiguityDict,
+  });
+  const resolverProjectionLookup = buildResolverProjectionLookupFromSearchIndex(vespaSearchIndex);
+  const entityLookupV2UseCase = new EntityLookupV2UseCase({
+    admissionGate: new ConceptAdmissionGate(),
+    lookupPlanner,
+    entityResolver,
+    resolverProjectionLookup,
+    candidateRetrieval: new MultiChannelRetrievalEngine({
+      aliasMatcher,
+      resolverProjectionLookup,
+    }),
+    ambiguityDictionary: ambiguityDict,
+    querySanitizer,
+  });
+
   const searchUseCase = new SearchUseCase({
     queryPlanner,
-    entityResolver,
-    entityLookup: vespaSearchIndex,
+    entityLookupV2UseCase,
     candidatePool,
     ranker,
     decisionEngine,
@@ -380,40 +397,15 @@ export async function createVespaTestContainer(
     injectionJudge,
     judgeTimeoutMs,
   });
-  const resolveUseCase = new ResolveUseCase({
-    queryPlanner,
-    entityResolver,
-    entityLookup: vespaSearchIndex,
-    querySanitizer,
-    injectionJudge,
-    judgeTimeoutMs,
-  });
   const decomposedSearchUseCase = new DecomposedSearchUseCase(searchUseCase);
-  const lookupPlanner = new RuntimeLookupPlanner({
-    aliasMatcher,
-    ambiguityDictionary: ambiguityDict,
-  });
-  const entityLookupV2UseCase = new EntityLookupV2UseCase({
-    admissionGate: new ConceptAdmissionGate(),
-    lookupPlanner,
-    entityResolver,
-    entityLookup: vespaSearchIndex,
-    candidateRetrieval: new MultiChannelRetrievalEngine({
-      aliasMatcher,
-      entityLookup: vespaSearchIndex,
-    }),
-    ambiguityDictionary: ambiguityDict,
-    querySanitizer,
-  });
   const autocompleteUseCase = new AutocompleteUseCase({
     entityLookupV2UseCase,
-    entityLookup: vespaSearchIndex,
+    resolverProjectionLookup,
   });
   const hybridUseCase = new HybridUseCase({
     queryPlanner,
     candidatePool,
-    entityResolver,
-    entityLookup: vespaSearchIndex,
+    entityLookupV2UseCase,
     ranker,
     decisionEngine,
     responseBuilder,
@@ -429,7 +421,6 @@ export async function createVespaTestContainer(
   const batchSearchUseCase = new BatchSearchUseCase(searchUseCase);
   const container = {
     queryPlanner,
-    entityResolver,
     candidatePool,
     ranker,
     decisionEngine,
@@ -437,7 +428,6 @@ export async function createVespaTestContainer(
     mixedSolver,
     searchUseCase,
     interpretUseCase,
-    resolveUseCase,
     entityLookupV2UseCase,
     autocompleteUseCase,
     hybridUseCase,

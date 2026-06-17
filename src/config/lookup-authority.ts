@@ -18,6 +18,7 @@ import { QUERY_CLASSES } from '../domain/shared/types/query-class.js';
 import type { CalibrationStore } from '../domain/resolver/port/calibration-store.port.js';
 import type { Resolver } from '../domain/resolver/service/resolver.js';
 import type { SearchSnapshotAliasMatcher } from '../infrastructure/adapter/search-snapshot-alias-matcher.js';
+import type { LookupResolverProjectionPort } from '../application/search/port/search-pipeline-deps.port.js';
 
 export interface LookupAuthorityBootstrapProfile {
   readonly runtimeBundleMs: number;
@@ -42,6 +43,7 @@ export interface LookupAuthorityRuntimeProbe {
 
 export interface LookupAuthorityServices {
   readonly entityLookupV2UseCase: EntityLookupV2UseCasePort;
+  readonly resolverProjectionLookup: LookupResolverProjectionPort;
   readonly bootstrapProfile: LookupAuthorityBootstrapProfile;
   readonly metadata: LookupAuthorityRuntimeMetadata;
   readonly runtimeProbe: LookupAuthorityRuntimeProbe;
@@ -204,6 +206,7 @@ export async function createLookupAuthorityServices(
       runtimeBundleCacheKey,
       ...(runtime.searchSnapshotId !== undefined ? { searchSnapshotId: runtime.searchSnapshotId } : {}),
     },
+    resolverProjectionLookup,
     runtimeProbe: {
       aliasMatcher,
     },

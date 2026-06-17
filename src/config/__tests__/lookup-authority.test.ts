@@ -72,6 +72,7 @@ describe('createLookupAuthorityServices', () => {
     const deps = (authority.entityLookupV2UseCase as any).deps;
     expect(deps.semanticScopeRegistry).toBe(semanticScopeRegistry);
     expect(deps.resolverProjectionLookup).toBe(resolverProjectionLookup);
+    expect(authority.resolverProjectionLookup).toBe(resolverProjectionLookup);
     expect(deps.ambiguityDictionary).toBe(ambiguityDictionary);
     expect((deps.candidateRetrieval as any).deps.reviewedFamilyRecall).toBe(reviewedFamilyRecallRegistry);
     expect((deps.candidateRetrieval as any).deps.entityScopeGraph).toBe(entityScopeGraph);

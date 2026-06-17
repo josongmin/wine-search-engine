@@ -45,6 +45,10 @@ import {
 } from './index-to-vespa.js';
 import { ingestCanonicalEntityGraphForManifestPath } from './ingest-canonical-entity-graph.js';
 import {
+  createReapSnapshotsPool,
+  reapStaleSnapshotsAfterPublish,
+} from '../ops/reap-snapshots.js';
+import {
   createSnapshotPublishStateMachine,
   hasSnapshotPublishReachedPhase,
   type SnapshotPublishPhase,
@@ -1401,6 +1405,22 @@ async function run(): Promise<void> {
         manifestPath: built.manifestPath,
         requirePointerParity: true,
       });
+      console.log('🧹 Reaping stale snapshot rows (retain active + previous for rollback)');
+      const reapPool = createReapSnapshotsPool(config.pg);
+      try {
+        const reapSummary = await reapStaleSnapshotsAfterPublish(reapPool);
+        if (reapSummary.performed === 'skipped') {
+          console.log(`🧹 Snapshot reap skipped: ${reapSummary.skipReason ?? 'unknown reason'}`);
+        } else {
+          const totalDeleted = reapSummary.reports.reduce((sum, r) => sum + r.deletedRowCount, 0);
+          console.log(`🧹 Snapshot reap complete: deleted ${totalDeleted} stale row(s) across ${reapSummary.reports.length} table(s)`);
+        }
+      } catch (reapError) {
+        const reapMessage = reapError instanceof Error ? reapError.message : String(reapError);
+        console.warn(`⚠️ Snapshot reap failed (publish succeeded): ${reapMessage}`);
+      } finally {
+        await reapPool.end();
+      }
     } catch (error) {
       console.error(`↩️ Publish failed during phase=${publishState.current}; attempting rollback`);
       const publishMessage = error instanceof Error ? error.message : String(error);

@@ -139,9 +139,13 @@ describe('EntityLookupV2UseCase — channel provenance surfaced end-to-end', () 
       admissionGate: new ConceptAdmissionGate(),
       lookupPlanner: queryPlanner,
       entityResolver: resolver,
-      entityLookup: {
-        getDocument: vi.fn().mockResolvedValue(doc),
-        getDocuments: vi.fn().mockResolvedValue(new Map([[eid, doc]])),
+      resolverProjectionLookup: {
+        getResolverProjections: vi.fn().mockResolvedValue(new Map([[eid, {
+          entityId: eid,
+          entityType: 'wine',
+          canonicalLabel: 'Opus One 2018',
+          aliasesIdentitySafe: [],
+        }]])),
       },
       querySanitizer: { sanitize: vi.fn((q: string) => ({ safe: true, sanitizedQuery: q })) } as never,
     });
@@ -200,7 +204,14 @@ describe('EntityLookupV2UseCase — channel provenance surfaced end-to-end', () 
       lookupPlanner: queryPlanner,
       entityResolver: resolver,
       candidateRetrieval,
-      entityLookup: { getDocument: vi.fn().mockResolvedValue(doc), getDocuments: vi.fn().mockResolvedValue(new Map([[eid, doc]])) },
+      resolverProjectionLookup: {
+        getResolverProjections: vi.fn().mockResolvedValue(new Map([[eid, {
+          entityId: eid,
+          entityType: 'wine',
+          canonicalLabel: 'Opus One 2018',
+          aliasesIdentitySafe: [],
+        }]])),
+      },
       querySanitizer: { sanitize: vi.fn((q: string) => ({ safe: true, sanitizedQuery: q })) } as never,
     });
 

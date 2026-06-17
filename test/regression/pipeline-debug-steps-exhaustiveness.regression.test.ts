@@ -112,8 +112,6 @@ const EXPECTED_SORTED_STEP_VALUES: readonly string[] = [
   'retrieval.producer_browse.error',
   'retrieval.region_browse',
   'retrieval.region_browse.error',
-  'route.entity.corrective_retry.candidates',
-  'route.entity.corrective_retry.start',
   'route.entity.only.done',
   'route.entity.only.start',
   'search.execute.done',
@@ -145,8 +143,6 @@ function exhaustiveLabel(step: PipelineDebugStepId): string {
     case PipelineDebugStep.SEARCH_EXECUTE_STAGE_TIMINGS:
     case PipelineDebugStep.ROUTE_ENTITY_ONLY_START:
     case PipelineDebugStep.ROUTE_ENTITY_ONLY_DONE:
-    case PipelineDebugStep.ROUTE_ENTITY_CORRECTIVE_RETRY_START:
-    case PipelineDebugStep.ROUTE_ENTITY_CORRECTIVE_RETRY_CANDIDATES:
     case PipelineDebugStep.RESOLVER_ANCHOR_MISSING:
     case PipelineDebugStep.RESOLVER_ANCHOR_START:
     case PipelineDebugStep.RESOLVER_ANCHOR_DONE:

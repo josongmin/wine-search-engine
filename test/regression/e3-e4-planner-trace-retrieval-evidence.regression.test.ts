@@ -539,52 +539,7 @@ describe('E4: hard_filter_drop_log surfaced to AuditExtension', () => {
   });
 });
 
-// ─── TA5: corrective_retry_calibrated_confidence in AuditExtension ───────────
-
-describe('TA5: corrective_retry_calibrated_confidence in AuditExtension', () => {
-  it('TA5-20: corrective_retry_calibrated_confidence — absent 시 JSON 직렬화에 미노출', () => {
-    // 실질 검증: retry가 없었으면 API 응답에 이 필드가 나타나면 안 됨
-    type AuditExt = import('../../src/domain/audit/model/audit-extension.js').AuditExtension;
-    const extWithout: AuditExt = {};
-    const serializedWithout = JSON.stringify(extWithout);
-    expect(serializedWithout).not.toContain('corrective_retry_calibrated_confidence');
-
-    // present 시에는 직렬화에 포함
-    const extWith: AuditExt = { corrective_retry_calibrated_confidence: 0.85 };
-    const serializedWith = JSON.stringify(extWith);
-    expect(serializedWith).toContain('corrective_retry_calibrated_confidence');
-    expect(serializedWith).toContain('0.85');
-  });
-
-  it('TA5-21: corrective_retry_calibrated_confidence=0.5 — 0은 아니지만 최저값 (Rule-26 nullish 안전)', () => {
-    // 실질 검증: 0.5는 유효한 최저값이고 undefined와 다름
-    // 만약 `conf || defaultVal` 패턴을 쓰면 0.5는 truthy여서 안전하지만
-    // 0이 최저값인 다른 필드와의 일관성을 위해 nullish coalescing 사용을 강제
-    type AuditExt = import('../../src/domain/audit/model/audit-extension.js').AuditExtension;
-    const ext: AuditExt = { corrective_retry_calibrated_confidence: 0.5 };
-    // 0.5는 undefined가 아님
-    expect(ext.corrective_retry_calibrated_confidence).not.toBeUndefined();
-    // ?? -1 : 0.5는 falsy가 아니므로 0.5가 그대로 나옴
-    expect(ext.corrective_retry_calibrated_confidence ?? -1).toBe(0.5);
-    // || -1 : 0.5는 truthy → 0.5 (다행히 0.5는 truthy이지만, 0이었다면 위험)
-    // 이 테스트는 0.5가 절대 undefined/null로 처리되지 않음을 보장
-    const absent: AuditExt = {};
-    expect(absent.corrective_retry_calibrated_confidence ?? -1).toBe(-1);
-  });
-
-  it('TA5-22: corrective_retry_calibrated_confidence range is [0.5, 0.9]', () => {
-    // The TA5 formula guarantees: min=0.5 (rank N of N), max=0.9 (rank 1 of N).
-    for (const conf of [0.5, 0.7, 0.9]) {
-      const ext: import('../../src/domain/audit/model/audit-extension.js').AuditExtension = {
-        corrective_retry_calibrated_confidence: conf,
-      };
-      expect(ext.corrective_retry_calibrated_confidence).toBeGreaterThanOrEqual(0.5);
-      expect(ext.corrective_retry_calibrated_confidence).toBeLessThanOrEqual(0.9);
-    }
-  });
-});
-
-// ─── 수학적 완결성: AUDIT_DROP_LOG_MAX=5 슬라이싱 및 정렬 불변성 ─────────────────
+// ─── AUDIT_DROP_LOG_MAX=5 — 슬라이싱 및 정렬 불변성 (수학적 완결성) ─────────────────
 //
 // deriveAuditExtension 의 hard_filter_drop_log 처리:
 //   1. lastKnownScore 내림차순 정렬
@@ -698,7 +653,6 @@ describe('deriveAuditExtension — 조기 반환 및 선택적 필드 (AuditExte
     expect(ext.hard_filter_drop_log).toBeUndefined();
     expect(ext.abstain_policy_trace).toBeUndefined();
     expect(ext.retrieval_fusion_trace).toBeUndefined();
-    expect(ext.corrective_retry_calibrated_confidence).toBeUndefined();
     expect(ext.resolver_provenance_trace).toBeUndefined();
   });
 
@@ -709,9 +663,13 @@ describe('deriveAuditExtension — 조기 반환 및 선택적 필드 (AuditExte
     expect(ext.hard_filter_drop_log?.[0]?.entityId).toBe('wine-x');
   });
 
-  it('E4-EARLY-03: corrective_retry_calibrated_confidence 단독 존재 → 객체 반환', () => {
-    const ext: AuditExt = { corrective_retry_calibrated_confidence: 0.75 };
-    expect(ext.corrective_retry_calibrated_confidence).toBe(0.75);
+  it('E4-EARLY-03: resolver_provenance_trace 단독 존재 → 객체 반환', () => {
+    const ext: AuditExt = {
+      resolver_provenance_trace: {
+        blocker_seed_count: 2,
+      },
+    };
+    expect(ext.resolver_provenance_trace?.blocker_seed_count).toBe(2);
     expect(ext.hard_filter_drop_log).toBeUndefined();
   });
 
@@ -719,10 +677,12 @@ describe('deriveAuditExtension — 조기 반환 및 선택적 필드 (AuditExte
     const drop = makeDropRecord('wine-y', 0.8);
     const ext: AuditExt = {
       hard_filter_drop_log: [drop],
-      corrective_retry_calibrated_confidence: 0.9,
+      resolver_provenance_trace: {
+        blocker_seed_count: 1,
+      },
     };
     expect(ext.hard_filter_drop_log).toHaveLength(1);
-    expect(ext.corrective_retry_calibrated_confidence).toBe(0.9);
+    expect(ext.resolver_provenance_trace?.blocker_seed_count).toBe(1);
     expect(ext.planner_policy_trace).toBeUndefined();
   });
 

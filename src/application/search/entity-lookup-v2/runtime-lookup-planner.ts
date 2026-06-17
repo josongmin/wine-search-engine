@@ -6,7 +6,7 @@ import { AnchorExtractor, type AliasMatcher } from '../../../domain/query/servic
 import { buildAliasSurfaceLookupPlan } from '../../../domain/query/service/alias-lookup-plan.js';
 import { buildNormalizedQueryViews } from '../../../domain/query/service/query-normalizer.js';
 import { PolicyCompiler } from '../../../domain/query/service/policy-compiler.js';
-import type { AmbiguityDictionary } from '../../../domain/query/port/ambiguity-dictionary.port.js';
+import type { AmbiguityDictionary, AmbiguityInfo } from '../../../domain/query/port/ambiguity-dictionary.port.js';
 import type {
   LookupExactSafeRegistryPort,
   LookupExactSafeMatch,
@@ -36,7 +36,7 @@ export class RuntimeLookupPlanner implements LookupPlannerPort {
   }
 
   async plan(query: string, context?: LookupPlannerContext): Promise<LookupQueryPlan> {
-    const normalizedQueryViews = buildNormalizedQueryViews(query);
+    const normalizedQueryViews = context?.normalizedQueryViews ?? buildNormalizedQueryViews(query);
     const normalizedQuery = normalizedQueryViews.strict;
 
     const exactSafeMatch = this.lookupExactSafe(normalizedQueryViews, context?.stageTimer);
@@ -62,7 +62,9 @@ export class RuntimeLookupPlanner implements LookupPlannerPort {
       });
     }
 
-    const persistedAmbiguity = await this.lookupPersistedAmbiguity(normalizedQuery, context);
+    const persistedAmbiguity = context?.persistedAmbiguity !== undefined
+      ? context.persistedAmbiguity
+      : await this.lookupPersistedAmbiguity(normalizedQuery, context);
     if (persistedAmbiguity !== null) {
       return this.buildPlan({
         rawQuery: query,
@@ -81,14 +83,38 @@ export class RuntimeLookupPlanner implements LookupPlannerPort {
           anchorConfidence: 0,
           constraintConfidence: 1,
         },
+        persistedAmbiguity,
       });
     }
 
-    const anchors = await this.anchorExtractor.extract(
-      normalizedQuery,
-      normalizedQueryViews,
-      context?.stageTimer,
-    );
+    if (context?.earlyExitOnly === true) {
+      return this.buildPlan({
+        rawQuery: query,
+        normalizedQuery,
+        normalizedQueryViews,
+        queryClass: 'unknown',
+        intent: 'entity_fuzzy',
+        anchors: [],
+        uncertainty: {
+          overall: 0.8,
+          ambiguityDetected: false,
+          ambiguityTypes: [],
+          ambiguitySeverity: 'medium',
+          decisionEffect: 'raise_threshold',
+          parserConfidence: 0.7,
+          anchorConfidence: 0,
+          constraintConfidence: 1,
+        },
+      });
+    }
+
+    const anchors = context?.prefetchedAnchors !== undefined
+      ? context.prefetchedAnchors
+      : await this.anchorExtractor.extract(
+        normalizedQuery,
+        normalizedQueryViews,
+        context?.stageTimer,
+      );
     const authorityAnchors = pruneLookupAuthorityAnchors(
       normalizedQuery,
       normalizedQueryViews,
@@ -121,6 +147,7 @@ export class RuntimeLookupPlanner implements LookupPlannerPort {
     readonly intent: QueryIntent;
     readonly anchors: readonly AnchorCandidate[];
     readonly uncertainty: QueryUncertainty;
+    readonly persistedAmbiguity?: AmbiguityInfo | undefined;
   }): LookupQueryPlan {
     return {
       rawQuery: args.rawQuery,
@@ -136,6 +163,7 @@ export class RuntimeLookupPlanner implements LookupPlannerPort {
         args.uncertainty,
       ),
       uncertainty: args.uncertainty,
+      ...(args.persistedAmbiguity !== undefined ? { persistedAmbiguity: args.persistedAmbiguity } : {}),
     };
   }
 

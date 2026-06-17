@@ -31,8 +31,8 @@
  * remains the reranker + calibrator (never a single channel's top-1).
  *
  * Lives in the application layer because it composes a domain matcher
- * (AliasMatcher) with the application {@link EntityDocumentLookupPort} for
- * hydration — application → domain is the allowed direction.
+ * ({@link AliasMatcher}) with {@link LookupResolverProjectionPort} for
+ * resolver projection hydration — application → domain is the allowed direction.
  */
 
 import {
@@ -52,10 +52,7 @@ import type {
   LookupRetrievalInput,
   LookupRetrievalResult,
 } from '../../../domain/resolver/v2/lookup-v2-types.js';
-import type {
-  EntityDocumentLookupPort,
-  LookupResolverProjectionPort,
-} from '../port/search-pipeline-deps.port.js';
+import type { LookupResolverProjectionPort } from '../port/search-pipeline-deps.port.js';
 import type {
   EntityScopeGraphPort,
   LookupScopeGraphEdge,
@@ -69,8 +66,7 @@ import type { LookupReviewedFamilyRecallPort } from '../../../domain/resolver/v2
 
 export interface MultiChannelRetrievalDeps {
   readonly aliasMatcher: AliasMatcher;
-  readonly entityLookup?: EntityDocumentLookupPort | undefined;
-  readonly resolverProjectionLookup?: LookupResolverProjectionPort | undefined;
+  readonly resolverProjectionLookup: LookupResolverProjectionPort;
   readonly reviewedFamilyRecall?: LookupReviewedFamilyRecallPort | undefined;
   readonly entityScopeGraph?: EntityScopeGraphPort | undefined;
 }
@@ -403,12 +399,7 @@ export class MultiChannelRetrievalEngine implements LookupCandidateRetrievalPort
     }
 
     stageTimer?.start('retrieval.hydration');
-    if (this.deps.resolverProjectionLookup === undefined && this.deps.entityLookup === undefined) {
-      throw new Error('MultiChannelRetrievalEngine requires resolverProjectionLookup or entityLookup');
-    }
-    const docs = this.deps.resolverProjectionLookup !== undefined
-      ? await this.deps.resolverProjectionLookup.getResolverProjections(ranked.map((e) => e.id))
-      : await this.deps.entityLookup!.getDocuments(ranked.map((e) => e.id));
+    const docs = await this.deps.resolverProjectionLookup.getResolverProjections(ranked.map((e) => e.id));
     stageTimer?.end('retrieval.hydration');
 
     const candidates: LookupCandidate[] = ranked.map((entry) => {

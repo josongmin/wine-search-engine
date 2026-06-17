@@ -10,7 +10,6 @@ import type {
 import type { InterpretRequest } from '../interpret-request.dto.js';
 import type { InterpretResultWithV2 } from '../interpret.usecase.js';
 import type { ResolveRequest } from '../resolve-request.dto.js';
-import type { ResolveResponse } from '../resolve-response.dto.js';
 import type {
   EntityLookupV2Command,
   EntityLookupV2Result,
@@ -88,12 +87,6 @@ export interface InterpretUseCasePort {
     request: InterpretRequest & { readonly buildV2?: boolean | undefined; readonly requestId?: string | undefined },
     options?: InterpretExecutionOptions,
   ): Promise<QueryPlanV1 | InterpretResultWithV2>;
-}
-
-export type ResolveExecutionOptions = RequestExecutionContext;
-
-export interface ResolveUseCasePort {
-  execute(request: ResolveRequest, options?: ResolveExecutionOptions): Promise<ResolveResponse>;
 }
 
 export type EntityLookupV2ExecutionOptions = RequestExecutionContext;

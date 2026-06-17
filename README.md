@@ -1,6 +1,6 @@
 # Wine Search Engine — 내부 개발자 가이드
 
-와인 인텔리전스 / 검색 백엔드: **TypeScript**, **Node.js 22**, **Fastify** HTTP API, **PostgreSQL**, **Redis**, **Vespa** 검색, 선택적 **HTTP ML 서비스**(임베딩, 크로스 인코더 리랭크, 학습형 매처).
+와인 인텔리전스 / 검색 백엔드: **TypeScript**, **Node.js 22**, **Fastify** HTTP API, **PostgreSQL**, **Vespa** 검색, 선택적 **HTTP ML 서비스**(임베딩, 크로스 인코더 리랭크, 학습형 매처). **Redis는 공식 런타임 스택에서 제외**(캐시 정책 재설계 전까지 `REDIS_URL` 미설정).
 
 이 문서는 **이 저장소에서 작업하는 엔지니어**를 위한 것입니다. 제품 동작·용어는 **`docs/RFC-*.md`**를 따릅니다. 에디터/에이전트 단축: **`CLAUDE.md`**, **`AGENTS.md`**, **`.cursor/rules/wine-search-engine.mdc`**. **HTTP 요청 추적·에이전트 자율 디버깅:** **`.ai/llm-debugging-playbook.md`** (플레이북), **`.ai/debug-mode.md`** (활성화·한계).
 
@@ -26,7 +26,7 @@
 ```bash
 git clone <internal-remote> wine-search-engine && cd wine-search-engine
 corepack enable   # once per machine — activates pnpm from package.json "packageManager"
-pnpm install && cp .env.example .env   # DATABASE_URL(RDS), REDIS_URL, VESPA_URL 등 편집
+pnpm install && cp .env.example .env   # DATABASE_URL(RDS), VESPA_URL 등 편집 (REDIS_URL은 비움)
 pnpm run migrate                  # `.env`의 Postgres에 마이그레이션 (기본: RDS URL + PG_SSL)
 pnpm run dev                      # http://localhost:3000 — GET /health 참고
 pnpm run lint && pnpm run typecheck && pnpm run test   # 푸시 전
@@ -47,7 +47,7 @@ pnpm run lint && pnpm run typecheck && pnpm run test   # 푸시 전
 | HTTP | **Fastify 5**, **Zod**(스키마·라우트 계약), **Pino** 로깅 |
 | API 문서 | 계약 카탈로그 기반 HTTP surface (`src/interface/http/routes/http-route-contract-catalog.ts`) |
 | DB | **`pg`** — 엔터티, 별칭, 피드백, 제안, 워치리스트(해당 시) |
-| 캐시 / pub-sub | **`redis`** (공식 클라이언트, ioredis 아님) |
+| 캐시 | **in-process fallback** (공식 스택). **`redis` 어댑터는 코드에 유지하나 배포 env에서는 `REDIS_URL` 미설정** — 캐시 정책 재승인 전까지 제외 |
 | 검색 엔진 | **Vespa 8** — ANN + sparse; 앱 패키지는 **`vespa/app/`** |
 | ML / 수치 | **onnxruntime-node**(음주 가능 기간 ONNX 선택), 원격 모델용 HTTP 어댑터 |
 | LLM / 도구 | **@anthropic-ai/sdk** (선택; 보안·도구 경로) |
@@ -68,7 +68,7 @@ pnpm run lint && pnpm run typecheck && pnpm run test   # 푸시 전
 | **Interface** (`src/interface/`) | Fastify 라우트, Zod 계약, 미들웨어, Claude 도구, CLI 진입점 |
 | **Application** (`src/application/`) | 유스케이스 오케스트레이션: 검색 파이프라인 단계, 음주 가능 기간 파사드, 에이전트 실행 |
 | **Domain** (`src/domain/`) | 순수 로직, 엔티티, 정책, **포트**(인터페이스) — 직접 I/O 없음 |
-| **Infrastructure** (`src/infrastructure/`) | **어댑터**: Postgres, Redis, Vespa 클라이언트, HTTP ML 클라이언트, ONNX, 텔레메트리 |
+| **Infrastructure** (`src/infrastructure/`) | **어댑터**: Postgres, Vespa 클라이언트, HTTP ML 클라이언트, ONNX, 텔레메트리 (Redis 어댑터는 비공식·비활성) |
 
 의존성은 **안쪽**을 향합니다: 애플리케이션·도메인이 포트를 정의하고, 인프라가 구현합니다.
 
@@ -78,7 +78,7 @@ pnpm run lint && pnpm run typecheck && pnpm run test   # 푸시 전
 
 1. **`buildCoreContainerServices`** (`container-core.ts` / `container-core-builders.ts`) — 쿼리 플래너, 엔터티 리졸버(+ 캘리브레이터, 학습형 매처 HTTP), 후보 풀·퓨전, 랭커, 의사결정 엔진, 응답 빌더, mixed 솔버, Vespa 검색 인덱스, 임베딩·리랭커 HTTP, 음주 가능 기간 예측기 등.
 2. **`buildFeatureContainerServices`** (`container-features.ts` + `container-usecases.ts`) — search / hybrid / resolve / interpret / replay / batch / 분해 검색, 음주 가능 기간 유스케이스, 적응형 Claude 도구 실행기, 선택적 eval 러너.
-`main.ts`는 **런타임 핸들**(Postgres 풀, Redis 클라이언트)을 만든 뒤 **`createContainer(config, runtime)`**, 그다음 **`buildHealthRouteOptions`**의 준비 상태 옵션으로 **`createServer(container)`**를 호출합니다.
+`main.ts`는 **런타임 핸들**(Postgres 풀; Redis는 `REDIS_URL` 있을 때만)을 만든 뒤 **`createContainer(config, runtime)`**, 그다음 **`buildHealthRouteOptions`**의 준비 상태 옵션으로 **`createServer(container)`**를 호출합니다.
 
 ---
 
@@ -360,7 +360,7 @@ flowchart TD
 - **랭킹** — 시그널, 증거, 선택적 **LTR** 스타일 리랭크 훅 (`domain/ranking/`, 애플리케이션 파이프라인).
 - **의사결정·응답** — 의사결정 엔진, 임계 프로필, 응답 빌더; **음주 가능 기간** 힌트(ONNX 또는 휴리스틱 정책) (`domain/drinking-window/`, `infrastructure/ml/`).
 - **Mixed·유사도** — 앵커 + 유사 이웃용 mixed 솔버 (`domain/mixed/`).
-- **캐싱** — 검색 응답 캐시 포트 + 연결 시 Redis (`domain/performance/`).
+- **캐싱** — 검색 응답 캐시 포트; 공식 배포는 in-process fallback (`KILL_SWITCH_QUERY_CACHE=true` 권장). Redis 경로는 캐시 정책 재설계 후 재도입.
 
 ### 보안·품질 게이트
 
@@ -451,7 +451,7 @@ corepack enable
 pnpm install --frozen-lockfile
 # npm/yarn/bun으로는 설치되지 않습니다(preinstall 가드). 예외 자동화만 SKIP_PNPM_ONLY_CHECK=1.
 cp .env.example .env
-# .env 편집 — PG_*, REDIS_URL, VESPA_URL, ML URL, 시크릿.
+# .env 편집 — PG_*, VESPA_URL, ML URL, 시크릿 (REDIS_URL 비움).
 ```
 
 실질적 변경을 머지하기 전: **`pnpm run lint`**, **`pnpm run typecheck`**, 담당 영역 테스트.
@@ -468,7 +468,7 @@ cp .env.example .env
 |------|------|
 | Core | `NODE_ENV`, `PORT`, `LOG_LEVEL`, `HTTP_RATE_LIMIT_MAX`, `CORS_ALLOWED_ORIGINS` |
 | Postgres | `PG_HOST`, `PG_PORT`, `PG_DATABASE`, `PG_USER`, `PG_PASSWORD` — 비밀번호 비우면 여러 경로에서 PG 풀 생략 |
-| Redis | `REDIS_URL` |
+| Redis | **공식 스택 제외** — `REDIS_URL` 비움. 재도입 전 `KILL_SWITCH_QUERY_CACHE=true` 유지 |
 | Vespa | `VESPA_URL`, `VESPA_CONTENT_CLUSTER` |
 | ML HTTP | `EMBEDDING_SERVICE_URL`, 선택 `COHERE_API_KEY`/`COHERE_RERANK_MODEL`, `RERANK_BLEND_SCALE`, 선택 `LEARNED_MATCHER_SERVICE_URL` |
 | Anthropic | `ANTHROPIC_API_KEY`(선택 기능) |
@@ -486,7 +486,7 @@ bash scripts/build/link-external-artifacts.sh
 
 루트 `node_modules`는 `link-external-node-modules.sh`로 **`WINE_DEPS_DIR`(기본 `~/.wine-search-engine/deps`)** 밖으로 옮길 수 있습니다. `web/node_modules`는 Next/Turbopack 제약 때문에 **저장소 안의 실제 디렉터리**로 두는 것이 안전합니다. `dist`/`.next`/coverage 등은 `link-external-artifacts.sh`가 **`WINE_BUILD_DIR`(기본 `~/.wine-search-engine/build`)** 쪽으로 옮기고 레포에는 심볼릭 링크만 둡니다.
 
-**Docker Compose (`docker-compose.yml`)**는 **`app`** 서비스 환경을 설정해 **`postgres`**, **`redis`**, **`vespa`**를 DNS으로 해석; 임베딩은 **`host.docker.internal`**로 호스트 서비스를 쓸 수 있음. 리랭커는 Cohere API(`COHERE_API_KEY`)를 사용합니다.
+**Docker Compose (`docker-compose.yml`)** — 로컬 **Postgres만** (`wine-search-dev`). Vespa는 `.env`의 `VESPA_URL`(Cloud/로컬). **Redis 없음** (prod/dev/CI 공통).
 
 ---
 
@@ -503,18 +503,17 @@ pnpm run build && pnpm run start   # dist/main.js
 
 스택 두 가지; **한 머신에서 충돌하는 호스트 포트로 Vespa 두 개를 동시에 띄우지 않도록** 주의.
 
-### 전체 스택 — `docker-compose.yml` (**`wine-search-dev`**)
+### 로컬 Postgres — `docker-compose.yml` (**`wine-search-dev`**)
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 ```
 
 | 서비스 | 호스트 포트 | 비고 |
 |--------|-------------|------|
-| API | `3000` | |
-| Postgres | `5432` | `wine_engine` / `wine_dev`(파일 참고) |
-| Redis | `6379` | |
-| Vespa | `8080`, 설정 `19072`→`19071` | 호스트 `VESPA_URL`: `http://localhost:8080` |
+| Postgres | `5432` | `wine_engine` / `wine_dev` |
+
+Vespa·ML 서비스는 `.env`의 `VESPA_URL`, `EMBEDDING_SERVICE_URL` 등으로 별도 연결.
 ### 테스트 레인 — `docker-compose.test.yml` (**`wine-search-test`**)
 
 ```bash
@@ -524,7 +523,6 @@ docker compose -f docker-compose.test.yml up -d
 | 서비스 | 호스트 포트 |
 |--------|-------------|
 | Postgres | `5433` — `wine_engine_test` |
-| Redis | `6380` |
 | Vespa | `18080`, `19071` — `VESPA_URL`: `http://localhost:18080` |
 
 ---

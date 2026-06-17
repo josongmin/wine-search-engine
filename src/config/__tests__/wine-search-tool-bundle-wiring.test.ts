@@ -29,9 +29,6 @@ const buildMockCore = (overrides: Record<string, unknown> = {}) => ({
   calibrationStore: {} as never,
   browseRetriever: {} as never,
   compareRetriever: {} as never,
-  entityLookup: {
-    getDocuments: vi.fn(async () => new Map()),
-  } as never,
   snapshotVersions: {} as never,
   cacheLookupRuntimeState: {} as never,
   cacheLookupRuntimeStateProvider: {} as never,
@@ -55,7 +52,6 @@ vi.mock('../container-features.js', () => ({
     searchUseCase: { execute: vi.fn() } as never,
     decomposedSearchUseCase: { execute: vi.fn() } as never,
     interpretUseCase: {} as never,
-    resolveUseCase: {} as never,
     hybridUseCase: {} as never,
     batchSearchUseCase: {} as never,
     autocompleteUseCase: {} as never,

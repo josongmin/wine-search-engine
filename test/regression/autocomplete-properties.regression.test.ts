@@ -61,7 +61,8 @@ import {
   type AutocompleteBenchmarkCase,
 } from '../../scripts/eval/run-autocomplete-eval.ts';
 import type { EntityLookupV2UseCasePort } from '../../src/application/search/port/search-route-usecases.port.js';
-import type { EntityDocumentLookupPort } from '../../src/application/search/port/search-pipeline-deps.port.js';
+import type { LookupResolverProjectionPort } from '../../src/application/search/port/search-pipeline-deps.port.js';
+import { wrapEntityDocumentLookupAsResolverProjection } from '../../src/application/search/__tests__/resolver-projection-lookup.stub.js';
 import type { EntityLookupV2Command, EntityLookupV2Result } from '../../src/application/search/entity-lookup-v2/entity-lookup-v2.dto.js';
 import {
   buildEntityLookupV2AutocompleteTraceRef,
@@ -151,17 +152,17 @@ function makeEntityLookupV2Stub(response: EntityLookupV2Result): {
   return { port, calls };
 }
 
-function makeEntityLookupStub(docs: ReadonlyMap<CanonicalEntityId, RetrievalDocument>): {
-  readonly port: EntityDocumentLookupPort;
+function makeResolverProjectionStub(docs: ReadonlyMap<CanonicalEntityId, RetrievalDocument>): {
+  readonly port: LookupResolverProjectionPort;
   readonly requestedIds: CanonicalEntityId[][];
 } {
   const requestedIds: CanonicalEntityId[][] = [];
-  const port: EntityDocumentLookupPort = {
+  const port = wrapEntityDocumentLookupAsResolverProjection({
     getDocuments: (entityIds) => {
       requestedIds.push([...entityIds]);
       return Promise.resolve(docs);
     },
-  };
+  });
   return { port, requestedIds };
 }
 
@@ -244,8 +245,8 @@ describe('Property: autocomplete projection determinism', () => {
     await fc.assert(
       fc.asyncProperty(lookupV2ResponseArb(), async ({ response }) => {
         const resolveA = makeEntityLookupV2Stub(response);
-        const lookupA = makeEntityLookupStub(new Map());
-        const ucA = new AutocompleteUseCase({ entityLookupV2UseCase: resolveA.port, entityLookup: lookupA.port });
+        const lookupA = makeResolverProjectionStub(new Map());
+        const ucA = new AutocompleteUseCase({ entityLookupV2UseCase: resolveA.port, resolverProjectionLookup: lookupA.port });
 
         const first = await ucA.execute({ query: 'opu' });
         const second = await ucA.execute({ query: 'opu' });
@@ -263,8 +264,8 @@ describe('Property: faithful 1:1 projection (cardinality, order, rank, identity)
     await fc.assert(
       fc.asyncProperty(lookupV2ResponseArb(), async ({ response, candidates }) => {
         const resolve = makeEntityLookupV2Stub(response);
-        const lookup = makeEntityLookupStub(new Map());
-        const uc = new AutocompleteUseCase({ entityLookupV2UseCase: resolve.port, entityLookup: lookup.port });
+        const lookup = makeResolverProjectionStub(new Map());
+        const uc = new AutocompleteUseCase({ entityLookupV2UseCase: resolve.port, resolverProjectionLookup: lookup.port });
 
         const result = await uc.execute({ query: 'q' });
 
@@ -307,8 +308,8 @@ describe('Property: canonical label hydration + fallback', () => {
             }
           }
           const resolve = makeEntityLookupV2Stub(response);
-          const lookup = makeEntityLookupStub(docs);
-          const uc = new AutocompleteUseCase({ entityLookupV2UseCase: resolve.port, entityLookup: lookup.port });
+          const lookup = makeResolverProjectionStub(docs);
+          const uc = new AutocompleteUseCase({ entityLookupV2UseCase: resolve.port, resolverProjectionLookup: lookup.port });
 
           const result = await uc.execute({ query: 'q' });
 
@@ -331,8 +332,8 @@ describe('Property: status / trace-ref / request-id mapping fidelity', () => {
     await fc.assert(
       fc.asyncProperty(lookupV2ResponseArb(), async ({ response }) => {
         const lookupV2 = makeEntityLookupV2Stub(response);
-        const lookup = makeEntityLookupStub(new Map());
-        const uc = new AutocompleteUseCase({ entityLookupV2UseCase: lookupV2.port, entityLookup: lookup.port });
+        const lookup = makeResolverProjectionStub(new Map());
+        const uc = new AutocompleteUseCase({ entityLookupV2UseCase: lookupV2.port, resolverProjectionLookup: lookup.port });
 
         const result = await uc.execute({ query: 'q' });
         const traceRef = buildEntityLookupV2AutocompleteTraceRef(response);
@@ -359,8 +360,8 @@ describe('Property: NFC/NFD Korean prefix transparency', () => {
           // Build the requested normalization form. The use case must not alter it.
           const query = prefix.normalize(form === 'NFC' ? 'NFC' : 'NFD');
           const lookupV2 = makeEntityLookupV2Stub(buildLookupV2Result('resolved', []));
-          const lookup = makeEntityLookupStub(new Map());
-          const uc = new AutocompleteUseCase({ entityLookupV2UseCase: lookupV2.port, entityLookup: lookup.port });
+          const lookup = makeResolverProjectionStub(new Map());
+          const uc = new AutocompleteUseCase({ entityLookupV2UseCase: lookupV2.port, resolverProjectionLookup: lookup.port });
 
           await uc.execute({ query });
 
@@ -389,8 +390,8 @@ describe('Property: NFC/NFD Korean prefix transparency', () => {
 
         const runForm = async (form: 'NFC' | 'NFD'): Promise<string | undefined> => {
           const lookupV2 = makeEntityLookupV2Stub(buildResponse(form));
-          const lookup = makeEntityLookupStub(new Map());
-          const uc = new AutocompleteUseCase({ entityLookupV2UseCase: lookupV2.port, entityLookup: lookup.port });
+          const lookup = makeResolverProjectionStub(new Map());
+          const uc = new AutocompleteUseCase({ entityLookupV2UseCase: lookupV2.port, resolverProjectionLookup: lookup.port });
           const result = await uc.execute({ query: prefix });
           return result.suggestions[0]?.entity.canonical_label;
         };
@@ -418,8 +419,8 @@ describe('Property: empty-candidate and empty-prefix safety', () => {
         statusArb(),
         async (query, status) => {
           const lookupV2 = makeEntityLookupV2Stub(buildLookupV2Result(status, []));
-          const lookup = makeEntityLookupStub(new Map());
-          const uc = new AutocompleteUseCase({ entityLookupV2UseCase: lookupV2.port, entityLookup: lookup.port });
+          const lookup = makeResolverProjectionStub(new Map());
+          const uc = new AutocompleteUseCase({ entityLookupV2UseCase: lookupV2.port, resolverProjectionLookup: lookup.port });
 
           const result = await uc.execute({ query });
           expect(result.suggestions).toEqual([]);
@@ -439,8 +440,8 @@ describe('Property: calibrated score forwarded verbatim within [0,1]', () => {
     await fc.assert(
       fc.asyncProperty(lookupV2ResponseArb(), async ({ response, candidates }) => {
         const resolve = makeEntityLookupV2Stub(response);
-        const lookup = makeEntityLookupStub(new Map());
-        const uc = new AutocompleteUseCase({ entityLookupV2UseCase: resolve.port, entityLookup: lookup.port });
+        const lookup = makeResolverProjectionStub(new Map());
+        const uc = new AutocompleteUseCase({ entityLookupV2UseCase: resolve.port, resolverProjectionLookup: lookup.port });
 
         const result = await uc.execute({ query: 'q' });
         for (let i = 0; i < candidates.length; i += 1) {

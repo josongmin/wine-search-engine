@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { HybridUseCase } from '../../../../src/application/search/hybrid.usecase.js';
+import { makeStubEntityLookupV2UseCase } from '../../../../src/application/search/__tests__/entity-lookup-v2-use-case.stub.js';
+import type { EntityLookupV2Result } from '../../../../src/application/search/entity-lookup-v2/entity-lookup-v2.dto.js';
 import type { QueryPlanV1 } from '../../../../src/domain/query/model/query-plan.js';
 import {
   LTR_FEATURE_DIMENSION,
@@ -258,6 +260,53 @@ function createKnownItemLtrModel() {
   };
 }
 
+function makeResolvedLookupV2Result(entityId: string, label = 'Opus One 2021'): EntityLookupV2Result {
+  return {
+    status: 'resolved',
+    decisionReason: 'resolved',
+    normalizedQueryViews: {
+      raw: 'Opus One',
+      strict: 'opus one',
+      accentless: 'opus one',
+      compact: 'opusone',
+      vintageCanonicalized: 'opus one',
+      vintageStripped: 'opus one',
+      lookupVariants: ['opus one'],
+    },
+    candidates: [{
+      entityId,
+      canonicalLabel: label,
+      calibratedScore: 0.96,
+      rank: 1,
+      channelAgreement: 1,
+      channelHits: [],
+    }],
+    topCandidate: {
+      entityId,
+      canonicalLabel: label,
+      calibratedScore: 0.96,
+      rank: 1,
+      channelAgreement: 1,
+      channelHits: [],
+    },
+    clarificationOptions: [],
+    evidenceSummary: {
+      admissionReasonCode: 'admitted_entity_reference',
+      decisionReasonCode: 'resolved_singleton',
+      topConfidence: 0.96,
+      calibrationTrusted: true,
+      queryClass: 'entity_resolution',
+      candidatePoolSize: 1,
+      channelCoverage: [],
+    },
+    meta: {
+      queryTimeMs: 1,
+      version: 'test',
+      engineSchemaVersion: 'entity_lookup_v2',
+    },
+  };
+}
+
 function makeHybridUseCase(overrides: Record<string, unknown> = {}) {
   return new HybridUseCase({
     allowCompiledFallback: true,
@@ -267,6 +316,7 @@ function makeHybridUseCase(overrides: Record<string, unknown> = {}) {
     decisionEngine: { decide: vi.fn().mockResolvedValue(createDecisionOutput()) } as never,
     responseBuilder: createResponseBuilder() as never,
     querySanitizer: safeSanitizer as never,
+    entityLookupV2UseCase: makeStubEntityLookupV2UseCase(),
     ...overrides,
   });
 }
@@ -551,41 +601,24 @@ describe('HybridUseCase', () => {
     const compareRetriever = {
       compareAgainstAnchor: vi.fn().mockResolvedValue(createCompareRetrieverResult(comparedEntityId)),
     };
-    const entityLookup = {
-      getDocument: vi.fn().mockResolvedValue(createAnchorDocument(anchorEntityId)),
-      getDocuments: vi.fn(async (ids: readonly unknown[]) => {
-        const map = new Map();
-        for (const id of ids) {
-          map.set(id, createAnchorDocument(anchorEntityId));
-        }
-        return map;
-      }),
-    };
-    const entityResolver = {
-      resolve: vi.fn().mockResolvedValue(createResolvedResolverResult(plan, anchorEntityId)),
+    const entityLookupV2UseCase = {
+      execute: vi.fn().mockResolvedValue(makeResolvedLookupV2Result(String(anchorEntityId))),
     };
     const candidatePool = { generate: vi.fn() };
     const useCase = makeHybridUseCase({
       queryPlanner: { plan: vi.fn().mockResolvedValue(plan) } as never,
       candidatePool: candidatePool as never,
       compareRetriever: compareRetriever as never,
-      entityResolver: entityResolver as never,
-      entityLookup: entityLookup as never,
+      entityLookupV2UseCase: entityLookupV2UseCase as never,
     });
 
     await useCase.execute({ query: 'Opus One alternatives' }, 'req-compare');
 
-    expect(entityResolver.resolve).toHaveBeenCalledWith(expect.objectContaining({
-      rawQuery: plan.rawQuery,
-      normalizedQuery: plan.normalizedQuery,
-      queryClass: plan.queryClass,
-      candidateEntities: [
-        expect.objectContaining({
-          entityId: anchorEntityId,
-          canonicalLabel: 'Opus One 2021',
-        }),
-      ],
-    }));
+    expect(entityLookupV2UseCase.execute).toHaveBeenCalledWith(expect.objectContaining({
+      query: plan.rawQuery,
+      maxCandidates: expect.any(Number),
+      mode: 'default',
+    }), undefined);
     expect(compareRetriever.compareAgainstAnchor).toHaveBeenCalledWith(
       anchorEntityId,
       plan.constraints,
@@ -602,18 +635,8 @@ describe('HybridUseCase', () => {
     const compareRetriever = {
       compareAgainstAnchor: vi.fn().mockResolvedValue([]),
     };
-    const entityLookup = {
-      getDocument: vi.fn().mockResolvedValue(createAnchorDocument(anchorEntityId)),
-      getDocuments: vi.fn(async (ids: readonly unknown[]) => {
-        const map = new Map();
-        for (const id of ids) {
-          map.set(id, createAnchorDocument(anchorEntityId));
-        }
-        return map;
-      }),
-    };
-    const entityResolver = {
-      resolve: vi.fn().mockResolvedValue(createResolvedResolverResult(plan, anchorEntityId)),
+    const entityLookupV2UseCase = {
+      execute: vi.fn().mockResolvedValue(makeResolvedLookupV2Result(String(anchorEntityId))),
     };
     const candidatePool = {
       generate: vi.fn().mockResolvedValue([]),
@@ -623,8 +646,7 @@ describe('HybridUseCase', () => {
       queryPlanner: { plan: vi.fn().mockResolvedValue(plan) } as never,
       candidatePool: candidatePool as never,
       compareRetriever: compareRetriever as never,
-      entityResolver: entityResolver as never,
-      entityLookup: entityLookup as never,
+      entityLookupV2UseCase: entityLookupV2UseCase as never,
       responseBuilder: responseBuilder as never,
     });
 

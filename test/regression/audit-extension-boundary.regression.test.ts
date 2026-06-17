@@ -40,7 +40,6 @@ describe('T-E5-03: AuditExtension stable vs debug boundary', () => {
   it('stable fields list matches the documented stable set', () => {
     expect([...AUDIT_EXTENSION_STABLE_FIELDS].sort()).toEqual([
       'abstain_policy_trace',
-      'corrective_retry_calibrated_confidence',
       'determinism_fingerprint',
       'fallback_trace',
       'hard_filter_drop_log',
@@ -72,7 +71,6 @@ describe('T-E5-03: AuditExtension stable vs debug boundary', () => {
         failed_synthesis_attempts: 0,
         fallback_search_used: false,
       },
-      corrective_retry_calibrated_confidence: 0.85,
       determinism_fingerprint: 'abc123',
     };
     const result = AuditExtensionSchema.safeParse(stableOnlyPayload);
@@ -148,7 +146,6 @@ describe('T-E5-03: AuditExtension stable vs debug boundary', () => {
       'abstain_policy_trace',
       'hard_filter_drop_log',
       'resolver_provenance_trace',
-      'corrective_retry_calibrated_confidence',
       'fallback_trace',
     ];
     expect(domainKeys.length).toBeGreaterThan(0);

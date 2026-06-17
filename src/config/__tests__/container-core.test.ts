@@ -47,9 +47,6 @@ const buildSnapshotVersions = vi.fn(() => ({
 const buildDecisionEngine = vi.fn(() => decisionEngine);
 const buildMixedSolver = vi.fn(() => mixedSolver);
 const buildResponseBuilder = vi.fn(() => responseBuilder);
-const buildBlockingUseCaseAdapter = vi.fn(() => ({ block: vi.fn() }));
-const snapshotEntityLookup = { getDocuments: vi.fn(), getDrinkingWindowDocuments: vi.fn() };
-const loadSnapshotEntityLookup = vi.fn(async () => snapshotEntityLookup);
 // ADR-013 Phase 1c.x: expose a minimal factory mock so
 // `buildCoreContainerServices` can populate `budgetLedgerFactory`
 // without pulling the concrete InMemoryBudgetLedger through the unit
@@ -69,12 +66,6 @@ vi.mock('../container-adapters.js', () => ({
   buildCoreAdapterServices,
 }));
 
-vi.mock('../../infrastructure/adapter/search-snapshot-entity-lookup.js', () => ({
-  SearchSnapshotEntityLookup: {
-    loadFromManifest: loadSnapshotEntityLookup,
-  },
-}));
-
 vi.mock('../startup-preflight.js', () => ({
   warnStartupMisconfigurations: vi.fn(),
 }));
@@ -84,7 +75,6 @@ vi.mock('../container-runtime-support.js', () => ({
 }));
 
 vi.mock('../container-core-builders.js', () => ({
-  buildBlockingUseCaseAdapter,
   buildBudgetLedgerFactory,
   buildCandidatePool,
   buildBrowseRetriever,
@@ -155,20 +145,5 @@ describe('buildCoreContainerServices', () => {
       support.phraseCache,
       'search-snapshot:v1:target',
     );
-  });
-
-  it('uses manifest-backed entity lookup for snapshot-scoped runtime overrides', async () => {
-    const { buildCoreContainerServices } = await import('../container-core.js');
-    const config = parseEnv({ NODE_ENV: 'test' });
-
-    const core = await buildCoreContainerServices(config, {
-      searchSnapshotId: 'search-snapshot:v1:target',
-      searchSnapshotManifestPath: '/tmp/search-snapshot:v1:target/manifest.json',
-    });
-
-    expect(loadSnapshotEntityLookup).toHaveBeenCalledWith(
-      '/tmp/search-snapshot:v1:target/manifest.json',
-    );
-    expect(core.entityLookup).toBe(snapshotEntityLookup);
   });
 });

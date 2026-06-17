@@ -12,6 +12,7 @@ import { abortSignalFromFastifyRequest, raceWithRequestAbort } from '../request-
 import { HTTP_STATUS_OK } from '../constants.js';
 import type { PrimitiveSearchRequestSchema } from '../schemas/primitive-search.schema.js';
 import type { ResolveRequest } from '../../../application/search/resolve-request.dto.js';
+import { executeResolveViaEntityLookupV2 } from '../../../application/search/entity-lookup-v2/entity-lookup-v2-resolve-mapping.js';
 
 type ResolveRouteBody = z.output<typeof PrimitiveSearchRequestSchema>;
 
@@ -28,10 +29,9 @@ function toResolveRequest(
 }
 
 /**
- * Retained internal resolve surface for resolver-only tooling/regression
- * coverage. The public exact-entity path is `POST /v2/entity-lookup`
- * (EntityLookupV2; the legacy `/v1/lookup/wine` route was removed in the
- * V2-only cutover).
+ * Retained internal resolve surface for tooling/regression coverage. Delegates
+ * to the same Entity Lookup V2 authority as `POST /v2/entity-lookup` (the legacy
+ * `/v1/lookup/wine` route was removed in the V2-only cutover).
  */
 export function registerResolveRoute(
   app: FastifyInstance,
@@ -47,7 +47,7 @@ export function registerResolveRoute(
       const abortSignal = abortSignalFromFastifyRequest(request, reply);
 
       const result = await raceWithRequestAbort(
-        deps.resolveUseCase.execute(resolveRequest, {
+        executeResolveViaEntityLookupV2(deps.entityLookupV2UseCase, resolveRequest, {
           abortSignal,
           debugRequest: request.debugRequest,
         }),

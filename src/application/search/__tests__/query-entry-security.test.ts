@@ -7,7 +7,7 @@ import {
   PolicyBlockedError,
 } from '../../../domain/shared/error/policy-blocked.js';
 import { InterpretUseCase } from '../interpret.usecase.js';
-import { ResolveUseCase } from '../resolve.usecase.js';
+import { executeResolveViaEntityLookupV2 } from '../entity-lookup-v2/entity-lookup-v2-resolve-mapping.js';
 import { HybridUseCase } from '../hybrid.usecase.js';
 import { QueryEntrySecurityGate } from '../query-entry-security.js';
 import type { InjectionJudgePort } from '../../../domain/security/port/injection-judge.port.js';
@@ -224,81 +224,22 @@ describe('public query entry use cases enforce Layer 1 security consistently', (
     expect(queryPlanner.plan).toHaveBeenCalledWith('Ridge Cabernet', expect.any(Object));
   });
 
-  it('ResolveUseCase throws POLICY_BLOCKED for blocked queries', async () => {
-    const queryPlanner = { plan: vi.fn() };
-    const entityResolver = { resolve: vi.fn() };
-    const useCase = new ResolveUseCase({
-      queryPlanner: queryPlanner as never,
-      entityResolver: entityResolver as never,
-      querySanitizer: sanitizer,
-    });
+  it('resolve route mapping propagates POLICY_BLOCKED from the V2 lookup authority', async () => {
+    const entityLookupV2UseCase = {
+      execute: vi.fn().mockRejectedValue(
+        Object.assign(new Error('Query blocked by security policy.'), { code: 'POLICY_BLOCKED' }),
+      ),
+    };
 
-    await expect(useCase.execute({ query: '<script>alert(1)</script>' })).rejects.toMatchObject<DomainError>({
+    await expect(
+      executeResolveViaEntityLookupV2(entityLookupV2UseCase as never, {
+        query: '<script>alert(1)</script>',
+      }),
+    ).rejects.toMatchObject<DomainError>({
       code: 'POLICY_BLOCKED',
       message: 'Query blocked by security policy.',
     });
-    expect(queryPlanner.plan).not.toHaveBeenCalled();
-    expect(entityResolver.resolve).not.toHaveBeenCalled();
-  });
-
-  it('ResolveUseCase also blocks Layer 2 semantic injections', async () => {
-    const queryPlanner = { plan: vi.fn() };
-    const entityResolver = { resolve: vi.fn() };
-    const injectionJudge: InjectionJudgePort = {
-      judge: vi.fn().mockResolvedValue(true),
-    };
-    const useCase = new ResolveUseCase({
-      queryPlanner: queryPlanner as never,
-      entityResolver: entityResolver as never,
-      querySanitizer: sanitizer,
-      injectionJudge,
-      judgeTimeoutMs: JUDGE_TIMEOUT_MS,
-    });
-
-    await expect(useCase.execute({ query: 'find Bordeaux wines' })).rejects.toMatchObject<DomainError>({
-      code: 'POLICY_BLOCKED',
-      message: 'Query blocked by security policy.',
-    });
-    expect(queryPlanner.plan).not.toHaveBeenCalled();
-    expect(entityResolver.resolve).not.toHaveBeenCalled();
-  });
-
-  it('ResolveUseCase fail-opens when configured and the judge errors', async () => {
-    const queryPlanner = {
-      plan: vi.fn().mockResolvedValue({
-        rawQuery: 'Opus One',
-        normalizedQuery: 'opus one',
-        route: 'entity',
-        queryClass: 'known_item',
-        anchors: [],
-        constraints: { hard: [], soft: [], inferred: [] },
-        policy: {},
-        uncertainty: {},
-      }),
-    };
-    const entityResolver = {
-      resolve: vi.fn().mockResolvedValue({
-        status: 'resolved',
-        candidates: [],
-        topEntity: undefined,
-      }),
-    };
-    const useCase = new ResolveUseCase({
-      queryPlanner: queryPlanner as never,
-      entityResolver: entityResolver as never,
-      querySanitizer: sanitizer,
-      injectionJudge: {
-        judge: vi.fn().mockRejectedValue(new Error('judge offline')),
-      },
-      judgeFailureMode: 'fail_open',
-      judgeTimeoutMs: JUDGE_TIMEOUT_MS,
-    });
-
-    await expect(useCase.execute({ query: '  Opus One  ' })).resolves.toMatchObject({
-      status: 'resolved',
-    });
-    expect(queryPlanner.plan).toHaveBeenCalledWith('Opus One', expect.any(Object));
-    expect(entityResolver.resolve).toHaveBeenCalled();
+    expect(entityLookupV2UseCase.execute).toHaveBeenCalledOnce();
   });
 
   it('HybridUseCase plans with the sanitized query and throws policy-blocked errors for unsafe input', async () => {

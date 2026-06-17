@@ -664,7 +664,6 @@ const TypedAbstainDecisionWireSchema = z.object({
 //   - abstain_policy_trace
 //   - fallback_trace
 //   - hard_filter_drop_log
-//   - corrective_retry_calibrated_confidence
 //   - determinism_fingerprint
 //
 // DEBUG-ONLY fields (gated by explain=true or X-Debug-Key — shape may change):
@@ -821,13 +820,6 @@ export const AuditExtensionSchema = z.object({
   }).strict().optional(),
 
   /**
-   * TA5: Calibrated posterior confidence from corrective retry.
-   *
-   * @stability stable
-   */
-  corrective_retry_calibrated_confidence: z.number().finite().optional(),
-
-  /**
    * Agent fallback trace — always emitted when agent fallback occurs.
    *
    * @stability stable
@@ -862,7 +854,6 @@ export const AUDIT_EXTENSION_STABLE_FIELDS = [
   'abstain_policy_trace',
   'fallback_trace',
   'hard_filter_drop_log',
-  'corrective_retry_calibrated_confidence',
   'determinism_fingerprint',
 ] as const satisfies readonly (keyof AuditExtensionWire)[];
 

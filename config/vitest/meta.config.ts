@@ -12,6 +12,9 @@ const metaTestInclude = [
   // E5-T12: SSoT gate — verifies SOFT_CONSTRAINT_ATTRIBUTES has exactly one definition
   'test/meta/constraint-attributes-ssot.test.ts',
   'test/meta/vespa-hit-summary-readraw-parity.test.ts',
+  // Entity Lookup V2 cutover gate — per-class no-regression + eval_cases fingerprint pin
+  'test/unit/entity-lookup-v2/cutover-gate.test.ts',
+  'test/meta/lookup-v2-cutover-gate.meta.test.ts',
 ] as const;
 
 export default defineConfig({
