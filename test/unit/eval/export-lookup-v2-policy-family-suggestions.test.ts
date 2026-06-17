@@ -49,24 +49,27 @@ describe('policy-family suggestions', () => {
 
     expect(suggestions).toEqual([
       {
+        semanticConflictKey: 'foo',
         policyConflictSurface: 'foo',
         benchmarkGoldEntityId: 'wine-b',
         suggestionStatus: 'manual_review',
         rationale: 'requires manual policy review: type=producer_family_collision authority=resolved stretch=ambiguous',
       },
       {
+        semanticConflictKey: '라뚜르',
         policyConflictSurface: '라뚜르',
         benchmarkGoldEntityId: 'wine-a',
-        suggestionStatus: 'suggest_keep_policy_conflict',
+        suggestionStatus: 'suggest_keep_ambiguous',
         rationale: 'fail-closed broad conflict: type=short_form_collision authority=resolved stretch=ambiguous',
       },
     ]);
 
     expect(buildLookupV2PolicyFamilySuggestedDecisionRows(suggestions)).toEqual([
       {
+        semanticConflictKey: '라뚜르',
         policyConflictSurface: '라뚜르',
         benchmarkGoldEntityId: 'wine-a',
-        decision: 'keep_policy_conflict',
+        decision: 'keep_ambiguous',
         reviewedBy: 'codex:suggested',
         decisionReason: 'fail-closed broad conflict: type=short_form_collision authority=resolved stretch=ambiguous',
         reviewedAt: expect.any(String),

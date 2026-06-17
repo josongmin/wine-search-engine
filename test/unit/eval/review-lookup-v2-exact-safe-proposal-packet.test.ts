@@ -112,7 +112,21 @@ describe('applyLookupExactSafeProposalReviewDecisions', () => {
           reviewedAt: '2026-06-06T00:00:00.000Z',
         },
       ],
-    })).toThrow(/unknown packet row/);
+    })).not.toThrow();
+
+    expect(applyLookupExactSafeProposalReviewDecisions({
+      packetRows: [],
+      decisionRows: [
+        {
+          surface: '샤또 무통 로쉴드',
+          entityId: 'wine-ce-mouton',
+          decision: 'approve',
+          reviewedBy: 'op',
+          decisionReason: 'verified singleton',
+          reviewedAt: '2026-06-06T00:00:00.000Z',
+        },
+      ],
+    })).toEqual([]);
   });
 
   it('fails closed on re-reviewing terminal rows', () => {

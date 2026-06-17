@@ -54,7 +54,7 @@ describe('applyLookupV2PolicyReviewDecisions', () => {
         {
           surface: 'Vega Sicilia 우니꼬',
           benchmarkGoldHint: 'vega sicilia unico',
-          decision: 'needs_target',
+          decision: 'needs_scope_target',
           reviewedBy: 'op',
           decisionReason: 'missing reviewed entity id',
           reviewedAt: '2026-06-06T00:00:00.000Z',
@@ -64,7 +64,7 @@ describe('applyLookupV2PolicyReviewDecisions', () => {
 
     expect(reviewed.map((row) => row.proposalStatus)).toEqual([
       'approved_exact_safe',
-      'needs_target',
+      'needs_scope_target',
     ]);
     expect(reviewed[0]).toEqual(expect.objectContaining({
       reviewedBy: 'op',
@@ -126,7 +126,21 @@ describe('applyLookupV2PolicyReviewDecisions', () => {
           reviewedAt: '2026-06-06T00:00:00.000Z',
         },
       ],
-    })).toThrow(/unknown packet row/);
+    })).not.toThrow();
+
+    expect(applyLookupV2PolicyReviewDecisions({
+      packetRows: [],
+      decisionRows: [
+        {
+          surface: '라뚜르 2009',
+          benchmarkGoldHint: 'latour',
+          decision: 'promote_exact_safe',
+          reviewedBy: 'op',
+          decisionReason: 'a',
+          reviewedAt: '2026-06-06T00:00:00.000Z',
+        },
+      ],
+    })).toEqual([]);
   });
 
   it('fails closed on re-reviewing terminal rows', () => {

@@ -51,7 +51,7 @@ export function buildLookupV2PolicyFamilySuggestions(
     );
     if (isFailClosedBroadConflict) {
       return {
-        semanticConflictKey: row.semanticConflictKey,
+        semanticConflictKey: row.semanticConflictKey ?? row.policyConflictSurface,
         policyConflictSurface: row.policyConflictSurface,
         benchmarkGoldEntityId: row.benchmarkGoldEntityId,
         suggestionStatus: 'suggest_keep_ambiguous',
@@ -59,7 +59,7 @@ export function buildLookupV2PolicyFamilySuggestions(
       };
     }
     return {
-      semanticConflictKey: row.semanticConflictKey,
+      semanticConflictKey: row.semanticConflictKey ?? row.policyConflictSurface,
       policyConflictSurface: row.policyConflictSurface,
       benchmarkGoldEntityId: row.benchmarkGoldEntityId,
       suggestionStatus: 'manual_review',

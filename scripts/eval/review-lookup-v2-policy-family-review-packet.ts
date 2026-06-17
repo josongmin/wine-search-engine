@@ -69,13 +69,24 @@ function packetKey(semanticConflictKey: string, benchmarkGoldEntityId: string): 
   return `${semanticConflictKey}::${benchmarkGoldEntityId}`;
 }
 
+function resolveSemanticConflictKey(row: {
+  readonly semanticConflictKey?: string | undefined;
+  readonly policyConflictSurface: string;
+}): string {
+  const key = row.semanticConflictKey ?? row.policyConflictSurface;
+  if (key.trim().length === 0) {
+    throw new Error(`family policy-review row is missing semanticConflictKey for surface=${JSON.stringify(row.policyConflictSurface)}`);
+  }
+  return key;
+}
+
 export function applyLookupV2PolicyFamilyReviewDecisions(args: {
   readonly packetRows: readonly LookupV2PolicyFamilyReviewPacketRow[];
   readonly decisionRows: readonly LookupV2PolicyFamilyReviewDecisionRow[];
 }): readonly LookupV2PolicyFamilyReviewPacketRow[] {
   const packetByKey = new Map<string, LookupV2PolicyFamilyReviewPacketRow>();
   for (const row of args.packetRows) {
-    const key = packetKey(row.semanticConflictKey, row.benchmarkGoldEntityId);
+    const key = packetKey(resolveSemanticConflictKey(row), row.benchmarkGoldEntityId);
     if (packetByKey.has(key)) {
       throw new Error(`duplicate family policy-review packet row for surface=${JSON.stringify(row.policyConflictSurface)} entityId=${JSON.stringify(row.benchmarkGoldEntityId)}`);
     }
@@ -93,7 +104,7 @@ export function applyLookupV2PolicyFamilyReviewDecisions(args: {
     if (Number.isNaN(Date.parse(row.reviewedAt))) {
       throw new Error(`family policy-review decision has invalid reviewedAt for surface=${JSON.stringify(row.policyConflictSurface)}`);
     }
-    const key = packetKey(row.semanticConflictKey, row.benchmarkGoldEntityId);
+    const key = packetKey(resolveSemanticConflictKey(row), row.benchmarkGoldEntityId);
     if (decisionByKey.has(key)) {
       throw new Error(`duplicate family policy-review decision for surface=${JSON.stringify(row.policyConflictSurface)} entityId=${JSON.stringify(row.benchmarkGoldEntityId)}`);
     }
@@ -104,7 +115,7 @@ export function applyLookupV2PolicyFamilyReviewDecisions(args: {
   }
 
   return args.packetRows.map((row) => {
-    const key = packetKey(row.semanticConflictKey, row.benchmarkGoldEntityId);
+    const key = packetKey(resolveSemanticConflictKey(row), row.benchmarkGoldEntityId);
     const decision = decisionByKey.get(key);
     if (decision === undefined) {
       return row;

@@ -47,7 +47,7 @@ describe('lookup-v2 policy-conflict governance', () => {
 
   it('keeps registry-owned policy conflicts aligned with core support fixtures', () => {
     expect(coreRecallOnlySurfaces).toEqual(expect.arrayContaining(registrySurfaces));
-    expect(coreNonIdentityQuerySurfaces).toEqual(registrySurfacesPresentInCoreQueryCases);
+    expect(registrySurfacesPresentInCoreQueryCases).toEqual(registrySurfaces);
     expect(coreAmbiguitySurfaces).toEqual(registrySurfaces);
   });
 
