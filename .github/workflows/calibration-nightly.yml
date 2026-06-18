@@ -60,6 +60,7 @@ jobs:
       trace_present: ${{ steps.emit.outputs.trace_present }}
       trace_rows: ${{ steps.emit.outputs.trace_rows }}
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - name: Checkout fixture repo
         uses: actions/checkout@v4
@@ -125,6 +126,7 @@ jobs:
     outputs:
       report_path: ${{ steps.fit.outputs.report_path }}
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - name: Apply DB migrations
         run: pnpm run migrate
@@ -175,6 +177,7 @@ jobs:
     env:
       DATABASE_URL: postgresql://wine:wine_test@localhost:5433/wine_engine_calibration
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - name: Apply DB migrations
         run: pnpm run migrate

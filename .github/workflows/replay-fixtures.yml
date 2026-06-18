@@ -35,6 +35,7 @@ jobs:
   self-contained-replay:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - name: Self-contained replay fixture lane
         run: pnpm run test:e2e:replay:fixtures:self-contained
@@ -54,6 +55,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [self-contained-replay]
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - name: Runtime-required replay execution lane
         run: pnpm run test:e2e:replay:fixtures:runtime-required
@@ -73,6 +75,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [runtime-required-replay-inmemory]
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - name: Runtime-required replay full-runtime lane
         env:

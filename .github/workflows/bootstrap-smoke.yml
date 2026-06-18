@@ -14,5 +14,6 @@ jobs:
     env:
       SKIP_MIGRATE: '1'
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - run: bash scripts/bootstrap-smoke.sh

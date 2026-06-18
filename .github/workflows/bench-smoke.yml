@@ -21,6 +21,7 @@ jobs:
       # reads the same env var and short-circuits when YES.
       BENCH_SMOKE_OVERRIDE: ${{ vars.BENCH_SMOKE_OVERRIDE }}
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - name: Bench smoke (unit-only lightweight)
         run: pnpm run bench:smoke
