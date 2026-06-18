@@ -1,99 +1,93 @@
-import fs from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { SearchSnapshotAliasMatcher } from '../search-snapshot-alias-matcher.js';
+import { LOOKUP_ALIAS_RUNTIME_SCHEMA_VERSION } from '../../../domain/shared/types/search-snapshot-lookup-runtime.js';
+import { createStageTimer } from '../../../domain/shared/stage-timer.js';
 
-const TMP_DIRS: string[] = [];
+function buildLookupAliasRuntimeArtifact(overrides?: {
+  readonly value?: string;
+  readonly normalizedValue?: string;
+  readonly aliasType?: string;
+}) {
+  const artifact = {
+    schemaVersion: LOOKUP_ALIAS_RUNTIME_SCHEMA_VERSION,
+    snapshotId: 'search-snapshot:v1:test',
+    generatedAt: '2026-04-16T00:00:00.000Z',
+    aliasRegistryHash: 'alias-registry-hash',
+    aliases: [{
+      aliasId: 'a1',
+      entityId: 'wine:opus-one',
+      value: overrides?.value ?? 'Opus One',
+      normalizedValue: overrides?.normalizedValue ?? 'opus one',
+      sourceTrust: 1,
+      confidencePrior: 0.97,
+      ...(overrides?.aliasType !== undefined ? { aliasType: overrides.aliasType } : {}),
+    }],
+    surfaceForms: [overrides?.value ?? 'Opus One'],
+    exactIndex: {
+      [overrides?.normalizedValue ?? 'opus one']: [0],
+    },
+    compactIndex: {
+      [overrides?.normalizedValue?.replace(/\s+/g, '') ?? 'opusone']: [0],
+    },
+    wholeTokenIndex: {
+      opus: [0],
+      one: [0],
+    },
+    phoneticIndex: {
+      psn: [0],
+    },
+    doubleMetaphoneIndex: {
+      APSN: [0],
+    },
+    doubleMetaphoneKeysByAliasId: {
+      a1: ['APSN'],
+    },
+    prefixCatalog: [
+      { candidateTerm: 'op', aliasIndexes: [0] },
+      { candidateTerm: 'opu', aliasIndexes: [0] },
+      { candidateTerm: 'opus', aliasIndexes: [0] },
+    ],
+    hangulCompletionRecords: [],
+  } as const;
+  return artifact;
+}
 
-afterEach(async () => {
-  await Promise.all(TMP_DIRS.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
-});
+function buildLookupAliasRuntimeCoreArtifact(overrides?: {
+  readonly value?: string;
+  readonly normalizedValue?: string;
+  readonly aliasType?: string;
+}) {
+  const legacy = buildLookupAliasRuntimeArtifact(overrides);
+  return {
+    schemaVersion: 'lookup_alias_runtime_core.v1',
+    snapshotId: legacy.snapshotId,
+    generatedAt: legacy.generatedAt,
+    aliasRegistryHash: legacy.aliasRegistryHash,
+    aliases: legacy.aliases,
+    exactIndex: legacy.exactIndex,
+    compactIndex: legacy.compactIndex,
+  } as const;
+}
+
+function buildLookupAliasBroadRecallRuntimeArtifact(overrides?: {
+  readonly value?: string;
+  readonly normalizedValue?: string;
+  readonly aliasType?: string;
+}) {
+  const legacy = buildLookupAliasRuntimeArtifact(overrides);
+  return {
+    schemaVersion: 'lookup_alias_broad_recall_runtime.v1',
+    snapshotId: legacy.snapshotId,
+    generatedAt: legacy.generatedAt,
+    aliasRegistryHash: legacy.aliasRegistryHash,
+    wholeTokenIndex: legacy.wholeTokenIndex,
+    phoneticIndex: legacy.phoneticIndex,
+    doubleMetaphoneIndex: legacy.doubleMetaphoneIndex,
+    prefixCatalog: legacy.prefixCatalog,
+  } as const;
+}
 
 describe('SearchSnapshotAliasMatcher', () => {
-  it('loads exact alias substrate from PostgreSQL snapshot rows', async () => {
-    const queries: string[] = [];
-    const pool = {
-      async query(sql: string): Promise<{ rows: Array<Record<string, unknown>> }> {
-        queries.push(sql);
-        if (sql.includes('FROM active_search_snapshot')) {
-          return {
-            rows: [{
-              active_snapshot_id: 'snapshot-001',
-              previous_snapshot_id: null,
-              content_hash: 'hash-001',
-              promoted_at: new Date('2026-04-16T00:00:00.000Z'),
-            }],
-          };
-        }
-        if (sql.includes('FROM aliases')) {
-          return {
-            rows: [
-              {
-                alias_id: 'alias-001',
-                entity_id: 'entity-opus-one',
-                surface_form: 'Opus One',
-                normalized_value: 'opus one',
-                source_trust: 1,
-                confidence: 0.98,
-              },
-            ],
-          };
-        }
-        return { rows: [] };
-      },
-    } as never;
-
-    const matcher = await SearchSnapshotAliasMatcher.loadFromPostgres(pool);
-    expect(matcher).toBeDefined();
-    const internalState = matcher as unknown as {
-      broadRecallIndexesBuilt: boolean;
-    };
-
-    const matches = await matcher?.findMatches('opus one');
-    expect(matches?.[0]).toMatchObject({
-      surfaceForm: 'Opus One',
-      entityIds: ['entity-opus-one'],
-    });
-    expect(internalState.broadRecallIndexesBuilt).toBe(true);
-    expect(queries.some((query) => query.includes('FROM active_search_snapshot'))).toBe(true);
-    expect(queries.some((query) => query.includes('FROM aliases'))).toBe(true);
-  });
-
-  it('uses the explicit snapshot override without resolving the active pointer', async () => {
-    const queries: string[] = [];
-    const paramsSeen: readonly unknown[][] = [];
-    const pool = {
-      async query(sql: string, params?: readonly unknown[]): Promise<{ rows: Array<Record<string, unknown>> }> {
-        queries.push(sql);
-        paramsSeen.push(params ?? []);
-        if (sql.includes('FROM active_search_snapshot')) {
-          throw new Error('active pointer should not be read when snapshot override is provided');
-        }
-        if (sql.includes('FROM aliases')) {
-          return {
-            rows: [
-              {
-                alias_id: 'alias-001',
-                entity_id: 'entity-opus-one',
-                surface_form: 'Opus One',
-                normalized_value: 'opus one',
-                source_trust: 1,
-                confidence: 0.98,
-              },
-            ],
-          };
-        }
-        return { rows: [] };
-      },
-    } as never;
-
-    const matcher = await SearchSnapshotAliasMatcher.loadFromPostgres(pool, 'search-snapshot:v1:target');
-    expect(matcher).toBeDefined();
-    expect(queries.some((query) => query.includes('FROM active_search_snapshot'))).toBe(false);
-    expect(paramsSeen).toContainEqual(['search-snapshot:v1:target']);
-  });
-
   it('resolves exact, compact, and transliterated alias matches from memory', async () => {
     const matcher = new SearchSnapshotAliasMatcher([
       {
@@ -393,233 +387,65 @@ describe('SearchSnapshotAliasMatcher', () => {
     ]);
   });
 
-  it('loads alias substrate from runtime search snapshot state', async () => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'snapshot-alias-matcher-'));
-    TMP_DIRS.push(dir);
-    const aliasesPath = path.join(dir, 'aliases.ndjson');
-    const manifestPath = path.join(dir, 'manifest.json');
-    const runtimeStatePath = path.join(dir, 'runtime-search-snapshot.json');
-
-    await fs.writeFile(
-      aliasesPath,
-      `${JSON.stringify({
-        aliasId: 'a1',
-        entityId: 'wine:opus-one',
-        value: 'Opus One',
-        normalizedValue: 'opus one',
-        sourceTrust: 1,
-        confidencePrior: 0.97,
-      })}\n`,
-      'utf8',
+  it('keeps runtime-artifact matchers fully hydrated and emits staged lookup timings', async () => {
+    const matcher = SearchSnapshotAliasMatcher.fromRuntimeArtifact(
+      buildLookupAliasRuntimeArtifact(),
     );
-    await fs.writeFile(
-      manifestPath,
-      `${JSON.stringify({
-        schemaVersion: 'search_snapshot.v1',
-        snapshotId: 'search-snapshot:v1:test1234',
-        generatedAt: '2026-04-16T00:00:00.000Z',
-        contentHash: 'hash1234',
-        sourceInputPath: '/tmp/input.ndjson',
-        artifacts: {
-          documentsNdjson: '/tmp/documents.ndjson',
-          vespaFeedNdjson: '/tmp/vespa-feed.ndjson',
-          entitiesNdjson: '/tmp/entities.ndjson',
-          aliasesNdjson: aliasesPath,
-          ambiguityRegistryNdjson: '/tmp/ambiguity.ndjson',
-          nlMappingsJson: '/tmp/nl-mappings.json',
-          metadataJson: '/tmp/metadata.json',
-        },
-        counts: {
-          documents: 1,
-          vespaFeed: 1,
-          entities: 1,
-          aliases: 1,
-          ambiguityRegistry: 0,
-          nlMappings: 0,
-        },
-        hashes: {
-          documents: 'h1',
-          vespaFeed: 'h2',
-          entities: 'h3',
-          aliases: 'h4',
-          ambiguityRegistry: 'h5',
-          nlMappings: 'h6',
-        },
-        fieldAvailability: {
-          appellation: {
-            populatedDocCount: 1,
-            totalDocCount: 1,
-            populatedDocRatio: 1,
-          },
-        },
-      })}\n`,
-      'utf8',
-    );
-    await fs.writeFile(
-      runtimeStatePath,
-      `${JSON.stringify({
-        schemaVersion: 'search_snapshot_runtime_state.v3',
-        snapshotId: 'search-snapshot:v1:test1234',
-        contentHash: 'hash1234',
-        publishedAt: '2026-04-16T00:00:00.000Z',
-        manifestPath,
-        nlMappingsRuntimePath: '/tmp/nl-mappings.runtime.json',
-        counts: {
-          entities: 1,
-          aliases: 1,
-          ambiguityRegistry: 0,
-          nlMappings: 0,
-          activeLtrModels: 1,
-        },
-        hashes: {
-          entities: 'h3',
-          aliases: 'h4',
-          ambiguityRegistry: 'h5',
-          nlMappings: 'h6',
-          activeLtrModels: 'h7',
-        },
-        fieldAvailability: {
-          appellation: {
-            populatedDocCount: 1,
-            totalDocCount: 1,
-            populatedDocRatio: 1,
-          },
-        },
-        quality: {
-          status: 'canonical',
-          blockers: [],
-          bypasses: [],
-          carryForwardBenchmarkCount: 0,
-          experimentalInputsPresent: false,
-        },
-      })}\n`,
-      'utf8',
-    );
+    const before = matcher.getBuildStateSnapshot();
+    const stageTimer = createStageTimer();
 
-    const matcher = await SearchSnapshotAliasMatcher.loadFromRuntimeState(runtimeStatePath);
-
-    expect(matcher).toBeDefined();
-    await expect(matcher!.findMatches('opus one')).resolves.toMatchObject([
+    await expect(matcher.findMatches('opu', {
+      scope: 'span',
+      stageTimer,
+    })).resolves.toMatchObject([
       expect.objectContaining({
         surfaceForm: 'Opus One',
       }),
     ]);
+
+    expect(matcher.isFullyHydratedRuntimeArtifact()).toBe(true);
+    expect(matcher.getBuildStateSnapshot()).toEqual(before);
+    expect(Object.keys(stageTimer.snapshot())).toEqual(expect.arrayContaining([
+      expect.stringMatching(/^exact#/),
+      expect.stringMatching(/^compact#/),
+      expect.stringMatching(/^broad_recall#/),
+    ]));
   });
 
-  it('loads alias substrate when alias rows contain legacy keys', async () => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'snapshot-alias-matcher-legacy-'));
-    TMP_DIRS.push(dir);
-    const aliasesPath = path.join(dir, 'aliases.ndjson');
-    const manifestPath = path.join(dir, 'manifest.json');
-    const runtimeStatePath = path.join(dir, 'runtime-search-snapshot.json');
-
-    await fs.writeFile(
-      aliasesPath,
-      `${JSON.stringify({
-        aliasId: 'a1',
-        entityId: 'wine:opus-one',
-        value: '오푸스 원',
-        normalizedValue: '오푸스 원',
-        sourceTrust: 1,
-        confidencePrior: 0.97,
-        type: 'translation',
-        scope: 'global',
-        source: 'legacy',
-      })}\n`,
-      'utf8',
-    );
-    await fs.writeFile(
-      manifestPath,
-      `${JSON.stringify({
-        schemaVersion: 'search_snapshot.v1',
-        snapshotId: 'search-snapshot:v1:test5678',
-        generatedAt: '2026-04-16T00:00:00.000Z',
-        contentHash: 'hash5678',
-        sourceInputPath: '/tmp/input.ndjson',
-        artifacts: {
-          documentsNdjson: '/tmp/documents.ndjson',
-          vespaFeedNdjson: '/tmp/vespa-feed.ndjson',
-          entitiesNdjson: '/tmp/entities.ndjson',
-          aliasesNdjson: aliasesPath,
-          ambiguityRegistryNdjson: '/tmp/ambiguity.ndjson',
-          nlMappingsJson: '/tmp/nl-mappings.json',
-          metadataJson: '/tmp/metadata.json',
-        },
-        counts: {
-          documents: 1,
-          vespaFeed: 1,
-          entities: 1,
-          aliases: 1,
-          ambiguityRegistry: 0,
-          nlMappings: 0,
-        },
-        hashes: {
-          documents: 'h1',
-          vespaFeed: 'h2',
-          entities: 'h3',
-          aliases: 'h4',
-          ambiguityRegistry: 'h5',
-          nlMappings: 'h6',
-        },
-        fieldAvailability: {
-          appellation: {
-            populatedDocCount: 1,
-            totalDocCount: 1,
-            populatedDocRatio: 1,
-          },
-        },
-      })}\n`,
-      'utf8',
-    );
-    await fs.writeFile(
-      runtimeStatePath,
-      `${JSON.stringify({
-        schemaVersion: 'search_snapshot_runtime_state.v3',
-        snapshotId: 'search-snapshot:v1:test5678',
-        contentHash: 'hash5678',
-        publishedAt: '2026-04-16T00:00:00.000Z',
-        manifestPath,
-        nlMappingsRuntimePath: '/tmp/nl-mappings.runtime.json',
-        counts: {
-          entities: 1,
-          aliases: 1,
-          ambiguityRegistry: 0,
-          nlMappings: 0,
-          activeLtrModels: 1,
-        },
-        hashes: {
-          entities: 'h3',
-          aliases: 'h4',
-          ambiguityRegistry: 'h5',
-          nlMappings: 'h6',
-          activeLtrModels: 'h7',
-        },
-        fieldAvailability: {
-          appellation: {
-            populatedDocCount: 1,
-            totalDocCount: 1,
-            populatedDocRatio: 1,
-          },
-        },
-        quality: {
-          status: 'canonical',
-          blockers: [],
-          bypasses: [],
-          carryForwardBenchmarkCount: 0,
-          experimentalInputsPresent: false,
-        },
-      })}\n`,
-      'utf8',
+  it('defers broad-recall sidecar hydration for core runtime artifacts until broad recall is needed', async () => {
+    const matcher = SearchSnapshotAliasMatcher.fromRuntimeArtifact(
+      buildLookupAliasRuntimeCoreArtifact(),
+      undefined,
+      {
+        raw: JSON.stringify(buildLookupAliasBroadRecallRuntimeArtifact()),
+        filePath: '/tmp/lookup-alias-broad-recall-runtime.json',
+      },
     );
 
-    const matcher = await SearchSnapshotAliasMatcher.loadFromRuntimeState(runtimeStatePath);
+    expect(matcher.getBuildStateSnapshot()).toMatchObject({
+      artifactHydrated: true,
+      compactIndexBuilt: true,
+      broadRecallIndexesBuilt: false,
+    });
 
-    expect(matcher).toBeDefined();
-    await expect(matcher!.findMatches('오푸스 원')).resolves.toMatchObject([
+    await expect(matcher.findMatches('opus one')).resolves.toMatchObject([
       expect.objectContaining({
-        surfaceForm: '오푸스 원',
-        aliasType: 'translation',
+        surfaceForm: 'Opus One',
+        lookupStrategy: 'exact',
       }),
     ]);
+    expect(matcher.getBuildStateSnapshot().broadRecallIndexesBuilt).toBe(false);
+
+    await expect(matcher.findMatches('opus')).resolves.toMatchObject([
+      expect.objectContaining({
+        surfaceForm: 'Opus One',
+      }),
+    ]);
+    await expect(matcher.findMatches('오푸')).resolves.toMatchObject([
+      expect.objectContaining({
+        surfaceForm: 'Opus One',
+      }),
+    ]);
+    expect(matcher.getSurfaceForms()).toEqual(['Opus One']);
   });
 });

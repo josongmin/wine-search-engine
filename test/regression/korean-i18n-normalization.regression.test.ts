@@ -47,6 +47,14 @@ describe('Korean/i18n normalization regressions', () => {
       expect(views.transliterated).toBe('beaujolais nouveau');
     });
 
+    it('QueryNormalizer preserves the raw exact-safe surface in lookupVariants even when typo correction broadens the canonical form', () => {
+      const views = normalizer.normalize('라피트 로쉴드');
+      expect(views.strict).toBe('샤또 라피트');
+      expect(views.lookupVariants).toEqual(
+        expect.arrayContaining(['라피트 로쉴드', '샤또 라피트']),
+      );
+    });
+
     it('extractSearchConstraints NFC-normalizes decomposed Hangul price queries', () => {
       const nfd = '카베르네 빼고 5만원 이하'.normalize('NFD');
       const result = extractSearchConstraints(nfd);

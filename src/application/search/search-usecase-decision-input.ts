@@ -213,9 +213,11 @@ function shouldProjectIdentityArtifactTrust(params: {
   ) {
     return true;
   }
-  return params.effectiveRoute === 'entity'
-    || params.effectiveRetrievalMode === 'entity_lookup'
-    || params.effectiveRetrievalMode === 'entity_resolution';
+  if (params.effectiveRoute === 'entity') {
+    return true;
+  }
+  return params.effectiveRetrievalMode !== undefined
+    && !isExploratoryRetrievalMode(params.effectiveRetrievalMode);
 }
 
 function buildRankingBranchGroups(

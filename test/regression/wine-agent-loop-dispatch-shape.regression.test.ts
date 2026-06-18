@@ -96,9 +96,30 @@ function makeSearchPort(): SearchUseCasePort & { readonly executeMock: ReturnTyp
   return { executeMock, execute: (input, reqId, _opts) => executeMock(input, reqId) };
 }
 
+function makeLookupPort(): { execute: ReturnType<typeof vi.fn> } {
+  return {
+    execute: vi.fn(() =>
+      Promise.resolve({
+        status: 'resolved',
+        decisionReason: 'resolved',
+        candidates: [],
+        topCandidate: { entityId: 'sassicaia', canonicalLabel: 'Sassicaia', calibratedScore: 0.97 },
+        clarificationOptions: [],
+        normalizedQueryViews: {
+          raw: 'Sassicaia', strict: 'sassicaia', accentless: 'sassicaia', compact: 'sassicaia',
+          vintageCanonicalized: 'sassicaia', vintageStripped: 'sassicaia', lookupVariants: ['sassicaia'],
+        },
+        evidenceSummary: { admissionReasonCode: 'admitted_entity_reference', decisionReasonCode: 'calibrated_resolve', calibrationTrusted: true },
+        meta: { queryTimeMs: 1, version: 'test', engineSchemaVersion: 'entity_lookup_v2' },
+      }),
+    ),
+  };
+}
+
 function makeToolPorts(overrides?: Partial<WineAgentLoopToolPorts>): WineAgentLoopToolPorts {
   return {
     searchUseCase: overrides?.searchUseCase ?? makeSearchPort(),
+    lookupWine: (overrides?.lookupWine ?? makeLookupPort()) as unknown as WineAgentLoopToolPorts['lookupWine'],
   };
 }
 
@@ -228,23 +249,25 @@ describe('wine-agent-loop dispatch — lookup_wine uses shared normalizer (H2)',
     expect(searchPort.executeMock).not.toHaveBeenCalled();
   });
 
-  it('dispatches a valid lookup with mode=entity + clamped limit', async () => {
-    const searchPort = makeSearchPort();
+  it('dispatches a valid lookup to the V2 lookup port with clamped maxCandidates', async () => {
+    const lookupPort = makeLookupPort();
     const llm = makeStubLlm([
       async () => asToolUseResult([toolUse('lookup_wine', { query: 'Sassicaia', limit: 999 })]),
       async () => asTextResult('Found.'),
     ]);
     const runner = new WineAgentLoopRunner({ structuredLlm: llm });
     await runner.run(makeInput({
-      toolPorts: makeToolPorts({ searchUseCase: searchPort }),
+      toolPorts: makeToolPorts({ lookupWine: lookupPort as unknown as WineAgentLoopToolPorts['lookupWine'] }),
     }));
 
-    const [searchInput] = searchPort.executeMock.mock.calls[0] ?? [];
-    const search = searchInput as { query?: string; mode?: string; limit?: number };
-    expect(search?.query).toBe('Sassicaia');
-    expect(search?.mode).toBe('entity');
+    // V2-only: lookup_wine dispatches to the dedicated EntityLookupV2 port with a
+    // V2-native command (query + maxCandidates + mode), NOT searchUseCase/mode=entity.
+    const [cmd] = lookupPort.execute.mock.calls[0] ?? [];
+    const command = cmd as { query?: string; maxCandidates?: number; mode?: string };
+    expect(command?.query).toBe('Sassicaia');
+    expect(command?.mode).toBe('default');
     // Clamp to LOOKUP_WINE_LIMIT_MAX (3) — same clamp as the agent-tools path.
-    expect(search?.limit).toBe(3);
+    expect(command?.maxCandidates).toBe(3);
   });
 });
 

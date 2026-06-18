@@ -16,8 +16,11 @@ import type {
   LookupAdmissionGatePort,
   LookupAdmissionInput,
   LookupAdmissionVerdict,
+  LookupConceptRedirectRegistryPort,
 } from './lookup-v2-types.js';
 import { classifyConcept } from './concept-lexicon.js';
+import { normalizeForMatch } from '../../alias/service/normalize.js';
+import { compactForLookup } from '../../query/service/phonetic-skeleton.js';
 
 /**
  * Minimum number of alphanumeric (incl. CJK) characters for a query to be a
@@ -43,6 +46,10 @@ function countSignalChars(value: string): number {
 }
 
 export class ConceptAdmissionGate implements LookupAdmissionGatePort {
+  constructor(
+    private readonly conceptRedirectRegistry?: LookupConceptRedirectRegistryPort,
+  ) {}
+
   classify(input: LookupAdmissionInput): LookupAdmissionVerdict {
     const probe = input.views.strict.trim();
 
@@ -60,6 +67,35 @@ export class ConceptAdmissionGate implements LookupAdmissionGatePort {
         reasonCode: 'under_specified',
         detail: 'The query is too short to reference a specific wine entity.',
       };
+    }
+
+    const registryKeys = new Set<string>();
+    for (const value of [
+      input.rawQuery,
+      input.views.strict,
+      input.views.accentless,
+      input.views.compact,
+      input.views.vintageStripped,
+    ]) {
+      const normalized = normalizeForMatch(value);
+      if (normalized.length > 0) {
+        registryKeys.add(normalized);
+      }
+      const compact = compactForLookup(value);
+      if (compact.length > 0) {
+        registryKeys.add(compact);
+      }
+    }
+    for (const key of registryKeys) {
+      const registryHit = this.conceptRedirectRegistry?.get(key) ?? null;
+      if (registryHit !== null) {
+        return {
+          decision: 'redirect_discovery',
+          reasonCode: registryHit.redirectReason,
+          detail: `This describes a ${registryHit.conceptClass} query — redirected to discovery search.`,
+          conceptTermsMatched: [input.rawQuery.trim()],
+        };
+      }
     }
 
     // Concept / facet gate: a query composed ENTIRELY of concept tokens

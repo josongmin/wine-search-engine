@@ -12,8 +12,10 @@ import { CodexAuthStoreAdapter } from '../infrastructure/cli/auth/codex-auth-sto
 import { ChatGptModelCatalogProbeAdapter } from '../infrastructure/cli/auth/chatgpt-model-catalog-probe.js';
 import { CodexLoginDelegateAdapter } from '../infrastructure/cli/auth/codex-login-delegate.js';
 import { LocalSearchFacade } from '../infrastructure/cli/local/local-search-facade.js';
+import { LocalLookupFacade } from '../infrastructure/cli/local/local-lookup-facade.js';
 import { LocalAgentFacade } from '../infrastructure/cli/local/local-agent-facade.js';
 import { RemoteSearchFacade } from '../infrastructure/cli/remote/remote-search-facade.js';
+import { RemoteLookupFacade } from '../infrastructure/cli/remote/remote-lookup-facade.js';
 import { RemoteAgentFacade } from '../infrastructure/cli/remote/remote-agent-facade.js';
 
 /**
@@ -42,12 +44,14 @@ function resolveFacadeRegistry(env: EnvLike, profile: ResolvedCliProfile): CliFa
     return {
       auth: buildAuthFacade(env),
       search: new LocalSearchFacade(),
+      lookup: new LocalLookupFacade(),
       agent: new LocalAgentFacade(),
     };
   }
   return {
     auth: buildAuthFacade(env),
     search: new RemoteSearchFacade(profile),
+    lookup: new RemoteLookupFacade(profile),
     agent: new RemoteAgentFacade(profile),
   };
 }

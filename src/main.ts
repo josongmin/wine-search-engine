@@ -12,6 +12,7 @@ import { connectRedisClient } from './infrastructure/db/redis-client.js';
 import { getTracer, initTelemetry } from './infrastructure/telemetry/tracer.js';
 import { bootstrapLogger } from './domain/shared/bootstrap-logger.js';
 import { logKillSwitchPolicyAtStartup } from './config/kill-switch-policy.js';
+import { pgConfigSanityCheck } from './config/startup-preflight.js';
 
 /**
  * Tune undici (Node 22 native fetch dispatcher) for high-RPS Vespa/LLM
@@ -74,6 +75,12 @@ async function main(): Promise<void> {
   await configureGlobalHttpDispatcher();
 
   const config = loadConfig();
+  // PG SSL pre-flight: the general warnStartupMisconfigurations(config) already
+  // runs inside container-core on every createContainer; we only add the
+  // PG-specific SSL-disabled-to-remote-host check here (the container call sees
+  // only the retrieval-config slice and cannot perform it). Calling the full
+  // function here too would double-log the general warnings.
+  pgConfigSanityCheck(config.pg);
   logKillSwitchPolicyAtStartup(config, bootstrapLogger);
   const telemetrySdk = initTelemetry();
 

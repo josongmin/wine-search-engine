@@ -7,27 +7,58 @@
  * curation flow as alias/registry proposals (RFC DoD §2 — `dom perignon` /
  * `돔페리뇽`류 hole이 coverage report와 curation flow에서 다뤄진다).
  *
- * This is the SSoT for coverage classification. The ETL script
- * (`scripts/etl/lookup-v2-coverage-report.ts`) and the operator coverage/health
- * use-case (T-ELV2-07) both import from here — no duplicated logic. The script's
- * live wrapper runs `/v2/entity-lookup` over the hotset corpus
- * (`test/fixtures/lookup-v2-hotset.jsonl`) and feeds the observed statuses in;
- * keeping the classification pure makes the report deterministic and testable.
+ * This is the SSoT for coverage classification. Its sole production consumer is
+ * the live coverage runner `scripts/eval/run-lookup-v2-coverage-report.ts`
+ * (`pnpm run eval:lookup-v2:coverage`), which runs `/v2/entity-lookup` over the
+ * hotset corpus (`test/fixtures/lookup-v2-hotset.jsonl`), feeds the observed
+ * statuses in here, and pipes the resulting holes into `buildCurationTasks` for
+ * the T-07 operator write-plane queue. Keeping the classification pure makes the
+ * report deterministic and testable.
  *
  * Domain leaf: this module imports nothing outside the domain (pure).
  */
 
 export type CoverageStatus = 'resolved' | 'ambiguous' | 'failed' | 'redirect_discovery';
 
+export const COVERAGE_HOLE_OPERATOR_BUCKETS = [
+  'strict_collision_ambiguous',
+  'family_surface_gap',
+  'qualified_scope_surface_gap',
+  'scope_target_missing',
+  'scope_support_needed',
+] as const;
+
+export type CoverageHoleOperatorBucket = (typeof COVERAGE_HOLE_OPERATOR_BUCKETS)[number];
+
 export interface CoverageInputRow {
   readonly qid: string;
   readonly query: string;
   /** Gold expectation for this query. */
   readonly expectedStatus: CoverageStatus;
+  /**
+   * Optional exact set of statuses that count as correct for this row. This is
+   * for precision-first "must not resolve" rows where multiple abstentions are
+   * acceptable (`failed` OR `ambiguous`, but never `resolved`).
+   */
+  readonly acceptedStatuses?: readonly CoverageStatus[] | undefined;
+  /** Optional benchmark gold hint for the expected entity. */
+  readonly expectedEntityHint?: string | undefined;
+  /** Optional exact benchmark gold entity id when the corpus carries it. */
+  readonly expectedEntityId?: string | undefined;
   /** Hotset class tag (e.g. hot_entity_coverage, concept_grape). */
   readonly class: string;
   /** What the engine actually returned. */
   readonly observedStatus: CoverageStatus;
+  /** Optional canonical decision reason code returned by the runtime. */
+  readonly observedReasonCode?: string | undefined;
+  /** Reviewed support-plane status for the intended semantic scope, if one exists. */
+  readonly supportStatus?:
+    | 'active_entity_absent'
+    | 'vintage_anchor_absent'
+    | 'secondary_line_only'
+    | undefined;
+  /** Reviewed surface gap class for the intended semantic scope, when known. */
+  readonly surfaceGapBucket?: 'family_surface_gap' | 'qualified_scope_surface_gap' | undefined;
 }
 
 /** A hot entity the gold says should resolve, but the engine did not. */
@@ -36,12 +67,16 @@ export interface CoverageHole {
   readonly query: string;
   readonly class: string;
   readonly observedStatus: CoverageStatus;
+  readonly operatorBucket: CoverageHoleOperatorBucket;
+  readonly observedReasonCode?: string | undefined;
+  readonly expectedEntityHint?: string | undefined;
+  readonly expectedEntityId?: string | undefined;
 }
 
 export interface CoverageReport {
   /** Rows whose gold expectation is a resolve (hot entities). */
   readonly hotEntityCount: number;
-  /** Hot entities that resolved correctly. */
+  /** Hot-entity rows whose observed status stayed inside the accepted set. */
   readonly coveredCount: number;
   /** Hot entities that failed to resolve — these need curation. */
   readonly holes: readonly CoverageHole[];
@@ -52,36 +87,72 @@ export interface CoverageReport {
   readonly nonEntityTotal: number;
   /** Holes grouped by hotset class, for prioritising curation. */
   readonly holesByClass: Readonly<Record<string, number>>;
+  /** Holes grouped by strict operator bucket, for owner routing. */
+  readonly holesByOperatorBucket: Readonly<Record<CoverageHoleOperatorBucket, number>>;
 }
 
 function ratio(num: number, den: number): number {
   return den === 0 ? 0 : num / den;
 }
 
+function acceptedStatuses(row: CoverageInputRow): readonly CoverageStatus[] {
+  return row.acceptedStatuses ?? [row.expectedStatus];
+}
+
+function classifyHole(row: CoverageInputRow): CoverageHoleOperatorBucket {
+  if (row.supportStatus !== undefined) {
+    return 'scope_support_needed';
+  }
+  if (row.observedReasonCode === 'reviewed_family_collision_requires_clarification') {
+    return 'strict_collision_ambiguous';
+  }
+  if (row.surfaceGapBucket !== undefined) {
+    return row.surfaceGapBucket;
+  }
+  return 'scope_target_missing';
+}
+
 export function buildCoverageReport(rows: readonly CoverageInputRow[]): CoverageReport {
-  const hotRows = rows.filter((r) => r.expectedStatus === 'resolved');
-  const nonEntityRows = rows.filter((r) => r.expectedStatus !== 'resolved');
+  const hotRows = rows.filter((r) => acceptedStatuses(r).includes('resolved'));
+  const nonEntityRows = rows.filter((r) => !acceptedStatuses(r).includes('resolved'));
 
   const holes: CoverageHole[] = [];
   let coveredCount = 0;
   for (const row of hotRows) {
-    if (row.observedStatus === 'resolved') {
+    if (acceptedStatuses(row).includes(row.observedStatus)) {
       coveredCount += 1;
     } else {
-      holes.push({ qid: row.qid, query: row.query, class: row.class, observedStatus: row.observedStatus });
+      holes.push({
+        qid: row.qid,
+        query: row.query,
+        class: row.class,
+        observedStatus: row.observedStatus,
+        operatorBucket: classifyHole(row),
+        ...(row.observedReasonCode !== undefined ? { observedReasonCode: row.observedReasonCode } : {}),
+        ...(row.expectedEntityHint !== undefined ? { expectedEntityHint: row.expectedEntityHint } : {}),
+        ...(row.expectedEntityId !== undefined ? { expectedEntityId: row.expectedEntityId } : {}),
+      });
     }
   }
 
   let nonEntityCorrect = 0;
   for (const row of nonEntityRows) {
-    if (row.observedStatus === row.expectedStatus) {
+    if (acceptedStatuses(row).includes(row.observedStatus)) {
       nonEntityCorrect += 1;
     }
   }
 
   const holesByClass: Record<string, number> = {};
+  const holesByOperatorBucket: Record<CoverageHoleOperatorBucket, number> = {
+    strict_collision_ambiguous: 0,
+    family_surface_gap: 0,
+    qualified_scope_surface_gap: 0,
+    scope_target_missing: 0,
+    scope_support_needed: 0,
+  };
   for (const hole of holes) {
     holesByClass[hole.class] = (holesByClass[hole.class] ?? 0) + 1;
+    holesByOperatorBucket[hole.operatorBucket] += 1;
   }
 
   return {
@@ -92,6 +163,7 @@ export function buildCoverageReport(rows: readonly CoverageInputRow[]): Coverage
     nonEntityCorrect,
     nonEntityTotal: nonEntityRows.length,
     holesByClass,
+    holesByOperatorBucket,
   };
 }
 
@@ -102,8 +174,9 @@ export function formatCoverageReport(report: CoverageReport): string {
   lines.push(`non-entity handling: ${report.nonEntityCorrect}/${report.nonEntityTotal} correct`);
   if (report.holes.length > 0) {
     lines.push(`coverage holes (need curation):`);
+    lines.push(`hole buckets: strict_collision_ambiguous=${report.holesByOperatorBucket.strict_collision_ambiguous}, family_surface_gap=${report.holesByOperatorBucket.family_surface_gap}, qualified_scope_surface_gap=${report.holesByOperatorBucket.qualified_scope_surface_gap}, scope_target_missing=${report.holesByOperatorBucket.scope_target_missing}, scope_support_needed=${report.holesByOperatorBucket.scope_support_needed}`);
     for (const hole of report.holes) {
-      lines.push(`  - [${hole.class}] "${hole.query}" → ${hole.observedStatus} (qid ${hole.qid})`);
+      lines.push(`  - [${hole.class}/${hole.operatorBucket}] "${hole.query}" → ${hole.observedStatus} (qid ${hole.qid})`);
     }
   } else {
     lines.push('no coverage holes');

@@ -7,6 +7,7 @@
  */
 
 import type { LookupRetrievalChannel, LookupV2Status } from '../../../domain/resolver/v2/lookup-v2-types.js';
+import type { AliasRegistryVersion } from '../../../domain/alias/model/alias-registry-version.js';
 
 /** Dedicated entry command for the V2 lookup use case. */
 export interface EntityLookupV2Command {
@@ -88,5 +89,7 @@ export interface EntityLookupV2Result {
     readonly queryTimeMs: number;
     readonly version: string;
     readonly engineSchemaVersion: 'entity_lookup_v2';
+    /** T-ELV2-03: dedicated alias-registry version identity that served this resolve. */
+    readonly aliasRegistry?: AliasRegistryVersion | undefined;
   };
 }

@@ -11,6 +11,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createTestServer, closeTestServer, type TestServer } from './helpers/test-server.js';
 import {
+  parseEntityLookupResponse,
   parseSearchResponse,
   postJson,
   getSearchDecisionStatus,
@@ -41,52 +42,36 @@ async function post(path: string, body: unknown): Promise<InjectResponse> {
   return postJson(server.app, path, body);
 }
 
+async function lookup(query: string) {
+  const response = await post('/v2/entity-lookup', { query });
+  expect(response.statusCode).toBe(200);
+  return parseEntityLookupResponse(response);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Korean entity resolution
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('Korean entity resolution', () => {
-  it("'오푸스원' entity mode → 200 with resolved or ambiguous (pre-registered alias, not failed)", async () => {
-    const res = await post('/v1/search/hybrid', {
-      query: '오푸스원',
-      options: { mode: 'entity', explain: false, clarification: false },
-    });
-
-    expect(res.statusCode).toBe(200);
-    const body = parseSearchResponse(res);
+  it("'오푸스원' lookup → resolved or ambiguous (pre-registered alias, not failed)", async () => {
+    const body = await lookup('오푸스원');
     // '오푸스원' is a pre-registered alias for opus-one-2018 — must resolve or be ambiguous
-    expect(getSearchDecisionStatus(body)).toMatch(/^(resolved|ambiguous)$/);
+    expect(body.status).toMatch(/^(resolved|ambiguous)$/);
   });
 
-  it("'샤토 마고' entity mode → 200", async () => {
-    const res = await post('/v1/search/hybrid', {
-      query: '샤토 마고',
-      options: { mode: 'entity', explain: false, clarification: false },
-    });
-
-    expect(res.statusCode).toBe(200);
+  it("'샤토 마고' lookup → 200", async () => {
+    const body = await lookup('샤토 마고');
+    expect(body.meta.request_id).toBeTruthy();
   });
 
-  it("'마고' entity mode with clarification=true → 200 and 'clarification' key present", async () => {
-    const res = await post('/v1/search/hybrid', {
-      query: '마고',
-      options: { mode: 'entity', explain: false, clarification: true },
-    });
-
-    expect(res.statusCode).toBe(200);
-    const body = res.json() as Record<string, unknown>;
-    expect('clarification' in body).toBe(true);
+  it("'마고' lookup → ambiguity-safe 4-state outcome", async () => {
+    const body = await lookup('마고');
+    expect(['ambiguous', 'failed', 'redirect_discovery']).toContain(body.status);
   });
 
-  it("'Chateau Margaux' (no accent) entity mode → resolves (decisionStatus not 'failed')", async () => {
-    const res = await post('/v1/search/hybrid', {
-      query: 'Chateau Margaux',
-      options: { mode: 'entity', explain: false, clarification: false },
-    });
-
-    expect(res.statusCode).toBe(200);
-    const body = parseSearchResponse(res);
-    expect(getSearchDecisionStatus(body)).not.toBe('failed');
+  it("'Chateau Margaux' (no accent) lookup → does not fail", async () => {
+    const body = await lookup('Chateau Margaux');
+    expect(body.status).not.toBe('failed');
   });
 });
 
@@ -98,7 +83,7 @@ describe('Semantic / hybrid mode queries', () => {
   it("'풀바디 레드 와인' hybrid → results array is non-empty", async () => {
     const res = await post('/v1/search/hybrid', {
       query: '풀바디 레드 와인',
-      options: { mode: 'hybrid', explain: false, clarification: false },
+      options: { explain: false, clarification: false },
     });
 
     expect(res.statusCode).toBe(200);
@@ -111,7 +96,7 @@ describe('Semantic / hybrid mode queries', () => {
   it("'스파클링 와인' hybrid → results non-empty", async () => {
     const res = await post('/v1/search/hybrid', {
       query: '스파클링 와인',
-      options: { mode: 'hybrid', explain: false, clarification: false },
+      options: { explain: false, clarification: false },
     });
 
     expect(res.statusCode).toBe(200);
@@ -124,7 +109,7 @@ describe('Semantic / hybrid mode queries', () => {
   it("'달달한 와인' hybrid → results non-empty", async () => {
     const res = await post('/v1/search/hybrid', {
       query: '달달한 와인',
-      options: { mode: 'hybrid', explain: false, clarification: false },
+      options: { explain: false, clarification: false },
     });
 
     expect(res.statusCode).toBe(200);
@@ -140,19 +125,19 @@ describe('Semantic / hybrid mode queries', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('Mixed-mode / natural-language queries', () => {
-  it("'오푸스원 같은 와인' auto mode → 200", async () => {
+  it("'오푸스원 같은 와인' query → 200", async () => {
     const res = await post('/v1/search/hybrid', {
       query: '오푸스원 같은 와인',
-      options: { mode: 'auto', explain: false, clarification: false },
+      options: { explain: false, clarification: false },
     });
 
     expect(res.statusCode).toBe(200);
   });
 
-  it("'클라우디베이 말고 다른 화이트' auto mode → 200", async () => {
+  it("'클라우디베이 말고 다른 화이트' query → 200", async () => {
     const res = await post('/v1/search/hybrid', {
       query: '클라우디베이 말고 다른 화이트',
-      options: { mode: 'auto', explain: false, clarification: false },
+      options: { explain: false, clarification: false },
     });
 
     expect(res.statusCode).toBe(200);

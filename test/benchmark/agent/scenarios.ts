@@ -6,18 +6,18 @@
  * Regenerate after edits:
  *   pnpm run bench:agent:export-scenarios-md
  *
- * ADR-005 Workstream F: AGENT_SCENARIOS is NOT the release-gate source for
- * agent correctness. Release gates use fixture-native runners:
- *   - pnpm run bench:agent:fixtures:tool-use
- *   - pnpm run bench:agent:fixtures:answer-quality
+ * Current executable lanes:
+ *   - pnpm run bench:smoke
+ *   - pnpm run bench:agent:export-scenarios-md
  *
- * Canonical exploratory entrypoints are explicitly named:
- *   - pnpm run bench:agent:exploratory
- *   - pnpm run benchmark:exploratory:quick|standard|nightly|retrieval
+ * Lookup-authority gates live elsewhere:
+ *   - pnpm run eval:lookup-v2:authority
+ *   - pnpm run eval:lookup-v2:parity
  *
- * AGENT_SCENARIOS is retained for broad regression exploration and nightly
- * runs only. Do NOT add new release-gate logic that depends solely on this
- * corpus.
+ * AGENT_SCENARIOS is exploratory corpus only. The repo does NOT currently
+ * ship a live agent benchmark runner, so do NOT document `runner.ts`,
+ * exploratory profile commands, or release gates as current until that runner
+ * is restored.
  *
  * Adversarial security scenarios (#106-116) live in scenarios.adversarial.ts.
  * Coverage-expansion scenarios (200+) live in scenarios.coverage.ts.

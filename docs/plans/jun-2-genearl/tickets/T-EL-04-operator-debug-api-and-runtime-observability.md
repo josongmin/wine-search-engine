@@ -1,5 +1,11 @@
 # T-EL-04 Operator Debug API And Runtime Observability
 
+> Historical / audit-only ticket.
+> Current public lookup truth moved to `docs/bench/STATUS.md` and
+> `tools/feature-catalog/features/retrieval/entity-lookup-v2.yaml`.
+> Any public lookup route references below are preserved as pre-cutover
+> planning context only.
+
 ## 목표
 
 operator가 `lookup query -> alias hits -> blocker -> candidates -> scores -> final decision`을 public product API와 분리된 trusted surface로 직접 볼 수 있게 한다.

@@ -60,14 +60,26 @@ describe.skipIf(!PG_TEST_URL)('PgCurationStore (live PG integration)', () => {
       targetEntityId: 'ent-dp',
       proposedType: 'misspelling',
       confidence: 0.9,
-      evidence: { reason: 'hot-entity coverage hole', source: 'coverage-report' },
+      evidence: { reason: 'hot-entity coverage hole', source: 'coverage-report', note: 'menu verified' },
       proposedBy: 'operator-1',
     });
     expect(p.kind).toBe('alias');
     expect(p.status).toBe('pending');
     expect(p.proposalId).toMatch(/[0-9a-f-]{36}/);
-    expect(p.evidence).toEqual({ reason: 'hot-entity coverage hole', source: 'coverage-report' });
+    expect(p.evidence).toEqual({
+      source: 'coverage-report',
+      operatorNote: 'menu verified',
+    });
     expect(p.proposedBy).toBe('operator-1');
+
+    const raw = await pool.query<{ evidence: Record<string, unknown> }>(
+      'SELECT evidence FROM alias_proposals WHERE proposal_id = $1',
+      [p.proposalId],
+    );
+    expect(raw.rows[0]?.evidence).toEqual({
+      source: 'coverage-report',
+      operatorNote: 'menu verified',
+    });
   });
 
   it('runs the full review→publish lifecycle with an optimistic guard', async () => {
@@ -138,6 +150,63 @@ describe.skipIf(!PG_TEST_URL)('PgCurationStore (live PG integration)', () => {
     expect(health.queueByStatus.pending).toBe(2);
     expect(health.queueByKind.alias).toBe(1);
     expect(health.queueByKind.ambiguity).toBe(1);
+  });
+
+  it('tracks published proposals awaiting snapshot materialization (migration 033)', async () => {
+    const created = await store.createAliasProposal({
+      surfaceForm: 'opus one',
+      targetEntityId: 'ent-opus',
+      proposedType: 'observed_query_alias',
+      confidence: 0.8,
+      evidence: {},
+    });
+    await store.transitionProposal('alias', created.proposalId, {
+      expectedFrom: 'pending',
+      to: 'approved',
+      reviewedBy: 'reviewer-1',
+      reviewedAt: new Date(),
+      decisionReason: 'ok',
+    });
+    await store.transitionProposal('alias', created.proposalId, {
+      expectedFrom: 'approved',
+      to: 'published',
+      publishedAt: new Date(),
+      targetSnapshotVersion: 'search-snapshot:v1:abc',
+    });
+
+    const awaiting = await store.getCurationHealth();
+    expect(awaiting.publishedAwaitingMaterialization).toBe(1);
+
+    await pool.query(
+      `UPDATE alias_proposals
+          SET materialized_snapshot_id = $1,
+              materialized_at = NOW()
+        WHERE proposal_id = $2`,
+      ['search-snapshot:v1:abc', created.proposalId],
+    );
+
+    const materialized = await store.getCurationHealth();
+    expect(materialized.publishedAwaitingMaterialization).toBe(0);
+  });
+
+  it('counts legacy approved abbreviation rows awaiting ops publish', async () => {
+    const abbrev = await store.createAliasProposal({
+      surfaceForm: 'drc 19',
+      targetEntityId: 'ent-drc',
+      proposedType: 'abbreviation',
+      confidence: 0.9,
+      evidence: {},
+    });
+    await store.transitionProposal('alias', abbrev.proposalId, {
+      expectedFrom: 'pending',
+      to: 'approved',
+      reviewedBy: 'reviewer-1',
+      reviewedAt: new Date(),
+      decisionReason: 'ok',
+    });
+
+    const health = await store.getCurationHealth();
+    expect(health.legacyApprovedAbbreviationBacklog).toBe(1);
   });
 
   it('alias audit surfaces live aliases and proposals touching the entity', async () => {

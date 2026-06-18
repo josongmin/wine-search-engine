@@ -382,6 +382,7 @@ export class Transliterator {
     ['ornellaia', '오르넬라이아'],
     ['antinori', '안티노리'],
     ['gaja', '가야'],
+    ['masseto', '마세토'],
     // New World — USA
     ['screaming eagle', '스크리밍 이글'],
     ['harlan estate', '할란 이스테이트'],
@@ -451,6 +452,8 @@ export class Transliterator {
     ['chapoutier', '샤푸티에'],
     ['jaboulet', '자불레'],
     ['chave', '샤브'],
+    ['pichon lalande', '피숑 라랑드'],
+    ['chateau pichon lalande', '샤또 피숑 라랑드'],
   ]);
 
   /** Supported source languages for alias generation (module-scope, Rule 16). */

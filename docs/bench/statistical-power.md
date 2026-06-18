@@ -1,5 +1,9 @@
 # Agent benchmark — statistical power planning
 
+> Historical/dormant note: this planning flow assumes a materialized live agent
+> benchmark baseline report. The current repo-native runner is absent, so this
+> doc is not a current executable lane by itself. See `docs/bench/STATUS.md`.
+
 ## Why this exists
 
 Single-run agent benchmark deltas oscillated 5–6 pp across consecutive

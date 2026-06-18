@@ -12,6 +12,7 @@ import type {
 } from '@domain/ai/port/structured-llm.port.js';
 import {
   StructuredLlmCircuitOpenError,
+  StructuredLlmProviderError,
   StructuredLlmTimeoutError,
   StructuredLlmValidationError,
 } from '@domain/ai/port/structured-llm.port.js';
@@ -22,7 +23,7 @@ import {
   type AnswerResult,
   type SynthesisAnswer,
 } from '../synthesis-schemas.js';
-import { FALLBACK_TEMPLATES } from '../synthesis-fallback-templates.js';
+import { FALLBACK_TEMPLATES, layer4MessageFor } from '../synthesis-fallback-templates.js';
 import type { WineSearchAnalysis } from '../wine-search-schemas.js';
 
 // ---------------------------------------------------------------------------
@@ -32,8 +33,13 @@ import type { WineSearchAnalysis } from '../wine-search-schemas.js';
 const REQUEST_ID = 'req-synth-0001';
 const PER_STEP_TIMEOUT_MS = 5_000;
 const MAX_OUTPUT_TOKENS = 1024;
-const ANTHROPIC_CREDIT_BALANCE_ERROR_MESSAGE =
-  'Anthropic API error: credit balance is too low';
+// A GENERIC, untyped Error (not a StructuredLlm*Error). Models an UNMODELED
+// failure → degradedReason 'unexpected_error' → ladder fabrication. NOTE: a
+// REAL provider credit/auth rejection arrives as a typed
+// StructuredLlmValidationError carrying httpStatus and is handled as
+// 'llm_unavailable' (honest fail) — see the "provider unavailable" describe.
+const GENERIC_UNMODELED_ERROR_MESSAGE =
+  'some unmodeled downstream failure';
 
 function makeLogger() {
   return {
@@ -52,8 +58,8 @@ function makeTokenUsage(input: number, output: number): TokenUsage {
   };
 }
 
-function makeAnthropicCreditBalanceError(): Error {
-  return new Error(ANTHROPIC_CREDIT_BALANCE_ERROR_MESSAGE);
+function makeGenericUnmodeledError(): Error {
+  return new Error(GENERIC_UNMODELED_ERROR_MESSAGE);
 }
 
 function makeAnalysis(
@@ -170,6 +176,7 @@ async function run(
     readonly abortSignal?: AbortSignal;
     readonly intent?: WineSearchAnalysis['intent'];
     readonly callerInterpretation?: WineSearchAnalysis['callerInterpretation'];
+    readonly blockedKind?: 'security_block' | 'unsupported_intent' | 'analysis_unavailable';
   },
 ): Promise<AnswerResult> {
   const { runner } = makeRunner(llm);
@@ -187,6 +194,7 @@ async function run(
     policyBlocked: overrides.policyBlocked ?? false,
     perStepTimeoutMs: PER_STEP_TIMEOUT_MS,
     maxOutputTokens: MAX_OUTPUT_TOKENS,
+    ...(overrides.blockedKind !== undefined ? { blockedKind: overrides.blockedKind } : {}),
     ...(overrides.abortSignal !== undefined ? { abortSignal: overrides.abortSignal } : {}),
   });
 }
@@ -249,6 +257,46 @@ describe('SynthesisRunner — primary structured-LLM path', () => {
     });
     expect(result.layer).toBe('primary');
     expect(result.answer).toContain('Côte-Rôtie');
+  });
+});
+
+describe('SynthesisRunner — deterministic language directive', () => {
+  // Minor fix: weak models (e.g. OpenAI gpt-*-mini) don't reliably honor the
+  // system-prompt's "respond in Korean if the query is Korean" bullet — a
+  // Korean query ("보르고뉴") came back in English. We detect the language
+  // deterministically (containsHangul) and inject an EXPLICIT, salient
+  // per-request directive so language is not left to model judgment.
+  it('Korean query → synthesis messages carry an explicit Korean directive', async () => {
+    const llm = makeStubLlm(async () => ({
+      data: { answer: 'ok' },
+      usage: makeTokenUsage(10, 5),
+      durationMs: 1,
+    }));
+    await run(llm, {
+      query: '보르고뉴 와인 추천',
+      hangulDominant: true,
+      toolOutcomes: [makeSearchOutcome([{ canonicalLabel: 'X' }])],
+    });
+    const messages = llm.synthesizeMock.mock.calls[0]?.[0]?.messages ?? [];
+    const joined = messages.map((m: { content: string }) => m.content).join('\n');
+    expect(joined).toMatch(/한국어|Korean/);
+  });
+
+  it('English query → explicit English directive, not the Korean one', async () => {
+    const llm = makeStubLlm(async () => ({
+      data: { answer: 'ok' },
+      usage: makeTokenUsage(10, 5),
+      durationMs: 1,
+    }));
+    await run(llm, {
+      query: 'recommend a Bordeaux',
+      hangulDominant: false,
+      toolOutcomes: [makeSearchOutcome([{ canonicalLabel: 'X' }])],
+    });
+    const messages = llm.synthesizeMock.mock.calls[0]?.[0]?.messages ?? [];
+    const joined = messages.map((m: { content: string }) => m.content).join('\n');
+    expect(joined).toMatch(/English/);
+    expect(joined).not.toMatch(/한국어/);
   });
 });
 
@@ -463,7 +511,7 @@ describe('SynthesisRunner — Layer 3 grounding preview', () => {
 // ---------------------------------------------------------------------------
 
 describe('SynthesisRunner — Layer 4 hard-coded fallback', () => {
-  it('Korean query → Korean Layer 4 template (no tool outcomes)', async () => {
+  it('no-results → honest "no match" message (NOT a generic "change your query")', async () => {
     const llm = makeStubLlm(async () => {
       throw new Error('should not be called when no grounding');
     });
@@ -474,12 +522,13 @@ describe('SynthesisRunner — Layer 4 hard-coded fallback', () => {
     });
     expect(result.layer).toBe('layer4');
     expect(result.groundedOnToolResults).toBe(false);
-    expect(result.answer).toBe(FALLBACK_TEMPLATES.layer4.korean);
+    expect(result.answer).toBe(layer4MessageFor('no_results', true));
+    expect(result.answer).toContain('찾지 못했어요');
     expect(result.synthesisAttempts).toBe(0);
     expect(result.degradedReason).toBe('no_results');
   });
 
-  it('English query → English Layer 4 template', async () => {
+  it('English no-results → English honest "no match" message', async () => {
     const llm = makeStubLlm(async () => {
       throw new Error('should not be called when no grounding');
     });
@@ -489,7 +538,8 @@ describe('SynthesisRunner — Layer 4 hard-coded fallback', () => {
       toolOutcomes: [],
     });
     expect(result.layer).toBe('layer4');
-    expect(result.answer).toBe(FALLBACK_TEMPLATES.layer4.english);
+    expect(result.answer).toBe(layer4MessageFor('no_results', false));
+    expect(result.answer).toContain('could not find');
   });
 });
 
@@ -512,6 +562,28 @@ describe('SynthesisRunner — policy blocked branch', () => {
     expect(result.degradedReason).toBe('policy_blocked');
     expect(result.synthesisAttempts).toBe(0);
     expect(result.tokenUsage.inputTokens).toBe(0);
+  });
+
+  it('analysis_unavailable → honest "AI analysis unavailable" message + degradedReason llm_unavailable (NOT query-blaming)', async () => {
+    // Move 2: when the router reports the reject was caused by an analyzer LLM
+    // failure, the synthesizer must say so honestly — not render the
+    // unsupported_intent copy that asks the user for a wine name.
+    const llm = makeStubLlm(async () => {
+      throw new Error('LLM must not be called when blocked');
+    });
+    const result = await run(llm, {
+      query: '보르고뉴',
+      policyBlocked: true,
+      blockedKind: 'analysis_unavailable',
+      hangulDominant: true,
+      toolOutcomes: [],
+    });
+    expect(result.layer).toBe('layer4');
+    expect(result.degradedReason).toBe('llm_unavailable');
+    expect(result.answer).toBe(FALLBACK_TEMPLATES.analysisUnavailable.korean);
+    // must NOT be the unsupported_intent copy that blames the query
+    expect(result.answer).not.toBe(FALLBACK_TEMPLATES.unsupportedIntent.korean);
+    expect(result.synthesisAttempts).toBe(0);
   });
 });
 
@@ -621,7 +693,7 @@ describe('SynthesisRunner — token / timeout / circuit-open accounting', () => 
     expect(result.tokenUsage.outputTokens).toBe(25);
   });
 
-  it('timeout on primary does NOT retry → falls to layer 2 with degradedReason=timeout', async () => {
+  it('timeout on primary does NOT retry → fails honestly (provider unavailable), no Layer 2 fabrication', async () => {
     const llm = makeStubLlm(async () => {
       throw new StructuredLlmTimeoutError();
     });
@@ -634,12 +706,14 @@ describe('SynthesisRunner — token / timeout / circuit-open accounting', () => 
         ]),
       ],
     });
-    expect(result.layer).toBe('layer2');
+    expect(result.layer).toBe('layer4');
     expect(result.degradedReason).toBe('timeout');
+    expect(result.answer).toBe(FALLBACK_TEMPLATES.llmUnavailable.korean);
+    expect(result.answer).not.toContain('Wine T');
     expect(result.synthesisAttempts).toBe(1);
   });
 
-  it('circuit-open on primary → falls to layer 2 with degradedReason=circuit_open', async () => {
+  it('circuit-open on primary → fails honestly (provider unavailable), no Layer 2 fabrication', async () => {
     const llm = makeStubLlm(async () => {
       throw new StructuredLlmCircuitOpenError('synth');
     });
@@ -652,14 +726,16 @@ describe('SynthesisRunner — token / timeout / circuit-open accounting', () => 
         ]),
       ],
     });
-    expect(result.layer).toBe('layer2');
+    expect(result.layer).toBe('layer4');
     expect(result.degradedReason).toBe('circuit_open');
+    expect(result.answer).toBe(FALLBACK_TEMPLATES.llmUnavailable.korean);
+    expect(result.answer).not.toContain('Wine C');
     expect(result.synthesisAttempts).toBe(1);
   });
 
-  it('generic Anthropic credit-balance error on both attempts → deterministic Layer 2 fallback', async () => {
+  it('generic unmodeled error on both attempts → unexpected_error Layer 2 fallback', async () => {
     const llm = makeStubLlm(async () => {
-      throw makeAnthropicCreditBalanceError();
+      throw makeGenericUnmodeledError();
     });
     const result = await run(llm, {
       query: '나파 카베르네 추천',
@@ -680,9 +756,9 @@ describe('SynthesisRunner — token / timeout / circuit-open accounting', () => 
     );
   });
 
-  it('generic Anthropic credit-balance error on both attempts → deterministic Layer 3 fallback', async () => {
+  it('generic unmodeled error on both attempts → unexpected_error Layer 3 fallback', async () => {
     const llm = makeStubLlm(async () => {
-      throw makeAnthropicCreditBalanceError();
+      throw makeGenericUnmodeledError();
     });
     const result = await run(llm, {
       query: '카베르네 추천',
@@ -703,9 +779,9 @@ describe('SynthesisRunner — token / timeout / circuit-open accounting', () => 
     expect(result.answer).toContain('Wine B');
   });
 
-  it('generic Anthropic credit-balance error on both attempts → deterministic Layer 4 fallback', async () => {
+  it('generic unmodeled error on both attempts → unexpected_error Layer 4 fallback', async () => {
     const llm = makeStubLlm(async () => {
-      throw makeAnthropicCreditBalanceError();
+      throw makeGenericUnmodeledError();
     });
     const result = await run(llm, {
       query: 'Recommend something',
@@ -723,7 +799,7 @@ describe('SynthesisRunner — token / timeout / circuit-open accounting', () => 
     expect(result.groundedOnToolResults).toBe(false);
     expect(result.degradedReason).toBe('unexpected_error');
     expect(result.synthesisAttempts).toBe(2);
-    expect(result.answer).toBe(FALLBACK_TEMPLATES.layer4.english);
+    expect(result.answer).toBe(layer4MessageFor('unexpected_error', false));
   });
 });
 
@@ -771,7 +847,7 @@ describe('SynthesisRunner — invariants', () => {
       hangulDominant: true,
       toolOutcomes: [],
     });
-    expect(resHangulLayer4.answer).toBe(FALLBACK_TEMPLATES.layer4.korean);
+    expect(resHangulLayer4.answer).toBe(layer4MessageFor('no_results', true));
 
     // Pure emoji query → no Hangul → English Layer 4 template.
     const resEmoji = await run(llmNo, {
@@ -779,7 +855,7 @@ describe('SynthesisRunner — invariants', () => {
       hangulDominant: false,
       toolOutcomes: [],
     });
-    expect(resEmoji.answer).toBe(FALLBACK_TEMPLATES.layer4.english);
+    expect(resEmoji.answer).toBe(layer4MessageFor('no_results', false));
 
     // Accented Latin → no Hangul → English Layer 4 template.
     const resAccent = await run(llmNo, {
@@ -787,7 +863,7 @@ describe('SynthesisRunner — invariants', () => {
       hangulDominant: false,
       toolOutcomes: [],
     });
-    expect(resAccent.answer).toBe(FALLBACK_TEMPLATES.layer4.english);
+    expect(resAccent.answer).toBe(layer4MessageFor('no_results', false));
   });
 });
 
@@ -1172,5 +1248,103 @@ describe('SynthesisRunner — A3 grounded-but-thin vs ungrounded fallback', () =
     expect(result.degradedReason).toBe('ungrounded_claim');
     expect(result.verificationAttempts).toBe(2);
     expect(calls).toBe(2);
+  });
+});
+
+describe('SynthesisRunner — provider unavailable fails honestly (no fabrication)', () => {
+  const groundedOutcome = () =>
+    makeSearchOutcome([
+      { canonicalLabel: 'Château Margaux', producer: 'Château Margaux', region: 'Bordeaux' },
+    ]);
+
+  it('LLM provider HTTP rejection (e.g. credit exhausted) → honest message, NOT a fabricated wine answer', async () => {
+    // Anthropic adapter shape for an HTTP 400 transport rejection: empty zod
+    // issues + rawOutput carrying httpStatus (distinct from a real schema fail).
+    const llm = makeStubLlm(async () => {
+      throw new StructuredLlmValidationError(
+        [],
+        { httpStatus: 400, body: 'credit balance is too low' },
+        'Anthropic structured: HTTP 400 — credit balance is too low',
+      );
+    });
+    const result = await run(llm, {
+      query: '보르고뉴 와인 얼마',
+      hangulDominant: true,
+      toolOutcomes: [groundedOutcome()],
+    });
+    expect(result.degradedReason).toBe('llm_unavailable');
+    expect(result.layer).toBe('layer4');
+    expect(result.groundedOnToolResults).toBe(false);
+    expect(result.answer).toBe(FALLBACK_TEMPLATES.llmUnavailable.korean);
+    // must NOT fabricate a wine-name answer
+    expect(result.answer).not.toContain('Château Margaux');
+    expect(result.answer).not.toContain('검색 결과:');
+  });
+
+  it('provider error (HTTP transport rejection, first-class) → honest message, not Layer 2 fabrication', async () => {
+    // Move 1: the adapter now throws a dedicated StructuredLlmProviderError for
+    // HTTP non-2xx (credit/auth/5xx) instead of conflating it into a
+    // ValidationError. The synthesizer treats it as provider-unavailable.
+    const llm = makeStubLlm(async () => {
+      throw new StructuredLlmProviderError(400, 'Anthropic: credit balance too low');
+    });
+    const result = await run(llm, {
+      query: '보르고뉴 와인 얼마',
+      hangulDominant: true,
+      toolOutcomes: [groundedOutcome()],
+    });
+    expect(result.degradedReason).toBe('llm_unavailable');
+    expect(result.layer).toBe('layer4');
+    expect(result.answer).toBe(FALLBACK_TEMPLATES.llmUnavailable.korean);
+    expect(result.answer).not.toContain('검색 결과:');
+  });
+
+  it('circuit breaker open → honest message, not Layer 2 fabrication', async () => {
+    const llm = makeStubLlm(async () => {
+      throw new StructuredLlmCircuitOpenError('anthropic-structured');
+    });
+    const result = await run(llm, {
+      query: 'Recommend a Bordeaux',
+      hangulDominant: false,
+      toolOutcomes: [groundedOutcome()],
+    });
+    expect(result.degradedReason).toBe('circuit_open');
+    expect(result.layer).toBe('layer4');
+    expect(result.answer).toBe(FALLBACK_TEMPLATES.llmUnavailable.english);
+    expect(result.answer).not.toContain('Château Margaux');
+  });
+
+  it('LLM timeout → honest message, not Layer 2 fabrication', async () => {
+    const llm = makeStubLlm(async () => {
+      throw new StructuredLlmTimeoutError();
+    });
+    const result = await run(llm, {
+      query: '보르고뉴 와인 얼마',
+      hangulDominant: true,
+      toolOutcomes: [groundedOutcome()],
+    });
+    expect(result.degradedReason).toBe('timeout');
+    expect(result.layer).toBe('layer4');
+    expect(result.answer).toBe(FALLBACK_TEMPLATES.llmUnavailable.korean);
+    expect(result.answer).not.toContain('검색 결과:');
+  });
+
+  it('genuine malformed LLM output (schema validation) STILL uses the grounded Layer 2 template', async () => {
+    // Regression guard: a WORKING LLM that returns bad JSON is a legitimate
+    // grounded degradation — it must keep Layer 2, NOT fail honestly.
+    const llm = makeStubLlm(async () => {
+      throw new StructuredLlmValidationError(
+        [{ code: 'custom', message: 'bad', path: [] } as z.ZodIssue],
+        { answer: 123 },
+      );
+    });
+    const result = await run(llm, {
+      query: '와인 추천',
+      hangulDominant: true,
+      toolOutcomes: [groundedOutcome()],
+    });
+    expect(result.degradedReason).toBe('malformed_llm_output');
+    expect(result.layer).toBe('layer2');
+    expect(result.answer).toContain('검색 결과: Château Margaux');
   });
 });

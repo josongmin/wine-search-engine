@@ -28,6 +28,8 @@ import { POLICY_BLOCKED_CODE } from '../../../domain/shared/error/policy-blocked
 import type { Proposal } from '../../../domain/curation/model/proposal.js';
 import type { AliasAuditView, CurationHealth, ProposalListFilter } from '../../../domain/curation/port/curation-store.port.js';
 import type { ProposalWire } from '../schemas/entity-lookup-v2-ops.schema.js';
+import { wireCurationEvidenceFromDomain } from '../../../domain/curation/model/curation-proposal-evidence.js';
+import type { LookupOpsRuntimeHealthView } from '../../../config/lookup-authority.js';
 
 function requireReadGate(request: FastifyRequest): void {
   if (!request.debugRequest) {
@@ -46,7 +48,7 @@ function toProposalWire(p: Proposal): ProposalWire {
   const base = {
     proposal_id: p.proposalId,
     status: p.status,
-    evidence: p.evidence,
+    evidence: wireCurationEvidenceFromDomain(p.evidence),
     created_at: p.createdAt.toISOString(),
     updated_at: p.updatedAt.toISOString(),
     ...(p.proposedBy !== undefined ? { proposed_by: p.proposedBy } : {}),
@@ -103,15 +105,42 @@ function toAliasAuditWire(view: AliasAuditView): {
   };
 }
 
-function toHealthWire(h: CurationHealth): {
+function toHealthWire(
+  h: CurationHealth,
+  lookupOpsRuntime?: LookupOpsRuntimeHealthView,
+): {
   queue_by_status: CurationHealth['queueByStatus'];
   queue_by_kind: CurationHealth['queueByKind'];
   total_proposals: number;
+  published_awaiting_materialization: number;
+  legacy_approved_abbreviation_backlog: number;
+  lookup_runtime?: {
+    search_snapshot_id?: string;
+    family_graph_edge_count: number;
+    ltr_support_status: 'unsupported';
+    ltr_support_reason: 'lookup_domain_model_absent';
+    unwired_substrate_ids: readonly string[];
+  };
 } {
   return {
     queue_by_status: h.queueByStatus,
     queue_by_kind: h.queueByKind,
     total_proposals: h.totalProposals,
+    published_awaiting_materialization: h.publishedAwaitingMaterialization,
+    legacy_approved_abbreviation_backlog: h.legacyApprovedAbbreviationBacklog,
+    ...(lookupOpsRuntime !== undefined
+      ? {
+        lookup_runtime: {
+          ...(lookupOpsRuntime.searchSnapshotId !== undefined
+            ? { search_snapshot_id: lookupOpsRuntime.searchSnapshotId }
+            : {}),
+          family_graph_edge_count: lookupOpsRuntime.familyGraphEdgeCount,
+          ltr_support_status: lookupOpsRuntime.ltrSupportStatus,
+          ltr_support_reason: lookupOpsRuntime.ltrSupportReason,
+          unwired_substrate_ids: [...lookupOpsRuntime.unwiredSubstrateIds],
+        },
+      }
+      : {}),
   };
 }
 
@@ -144,7 +173,8 @@ export function registerEntityLookupV2OpsCurationRoutes(
       parseContractBody(request, EntityLookupV2OpsCoverageHealthRouteContract);
       const health = await deps.curationUseCase.curationHealth();
       sendRouteContractResponse(
-        request, reply, EntityLookupV2OpsCoverageHealthRouteContract, HTTP_STATUS_OK, toHealthWire(health),
+        request, reply, EntityLookupV2OpsCoverageHealthRouteContract, HTTP_STATUS_OK,
+        toHealthWire(health, deps.lookupOpsRuntime),
       );
     },
   });

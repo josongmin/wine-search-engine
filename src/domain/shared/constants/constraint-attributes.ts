@@ -106,6 +106,23 @@ export const GEOGRAPHY_ATTRIBUTES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Soft-bundle attributes produced by ontology span extraction on identity-shaped
+ * short surfaces. Distinct from {@link SOFT_CONSTRAINT_ATTRIBUTES} — geography
+ * and identity ontology signals, not sensory ranking preferences.
+ *
+ * SSoT — import from here for planner ontology-only evidence checks.
+ */
+export const ONTOLOGY_SPAN_SOFT_ATTRIBUTES: ReadonlySet<string> = new Set([
+  'appellation',
+  'region',
+  'country',
+  'grape_primary',
+  'wine_type',
+  'classification',
+  'vintage_year',
+]);
+
+/**
  * Constraint attribute names that signal price / budget intent.
  *
  * SSoT — import from here. Do NOT redefine in:

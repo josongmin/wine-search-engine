@@ -40,14 +40,13 @@ describe('Core Korean Iconic Release Gate', () => {
   it.each(identitySafeCases)(
     'resolves Korean iconic variant $query to $expectedEntityId',
     async ({ query, expectedEntityId }) => {
-      const response = await postJson(server.app, '/v1/lookup/wine', { query });
+      const response = await postJson(server.app, '/v2/entity-lookup', { query });
 
       expect(response.statusCode).toBe(200);
 
-      const body = parseSearchResponse(response);
-      expect(body.engine_decision.decision_status).toBe('resolved');
-      expect(body.engine_decision.next_action).toBe('return_result');
-      expect(body.results[0]?.entity.entity_id).toBe(expectedEntityId);
+      const body = response.json() as { status: string; top_candidate?: { entity_id?: string } | null };
+      expect(body.status).toBe('resolved');
+      expect(body.top_candidate?.entity_id).toBe(expectedEntityId);
     },
   );
 

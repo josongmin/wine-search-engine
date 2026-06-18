@@ -1,5 +1,10 @@
 # Agent Benchmark Annotation Guide (SOTA++)
 
+> Schema and corpus authoring remain current. Historical note: the live agent
+> runner that consumes these annotations is absent in this checkout, so this is
+> a data-contract doc, not proof of a runnable live bench lane. See
+> `docs/bench/STATUS.md`.
+
 This guide describes how to annotate a scenario with ground truth, what each
 field means, and the conventions seed annotations follow.
 
@@ -20,8 +25,8 @@ tsx scripts/eval/annotate-scenario.ts --list
 ```
 
 Annotations live under `test/benchmark/agent/annotations/<scenarioId>.json`.
-The runner loads them at startup; missing files = judge-only path for that
-scenario.
+The historical live runner loaded them at startup; missing files imply a
+judge-only path once a runner is restored.
 
 ## Schema
 

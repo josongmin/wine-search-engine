@@ -7,6 +7,7 @@ const TABS = [
   { href: '/ops/inspect', label: 'Inspect' },
   { href: '/ops/curation', label: 'Curation' },
   { href: '/ops/coverage', label: 'Coverage' },
+  { href: '/ops/playground', label: 'Playground' },
 ] as const;
 
 export function OpsNav() {

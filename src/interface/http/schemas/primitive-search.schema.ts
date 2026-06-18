@@ -2,15 +2,15 @@
  * Primitive search & lookup HTTP request schemas — T-IR-01.
  *
  * Path-authoritative selectors: each primitive endpoint owns a dedicated path
- * (`/v1/search/hybrid`, `/v1/search/semantic`, `/v1/search/lexical`,
- * `/v1/lookup/wine`) and the request body deliberately CANNOT override the
+ * (`/v1/search/hybrid`, `/v1/search/semantic`, `/v1/search/lexical`) and the
+ * request body deliberately CANNOT override the
  * retrieval lane. `retrieval_mode`, `sessionContext`, and other monolith-era
  * control surfaces are gone. A narrow legacy `options` envelope is still
  * accepted as a no-op compatibility shim so stale callers do not hard-fail
  * during the primitive-route cutover; the path remains the sole authority on
  * the executed lane (architecture-decision §2.2).
  *
- * Schema shape is shared across all four primitives — the only thing that
+ * Schema shape is shared across the three public search primitives — the only thing that
  * differs at the public boundary is the URL. The route handler is what
  * derives the internal `retrievalLane` from the path.
  *

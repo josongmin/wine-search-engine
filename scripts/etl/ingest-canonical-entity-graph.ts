@@ -24,6 +24,14 @@ interface Args {
   readonly manifestPath: string;
 }
 
+export interface CanonicalEntityGraphIngestResult {
+  readonly result: 'passed';
+  readonly snapshot_id: string;
+  readonly canonical_entities_upserted: number;
+  readonly canonical_aliases_inserted: number;
+  readonly canonical_ambiguity_rows_inserted: number;
+}
+
 function parseArgs(argv: readonly string[]): Args {
   let manifestPath = '';
   for (let i = 0; i < argv.length; i += 1) {
@@ -43,26 +51,27 @@ async function loadManifest(manifestPath: string): Promise<SearchSnapshotManifes
   return parseManifest(await fs.readFile(manifestPath, 'utf8'), manifestPath);
 }
 
-async function loadEntities(manifest: SearchSnapshotManifest): Promise<readonly EntitySnapshotRecord[]> {
+export async function loadEntities(manifest: SearchSnapshotManifest): Promise<readonly EntitySnapshotRecord[]> {
   const raw = await fs.readFile(manifest.artifacts.entitiesNdjson, 'utf8');
   return parseNdjson<EntitySnapshotRecord>(raw, manifest.artifacts.entitiesNdjson).records;
 }
 
-async function loadAliases(manifest: SearchSnapshotManifest): Promise<readonly AliasSnapshotRecord[]> {
+export async function loadAliases(manifest: SearchSnapshotManifest): Promise<readonly AliasSnapshotRecord[]> {
   const raw = await fs.readFile(manifest.artifacts.aliasesNdjson, 'utf8');
   return parseNdjson<AliasSnapshotRecord>(raw, manifest.artifacts.aliasesNdjson).records;
 }
 
-async function loadAmbiguity(
+export async function loadAmbiguity(
   manifest: SearchSnapshotManifest,
 ): Promise<readonly AmbiguityRegistrySnapshotRow[]> {
   const raw = await fs.readFile(manifest.artifacts.ambiguityRegistryNdjson, 'utf8');
   return parseNdjson<AmbiguityRegistrySnapshotRow>(raw, manifest.artifacts.ambiguityRegistryNdjson).records;
 }
 
-async function main(): Promise<void> {
-  const args = parseArgs(process.argv.slice(2));
-  const manifest = await loadManifest(args.manifestPath);
+export async function ingestCanonicalEntityGraphForManifestPath(
+  manifestPath: string,
+): Promise<CanonicalEntityGraphIngestResult> {
+  const manifest = await loadManifest(manifestPath);
   const [entities, aliases, ambiguityRows] = await Promise.all([
     loadEntities(manifest),
     loadAliases(manifest),
@@ -83,15 +92,13 @@ async function main(): Promise<void> {
       searchSnapshotId: manifest.snapshotId,
     });
     await client.query('COMMIT');
-    console.log(
-      JSON.stringify({
-        result: 'passed',
-        snapshot_id: manifest.snapshotId,
-        canonical_entities_upserted: entities.length,
-        canonical_aliases_inserted: aliases.length,
-        canonical_ambiguity_rows_inserted: ambiguityRows.length,
-      }),
-    );
+    return {
+      result: 'passed',
+      snapshot_id: manifest.snapshotId,
+      canonical_entities_upserted: entities.length,
+      canonical_aliases_inserted: aliases.length,
+      canonical_ambiguity_rows_inserted: ambiguityRows.length,
+    };
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
@@ -99,6 +106,12 @@ async function main(): Promise<void> {
     client.release();
     await pool.end();
   }
+}
+
+async function main(): Promise<void> {
+  const args = parseArgs(process.argv.slice(2));
+  const result = await ingestCanonicalEntityGraphForManifestPath(args.manifestPath);
+  console.log(JSON.stringify(result));
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

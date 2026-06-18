@@ -12,7 +12,7 @@ import { z } from 'zod';
 import { parseNdjson } from '../etl/ndjson.js';
 import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 import { resolveCliDataPathArg } from './cli-data-path.js';
-import type { AutocompleteUseCasePort } from '../../src/application/search/port/search-route-usecases.port.js';
+import type { AutocompleteQueryRunner } from '../../src/application/search/autocomplete-query-runner.js';
 
 export const AUTOCOMPLETE_BENCHMARK_CATEGORIES = [
   'latin_prefix',
@@ -119,7 +119,7 @@ export interface AutocompleteBenchmarkThresholds {
   readonly enforceMinRecallAt3ByLanguage?: boolean | undefined;
 }
 
-export interface AutocompleteUseCaseBenchmarkOptions {
+export interface AutocompleteQueryRunnerBenchmarkOptions {
   readonly input?: string | undefined;
   readonly concurrency?: number | undefined;
 }
@@ -630,9 +630,9 @@ function benchmarkContextForLanguage(
   }
 }
 
-export async function evaluateAutocompleteBenchmarkWithUseCase(
-  autocompleteUseCase: AutocompleteUseCasePort,
-  options: AutocompleteUseCaseBenchmarkOptions = {},
+export async function evaluateAutocompleteBenchmarkWithRunner(
+  autocompleteQueryRunner: AutocompleteQueryRunner,
+  options: AutocompleteQueryRunnerBenchmarkOptions = {},
 ): Promise<AutocompleteBenchmarkReport> {
   const cases = await loadAutocompleteBenchmark(options.input ?? DEFAULT_INPUT);
   const concurrency = Math.max(1, Math.min(options.concurrency ?? 4, 16));
@@ -641,7 +641,7 @@ export async function evaluateAutocompleteBenchmarkWithUseCase(
     concurrency,
     async (benchmarkCase) => {
       const start = performance.now();
-      const response = await autocompleteUseCase.execute({
+      const response = await autocompleteQueryRunner.execute({
         query: benchmarkCase.query,
         context: benchmarkContextForLanguage(benchmarkCase.language),
         requestId: `autocomplete-bench-${benchmarkCase.benchmark_id}`,
@@ -669,7 +669,7 @@ export async function fetchLiveAutocompleteRankings(
   timeoutMs: number,
   concurrency: number,
 ): Promise<Map<string, RankedPrediction>> {
-  const endpoint = new URL('/v1/lookup/wine', apiUrl).toString();
+  const endpoint = new URL('/v2/entity-lookup', apiUrl).toString();
   const mappings = await mapPool(
     cases,
     concurrency,

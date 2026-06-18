@@ -22,20 +22,20 @@ import { clamp01 } from '../../shared/utils/clamp.js';
 import type { EntityResolveResult } from '../model/resolve-result.js';
 import type { QueryClass } from '../../shared/types/index.js';
 import type { LookupDecision } from './lookup-v2-types.js';
+import type { LookupResolveEvidenceGrade } from './channel-provenance.js';
 
 export class CalibratedAbstainDecider {
   /**
    * Decide the terminal V2 status from the resolver result. Never upgrades the
    * resolver's advisory status; only holds or tightens it.
    *
-   * @param hasExactEvidence whether the top candidate carries EXACT identity
-   *   evidence (an exact/compact/transliteration alias hit — see
-   *   {@link hasExactIdentityEvidence}). This is the ONLY thing that may certify
-   *   a resolve under UNtrusted calibration: a raw/uncalibrated score must never
-   *   be read as a probability (calibration-trust gate; audit DoD-d). When the
-   *   caller cannot establish exact evidence it MUST pass false → abstain.
+   * @param evidenceGrade strongest evidence carried by the top candidate.
+   *   `identity_grade` is the ONLY evidence that may certify a resolve. Recall
+   *   lanes (`fuzzy_alias`, `family_graph`, `dense`) may widen the candidate
+   *   pool but must never self-certify identity, even when calibration is
+   *   trusted and the score is 1.0.
    */
-  decide(result: EntityResolveResult, _queryClass: QueryClass, hasExactEvidence: boolean): LookupDecision {
+  decide(result: EntityResolveResult, _queryClass: QueryClass, evidenceGrade: LookupResolveEvidenceGrade): LookupDecision {
     const trace = result.decisionTrace;
     const topConfidence = clamp01(trace.top1CalibratedScore);
     const margin = trace.calibratedGap;
@@ -62,10 +62,33 @@ export class CalibratedAbstainDecider {
       // DoD-d). Only an explicit EXACT-identity signal — an exact/compact/
       // transliteration alias hit, NOT the numeric score — may certify a
       // resolve here; otherwise abstain.
-      if (hasExactEvidence && isMarginClear(margin, gapThreshold)) {
+      if (evidenceGrade === 'identity_grade' && isMarginClear(margin, gapThreshold)) {
         return decision('resolved', 'exact_identity_uncalibrated', 'Resolved on exact-identity alias evidence (calibration untrusted).', topConfidence, margin, calibrationTrusted);
       }
       return decision('ambiguous', 'uncalibrated_low_trust', 'Calibration is untrusted and there is no exact-identity evidence — abstaining.', topConfidence, margin, calibrationTrusted);
+    }
+
+    // Resolver-owned exact-safe singleton certificate: the resolver has
+    // already established a collision-free singleton identity witness and
+    // emitted an explicit reason code. Re-applying the generic calibrated
+    // confidence floor here would silently demote that structural certificate
+    // back to failed when top1CalibratedScore is 0/near-0 under a sparse or
+    // conservative calibrator fit. Honor the resolver's certificate-owned
+    // outcome, but ONLY when the final V2 evidence grade is still
+    // identity-bearing and there is no competitive runner-up.
+    if (
+      evidenceGrade === 'identity_grade'
+      && isMarginClear(margin, gapThreshold)
+      && hasExactSafeSingletonResolverOutcome(trace.outcomeReasonCodes)
+    ) {
+      return decision(
+        'resolved',
+        'exact_safe_singleton_certificate',
+        'Resolved on an exact-safe singleton identity certificate.',
+        topConfidence,
+        margin,
+        calibrationTrusted,
+      );
     }
 
     // Trusted calibration: enforce confidence floor + margin.
@@ -74,6 +97,9 @@ export class CalibratedAbstainDecider {
     }
     if (!isMarginClear(margin, gapThreshold)) {
       return decision('ambiguous', 'narrow_margin', 'Top two candidates are too close to call.', topConfidence, margin, calibrationTrusted);
+    }
+    if (evidenceGrade !== 'identity_grade') {
+      return decision('ambiguous', 'identity_evidence_required', 'Top candidate lacks identity-grade evidence — abstaining.', topConfidence, margin, calibrationTrusted);
     }
 
     return decision('resolved', firstReason(trace.outcomeReasonCodes, 'calibrated_resolve'), 'Confidently resolved to a single entity.', topConfidence, margin, calibrationTrusted);
@@ -87,6 +113,10 @@ function isMarginClear(margin: number | undefined, gapThreshold: number): boolea
 
 function firstReason(codes: readonly string[], fallback: string): string {
   return codes[0] ?? fallback;
+}
+
+function hasExactSafeSingletonResolverOutcome(codes: readonly string[]): boolean {
+  return codes.includes('SINGLETON_EXACT_SAFE_CERTIFICATE_RESOLVED');
 }
 
 function decision(
@@ -106,4 +136,3 @@ function decision(
     calibrationTrusted,
   };
 }
-

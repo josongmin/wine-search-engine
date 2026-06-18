@@ -27,7 +27,7 @@ maturity_rationale: |
 
 status: active
 since: 2025-09
-last_reviewed: 2026-05-21
+last_reviewed: 2026-06-02
 
 owner: core
 
@@ -51,12 +51,16 @@ tests:
 
 related_rfcs:
   - docs/RFC-014.md
+  - docs/rfc/RFC-022-learned-sparse-splade-doc-encoder.md
 
 known_limitations:
   - "Reranker 없음 (현재 BM25 + ANN score blend만)"
   - "Long-tail 한국어 별칭 일부 미스 (catalog gap)"
+  - "learned_sparse 채널이 구조적 0 기여 — wine_aware rank-profile은 항을 갖지만 doc-side SPLADE 인코딩 producer 부재 + query-side는 tf 휴리스틱. wine_aware ≈ hybrid. RFC-022로 추적 (2026-06-02 감사)"
+  - "wine_aware second-phase의 availability rerank 항은 dead/redundant로 제거됨 (YQL이 이미 availability=true 필터 + 전 doc 하드코딩 true → 변별력 0)"
 
 next_steps:
+  - "RFC-022: 진짜 SPLADE doc+query 인코더로 learned_sparse 채널 부활 (P1 인코더 포트+stub부터)"
   - "ColBERT-style late interaction 도입 검토"
   - "LTR 재도입 (track-c step3 결과 활용)"
 

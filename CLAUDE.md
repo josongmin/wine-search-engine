@@ -49,8 +49,8 @@ This repository is a **wine intelligence / search engine** backend: typed TypeSc
 | `pnpm run test:e2e:vespa` | Vespa-backed e2e lane with setup/teardown |
 | `pnpm run test:ingest:contract` | ETL/ingest contract checks for exported script helpers |
 | `pnpm run test:quality:vespa` | Vespa-backed quality regression lane |
-| `pnpm run verify:http-contracts` | OpenAPI/catalog parity (runs on `git:prepush`) |
-| `pnpm run git:prepush` | Husky pre-push: typecheck + unit + `verify:http-contracts` |
+| `pnpm run verify:http-contracts` | OpenAPI/catalog parity (CI `verification-core`; `git:prepush:smart` for HTTP-sensitive diffs) |
+| `pnpm run git:prepush` | Husky pre-push: typecheck + security + unit + web + integration matrix + noisy + deadcode |
 | `pnpm run git:prepush:quick` | typecheck + unit only (skip HTTP contract check) |
 | `pnpm run git:prepush:heavy` | Extended pre-push: `git:prepush` + heavy test lane |
 
@@ -167,6 +167,7 @@ When adding or modifying shared logic (channel names, scoring formulae, type gua
 | Deterministic score comparators | `src/domain/shared/utils/stable-comparator.ts` |
 | Circuit breaker registry | `src/observability/circuit-breaker-registry.ts` |
 | Silent-skip counters | `src/observability/silent-skip-counters.ts` |
+| Calibration health (per-class trust + downgrade counter) | `src/domain/observability/calibration-health-registry.ts` |
 | Sparse hit → HybridCandidate mapping | `src/domain/retrieval/service/sparse-hit-to-candidate.ts` |
 
 **Do NOT duplicate** these into private functions. Import from the SSoT module. If the SSoT module is missing a function you need, add it there — not locally.

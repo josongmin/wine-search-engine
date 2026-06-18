@@ -24,12 +24,27 @@ const AMBIGUITY_TYPE_COLLISION_SCAN_K = 3;
  * Minimum number of same-producer wines among the top scan window to call a
  * producer-family collision. 3 = a clear cluster (not a coincidental pair),
  * suggesting the query targets the producer rather than one specific wine.
+ *
+ * Only **score-competitive** occurrences count toward this threshold (siblings
+ * within STRONG_MATCH_RATIO of the top candidate's canonicalNormalizedMatch) —
+ * this implements the detector's stated "score similarly" contract. Recall-only
+ * seeds (e.g. family_graph siblings carrying zero identity signals) are NOT a
+ * collision: the user did not type something that matches them strongly, so
+ * surfacing a "which one did you mean?" clarification over them is a false
+ * positive that needlessly abstains on an otherwise-resolvable head match.
  */
 const PRODUCER_FAMILY_COLLISION_MIN_COUNT = 3;
 /** ≥ this many distinct ambiguity types → 'high' severity (compounding ambiguity). */
 const SEVERITY_HIGH_TYPE_COUNT = 3;
 /** ≥ this many distinct ambiguity types → 'medium' severity. */
 const SEVERITY_MEDIUM_TYPE_COUNT = 2;
+
+function hasCollisionFreeExactSafeCertificate(candidate: ResolverCandidate): boolean {
+  return candidate.identityCertificates?.some((certificate) =>
+    certificate.singleton === true
+    && certificate.collisionFree === true,
+  ) ?? false;
+}
 
 /**
  * Classifies ambiguity among resolution candidates, per RFC-006 §7.
@@ -119,26 +134,39 @@ export class AmbiguityClassifier {
    * vintage was its own group, so vintages.size was always 1).
    */
   private detectMultiVintage(candidates: readonly ResolverCandidate[]): boolean {
-    const wineByLabel = new Map<string, Set<string>>();
-    for (const candidate of candidates.slice(0, AMBIGUITY_TOP_CANDIDATE_SCAN_K)) {
-      if (candidate.entityType === 'wine') {
-        const vintage = candidate.attributeHints?.['vintage'];
-        if (typeof vintage === 'string' || typeof vintage === 'number') {
-          // Strip 4-digit year from label for grouping so different vintages
-          // of the same wine converge to one key. Bounded strip preserves
-          // embedded numerals in product codes that are not vintages.
-          const label = stripVintageYearsBounded(candidate.canonicalLabel)
-            .trim()
-            .replace(/\s+/g, ' ');
-          const vintages = wineByLabel.get(label) ?? new Set<string>();
-          vintages.add(String(vintage));
-          wineByLabel.set(label, vintages);
-        }
-      }
+    const top = candidates[0];
+    if (top === undefined || top.entityType !== 'wine') {
+      return false;
     }
-    for (const vintages of wineByLabel.values()) {
-      if (vintages.size > 1) {
-        return true;
+
+    // Multi-vintage ambiguity must be ABOUT the head wine. A sibling pair from
+    // the same producer (e.g. two Cabernet vintages) must not make an exact
+    // head for a different cuvee (e.g. Élu) ambiguous. Scope the scan to the
+    // top candidate's vintage-stripped identity.
+    const topLabel = stripVintageYearsBounded(top.canonicalLabel)
+      .trim()
+      .replace(/\s+/g, ' ');
+    if (topLabel.length === 0) {
+      return false;
+    }
+
+    const vintages = new Set<string>();
+    for (const candidate of candidates.slice(0, AMBIGUITY_TOP_CANDIDATE_SCAN_K)) {
+      if (candidate.entityType !== 'wine') {
+        continue;
+      }
+      const vintage = candidate.attributeHints?.['vintage'];
+      if (typeof vintage !== 'string' && typeof vintage !== 'number') {
+        continue;
+      }
+      const label = stripVintageYearsBounded(candidate.canonicalLabel)
+        .trim()
+        .replace(/\s+/g, ' ');
+      if (label === topLabel) {
+        vintages.add(String(vintage));
+        if (vintages.size > 1) {
+          return true;
+        }
       }
     }
     return false;
@@ -173,14 +201,53 @@ export class AmbiguityClassifier {
   }
 
   /**
-   * Detects when multiple wines from the same producer score similarly,
+   * Detects when multiple wines from the same producer **score similarly**,
    * suggesting the query refers to the producer rather than a specific wine.
+   *
+   * Score-competitiveness is mandatory, not incidental: only siblings within
+   * STRONG_MATCH_RATIO of the top candidate's canonicalNormalizedMatch count
+   * toward the cluster. Bare producer-name counting (ignoring score) silently
+   * folds recall-only seeds — notably zero-signal family_graph siblings that
+   * the user never matched on — into a false "producer family" cluster,
+   * forcing a needless clarification/abstain over an otherwise-resolvable
+   * exact head match. This mirrors detectUnderspecifiedShortForm's gate using
+   * the same canonicalNormalizedMatch proxy and STRONG_MATCH_RATIO constant.
    */
   private detectProducerFamilyCollision(candidates: readonly ResolverCandidate[]): boolean {
+    // Conservative escape identical to detectUnderspecifiedShortForm: no top
+    // candidate, or a top whose proxy score is zero (odd-ranking / no-signal
+    // edge) — leave behaviour unchanged rather than divide by zero.
+    const top = candidates[0];
+    if (top === undefined) return false;
+    const topScore = top.sourceSignals.canonicalNormalizedMatch;
+    if (topScore === 0) {
+      return false;
+    }
+    const topProducer = top.attributeHints?.['producer'];
+    if (hasCollisionFreeExactSafeCertificate(top) && typeof topProducer === 'string') {
+      const competitiveSiblings = candidates
+        .slice(0, AMBIGUITY_TOP_CANDIDATE_SCAN_K)
+        .filter((candidate) =>
+          candidate.sourceSignals.canonicalNormalizedMatch / topScore >= STRONG_MATCH_RATIO,
+        );
+      if (
+        competitiveSiblings.length > 0
+        && competitiveSiblings.every((candidate) => candidate.attributeHints?.['producer'] === topProducer)
+      ) {
+        return false;
+      }
+    }
+
     const producerCounts = new Map<string, number>();
     for (const candidate of candidates.slice(0, AMBIGUITY_TOP_CANDIDATE_SCAN_K)) {
       const producer = candidate.attributeHints?.['producer'];
-      if (typeof producer === 'string') {
+      if (typeof producer !== 'string') {
+        continue;
+      }
+      // Only a score-competitive sibling is part of the producer-family
+      // cluster. Zero-signal recall seeds (canonicalNormalizedMatch=0) yield
+      // 0/topScore = 0 < STRONG_MATCH_RATIO and are excluded.
+      if (candidate.sourceSignals.canonicalNormalizedMatch / topScore >= STRONG_MATCH_RATIO) {
         producerCounts.set(producer, (producerCounts.get(producer) ?? 0) + 1);
       }
     }

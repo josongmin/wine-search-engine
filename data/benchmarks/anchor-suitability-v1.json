@@ -1,108 +1,2010 @@
 {
   "version": "v1",
-  "generatedAt": "2026-04-17T00:00:00.000Z",
-  "model": "gpt-5.4-mini",
+  "generatedAt": "2026-06-08T22:09:09.811Z",
+  "models": {
+    "gift": "gpt-5.4-mini",
+    "beginner": "gpt-5.4-mini"
+  },
   "promptVersions": {
     "gift": "gift-suitability-scorer-v2",
     "beginner": "beginner-suitability-scorer-v2"
   },
+  "requiredEntityIds": [
+    "chateau-margaux-2015",
+    "masi-amarone-2015",
+    "moet-brut-nv",
+    "opus-one-2018",
+    "romanee-conti-2015",
+    "sassicaia-2018",
+    "w-almaviva-2019",
+    "w-angelus-2012",
+    "w-angelus-2016",
+    "w-angelus-2018",
+    "w-armand-rousseau-chambertin-2018",
+    "w-beychevelle-2013",
+    "w-beychevelle-2017",
+    "w-bollinger-la-grande-annee-2020",
+    "w-calon-segur-2009",
+    "w-calon-segur-2012",
+    "w-calon-segur-2020",
+    "w-caymus-cabernet-2010",
+    "w-caymus-cabernet-2015",
+    "w-caymus-cabernet-2019",
+    "w-chateau-ausone-2016",
+    "w-chateau-dyquem-2015",
+    "w-chateau-haut-brion-2015",
+    "w-chateau-lafite-rothschild-2016",
+    "w-chateau-latour-2016",
+    "w-chateau-margaux-2015",
+    "w-chateau-mouton-rothschild-2018",
+    "w-cheval-blanc-2010",
+    "w-cheval-blanc-2015",
+    "w-cheval-blanc-2017",
+    "w-coche-dury-corton-charlemagne-2019",
+    "w-cos-destournel-2013",
+    "w-cos-destournel-2015",
+    "w-dom-perignon-2013",
+    "w-don-melchor-2019",
+    "w-drc-romanee-conti-2017",
+    "w-egon-muller-scharzhofberger-kabinett-2020",
+    "w-giacomo-conterno-monfortino-2015",
+    "w-harlan-estate-2016",
+    "w-krug-grande-cuvee-170eme-nv",
+    "w-louis-roederer-cristal-2014",
+    "w-lynch-bages-2011",
+    "w-lynch-bages-2016",
+    "w-montelena-2011",
+    "w-montrose-2010",
+    "w-montrose-2019",
+    "w-opus-one-2018",
+    "w-opus-one-2019",
+    "w-ornellaia-2018",
+    "w-palmer-2012",
+    "w-palmer-2020",
+    "w-pavie-2014",
+    "w-pavie-2017",
+    "w-pavie-2019",
+    "w-penfolds-grange-2017",
+    "w-petrus-2016",
+    "w-pichon-baron-2009",
+    "w-pichon-baron-2016",
+    "w-pingus-2019",
+    "w-pol-roger-brut-reserve-nv",
+    "w-pol-roger-brut-vintage-2018",
+    "w-pol-roger-sir-winston-churchill-2015",
+    "w-pontet-canet-2011",
+    "w-pontet-canet-2014",
+    "w-ridge-monte-bello-2017",
+    "w-sassicaia-2018",
+    "w-screaming-eagle-2018",
+    "w-solaia-2016",
+    "w-solaia-2019",
+    "w-talbot-2009",
+    "w-talbot-2018",
+    "w-tignanello-2019",
+    "w-vega-sicilia-unico-2012",
+    "yquem-2015"
+  ],
   "entities": {
     "chateau-margaux-2015": {
+      "sourceDataset": "seed_wines_real",
       "gift": {
         "score": 0.96,
-        "evidenceAxes": ["occasion", "classification", "producer_prestige", "pairing", "flavor_profile", "search_text"],
-        "snippet": "occasion_tags: celebration, investment wine, special dinner; classification: Premier Grand Cru Classé; producer_prestige: 0.98; pairing_tags: beef, lamb, duck; flavor_profiles: blackcurrant, violet, cedar, graphite, tobacco, espresso, truffle; search_text_en: Chateau Margaux 2015 Bordeaux Premier Grand Cru Classé Cabernet Sauvignon full body structured tannins complex finish blackcurrant violet cedar graphite",
-        "rationale": "Very strong gift suitability based on explicit catalog evidence: it is tagged for celebration and special dinner, carries a top-tier official classification, and has very high producer prestige. The flavor and search text describe a complex, structured, premium-style wine, which supports gifting for serious wine recipients. The score is kept below 100 because the catalog does not explicitly mention gift packaging or broader social gifting cues."
-      },
-      "beginner": {
-        "score": 0.18,
-        "evidenceAxes": ["body", "sweetness", "acidity", "tannin", "alcohol_pct", "flavor_profiles", "search_text_en"],
-        "snippet": "body 0.88; sweetness 0.04; acidity 0.72; tannin 0.82; alcohol_pct 13.5; flavor_profiles: blackcurrant, violet, cedar, graphite, tobacco, espresso, truffle; search_text_en: full body structured tannins complex finish",
-        "rationale": "This looks like a highly structured, dry red wine with very high body and tannin, plus notable acidity and complex, savory/aromatic descriptors. Those traits usually make a wine less immediately approachable for beginners. The low sweetness also suggests little softness from residual sugar. I’m keeping the score low because the catalog explicitly points to intensity and structure rather than easy-drinking simplicity."
-      }
-    },
-    "romanee-conti-2015": {
-      "gift": {
-        "score": 0.98,
-        "evidenceAxes": ["occasion", "classification", "producer"],
-        "snippet": "occasion_tags: investment wine, collector, ultimate celebration; classification: Grand Cru; producer: Domaine de la Romanée-Conti; producer_prestige: 1; search_text_en: ... world finest",
-        "rationale": "Extremely strong gift suitability based on explicit catalog evidence: it is tagged for collector/investment use and ultimate celebration, carries Grand Cru classification, and comes from Domaine de la Romanée-Conti with producer_prestige marked 1. The search text also describes it as 'world finest,' reinforcing exceptional status. This is a highly prestigious, occasion-appropriate wine for a special gift."
-      },
-      "beginner": {
-        "score": 0.28,
-        "evidenceAxes": ["body", "sweetness", "acidity", "tannin", "alcohol_pct", "flavor_profiles"],
-        "snippet": "body: 0.85; sweetness: 0.05; acidity: 0.82; tannin: 0.7; alcohol_pct: 13; flavor_profiles: red cherry, rose petal, earth, spice, truffle, incense, forest floor, dried violets",
-        "rationale": "The catalog shows a very full-bodied red with very low sweetness, high acidity, and fairly high tannin, which typically makes a wine less immediately easy for beginners. The flavor profile is complex and earthy/floral rather than simple or obviously soft, suggesting a more demanding style. Alcohol is moderate at 13%, which helps a little, but the overall structure points to low beginner-friendliness."
-      }
-    },
-    "moet-brut-nv": {
-      "gift": {
-        "score": 0.88,
-        "evidenceAxes": ["occasion", "classification", "producer_prestige", "pairing", "flavor_profile", "wine_type", "search_text"],
-        "snippet": "occasion_tags: celebration, casual dining, aperitif; classification: Champagne NV; producer_prestige: 0.82; pairing_tags: aperitif, seafood, light snacks; flavor_profiles: green apple, citrus, brioche, toast, pear, biscuit; wine_type: sparkling; search_text_en: ... entry level classic",
-        "rationale": "Strong gift suitability is supported by explicit celebration-oriented occasion tags, a recognized Champagne NV classification, and high producer prestige. The flavor profile and pairing tags suggest broad appeal and easy gifting versatility, while the sparkling wine type and classic search text reinforce a safe, widely appreciated choice. Score is high, though not maximal, because the catalog evidence does not explicitly mention premium packaging or special gift presentation."
-      },
-      "beginner": {
-        "score": 0.62,
-        "evidenceAxes": ["body", "sweetness", "acidity", "flavor_profiles", "search_text_en"],
-        "snippet": "body: 0.55; sweetness: 0.2; acidity: 0.8; flavor_profiles: green apple, citrus, brioche, toast, pear, biscuit; search_text_en: ... entry level classic",
-        "rationale": "This looks moderately beginner-friendly based on explicit catalog evidence: it has low sweetness, moderate body, and no tannin, which can make it approachable. However, the acidity is quite high, which may be less easy for some beginners. The flavor profile is familiar and descriptive rather than challenging, and the search text explicitly says 'entry level classic,' supporting accessibility. I kept the score moderate rather than high because the high acidity is a notable hurdle."
-      }
-    },
-    "yquem-2015": {
-      "gift": {
-        "score": 0.96,
-        "evidenceAxes": ["occasion", "classification", "producer_prestige", "pairing", "flavor_profile", "wine_type", "search_text"],
-        "snippet": "occasion_tags: celebration, dessert course, collector; classification: Premier Cru Supérieur; producer_prestige: 1; pairing_tags: foie gras, blue cheese, fruit tart, crème brûlée; flavor_profiles: apricot, honey, botrytis, orange peel, vanilla, caramel, saffron; wine_type: dessert; search_text_en: ... greatest dessert wine",
-        "rationale": "This is highly gift-suitable based on explicit catalog evidence: it has strong celebratory and collector occasion tags, a top-tier official classification, and explicit producer prestige. The pairing and flavor language also signal a distinctive, luxurious dessert wine profile that fits gifting well. I am keeping the score below 100 because the catalog does not provide broader gift-specific context beyond these strong wine-quality and occasion signals."
-      },
-      "beginner": {
-        "score": 0.72,
-        "evidenceAxes": ["body", "sweetness", "acidity", "wine type", "flavor_profiles", "alcohol_pct"],
-        "snippet": "body: 0.9; sweetness: 0.98; acidity: 0.78; tannin: 0; alcohol_pct: 14; wine_type: dessert; flavor_profiles: apricot, honey, botrytis, orange peel, vanilla, caramel, saffron",
-        "rationale": "This looks quite approachable for many beginners because it is explicitly very sweet, has no tannin, and is described with familiar dessert-like flavors such as apricot, honey, vanilla, and caramel. The high acidity suggests it should not feel cloying despite the sweetness. The main caution is that it is a dessert wine with 14% alcohol, so it may feel rich and intense rather than light or neutral. Overall, the explicit catalog evidence points to a fairly beginner-friendly style, especially for someone open to sweet wines."
-      }
-    },
-    "sassicaia-2018": {
-      "gift": {
-        "score": 0.94,
-        "evidenceAxes": ["classification", "producer_prestige", "occasion", "pairing", "flavor_profile", "search_text"],
-        "snippet": "Bolgheri Sassicaia DOC; producer_prestige: 0.96; occasion_tags: special dinner, wine enthusiast; pairing_tags: beef, lamb, truffle, aged cheese; flavor_profiles: blackcurrant, cedar, herbs, tobacco, dark cherry, mint, graphite; search_text_en: Italian icon",
-        "rationale": "Very strong gift suitability based on explicit catalog evidence: an official DOC classification tied to Sassicaia, very high producer prestige, and occasion tags that directly signal gifting contexts like special dinner and wine enthusiast. The pairing and flavor language also suggest a serious, widely appreciated premium red. Score is high, though kept below 100 because the catalog does not explicitly mention gift packaging or broader celebratory positioning."
+        "evidenceAxes": [
+          "classification",
+          "producer_prestige",
+          "occasion",
+          "flavor_profile",
+          "pairing",
+          "search_text"
+        ],
+        "snippet": "classification: Premier Grand Cru Classé; producer_prestige: 0.98; occasion_tags: celebration, investment wine, special dinner; pairing_tags: beef, lamb, duck; flavor_profiles: blackcurrant, violet, cedar, graphite, tobacco, espresso, truffle; search_text_en: Chateau Margaux 2015 Bordeaux Premier Grand Cru Classé Cabernet Sauvignon full body structured tannins complex finish",
+        "rationale": "This is exceptionally gift-suitable based on explicit catalog evidence: top-tier official classification, very high producer prestige, and strong occasion tags for celebration and special dinner. The flavor and search text describe a complex, structured, premium-style wine, and the pairing tags support gifting for a formal meal. I am keeping the score high but not perfect because gift suitability still depends on recipient preference, and the catalog does not provide packaging or broader market context.",
+        "generationSource": "llm_teacher_generated"
       },
       "beginner": {
         "score": 0.22,
-        "evidenceAxes": ["body", "sweetness", "acidity", "tannin", "alcohol_pct", "flavor_profiles", "wine_type"],
-        "snippet": "body: 0.88; sweetness: 0.04; acidity: 0.74; tannin: 0.85; alcohol_pct: 14; wine_type: red; flavor_profiles: blackcurrant, cedar, herbs, tobacco, dark cherry, mint, graphite",
-        "rationale": "This looks like a challenging beginner wine based on explicit catalog data: it is very full-bodied, very dry, high in acidity, and especially high in tannin, with 14% alcohol. The flavor profile also suggests a more structured, savory style (cedar, herbs, tobacco, graphite) rather than an easy, soft, fruit-forward wine. I’m keeping the score low because the catalog evidence points to a wine that is likely less approachable for beginners."
+        "evidenceAxes": [
+          "body",
+          "sweetness",
+          "acidity",
+          "tannin",
+          "alcohol_pct",
+          "flavor_profiles",
+          "search_text_en"
+        ],
+        "snippet": "body 0.88; sweetness 0.04; acidity 0.72; tannin 0.82; alcohol_pct 13.5; flavor_profiles: blackcurrant, violet, cedar, graphite, tobacco, espresso, truffle; search_text_en: full body structured tannins complex finish",
+        "rationale": "The catalog explicitly describes a very full-bodied, highly tannic, fairly high-acid red with complex, savory flavors and a structured finish. Those traits usually make a wine less immediately approachable for beginners. Low sweetness also suggests little softness to offset the structure. The score is not lower because the alcohol is moderate and the evidence does not indicate extreme harshness, but overall this looks challenging for a novice palate.",
+        "generationSource": "llm_teacher_generated"
       }
     },
     "masi-amarone-2015": {
+      "sourceDataset": "seed_wines_real",
       "gift": {
         "score": 0.88,
-        "evidenceAxes": ["classification", "producer_prestige", "occasion", "pairing", "flavor_profile", "wine_type", "alcohol_pct", "search_text"],
-        "snippet": "Amarone della Valpolicella DOCG; producer_prestige: 0.85; occasion_tags: special dinner, wine enthusiast; pairing_tags: beef, game, aged cheese, chocolate; flavor_profiles: dried cherry, chocolate, fig, dark plum, tobacco, star anise, coffee; wine_type: red; alcohol_pct: 15; search_text_en: ... rich",
-        "rationale": "Strong gift suitability is supported by multiple explicit catalog signals: a prestigious DOCG classification, high producer prestige, and occasion tags that directly indicate gifting contexts (special dinner, wine enthusiast). The pairing and flavor profile language suggests a rich, distinctive wine that suits celebratory or enthusiast-oriented gifting. The high alcohol level and Amarone style further reinforce a serious, premium red wine profile. Evidence is strong enough for a high score, though not maximal because there is no explicit gift/packaging or broader brand-recognition evidence beyond the provided prestige field."
+        "evidenceAxes": [
+          "classification",
+          "producer_prestige",
+          "occasion",
+          "pairing",
+          "flavor_profile",
+          "wine_type",
+          "alcohol_pct",
+          "search_text"
+        ],
+        "snippet": "Amarone della Valpolicella DOCG; producer_prestige: 0.85; occasion_tags: special dinner, wine enthusiast; pairing_tags: beef, game, aged cheese, chocolate; flavor_profiles: dried cherry, chocolate, fig, dark plum, tobacco, star anise, coffee; wine_type: red; alcohol_pct: 15; search_text_en includes rich",
+        "rationale": "Strong gift suitability is supported by explicit premium classification (DOCG), high producer prestige, and occasion tags that directly signal gifting contexts like special dinner and wine enthusiast. The pairing and flavor profile suggest a rich, distinctive wine that suits celebratory or food-focused gifting. The 15% alcohol and 'rich' search text reinforce a bold, serious style. Score is high, though not maximal, because the catalog does not explicitly mention gift packaging or broader brand recognition beyond the provided prestige metric.",
+        "generationSource": "llm_teacher_generated"
       },
       "beginner": {
         "score": 0.18,
-        "evidenceAxes": ["body", "sweetness", "acidity", "tannin", "alcohol_pct", "flavor_profiles", "search_text_en"],
-        "snippet": "body: 0.95; sweetness: 0.08; acidity: 0.65; tannin: 0.8; alcohol_pct: 15; flavor_profiles: dried cherry, chocolate, fig, dark plum, tobacco, star anise, coffee; search_text_en: rich",
-        "rationale": "This looks like a very full-bodied, dry, high-tannin, high-alcohol red with concentrated, savory/dark flavors. Those explicit traits usually make a wine less immediately approachable for beginners, especially the strong tannin and alcohol. The only beginner-friendly cue is the rich, fruit-driven flavor profile, but the overall structure suggests a challenging wine."
+        "evidenceAxes": [
+          "body",
+          "sweetness",
+          "acidity",
+          "tannin",
+          "alcohol_pct",
+          "flavor_profiles",
+          "search_text_en"
+        ],
+        "snippet": "body 0.95; sweetness 0.08; acidity 0.65; tannin 0.8; alcohol_pct 15; flavor_profiles: dried cherry, chocolate, fig, dark plum, tobacco, star anise, coffee; search_text_en includes \"rich\"",
+        "rationale": "This looks like a very full-bodied, dry, high-tannin, high-alcohol red with concentrated dark/complex flavors. Those explicit traits usually make a wine less beginner-friendly because it is likely intense and structured rather than soft or easygoing. The score is not lower only because the catalog also shows some fruit-forward notes, but overall the evidence points strongly toward a challenging style for beginners.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "moet-brut-nv": {
+      "sourceDataset": "seed_wines_real",
+      "gift": {
+        "score": 0.88,
+        "evidenceAxes": [
+          "occasion",
+          "classification",
+          "producer_prestige",
+          "pairing",
+          "flavor_profile",
+          "wine_type",
+          "search_text"
+        ],
+        "snippet": "occasion_tags: celebration, casual dining, aperitif; classification: Champagne NV; producer: Moët & Chandon; producer_prestige: 0.82; pairing_tags: aperitif, seafood, light snacks; flavor_profiles: green apple, citrus, brioche, toast, pear, biscuit; wine_type: sparkling; search_text_en: ... entry level classic",
+        "rationale": "Strong gift suitability is supported by explicit celebration/aperitif occasion tags, Champagne NV classification, and a well-recognized producer with high prestige. The flavor profile and pairing tags suggest a broadly appealing, classic sparkling wine that fits gifting occasions well. Score is high but not maximal because the catalog also describes it as 'entry level classic,' which supports accessibility more than luxury.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.42,
+        "evidenceAxes": [
+          "body",
+          "sweetness",
+          "acidity",
+          "flavor_profiles",
+          "search_text_en"
+        ],
+        "snippet": "body: 0.55; sweetness: 0.2; acidity: 0.8; flavor_profiles: green apple, citrus, brioche, toast, pear, biscuit; search_text_en: ... entry level classic",
+        "rationale": "This looks moderately approachable but not especially easy for a total beginner. The wine is fairly dry (sweetness 0.2) and quite high in acidity (0.8), which can make sparkling wine feel sharp or brisk. The body is medium-light (0.55), which helps accessibility, and the flavor profile is familiar and straightforward (green apple, citrus, pear, brioche, toast). The search text explicitly says 'entry level classic,' which supports some beginner-friendliness, but the high acidity keeps the score from being higher.",
+        "generationSource": "llm_teacher_generated"
       }
     },
     "opus-one-2018": {
+      "sourceDataset": "seed_wines_real",
       "gift": {
         "score": 0.92,
-        "evidenceAxes": ["occasion", "classification", "producer_prestige", "pairing", "flavor_profile", "search_text"],
-        "snippet": "occasion_tags: celebration, special dinner, investment wine; classification: Napa Valley AVA; producer_prestige: 0.97; pairing_tags: beef, lamb, truffle, venison; flavor_profiles: blackcurrant, plum, dark cherry, graphite, tobacco, cedar, dark chocolate; search_text_en: Opus One 2018 Napa Valley Cabernet Sauvignon Merlot blend blackcurrant plum dark cherry graphite tobacco cedar dark chocolate Rothschild Mondavi",
-        "rationale": "Strong gift suitability is supported by explicit celebration and special-dinner occasion tags, very high producer prestige, and a formal Napa Valley AVA classification. The wine also has luxury-leaning search text and rich, classic flavor descriptors plus premium food-pairing tags, all of which make it a strong gifting choice. Score is high but not perfect because the catalog evidence does not explicitly mention gift packaging or a dedicated gifting designation."
+        "evidenceAxes": [
+          "producer_prestige",
+          "classification",
+          "occasion",
+          "pairing",
+          "flavor_profile",
+          "search_text"
+        ],
+        "snippet": "producer_prestige: 0.97; classification: Napa Valley AVA; occasion_tags: celebration, special dinner, investment wine; pairing_tags: beef, lamb, truffle, venison; flavor_profiles: blackcurrant, plum, dark cherry, graphite, tobacco, cedar, dark chocolate; search_text_en: Opus One 2018 Napa Valley Cabernet Sauvignon Merlot blend blackcurrant plum dark cherry graphite tobacco cedar dark chocolate Rothschild Mondavi",
+        "rationale": "This is highly gift-suitable based on explicit catalog evidence: very high producer prestige, an official AVA classification, and strong occasion tags including celebration and special dinner. The wine’s luxury positioning is reinforced by 'investment wine.' The flavor and pairing descriptors suggest a serious, broadly appreciated red suited to impressive gifting occasions. I kept the score below 100 because the catalog does not provide direct packaging or award evidence.",
+        "generationSource": "llm_teacher_generated"
       },
       "beginner": {
         "score": 0.28,
-        "evidenceAxes": ["body", "sweetness", "acidity", "tannin", "alcohol_pct", "flavor_profiles", "wine_type", "search_text_en"],
-        "snippet": "body: 0.88; sweetness: 0.06; acidity: 0.72; tannin: 0.84; alcohol_pct: 14.5; flavor_profiles: blackcurrant, plum, dark cherry, graphite, tobacco, cedar, dark chocolate; wine_type: red; search_text_en: Opus One 2018 Napa Valley Cabernet Sauvignon Merlot blend blackcurrant plum dark cherry graphite tobacco cedar dark chocolate Rothschild Mondavi",
-        "rationale": "This looks like a full-bodied, dry red with high tannin and fairly high acidity, which typically makes it less immediately easy for beginners. The flavor profile is also dominated by dark fruit plus graphite, tobacco, cedar, and dark chocolate, suggesting a structured, complex style rather than a soft or simple one. The catalog evidence supports a lower beginner-friendliness score, though not the absolute minimum because the wine is not described as extremely high-alcohol or overtly harsh."
+        "evidenceAxes": [
+          "body",
+          "sweetness",
+          "acidity",
+          "tannin",
+          "alcohol_pct",
+          "flavor_profiles",
+          "search_text_en"
+        ],
+        "snippet": "body 0.88; sweetness 0.06; acidity 0.72; tannin 0.84; alcohol_pct 14.5; flavor_profiles: blackcurrant, plum, dark cherry, graphite, tobacco, cedar, dark chocolate; search_text_en: Napa Valley Cabernet Sauvignon Merlot blend",
+        "rationale": "The catalog suggests a very full-bodied, dry, high-tannin red with fairly high acidity and 14.5% alcohol, which typically makes it less immediately approachable for beginners. The flavor profile is also more savory/structured than simple or soft, with graphite, tobacco, cedar, and dark chocolate alongside dark fruit. There is some fruit-forward character, but the strong tannin and structure keep the score low.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "romanee-conti-2015": {
+      "sourceDataset": "seed_wines_real",
+      "gift": {
+        "score": 0.96,
+        "evidenceAxes": [
+          "occasion",
+          "classification",
+          "producer_prestige",
+          "pairing",
+          "flavor_profile",
+          "search_text"
+        ],
+        "snippet": "occasion_tags: investment wine, collector, ultimate celebration; classification: Grand Cru; producer_prestige: 1; pairing_tags: truffle, duck, wild mushroom; flavor_profiles: red cherry, rose petal, earth, spice, truffle, incense, forest floor, dried violets; search_text_en: ... world finest",
+        "rationale": "This is exceptionally gift-suitable based on explicit catalog evidence: it is tagged for collector use, investment, and ultimate celebration, carries Grand Cru classification, and comes from a highly prestigious producer. The pairing and flavor language also signal a luxury, celebratory wine. I keep the score below 100 because the assessment is still grounded only in catalog tags rather than external assumptions about presentation or social status.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.28,
+        "evidenceAxes": [
+          "body",
+          "sweetness",
+          "acidity",
+          "tannin",
+          "alcohol_pct",
+          "flavor_profiles"
+        ],
+        "snippet": "body: 0.85; sweetness: 0.05; acidity: 0.82; tannin: 0.7; alcohol_pct: 13; flavor_profiles: red cherry, rose petal, earth, spice, truffle, incense, forest floor, dried violets",
+        "rationale": "The catalog shows a very full-bodied red with high acidity and fairly high tannin, which usually makes a wine less immediately easy for beginners. Low sweetness also means there is little softening cushion. The flavor profile is complex and earthy/floral rather than simple or obviously fruit-forward, which can be less approachable for new drinkers. Alcohol is moderate at 13%, so that does not add much difficulty, but overall the explicit evidence points to a challenging, not beginner-friendly, wine.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "sassicaia-2018": {
+      "sourceDataset": "seed_wines_real",
+      "gift": {
+        "score": 0.92,
+        "evidenceAxes": [
+          "classification",
+          "producer_prestige",
+          "occasion",
+          "pairing",
+          "flavor_profile",
+          "search_text"
+        ],
+        "snippet": "classification: Bolgheri Sassicaia DOC; producer_prestige: 0.96; occasion_tags: special dinner, wine enthusiast; pairing_tags: beef, lamb, truffle, aged cheese; flavor_profiles: blackcurrant, cedar, herbs, tobacco, dark cherry, mint, graphite; search_text_en: Italian icon",
+        "rationale": "Strong gift suitability is supported by explicit prestige and classification evidence, plus occasion tags indicating special dinner and wine enthusiast. The pairing and flavor language suggest a serious, high-quality red that fits gifting for knowledgeable recipients. Score is high, though kept below the maximum because the catalog does not explicitly mention gift packaging or broader social gifting cues.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.28,
+        "evidenceAxes": [
+          "body",
+          "sweetness",
+          "acidity",
+          "tannin",
+          "alcohol_pct",
+          "flavor_profiles"
+        ],
+        "snippet": "body 0.88; sweetness 0.04; acidity 0.74; tannin 0.85; alcohol_pct 14; flavor_profiles: blackcurrant, cedar, herbs, tobacco, dark cherry, mint, graphite",
+        "rationale": "This looks like a very full-bodied, very dry red with high acidity and especially high tannin, plus 14% alcohol. Those traits usually make a wine less immediately approachable for beginners, even though the flavor profile is clear and fruit-driven. The catalog evidence suggests a structured, intense wine rather than an easygoing one, so the score is low but not minimal because the fruit notes may still provide some appeal.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-almaviva-2019": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.62,
+        "evidenceAxes": [
+          "search_text",
+          "wine_type",
+          "producer"
+        ],
+        "snippet": "search_text_en: \"Almaviva 2019 Viña Almaviva Chile Maipo Valley Puente Alto Cabernet Sauvignon Carménère Cabernet Franc Petit Verdot Merlot chilean bordeaux-blend\"; wine_type: \"red\"; producer: \"Viña Almaviva\"",
+        "rationale": "Gift suitability is moderately strong because the catalog explicitly identifies a named, blended red wine from Viña Almaviva and the search text highlights a Chilean Bordeaux-style blend with multiple classic grapes, which can read as a more serious, giftable wine. However, the record provides no explicit classification, occasion tags, pairing language, alcohol, or producer prestige, so the score stays conservative.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.18,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin",
+          "wine_type",
+          "search_text"
+        ],
+        "snippet": "body: 1; acidity: 0.6; tannin: 0.8; wine_type: red; search_text_en: ... Cabernet Sauvignon Carménère Cabernet Franc Petit Verdot Merlot chilean bordeaux-blend",
+        "rationale": "The catalog suggests a very light-bodied red (body 1), but it also shows fairly high tannin (0.8) and moderate acidity (0.6), which can make a wine feel more structured and less immediately easy for beginners. The search text indicates a Bordeaux-style blend with multiple grapes, but there is no explicit flavor-profile or sweetness data to soften that impression. With limited evidence, this looks only mildly beginner-friendly.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-angelus-2012": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.72,
+        "evidenceAxes": [
+          "producer",
+          "search_text"
+        ],
+        "snippet": "search_text_en: \"Château Angélus 2012 Château Angélus France Bordeaux Saint-Émilion Merlot Cabernet Franc opulent right-bank saint-emilion\"",
+        "rationale": "Gift suitability is moderately strong because the catalog explicitly identifies Château Angélus and links the wine to Saint-Émilion/right-bank Bordeaux with the descriptor \"opulent,\" which suggests a premium, gift-friendly red. However, the record lacks explicit classification, producer_prestige, occasion tags, pairing tags, and alcohol data, so the score should remain conservative rather than assuming prestige beyond the provided text.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.35,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin",
+          "grape_primary",
+          "wine_type"
+        ],
+        "snippet": "body: 0.8; acidity: 0.6; tannin: 0.8; grape_primary: Merlot; wine_type: red; search_text_en: ... opulent right-bank saint-emilion",
+        "rationale": "The catalog suggests a full-bodied red with high tannin and moderate acidity, which usually makes it less immediately beginner-friendly than lighter, softer wines. The search text also says 'opulent,' but there is no explicit sweetness or flavor-profile detail to offset the structure. Merlot as the primary grape is noted, but I am using it only as catalog evidence alongside the strong body/tannin signals, not as a proxy for familiarity.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-angelus-2016": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.72,
+        "evidenceAxes": [
+          "producer",
+          "search_text"
+        ],
+        "snippet": "search_text_en: \"Château Angélus 2016 Château Angélus France Bordeaux Saint-Émilion Merlot Cabernet Franc opulent right-bank saint-emilion\"",
+        "rationale": "Gift suitability is moderately strong because the catalog explicitly identifies a well-known named producer and includes search text suggesting a premium Bordeaux Saint-Émilion wine with 'opulent' character. However, the record lacks explicit classification, producer prestige, occasion tags, pairing guidance, alcohol, or other gifting cues, so the score should remain conservative.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.35,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 0.8; acidity: 0.6; tannin: 0.8; search_text_en: \"opulent right-bank saint-emilion\"",
+        "rationale": "This looks fairly full-bodied and opulent, which can be approachable in style, but the high tannin level is a clear beginner-unfriendly signal. Moderate acidity adds some freshness, but there is no explicit sweetness or flavor-profile evidence to suggest softness or easy-drinking simplicity. Overall, the catalog evidence points to a more structured red that is less beginner-friendly.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-angelus-2018": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.72,
+        "evidenceAxes": [
+          "producer",
+          "search_text"
+        ],
+        "snippet": "\"Château Angélus 2018\"; \"Château Angélus France Bordeaux Saint-Émilion Merlot Cabernet Franc opulent right-bank saint-emilion\"",
+        "rationale": "Gift suitability is moderately strong because the catalog explicitly identifies a named château and includes search text pointing to Saint-Émilion/right-bank Bordeaux with an \"opulent\" style, which can signal a more premium, giftable wine. However, the record lacks explicit classification, producer prestige, occasion tags, pairing guidance, alcohol, or other gifting cues, so the score stays conservative.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.35,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin",
+          "grape_primary",
+          "wine_type"
+        ],
+        "snippet": "body: 0.8; acidity: 0.6; tannin: 0.8; grape_primary: Merlot; wine_type: red; search_text_en: ... opulent right-bank saint-emilion",
+        "rationale": "This looks like a full-bodied, high-tannin red with moderate acidity, which usually makes it less immediately beginner-friendly than lighter, softer wines. The catalog also uses the word 'opulent,' suggesting richness rather than easy simplicity. However, the evidence is limited because sweetness, alcohol, and flavor-profile details are missing, so the score stays conservative rather than extremely low.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-armand-rousseau-chambertin-2018": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.82,
+        "evidenceAxes": [
+          "classification",
+          "producer"
+        ],
+        "snippet": "\"Chambertin Grand Cru\"; \"Domaine Armand Rousseau\"; search_text_en: \"powerful grand cru pinot noir\"",
+        "rationale": "Gift suitability is strong because the catalog explicitly shows a prestigious Grand Cru classification and a highly recognized producer name. The wine is also a red Burgundy Pinot Noir with 'powerful' style language in search text, which supports a premium, gift-worthy profile. Evidence is still limited because there are no occasion tags, pairing notes, alcohol data, or explicit prestige field entries, so the score is high but not maximal.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.28,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin",
+          "wine_type",
+          "search_text_en"
+        ],
+        "snippet": "body: 0.8; acidity: 0.8; tannin: 0.6; wine_type: red; search_text_en: \"powerful grand cru pinot noir\"",
+        "rationale": "The catalog explicitly suggests a powerful, full-bodied red with high acidity and moderate tannin, which usually makes it less immediately beginner-friendly. There is no sweetness, alcohol, or flavor-profile detail to soften that impression, so the score stays conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-beychevelle-2013": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.62,
+        "evidenceAxes": [
+          "producer",
+          "region",
+          "search_text"
+        ],
+        "snippet": "search_text_en: \"Château Beychevelle 2013 ... Bordeaux Saint-Julien Cabernet Sauvignon Merlot Cabernet Franc Petit Verdot elegant saint-julien bordeaux\"",
+        "rationale": "Gift suitability is moderately supported by explicit evidence that this is a Château Beychevelle Bordeaux from Saint-Julien, with 'elegant' in the search text and a recognized Bordeaux appellation. However, the catalog provides no explicit occasion tags, classification, producer prestige field, pairing notes, or flavor profile details, so the score should remain conservative.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.28,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 0.8; acidity: 0.6; tannin: 0.8; search_text_en: elegant saint-julien bordeaux",
+        "rationale": "This looks like a fairly structured red with high body and high tannin, plus moderate acidity. Those explicit metrics suggest a wine that may feel firm and less immediately easy for a beginner than a softer, lower-tannin style. The catalog also uses the word 'elegant,' which helps a bit, but there is no explicit sweetness, alcohol, or flavor-profile detail to offset the structure, so I keep the score low-to-moderate and conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-beychevelle-2017": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.62,
+        "evidenceAxes": [
+          "producer",
+          "region",
+          "search_text"
+        ],
+        "snippet": "search_text_en: \"Château Beychevelle 2017 ... Bordeaux Saint-Julien Cabernet Sauvignon Merlot Cabernet Franc Petit Verdot elegant saint-julien bordeaux\"",
+        "rationale": "Gift suitability is moderately strong based on explicit producer and appellation evidence: Château Beychevelle is named, and the search text identifies Saint-Julien/Bordeaux plus an 'elegant' style cue. However, the catalog provides no explicit classification, producer prestige field, occasion tags, pairing tags, alcohol, or detailed flavor profile, so the score should remain conservative rather than high.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.35,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 0.8; acidity: 0.6; tannin: 0.8; search_text_en: \"elegant saint-julien bordeaux\"",
+        "rationale": "This looks like a fairly full-bodied red with notable tannin and moderate acidity, which usually makes it less immediately easy for beginners than lighter, softer wines. The catalog also explicitly calls it elegant, which helps a bit, but there is no sweetness, alcohol, or flavor-profile detail to suggest extra approachability. Overall, the evidence points to a moderately challenging wine for a beginner.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-bollinger-la-grande-annee-2020": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.72,
+        "evidenceAxes": [
+          "producer",
+          "region",
+          "wine_type",
+          "search_text"
+        ],
+        "snippet": "Bollinger La Grande Année 2020; Bollinger; France; Champagne; sparkling; \"pinot-noir-led vintage champagne\"",
+        "rationale": "Gift suitability is moderately strong because the catalog explicitly identifies a well-known producer (Bollinger), a prestigious origin (Champagne, France), and a celebratory wine type (sparkling). The search text also describes it as a vintage Champagne and pinot-noir-led, which supports a premium, gift-appropriate impression. However, there are no explicit occasion tags, classification details, pairing notes, or producer_prestige field entries, so the score stays conservative.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.28,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "wine_type",
+          "search_text_en"
+        ],
+        "snippet": "body: 0.8; acidity: 0.8; wine_type: sparkling; search_text_en: \"pinot-noir-led vintage champagne\"",
+        "rationale": "The catalog explicitly shows a very full-bodied sparkling wine with high acidity, which can make it feel intense and less immediately easy for beginners. The search text also describes it as a Pinot Noir-led vintage Champagne, suggesting a more structured style rather than a soft, simple one. However, there is no explicit sweetness, alcohol, tannin, or flavor-profile data, so the score stays conservative rather than very low.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-calon-segur-2009": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.58,
+        "evidenceAxes": [
+          "producer",
+          "search_text"
+        ],
+        "snippet": "search_text_en: \"Château Calon-Ségur 2009 ... Bordeaux Saint-Estèphe Cabernet Sauvignon Merlot Cabernet Franc Petit Verdot structured saint-estephe bordeaux\"",
+        "rationale": "Gift suitability is moderately supported by explicit producer and appellation evidence. The producer name is present and the search text indicates a structured Bordeaux Saint-Estèphe red blend, which can suit wine-focused gifting. However, the catalog provides no explicit classification, producer prestige, occasion tags, pairing tags, flavor profile details beyond 'structured,' or alcohol data, so the score should remain conservative.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.28,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin",
+          "wine_type",
+          "search_text_en"
+        ],
+        "snippet": "body: 0.8; acidity: 0.6; tannin: 0.8; wine_type: red; search_text_en: structured saint-estephe bordeaux",
+        "rationale": "This looks like a fairly structured red wine with high tannin and moderate acidity, which usually makes it less immediately approachable for beginners. The catalog explicitly says it is structured and shows a high body and tannin level, so I score it on the lower side for beginner-friendliness. Evidence is limited because sweetness, alcohol, and flavor-profile details are not provided.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-calon-segur-2012": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.58,
+        "evidenceAxes": [
+          "producer",
+          "region",
+          "search_text"
+        ],
+        "snippet": "search_text_en: \"Château Calon-Ségur 2012 Château Calon-Ségur France Bordeaux Saint-Estèphe Cabernet Sauvignon Merlot Cabernet Franc Petit Verdot structured saint-estephe bordeaux\"",
+        "rationale": "Gift suitability is moderately strong because the wine is from a named château producer and a recognized Bordeaux appellation (Saint-Estèphe/Bordeaux), with search text explicitly describing it as \"structured\" and listing classic Bordeaux varieties. However, the catalog provides no explicit classification, producer prestige field, occasion tags, pairing tags, alcohol, or flavor profile details, so the score should remain conservative.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.22,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin",
+          "wine type",
+          "search text"
+        ],
+        "snippet": "body: 0.8; acidity: 0.6; tannin: 0.8; wine_type: red; search_text_en: ... structured saint-estephe bordeaux",
+        "rationale": "This looks like a fairly challenging beginner wine because the catalog explicitly shows high body and especially high tannin, plus a structured style in the search text. Moderate acidity adds to the firmness. There is no explicit sweetness or flavor-profile evidence to offset that, so I keep the score low. The evidence is limited, so this is a conservative estimate.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-calon-segur-2020": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.62,
+        "evidenceAxes": [
+          "producer",
+          "region",
+          "search_text"
+        ],
+        "snippet": "search_text_en: \"Château Calon-Ségur 2020 ... Bordeaux Saint-Estèphe Cabernet Sauvignon Merlot Cabernet Franc Petit Verdot structured saint-estephe bordeaux\"; producer: \"Château Calon-Ségur\"; country: \"France\"; region: \"Bordeaux\"; wine_type: \"red\"",
+        "rationale": "Gift suitability is moderately strong because the catalog explicitly identifies a named château producer, a well-known Bordeaux region, and a structured red blend from Saint-Estèphe in the search text. Those cues support a classic, serious wine that can work as a gift. However, the catalog provides no explicit classification, prestige field, occasion tags, pairing tags, or flavor-profile detail beyond \"structured,\" so the score stays conservative rather than high.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.28,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin",
+          "wine_type",
+          "search_text_en"
+        ],
+        "snippet": "body: 0.8; acidity: 0.6; tannin: 0.8; wine_type: red; search_text_en: structured saint-estephe bordeaux",
+        "rationale": "This looks relatively challenging for beginners because the catalog explicitly shows a full-bodied red with high tannin and moderate acidity, and the search text describes it as structured. Those traits usually make a wine less immediately easy-drinking. Evidence is limited because sweetness, alcohol, and flavor-profile details are missing, so the score stays conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-caymus-cabernet-2010": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.62,
+        "evidenceAxes": [
+          "search_text",
+          "wine_type",
+          "region",
+          "producer"
+        ],
+        "snippet": "\"Caymus Napa Valley Cabernet Sauvignon 2010\"; \"Caymus Vineyards\"; \"USA Napa Valley\"; \"red\"; search text includes \"ripe crowd-pleasing napa cab\"",
+        "rationale": "Gift suitability is moderately strong based on explicit catalog evidence: it is a red Cabernet Sauvignon from Napa Valley by Caymus Vineyards, and the search text explicitly describes it as \"ripe\" and \"crowd-pleasing,\" which supports broad appeal for gifting. However, the catalog provides no explicit occasion tags, classification, pairing notes, or producer prestige field, so the score should remain conservative rather than high.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.35,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 1; acidity: 0.6; tannin: 0.6; search_text_en: \"ripe crowd-pleasing napa cab\"",
+        "rationale": "The catalog gives some explicit accessibility signals: the search text says \"ripe crowd-pleasing,\" which suggests an approachable style, and the listed body is low (1), which can make a wine feel lighter. However, the acidity and tannin are both moderate at 0.6, and there is no explicit sweetness, alcohol, or flavor-profile evidence to further support beginner-friendliness. Overall this is only moderately beginner-friendly based on the limited catalog evidence.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-caymus-cabernet-2015": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.72,
+        "evidenceAxes": [
+          "search_text",
+          "wine_type",
+          "region",
+          "producer"
+        ],
+        "snippet": "\"Caymus Napa Valley Cabernet Sauvignon 2015\"; \"Caymus Vineyards\"; \"USA Napa Valley\"; search text includes \"ripe crowd-pleasing napa cab\"",
+        "rationale": "Gift suitability is moderately strong because the catalog explicitly identifies a well-known Napa Valley Cabernet Sauvignon from Caymus Vineyards and the search text describes it as \"ripe\" and \"crowd-pleasing,\" both positive gifting cues. However, there is no explicit classification, occasion tag, pairing tag, or producer prestige field filled in, so the score stays conservative rather than high.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.35,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 1; acidity: 0.6; tannin: 0.6; search_text_en: \"ripe crowd-pleasing napa cab\"",
+        "rationale": "The catalog gives some explicit accessibility signals: very low body and moderate acidity/tannin suggest it may be less heavy than many reds, and the search text says \"ripe crowd-pleasing,\" which hints at approachable style. However, this is still a Cabernet Sauvignon red with no explicit sweetness or flavor-profile detail, so I would keep the beginner-friendliness score conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-caymus-cabernet-2019": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.72,
+        "evidenceAxes": [
+          "search_text",
+          "wine_type",
+          "region"
+        ],
+        "snippet": "\"Caymus Napa Valley Cabernet Sauvignon 2019\"; \"Caymus Vineyards\"; \"Napa Valley Cabernet Sauvignon ripe crowd-pleasing napa cab\"",
+        "rationale": "Gift suitability is moderately strong because the catalog explicitly identifies a well-known Napa Valley Cabernet Sauvignon from Caymus Vineyards and includes search text describing it as \"ripe\" and \"crowd-pleasing,\" which are positive gifting cues. However, the catalog fields do not provide explicit classification, occasion tags, pairing tags, alcohol, or other direct prestige signals, so the score stays conservative rather than high.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.35,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin",
+          "search_text"
+        ],
+        "snippet": "body: 1; acidity: 0.6; tannin: 0.6; search_text_en: \"ripe crowd-pleasing napa cab\"",
+        "rationale": "The catalog gives some helpful beginner-facing signals: the search text explicitly says \"ripe\" and \"crowd-pleasing,\" which suggests approachable flavor style. However, the wine is also a Cabernet Sauvignon red with moderate acidity and tannin listed, and there is no explicit sweetness, alcohol, or flavor-profile detail to further support easy accessibility. With limited evidence, I keep the score conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-chateau-ausone-2016": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.78,
+        "evidenceAxes": [
+          "producer",
+          "region",
+          "search_text"
+        ],
+        "snippet": "Château Ausone 2016; producer: Château Ausone; country: France; region: Bordeaux; search_text_en: \"Saint-Émilion Merlot Cabernet Franc limestone-driven right-bank\"",
+        "rationale": "Gift suitability is supported by explicit producer and region evidence: Château Ausone is a named producer, and the search text places the wine in Saint-Émilion/Bordeaux with varietal and terroir cues. However, the catalog fields do not provide an explicit classification, producer prestige field, occasion tags, pairing tags, flavor profile, or alcohol percentage, so the score should remain moderately high but conservative rather than exceptional.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.28,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin",
+          "grape_primary",
+          "wine_type"
+        ],
+        "snippet": "body: 0.8; acidity: 0.6; tannin: 0.8; grape_primary: Merlot; wine_type: red; search_text_en: ... limestone-driven right-bank",
+        "rationale": "This looks less beginner-friendly because the catalog explicitly shows a full-bodied red with high tannin and moderate acidity, which usually makes wines feel more structured and less immediately easy-drinking. The available evidence does not include sweetness, alcohol, or flavor-profile language, so the score stays conservative and based only on the listed structural cues.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-chateau-dyquem-2015": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.78,
+        "evidenceAxes": [
+          "producer",
+          "search_text",
+          "wine_type"
+        ],
+        "snippet": "producer: Château d'Yquem; search_text_en: \"legendary botrytis sauternes\"; wine_type: dessert",
+        "rationale": "Gift suitability is strong because the producer is explicitly Château d'Yquem, a highly recognizable name, and the search text describes the wine as 'legendary' and 'botrytis sauternes,' which signals a prestigious dessert wine style. However, the catalog fields do not provide explicit occasion tags, classification, alcohol, or pairing language, so the score stays conservative rather than very high.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.42,
+        "evidenceAxes": [
+          "wine_type",
+          "body",
+          "acidity",
+          "search_text_en"
+        ],
+        "snippet": "wine_type: dessert; body: 0.8; acidity: 0.8; search_text_en: \"legendary botrytis sauternes\"",
+        "rationale": "The catalog explicitly identifies this as a dessert wine with very high body and high acidity. Dessert wines can be approachable for some beginners because sweetness is often easier to taste than tannin, but the catalog does not provide an explicit sweetness value, alcohol, or flavor profile, so I should stay conservative. The high body and acidity suggest a rich, intense style that may be less immediately easy for a novice than a lighter, softer wine.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-chateau-haut-brion-2015": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.72,
+        "evidenceAxes": [
+          "producer",
+          "search_text"
+        ],
+        "snippet": "search_text_en: \"Château Haut-Brion 2015 Château Haut-Brion France Bordeaux Pessac-Léognan Cabernet Sauvignon Merlot Cabernet Franc graphite-driven bordeaux-blend\"",
+        "rationale": "Gift suitability is moderately high because the catalog explicitly identifies a prestigious, well-known producer name (Château Haut-Brion) and a classic Bordeaux red blend from a recognized region. The search text also includes a quality-oriented flavor descriptor, \"graphite-driven,\" which supports a serious, premium style. However, the catalog does not provide explicit classification, occasion tags, pairing tags, alcohol, or producer_prestige fields, so the score stays conservative rather than very high.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.22,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin",
+          "search_text_en"
+        ],
+        "snippet": "body: 0.8; acidity: 0.6; tannin: 0.8; search_text_en: \"graphite-driven bordeaux-blend\"",
+        "rationale": "This looks like a full-bodied, fairly tannic red with moderate acidity, which usually makes it less immediately approachable for beginners. The search text also suggests a graphite-driven Bordeaux blend, implying a more structured, savory style rather than an easy, soft, fruit-forward one. Evidence is limited because sweetness and alcohol are not provided, so the score stays conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-chateau-lafite-rothschild-2016": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.72,
+        "evidenceAxes": [
+          "producer",
+          "search_text"
+        ],
+        "snippet": "search_text_en: \"Château Lafite Rothschild 2016 ... refined classic bordeaux-blend\"; producer: \"Château Lafite Rothschild\"; region: \"Bordeaux\"; wine_type: \"red\"",
+        "rationale": "Gift suitability is supported by explicit evidence of a highly recognizable producer name and refined/classic style language in the search text. However, the catalog fields do not provide official classification, occasion tags, pairing tags, alcohol, or detailed flavor notes, so the score should remain moderate rather than maximal.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.18,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 0.8; acidity: 0.6; tannin: 0.8; wine_type: red; search_text_en: refined classic bordeaux-blend",
+        "rationale": "The catalog explicitly shows a full-bodied red with fairly high tannin and moderate acidity, which usually makes a wine less immediately approachable for beginners. There is no sweetness, alcohol, or flavor-profile detail to soften that impression, so the score stays low and conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-chateau-latour-2016": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.72,
+        "evidenceAxes": [
+          "producer",
+          "region",
+          "wine_type",
+          "search_text"
+        ],
+        "snippet": "search_text_en: \"Château Latour 2016 Château Latour France Bordeaux Pauillac Cabernet Sauvignon Merlot Cabernet Franc Petit Verdot powerful full-bodied bordeaux-blend\"; producer: \"Château Latour\"; region: \"Bordeaux\"; wine_type: \"red\"",
+        "rationale": "Gift suitability is moderately strong because the catalog explicitly identifies a well-known producer name, a prestigious Bordeaux region, and a classic red Bordeaux-blend style described as powerful and full-bodied. However, the catalog fields do not provide explicit classification, occasion tags, pairing tags, alcohol, or producer prestige, so the score should remain conservative rather than assuming gift appeal from reputation alone.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.18,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 1; acidity: 0.6; tannin: 1; search_text_en: \"powerful full-bodied bordeaux-blend\"",
+        "rationale": "This looks like a challenging beginner wine based on explicit catalog evidence: very low body value, high tannin, and moderate acidity, plus search text describing it as powerful and full-bodied. Those traits usually make a wine less immediately approachable for beginners. Evidence is still limited because sweetness and alcohol are not provided, so the score stays conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-chateau-margaux-2015": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.78,
+        "evidenceAxes": [
+          "producer",
+          "search_text",
+          "wine_type"
+        ],
+        "snippet": "\"Château Margaux 2015\"; \"Château Margaux\"; \"France Bordeaux\"; \"elegant full-bodied bordeaux-blend\"",
+        "rationale": "Gift suitability is strong based on explicit evidence of a highly recognizable producer name and a premium-style red Bordeaux blend described as elegant and full-bodied. The catalog does not provide explicit classification, occasion tags, pairing tags, alcohol, or producer prestige fields, so the score is kept moderate rather than higher.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.28,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin",
+          "search_text_en"
+        ],
+        "snippet": "body: 1; acidity: 0.6; tannin: 0.8; search_text_en: \"elegant full-bodied bordeaux-blend\"",
+        "rationale": "The catalog explicitly suggests a full-bodied red with fairly high tannin and moderate acidity, which usually makes it less immediately beginner-friendly. The 'elegant' descriptor helps a little, but there is no explicit sweetness or low-alcohol evidence to offset the structure. Evidence is limited, so the score stays conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-chateau-mouton-rothschild-2018": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.72,
+        "evidenceAxes": [
+          "producer",
+          "search_text"
+        ],
+        "snippet": "search_text_en: \"Château Mouton Rothschild 2018 ... Pauillac Cabernet Sauvignon Merlot Cabernet Franc Petit Verdot opulent full-bodied bordeaux-blend\"",
+        "rationale": "Gift suitability is moderately high because the catalog explicitly identifies a highly recognizable producer name and a premium Bordeaux-style red blend from Pauillac, with flavor language like \"opulent\" and \"full-bodied\" suggesting a serious, giftable wine. However, the structured fields do not provide explicit classification, occasion tags, pairing tags, alcohol, or producer prestige, so the score stays conservative and based only on the available text evidence.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.18,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 1; acidity: 0.6; tannin: 0.8; search_text_en includes \"opulent full-bodied\"",
+        "rationale": "The catalog explicitly indicates a very full-bodied style with relatively high tannin and moderate acidity, which usually makes a wine less immediately approachable for beginners. There is no explicit sweetness or alcohol data to soften that impression, so a low beginner-friendliness score is the conservative choice.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-cheval-blanc-2010": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.72,
+        "evidenceAxes": [
+          "producer",
+          "search_text"
+        ],
+        "snippet": "search_text_en: \"Château Cheval Blanc 2010 ... Bordeaux Saint-Émilion Cabernet Franc Merlot aromatic cabernet-franc-led bordeaux\"",
+        "rationale": "Gift suitability is moderately strong because the catalog explicitly identifies a highly specific, named producer and a premium Bordeaux/Saint-Émilion style in the search text. However, the structured fields do not provide explicit classification, producer prestige, occasion tags, pairing language, or alcohol data, so the score stays conservative rather than assuming prestige from the name alone.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.28,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin",
+          "grape_primary"
+        ],
+        "snippet": "body: 0.8; acidity: 0.6; tannin: 0.8; grape_primary: Cabernet Franc; search_text_en: ... aromatic cabernet-franc-led bordeaux",
+        "rationale": "The catalog explicitly shows a full-bodied red with fairly high tannin and moderate acidity, which usually makes a wine less immediately easy for beginners. The only positive accessibility cue is 'aromatic' in the search text, but there is no sweetness, alcohol, or flavor-profile detail to suggest softness or simplicity. With limited evidence, this should score low-to-moderate rather than high.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-cheval-blanc-2015": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.72,
+        "evidenceAxes": [
+          "producer",
+          "search_text",
+          "wine_type"
+        ],
+        "snippet": "\"Château Cheval Blanc 2015\"; \"Château Cheval Blanc\"; \"Saint-Émilion Cabernet Franc Merlot aromatic cabernet-franc-led bordeaux\"; wine_type: red",
+        "rationale": "Gift suitability is moderately strong because the producer is explicitly named as Château Cheval Blanc, which is a recognizable Bordeaux estate, and the search text indicates a Saint-Émilion Bordeaux blend with Cabernet Franc and Merlot plus an aromatic profile. The wine is a red Bordeaux from a named château, which supports a premium-gift impression. However, the catalog fields do not explicitly provide classification, producer prestige, occasion tags, pairing tags, or alcohol, so the score stays conservative rather than very high.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.28,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin",
+          "grape_primary",
+          "wine_type"
+        ],
+        "snippet": "body: 0.8; acidity: 0.6; tannin: 0.8; grape_primary: Cabernet Franc; wine_type: red; search_text_en: ... aromatic cabernet-franc-led bordeaux",
+        "rationale": "The catalog explicitly shows a full-bodied red with high tannin and moderate acidity, which usually makes a wine less immediately approachable for beginners. The search text also describes it as aromatic and Cabernet Franc-led, but there is no explicit sweetness, alcohol, or flavor-profile detail to offset the structural intensity. Based on the available evidence, this looks moderately challenging rather than beginner-friendly.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-cheval-blanc-2017": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.72,
+        "evidenceAxes": [
+          "producer",
+          "search_text"
+        ],
+        "snippet": "search_text_en: \"Château Cheval Blanc 2017 Château Cheval Blanc France Bordeaux Saint-Émilion Cabernet Franc Merlot aromatic cabernet-franc-led bordeaux\"",
+        "rationale": "Gift suitability is moderately strong because the catalog explicitly identifies a highly specific, named Bordeaux wine from Château Cheval Blanc and includes search text indicating Saint-Émilion, Cabernet Franc/Merlot, and an aromatic profile. However, the record lacks explicit occasion tags, classification, producer prestige fields, pairing guidance, alcohol, or other gifting cues, so the score should remain conservative rather than premium-high.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.35,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin",
+          "grape_primary",
+          "wine_type"
+        ],
+        "snippet": "body: 0.8; acidity: 0.6; tannin: 0.8; grape_primary: Cabernet Franc; wine_type: red; search_text_en: ... aromatic cabernet-franc-led bordeaux",
+        "rationale": "This looks like a fairly structured red wine: high body and especially high tannin suggest it may be less immediately easy for beginners, while moderate acidity adds some freshness. The search text explicitly says 'aromatic' and 'cabernet-franc-led bordeaux,' which gives a little accessibility signal, but there is no explicit sweetness, alcohol, or flavor-profile detail to offset the structure. Overall, the catalog evidence points to a more advanced-leaning red rather than a highly beginner-friendly one.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-coche-dury-corton-charlemagne-2019": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.78,
+        "evidenceAxes": [
+          "classification",
+          "producer",
+          "search_text"
+        ],
+        "snippet": "canonical_label: Coche-Dury Corton-Charlemagne Grand Cru 2019; producer: Domaine Coche-Dury; search_text_en: ... Corton-Charlemagne Grand Cru Chardonnay tensile age-worthy chardonnay",
+        "rationale": "Gift suitability is strong because the wine has an explicit Grand Cru classification and comes from Domaine Coche-Dury, a named producer in the catalog. The search text also describes it as 'tensile' and 'age-worthy,' which supports a premium, serious style that can work well as a gift. Evidence is still limited because there are no explicit occasion tags, pairing tags, alcohol data, or producer prestige field filled in, so the score is solid but not maximal.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.42,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "search_text_en"
+        ],
+        "snippet": "body: 0.8; acidity: 1; search_text_en: \"tensile age-worthy chardonnay\"",
+        "rationale": "The catalog explicitly shows a very light body and very high acidity, which can make the wine feel sharp and less immediately easygoing for beginners. The search text also describes it as \"tensile\" and \"age-worthy,\" suggesting a more structured, less plush style. However, there is no explicit sweetness, tannin, or alcohol data, so the score stays conservative rather than assuming additional difficulty.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-cos-destournel-2013": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.62,
+        "evidenceAxes": [
+          "producer",
+          "region",
+          "search_text"
+        ],
+        "snippet": "producer: Château Cos d'Estournel; region: Bordeaux; search_text_en: \"Château Cos d'Estournel 2013 ... Saint-Estèphe Cabernet Sauvignon Merlot Cabernet Franc\"",
+        "rationale": "Gift suitability is moderately strong based on explicit producer and appellation cues. Château Cos d'Estournel is a named Bordeaux producer, and the search text ties the wine to Saint-Estèphe and classic Bordeaux varieties, which supports a recognizable, gift-friendly profile. However, the catalog provides no explicit classification, producer prestige field, occasion tags, pairing tags, flavor profile, or alcohol data, so the score stays conservative.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.28,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 1; acidity: 0.6; tannin: 0.8; wine_type: red; search_text_en: ... Cabernet Sauvignon Merlot Cabernet Franc exotic saint-estephe bordeaux",
+        "rationale": "The catalog explicitly suggests a very light body, but also fairly high tannin and moderate acidity, which usually makes a red wine less immediately approachable for beginners. There is no explicit sweetness, alcohol, or flavor-profile evidence to offset that, so I keep the score conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-cos-destournel-2015": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.72,
+        "evidenceAxes": [
+          "producer",
+          "region",
+          "search_text"
+        ],
+        "snippet": "canonical_label: Château Cos d'Estournel 2015; producer: Château Cos d'Estournel; country: France; region: Bordeaux; search_text_en: ... Saint-Estèphe Cabernet Sauvignon Merlot Cabernet Franc exotic saint-estephe bordeaux",
+        "rationale": "Gift suitability is moderately strong because the wine is from a named, recognizable producer in Bordeaux and the search text explicitly references Saint-Estèphe and classic Bordeaux varieties, which can signal a serious, established red wine. However, the catalog fields do not provide explicit classification, producer prestige, occasion tags, pairing language, or flavor-profile detail, so the score stays conservative.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.18,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 1; acidity: 0.6; tannin: 0.8; wine_type: red; search_text_en: ... Cabernet Sauvignon Merlot Cabernet Franc exotic saint-estephe bordeaux",
+        "rationale": "The catalog explicitly shows a very light body (1), but also fairly high tannin (0.8) and moderate acidity (0.6), which usually makes a red wine less beginner-friendly. The search text suggests a Bordeaux/Saint-Estèphe style with Cabernet Sauvignon/Merlot/Cabernet Franc and 'exotic' notes, but there is no explicit sweetness or flavor-profile support to offset the structure. Overall, the evidence points to a structured red that is likely challenging for beginners.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-dom-perignon-2013": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.78,
+        "evidenceAxes": [
+          "search_text",
+          "wine_type",
+          "producer"
+        ],
+        "snippet": "\"Dom Pérignon 2013 Moët & Chandon France Champagne Champagne Chardonnay Pinot Noir refined vintage champagne\"",
+        "rationale": "Gift suitability is fairly strong because the catalog explicitly identifies a prestigious-sounding named cuvée in Champagne, from Moët & Chandon, and the search text calls it \"refined vintage champagne.\" The sparkling wine type and Champagne origin also support celebratory gifting. However, the catalog lacks explicit classification, occasion tags, pairing notes, or producer_prestige fields, so the score stays conservative rather than higher.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.42,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "wine_type"
+        ],
+        "snippet": "body: 0.6; acidity: 0.8; wine_type: sparkling; search_text_en: \"refined vintage champagne\"",
+        "rationale": "This looks moderately approachable on paper because the body is fairly light (0.6), which can make it feel less heavy. However, the acidity is quite high (0.8), which often makes sparkling wines feel sharper and less easygoing for beginners. The catalog also identifies it as sparkling and describes it as \"refined vintage champagne,\" but there is no explicit sweetness, alcohol, or flavor-profile detail to suggest extra softness or obvious crowd-pleasing simplicity. Overall, the evidence supports a middling beginner-friendliness score rather than a high one.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-don-melchor-2019": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.62,
+        "evidenceAxes": [
+          "producer",
+          "search_text",
+          "wine_type"
+        ],
+        "snippet": "\"Concha y Toro Don Melchor 2019\"; \"Concha y Toro\"; \"refined chilean cabernet\"; \"Cabernet Sauvignon Cabernet Franc Petit Verdot Merlot\"; \"red\"",
+        "rationale": "Gift suitability is moderately strong based on explicit catalog evidence that this is a named Concha y Toro wine and a refined Chilean Cabernet-style red blend. The producer name and the search text suggest a more premium, recognizable bottle, which helps gifting. However, the catalog provides no explicit classification, occasion tags, producer prestige field, pairing language, alcohol percentage, or flavor-profile detail, so the score stays conservative.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.35,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 0.8; acidity: 0.6; tannin: 0.8; wine_type: red; search_text_en: \"refined chilean cabernet\"",
+        "rationale": "The catalog explicitly shows a full-bodied red with fairly high tannin and moderate acidity, which usually makes a wine less immediately easy for beginners than a lighter, softer style. The search text suggests a refined Cabernet, but there is no explicit sweetness, alcohol, or flavor-profile detail to indicate extra softness or approachability. Given the limited evidence, this is a conservative mid-low beginner-friendliness score.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-drc-romanee-conti-2017": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.78,
+        "evidenceAxes": [
+          "producer",
+          "search_text"
+        ],
+        "snippet": "Domaine de la Romanée-Conti Romanée-Conti 2017 ... Romanée-Conti Grand Cru Pinot Noir ethereal grand cru pinot noir",
+        "rationale": "Gift suitability is strong based on explicit producer recognition and the search text’s Grand Cru / Pinot Noir / ethereal descriptors, which suggest a highly regarded, premium wine. However, the catalog fields do not explicitly provide classification, producer_prestige, occasion tags, pairing language, or alcohol details, so the score stays conservative rather than maximal.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.35,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 0.8; acidity: 0.8; tannin: 0.6; search_text_en: \"ethereal grand cru pinot noir\"",
+        "rationale": "The catalog gives some explicit structure: very light body (0.8) can make the wine feel less heavy, but high acidity (0.8) and moderate tannin (0.6) suggest a more demanding, less immediately easygoing red. The search text also describes it as \"ethereal grand cru pinot noir,\" which implies a delicate style rather than a plush, simple one. With no sweetness, alcohol, or flavor-profile details provided, the evidence is limited, so I keep the score conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-egon-muller-scharzhofberger-kabinett-2020": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.72,
+        "evidenceAxes": [
+          "producer",
+          "wine_type",
+          "search_text"
+        ],
+        "snippet": "producer: Egon Müller; canonical_label: Egon Müller Scharzhofberger Riesling Kabinett 2020; wine_type: white; search_text_en: ... crystalline saar riesling",
+        "rationale": "Gift suitability is moderately strong because the catalog explicitly identifies a highly specific producer name and a classic white Riesling from Mosel, with search text suggesting a refined style ('crystalline'). However, the catalog provides no explicit classification, occasion tags, pairing tags, alcohol, or producer prestige field, so the score stays conservative rather than assuming broader gifting appeal.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.62,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "wine_type"
+        ],
+        "snippet": "body: 0.4; acidity: 1; wine_type: white; search_text_en: ... Riesling Kabinett 2020 ... Mosel Saar Riesling crystalline saar riesling",
+        "rationale": "The catalog explicitly suggests a light-bodied white wine with very high acidity, which can feel crisp and approachable but also potentially sharp for absolute beginners. There is no explicit sweetness, alcohol, tannin, or flavor-profile data to further reduce uncertainty, so this is a moderate beginner-friendliness score rather than a high one.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-giacomo-conterno-monfortino-2015": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.78,
+        "evidenceAxes": [
+          "producer",
+          "wine_type",
+          "search_text"
+        ],
+        "snippet": "canonical_label: Giacomo Conterno Barolo Monfortino Riserva 2015; producer: Giacomo Conterno; wine_type: red; search_text_en: ... traditional barolo riserva",
+        "rationale": "Gift suitability is supported by explicit evidence that this is a red Barolo Riserva from Giacomo Conterno, with search text indicating a traditional Barolo Riserva. That suggests a serious, recognizable wine that can work well as a gift. However, the catalog fields do not explicitly provide producer prestige, classification, occasion tags, pairing language, or flavor notes, so the score stays conservative rather than very high.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.18,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 1; acidity: 1; tannin: 1; wine_type: red; grape_primary: Nebbiolo; search_text_en: \"traditional barolo riserva\"",
+        "rationale": "The catalog explicitly indicates very low body, acidity, and tannin values, which can suggest a lighter structural profile. However, the wine is also a traditional Barolo Riserva made from Nebbiolo, and the catalog gives no sweetness, alcohol, or flavor-profile detail to support easier approachability. Because the evidence is limited and the style is likely demanding, the score stays low and conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-harlan-estate-2016": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.72,
+        "evidenceAxes": [
+          "producer",
+          "search_text"
+        ],
+        "snippet": "\"Harlan Estate 2016\"; \"Harlan Estate\"; search text: \"powerful cult napa blend\"",
+        "rationale": "Gift suitability is supported by explicit producer recognition in the label and search text describing it as a \"powerful cult napa blend,\" which suggests strong prestige and a high-end, giftable profile. However, the catalog fields do not provide official classification, occasion tags, pairing language, alcohol, or detailed flavor notes, so the score stays conservative rather than very high.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.18,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin",
+          "search_text_en"
+        ],
+        "snippet": "body: 1; acidity: 0.6; tannin: 1; search_text_en: \"powerful cult napa blend\"",
+        "rationale": "This looks unlikely to be beginner-friendly based on explicit catalog evidence: very low body, very high tannin, and moderately high acidity suggest a structured, potentially demanding wine. The search text also describes it as a \"powerful cult napa blend,\" which reinforces intensity rather than easy approachability. No sweetness or alcohol data is provided, so I stayed conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-krug-grande-cuvee-170eme-nv": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.78,
+        "evidenceAxes": [
+          "producer",
+          "wine_type",
+          "search_text"
+        ],
+        "snippet": "\"Krug\"; \"wine_type: sparkling\"; search_text_en includes \"complex prestige champagne\"",
+        "rationale": "Gift suitability is strong because the producer is explicitly Krug, a highly recognizable Champagne house, and the search text directly signals \"complex prestige champagne.\" The wine type is sparkling Champagne, which is commonly gift-appropriate. However, the catalog fields do not provide explicit occasion tags, classification, pairing, or detailed flavor notes, so the score stays below the top range and remains grounded in the limited evidence.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.35,
+        "evidenceAxes": [
+          "body",
+          "acidity"
+        ],
+        "snippet": "body: 0.6; acidity: 0.8; search_text_en: \"complex prestige champagne\"; wine_type: sparkling",
+        "rationale": "The catalog explicitly shows a fairly light body (0.6) but very high acidity (0.8), which can make the wine feel sharp and less immediately easy for beginners. The search text also describes it as a \"complex prestige champagne,\" suggesting a more demanding style rather than an especially approachable one. Evidence is limited because sweetness, alcohol, tannin, and flavor-profile details are not provided, so the score stays conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-louis-roederer-cristal-2014": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.78,
+        "evidenceAxes": [
+          "producer",
+          "search_text"
+        ],
+        "snippet": "search_text_en: \"Louis Roederer Cristal 2014 ... precise prestige champagne\"; producer: \"Louis Roederer\"; region: \"Champagne\"; wine_type: \"sparkling\"",
+        "rationale": "Gift suitability is supported by explicit prestige language in the search text and by the recognized producer and Champagne origin. However, the catalog fields do not provide formal classification, occasion tags, pairing notes, or flavor-profile detail, so the score is kept moderately high rather than extreme.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.42,
+        "evidenceAxes": [
+          "body",
+          "acidity"
+        ],
+        "snippet": "body: 0.6; acidity: 0.8; search_text_en: \"precise prestige champagne\"",
+        "rationale": "The catalog gives some usable signals: this is a sparkling wine with moderate body (0.6) and high acidity (0.8), plus the search text describes it as \"precise prestige champagne.\" High acidity and a precise style can make it less immediately easygoing for beginners, while the moderate body keeps it from seeming especially heavy. Because sweetness, alcohol, tannin, and flavor-profile detail are missing, the score stays conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-lynch-bages-2011": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.62,
+        "evidenceAxes": [
+          "producer",
+          "region",
+          "search_text"
+        ],
+        "snippet": "search_text_en: \"Château Lynch-Bages 2011 Château Lynch-Bages France Bordeaux Pauillac Cabernet Sauvignon Merlot Cabernet Franc Petit Verdot rich pauillac bordeaux\"; producer: \"Château Lynch-Bages\"; region: \"Bordeaux\"",
+        "rationale": "Gift suitability is moderately strong because the catalog explicitly identifies a well-known named producer and a prestigious Bordeaux/Pauillac origin in the search text. However, there are no explicit occasion tags, classification, pairing notes, flavor-profile details, or alcohol information, so the score stays conservative rather than high.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.18,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 1; acidity: 0.6; tannin: 0.8; wine_type: red; search_text_en: ... rich pauillac bordeaux",
+        "rationale": "This looks like a low-beginner-friendliness wine based on the explicit catalog data. The body is very low (1), while tannin is high (0.8) and acidity is moderate-high (0.6), which typically makes a red feel more structured and less immediately easygoing. The search text also includes 'rich' and Bordeaux/Pauillac context, but there is no explicit sweetness or alcohol data to soften that impression. I’m keeping the score conservative because the catalog evidence is limited.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-lynch-bages-2016": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.62,
+        "evidenceAxes": [
+          "producer",
+          "region",
+          "search_text"
+        ],
+        "snippet": "search_text_en: \"Château Lynch-Bages 2016 Château Lynch-Bages France Bordeaux Pauillac Cabernet Sauvignon Merlot Cabernet Franc Petit Verdot rich pauillac bordeaux\"; producer: \"Château Lynch-Bages\"; region: \"Bordeaux\"",
+        "rationale": "Gift suitability is moderately strong based on explicit producer and region evidence. Château Lynch-Bages is a named producer, and the search text indicates a Bordeaux/Pauillac red blend with the descriptor \"rich,\" which supports a classic, giftable profile. However, the catalog fields do not provide explicit classification, occasion tags, pairing tags, alcohol, or producer prestige, so the score stays conservative.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.22,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin",
+          "wine_type",
+          "search_text_en"
+        ],
+        "snippet": "body: 1; acidity: 0.6; tannin: 0.8; wine_type: red; search_text_en: \"rich pauillac bordeaux\"",
+        "rationale": "The catalog explicitly suggests a rich red Bordeaux/Pauillac style with very low body and high tannin, plus moderate acidity. That combination usually makes a wine less immediately approachable for beginners than softer, lower-tannin reds. Sweetness and alcohol are not provided, so I’m keeping the score conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-montelena-2011": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.42,
+        "evidenceAxes": [
+          "search_text",
+          "producer"
+        ],
+        "snippet": "search_text_en: \"Chateau Montelena 2011 Chateau Montelena USA Napa Valley Napa Valley Cabernet Sauvignon age-worthy napa estate cabernet\"",
+        "rationale": "Gift suitability is moderately supported by explicit search text indicating a Napa Valley Cabernet Sauvignon and \"age-worthy\" character, which can appeal for wine gifts. However, the catalog lacks stronger gift signals such as occasion tags, pairing guidance, classification, alcohol, or explicit producer prestige, so the score stays conservative.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.28,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 1; acidity: 0.6; tannin: 0.8; search_text_en: \"age-worthy napa estate cabernet\"",
+        "rationale": "The catalog suggests a very light-bodied red with notable acidity and high tannin, which usually makes a wine less immediately easy for beginners. The search text also describes it as age-worthy Cabernet Sauvignon, implying a more structured style rather than an especially soft or approachable one. Evidence is limited because sweetness, alcohol, and flavor-profile details are missing, so the score is conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-montrose-2010": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.72,
+        "evidenceAxes": [
+          "producer",
+          "region",
+          "search_text"
+        ],
+        "snippet": "search_text_en: \"Château Montrose 2010 Château Montrose France Bordeaux Saint-Estèphe Cabernet Sauvignon Merlot Cabernet Franc Petit Verdot powerful saint-estephe bordeaux\"; canonical_label: \"Château Montrose 2010\"; producer: \"Château Montrose\"; region: \"Bordeaux\"; wine_type: \"red\"",
+        "rationale": "This has some gift appeal because the catalog explicitly identifies a well-known Bordeaux producer and a specific, named wine from Saint-Estèphe, with search text describing it as \"powerful.\" That supports a more premium, serious-gift profile. However, the catalog does not provide explicit classification, occasion tags, pairing guidance, alcohol, or detailed prestige language, so the score should remain moderate rather than high.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.18,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 1; acidity: 0.6; tannin: 1; search_text_en: powerful saint-estephe bordeaux",
+        "rationale": "The catalog explicitly suggests a very structured, intense red: low body, relatively high acidity, and very high tannin, plus the search text describes it as 'powerful.' Those traits usually make a wine less immediately approachable for beginners. There is no explicit sweetness, alcohol, or flavor-profile evidence to offset that, so the score stays low and conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-montrose-2019": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.72,
+        "evidenceAxes": [
+          "producer",
+          "search_text"
+        ],
+        "snippet": "search_text_en: \"Château Montrose 2019 Château Montrose France Bordeaux Saint-Estèphe Cabernet Sauvignon Merlot Cabernet Franc Petit Verdot powerful saint-estephe bordeaux\"",
+        "rationale": "Gift suitability is moderately strong because the catalog explicitly identifies Château Montrose, a named producer, and the search text includes \"powerful\" plus Saint-Estèphe/Bordeaux cues that suggest a serious, recognizable red wine. However, the catalog fields do not provide explicit classification, occasion tags, pairing tags, alcohol, or producer prestige, so the score stays conservative rather than high.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.18,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 1; acidity: 0.6; tannin: 1; search_text_en: \"powerful saint-estephe bordeaux\"",
+        "rationale": "This looks like a very structured, likely challenging red based on explicit catalog evidence: very low body, high acidity, and high tannin, plus the search text describes it as \"powerful.\" Those traits generally make a wine less beginner-friendly. I’m keeping the score conservative because sweetness, alcohol, and flavor-profile details are not provided.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-opus-one-2018": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.72,
+        "evidenceAxes": [
+          "producer",
+          "wine_type",
+          "search_text"
+        ],
+        "snippet": "\"Opus One 2018\"; \"Opus One Winery\"; \"Napa Valley Cabernet Sauvignon Cabernet Franc Merlot Petit Verdot Malbec full-bodied bordeaux-blend\"",
+        "rationale": "Gift suitability is moderately strong because the catalog explicitly identifies a well-known producer name, a premium red wine from Napa Valley, and search text indicating a full-bodied Bordeaux-style blend. Those cues support a polished, broadly giftable profile. However, the catalog provides no explicit occasion tags, classification, pairing notes, or producer prestige field, so the score stays conservative rather than assuming luxury gifting status.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.35,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 1; acidity: 0.6; tannin: 0.8; search_text_en: \"full-bodied bordeaux-blend\"",
+        "rationale": "The catalog explicitly suggests a very full-bodied red with notable tannin and moderate acidity, which usually makes it less beginner-friendly than lighter, softer wines. Evidence is limited because sweetness, alcohol, and flavor notes are not provided, so the score stays conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-opus-one-2019": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.78,
+        "evidenceAxes": [
+          "producer",
+          "search_text",
+          "wine_type",
+          "region"
+        ],
+        "snippet": "search_text_en: \"Opus One 2019 Opus One Winery USA Napa Valley Napa Valley Cabernet Sauvignon Cabernet Franc Merlot Petit Verdot Malbec full-bodied bordeaux-blend\"; canonical_label: \"Opus One 2019\"; producer: \"Opus One Winery\"; region: \"Napa Valley\"; wine_type: \"red\"",
+        "rationale": "This has strong gift-suitability signals from explicit catalog text: a named producer, a recognizable Napa Valley origin, and search text indicating a full-bodied Bordeaux-style blend with premium grape varieties. Those cues support a higher gift score. However, the catalog fields do not explicitly provide producer prestige, classification, occasion tags, pairing tags, or alcohol, so the score stays conservative rather than very high.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.35,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin",
+          "search_text_en"
+        ],
+        "snippet": "body: 1; acidity: 0.6; tannin: 0.8; search_text_en includes \"full-bodied bordeaux-blend\"",
+        "rationale": "The catalog explicitly suggests a full-bodied red with relatively high tannin and moderate acidity, which usually makes a wine less immediately easy for beginners than a lighter, softer style. Evidence is limited because sweetness, alcohol, and flavor-profile details are not provided, so the score stays conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-ornellaia-2018": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.62,
+        "evidenceAxes": [
+          "search_text",
+          "wine_type",
+          "region"
+        ],
+        "snippet": "\"Bolgheri Superiore Cabernet Sauvignon Merlot Cabernet Franc Petit Verdot polished super tuscan\"; canonical_label: \"Tenuta dell'Ornellaia Ornellaia 2018\"; country: Italy; region: Tuscany; wine_type: red",
+        "rationale": "Gift suitability is moderately strong because the catalog explicitly signals a premium-style Italian red with recognizable search terms like \"Bolgheri Superiore\" and \"super tuscan,\" which can make it appealing for a wine gift. However, the structured fields do not provide explicit classification, producer prestige, occasion tags, pairing tags, alcohol, or flavor-profile details, so the score stays conservative rather than high.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.28,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 1; acidity: 0.6; tannin: 0.8; search_text_en includes \"polished super tuscan\"",
+        "rationale": "The catalog explicitly shows a very light body score (1), but also fairly high acidity and tannin, which usually makes a wine less immediately beginner-friendly. The only flavor-language cue is \"polished super tuscan,\" which suggests refinement but not necessarily softness or easy-drinking accessibility. With no sweetness, alcohol, or flavor-profile detail provided, the evidence is limited, so I keep the score conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-palmer-2012": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.72,
+        "evidenceAxes": [
+          "producer",
+          "region",
+          "search_text"
+        ],
+        "snippet": "Château Palmer 2012; producer: Château Palmer; country: France; region: Bordeaux; search_text_en: ... Margaux Merlot Cabernet Sauvignon Petit Verdot aromatic merlot-led margaux",
+        "rationale": "Gift suitability is moderately strong based on explicit producer and appellation cues: Château Palmer is a named producer, and the search text identifies Margaux and a merlot-led Bordeaux blend, which can signal a recognizable, premium-style red wine. However, the catalog fields do not explicitly provide producer prestige, classification, occasion tags, pairing language, or alcohol details, so the score stays conservative rather than high.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.35,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin",
+          "grape_primary"
+        ],
+        "snippet": "body: 0.8; acidity: 0.6; tannin: 0.8; grape_primary: Merlot; search_text_en: ... aromatic merlot-led margaux",
+        "rationale": "This looks like a fairly full-bodied red with notable tannin and moderate acidity, which tends to be less beginner-friendly than lighter, softer wines. The catalog also explicitly says it is merlot-led and aromatic, which may help a bit, but there is no sweetness, alcohol, or flavor-profile detail to suggest easy approachability. Overall, the strong tannin is the main limiting factor, so I score it conservatively.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-palmer-2020": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.72,
+        "evidenceAxes": [
+          "producer",
+          "region",
+          "search_text"
+        ],
+        "snippet": "search_text_en: \"Château Palmer 2020 Château Palmer France Bordeaux Margaux Merlot Cabernet Sauvignon Petit Verdot aromatic merlot-led margaux\"",
+        "rationale": "Gift suitability is moderately strong based on explicit catalog evidence: Château Palmer is a named producer, the wine is from Bordeaux/Margaux, and the search text describes it as \"aromatic\" and \"merlot-led,\" which suggests a recognizable, premium-style red wine. However, the catalog does not provide explicit classification, producer prestige, occasion tags, pairing tags, or alcohol data, so the score stays conservative rather than high.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.35,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin",
+          "grape_primary",
+          "wine_type",
+          "search_text_en"
+        ],
+        "snippet": "body: 0.8; acidity: 0.6; tannin: 0.8; grape_primary: Merlot; wine_type: red; search_text_en: \"aromatic merlot-led margaux\"",
+        "rationale": "This looks like a full-bodied red with high tannin and moderate acidity, which usually makes it less immediately easy for beginners. The only clearly beginner-friendly cue is 'aromatic' and 'merlot-led,' but there is no explicit sweetness, low alcohol, or soft/approachable flavor-profile evidence in the catalog. With strong tannin and no clear softness signal, I’d score it as somewhat challenging for beginners.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-pavie-2014": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.72,
+        "evidenceAxes": [
+          "producer",
+          "region",
+          "search_text"
+        ],
+        "snippet": "canonical_label: Château Pavie 2014; producer: Château Pavie; country: France; region: Bordeaux; search_text_en: ... powerful saint-emilion bordeaux",
+        "rationale": "Gift suitability is moderately strong because the wine is from Château Pavie, a named producer, and the search text explicitly describes it as 'powerful' and ties it to Saint-Émilion/Bordeaux, which can signal a serious, recognizable red wine. However, the catalog provides no explicit classification, producer prestige field, occasion tags, pairing tags, alcohol percentage, or flavor profile details, so the score should remain conservative.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.18,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin",
+          "search_text_en"
+        ],
+        "snippet": "body: 1; acidity: 0.6; tannin: 0.8; search_text_en: \"powerful saint-emilion bordeaux\"",
+        "rationale": "This looks unlikely to be beginner-friendly based on the explicit catalog data. The wine is marked very light-bodied (body 1), but it also has fairly high acidity (0.6) and especially high tannin (0.8), which can make a red wine feel more structured and less approachable for beginners. The search text also explicitly describes it as \"powerful,\" suggesting a more intense style. Because sweetness, alcohol, and flavor notes are not provided, the score stays conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-pavie-2017": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.72,
+        "evidenceAxes": [
+          "producer",
+          "search_text"
+        ],
+        "snippet": "search_text_en: \"Château Pavie 2017 Château Pavie France Bordeaux Saint-Émilion Merlot Cabernet Franc Cabernet Sauvignon powerful saint-emilion bordeaux\"",
+        "rationale": "Gift suitability is moderately strong because the catalog explicitly identifies Château Pavie, a named producer, and the search text includes \"powerful\" plus Saint-Émilion/Bordeaux cues, which can support a premium, serious red-wine gift impression. However, the catalog fields do not provide explicit classification, producer prestige, occasion tags, pairing language, or alcohol details, so the score stays conservative.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.22,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 1; acidity: 0.6; tannin: 0.8; search_text_en: \"powerful saint-emilion bordeaux\"",
+        "rationale": "The catalog explicitly suggests a very light body but also notably high tannin and fairly high acidity, plus the search text describes it as \"powerful,\" which usually signals a less easygoing style for beginners. With no sweetness or alcohol data to soften that impression, this looks relatively challenging rather than beginner-friendly.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-pavie-2019": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.72,
+        "evidenceAxes": [
+          "producer",
+          "search_text"
+        ],
+        "snippet": "search_text_en: \"Château Pavie 2019 Château Pavie France Bordeaux Saint-Émilion Merlot Cabernet Franc Cabernet Sauvignon powerful saint-emilion bordeaux\"",
+        "rationale": "Gift suitability is moderately strong because the catalog explicitly identifies a well-known named producer and includes search text describing the wine as \"powerful,\" which can signal a serious, premium-style red that may appeal as a gift. However, the catalog fields do not provide explicit classification, occasion tags, pairing guidance, alcohol, or producer prestige, so the score stays conservative.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.18,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 1; acidity: 0.6; tannin: 0.8; search_text_en: ... powerful saint-emilion bordeaux",
+        "rationale": "The catalog explicitly indicates a very light body (1) but also fairly high tannin (0.8) and moderate acidity (0.6), plus the search text describes it as \"powerful.\" Those traits suggest a less beginner-friendly red overall, despite the light body. Evidence is limited because sweetness and alcohol are not provided, and there are no flavor-profile notes.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-penfolds-grange-2017": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.78,
+        "evidenceAxes": [
+          "producer",
+          "search_text"
+        ],
+        "snippet": "\"Penfolds Grange 2017\"; \"Penfolds\"; search text includes \"iconic australian shiraz\"",
+        "rationale": "Gift suitability is strong based on explicit producer recognition and the search text describing it as an \"iconic australian shiraz,\" which suggests prestige and a notable wine. However, the catalog fields do not provide explicit classification, occasion tags, pairing guidance, alcohol, or flavor profile details, so the score is kept below the top range and remains conservative.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.18,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 1; acidity: 0.6; tannin: 1; wine_type: red; search_text_en: \"iconic australian shiraz\"",
+        "rationale": "The catalog explicitly shows very low body and very high tannin, with moderate acidity. That combination suggests a structured, likely demanding red rather than an easygoing beginner wine. There is no explicit sweetness, alcohol, or flavor-profile evidence to offset that, so the score stays low and conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-petrus-2016": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.78,
+        "evidenceAxes": [
+          "producer",
+          "search_text"
+        ],
+        "snippet": "search_text_en: \"Pétrus 2016 Pétrus France Bordeaux Pomerol Merlot velvety right-bank merlot\"",
+        "rationale": "Gift suitability is strong based on explicit producer recognition and prestige implied by the name Pétrus, plus the search text’s premium-sounding descriptors and specific vintage. However, the catalog fields do not provide explicit classification, occasion tags, pairing guidance, alcohol, or detailed flavor notes, so the score stays conservative rather than higher.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.35,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 1; acidity: 0.6; tannin: 0.8; search_text_en: \"velvety right-bank merlot\"",
+        "rationale": "The catalog explicitly suggests a very light body and a velvety texture, which can make it somewhat approachable. However, the tannin is high and acidity is moderate, both of which can make the wine less beginner-friendly. Because sweetness and alcohol are not provided, I’m keeping the score conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-pichon-baron-2009": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.55,
+        "evidenceAxes": [
+          "search_text",
+          "wine_type",
+          "region"
+        ],
+        "snippet": "search_text_en: \"Pauillac Cabernet Sauvignon Merlot structured pauillac bordeaux\"; wine_type: red; region: Bordeaux",
+        "rationale": "Gift suitability is moderately positive because the catalog text explicitly indicates a structured Bordeaux/Pauillac red from a named château, which can appeal to wine-aware recipients. However, the record lacks explicit classification, producer prestige, occasion tags, pairing language, flavor notes, or alcohol data, so the score should remain conservative.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.22,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin",
+          "search_text_en"
+        ],
+        "snippet": "body: 1; acidity: 0.6; tannin: 0.8; search_text_en: \"structured pauillac bordeaux\"",
+        "rationale": "This looks like a very light-bodied red, but the explicit acidity and tannin values are relatively high, and the search text describes it as structured. That combination suggests a wine that may feel firm and less immediately approachable for beginners. Evidence is limited because sweetness, alcohol, and flavor-profile details are missing, so the score stays conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-pichon-baron-2016": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.62,
+        "evidenceAxes": [
+          "producer",
+          "region",
+          "search_text"
+        ],
+        "snippet": "canonical_label: Château Pichon-Longueville Baron 2016; producer: Château Pichon-Longueville Baron; country: France; region: Bordeaux; wine_type: red; search_text_en: ... Pauillac Cabernet Sauvignon Merlot structured pauillac bordeaux",
+        "rationale": "This has some gift appeal because it is a named Château from Bordeaux, and the search text suggests a structured Pauillac-style red made from Cabernet Sauvignon and Merlot. However, the catalog fields do not provide explicit classification, producer prestige, occasion tags, pairing guidance, alcohol, or flavor notes, so the score should stay moderate rather than high.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.18,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 1; acidity: 0.6; tannin: 0.8; search_text_en: ... structured pauillac bordeaux",
+        "rationale": "This looks quite challenging for a beginner based on the explicit catalog data: very low body, moderately high acidity, and high tannin, plus the search text explicitly says 'structured.' Those traits usually make a wine feel firmer and less immediately easy-drinking. There is not enough explicit evidence on sweetness, alcohol, or flavor profile to offset that, so I keep the score low and conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-pingus-2019": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.62,
+        "evidenceAxes": [
+          "producer",
+          "region",
+          "search_text"
+        ],
+        "snippet": "\"Dominio de Pingus Pingus 2019\"; \"Dominio de Pingus\"; \"Spain\"; \"Ribera del Duero\"; \"Tempranillo concentrated modern ribera\"",
+        "rationale": "Gift suitability is moderately strong because the catalog explicitly identifies a named producer and a well-known Spanish region, and the search text suggests a concentrated, modern Ribera del Duero style. However, the record lacks explicit classification, producer prestige, occasion tags, pairing guidance, alcohol, or flavor detail, so the score should remain conservative rather than high.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.18,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 1; acidity: 0.8; tannin: 0.8; search_text_en: \"concentrated modern ribera\"",
+        "rationale": "The catalog explicitly indicates a very full-bodied wine with high acidity and high tannin, plus a 'concentrated' style. Those traits usually make a wine less approachable for beginners, especially without any counterbalancing evidence such as low alcohol, softness, or sweetness. Evidence is limited, so the score is conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-pol-roger-brut-reserve-nv": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.78,
+        "evidenceAxes": [
+          "producer",
+          "region",
+          "wine_type",
+          "search_text"
+        ],
+        "snippet": "Pol Roger Brut Réserve NV; producer: Pol Roger; country: France; region: Champagne; wine_type: sparkling; search_text_en: \"pinot-led non-vintage brut champagne\"",
+        "rationale": "This has solid gift-suitability signals from explicit catalog evidence: a recognized Champagne producer, Champagne region, and sparkling wine type. The search text also describes it as a non-vintage brut Champagne, which is a broadly gift-friendly style. However, the catalog does not provide explicit prestige/classification, occasion tags, pairing language, or flavor-profile detail, so the score is kept strong but not maximal.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.55,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "wine_type",
+          "search_text_en"
+        ],
+        "snippet": "body: 0.6; acidity: 0.8; wine_type: sparkling; search_text_en: \"pinot-led non-vintage brut champagne\"",
+        "rationale": "This looks moderately beginner-friendly based on explicit catalog evidence: it is a sparkling wine with relatively light body (0.6), which can feel approachable. However, the acidity is quite high (0.8), and the search text explicitly says \"brut champagne,\" which usually signals a dry style; that can be less immediately easy for some beginners. Because sweetness, alcohol, and flavor-profile details are not provided, the score stays mid-range rather than high.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-pol-roger-brut-vintage-2018": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.72,
+        "evidenceAxes": [
+          "producer",
+          "region",
+          "wine_type",
+          "search_text"
+        ],
+        "snippet": "Pol Roger Brut Vintage 2018; producer: Pol Roger; country: France; region: Champagne; wine_type: sparkling; search_text_en: ... vintage-dated brut champagne",
+        "rationale": "Gift suitability is moderately strong based on explicit catalog evidence: Pol Roger is a named producer, the wine is from Champagne, and it is a vintage-dated brut sparkling wine. Champagne sparkling wines are commonly suitable for gifting, but the catalog provides no explicit prestige/classification, occasion tags, pairing notes, or flavor profile details, so the score stays conservative rather than high.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.45,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "wine_type"
+        ],
+        "snippet": "body: 0.6; acidity: 0.8; wine_type: sparkling; search_text_en: ... brut champagne",
+        "rationale": "This looks moderately beginner-friendly based on explicit catalog data: the body is fairly light (0.6), which can make it easier to approach, but the acidity is quite high (0.8), which may feel sharp or intense to newer drinkers. The wine is sparkling and labeled brut in the search text, which suggests a drier style, but sweetness is not explicitly provided in the catalog fields, so I’m keeping the score conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-pol-roger-sir-winston-churchill-2015": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.72,
+        "evidenceAxes": [
+          "producer",
+          "wine_type",
+          "search_text"
+        ],
+        "snippet": "\"Pol Roger Cuvée Sir Winston Churchill 2015\"; producer: \"Pol Roger\"; region: \"Champagne\"; search_text_en: \"prestige pinot-led vintage champagne\"",
+        "rationale": "Gift suitability is moderately strong because the catalog explicitly identifies a named Champagne from Pol Roger and the search text calls it a \"prestige pinot-led vintage champagne,\" which supports premium positioning and celebratory gifting. However, the catalog lacks explicit producer_prestige, classification, occasion tags, pairing notes, flavor profile, and alcohol data, so the score stays conservative rather than very high.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.58,
+        "evidenceAxes": [
+          "body",
+          "acidity"
+        ],
+        "snippet": "body: 0.8; acidity: 0.8; wine_type: sparkling; search_text_en: ... prestige pinot-led vintage champagne",
+        "rationale": "The catalog explicitly shows a light body (0.8) and high acidity (0.8), which can make the wine feel crisp and approachable but also quite sharp for some beginners. It is a sparkling wine, and the search text describes it as a prestige, pinot-led vintage champagne, but there is no explicit sweetness, alcohol, tannin, or flavor-profile data to further support easy-drinking accessibility. Given the limited evidence, this is a moderate, conservative beginner-friendliness score.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-pontet-canet-2011": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.62,
+        "evidenceAxes": [
+          "producer",
+          "region",
+          "search_text"
+        ],
+        "snippet": "search_text_en: \"Château Pontet-Canet 2011 ... Bordeaux Pauillac Cabernet Sauvignon Merlot Cabernet Franc Petit Verdot biodynamic pauillac bordeaux\"",
+        "rationale": "Gift suitability is moderately strong because the catalog explicitly identifies a named château producer and a Bordeaux/Pauillac origin, which are recognizable cues for a wine gift. The search text also includes grape varieties and 'biodynamic,' suggesting a more distinctive, quality-oriented wine. However, there is no explicit classification, producer prestige field, occasion tag, pairing language, flavor profile, or alcohol data, so the score stays conservative.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.18,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 1; acidity: 0.6; tannin: 0.8; wine_type: red",
+        "rationale": "This looks like a very light-bodied red, which can be approachable, but the relatively high tannin and moderate acidity suggest a more structured, less immediately easygoing wine for beginners. There is no explicit sweetness, alcohol, or flavor-profile evidence to offset that, so the score stays low-to-moderate.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-pontet-canet-2014": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.62,
+        "evidenceAxes": [
+          "producer",
+          "region",
+          "search_text"
+        ],
+        "snippet": "search_text_en: \"Château Pontet-Canet 2014 ... Bordeaux Pauillac Cabernet Sauvignon Merlot Cabernet Franc Petit Verdot biodynamic pauillac bordeaux\"",
+        "rationale": "Gift suitability is moderately strong because the catalog explicitly identifies a named Bordeaux/Pauillac wine from Château Pontet-Canet, with grape composition and biodynamic mention in search text suggesting a serious, recognizable red wine. However, the catalog fields do not provide explicit classification, producer prestige, occasion tags, pairing language, flavor profile, alcohol, or packaging cues, so the score stays conservative.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.18,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 1; acidity: 0.6; tannin: 0.8; wine_type: red",
+        "rationale": "The catalog explicitly indicates a very light body, but also fairly high acidity and high tannin, which usually makes a wine less immediately approachable for beginners. There is no sweetness, alcohol, or flavor-profile evidence to offset that, so the score stays low and conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-ridge-monte-bello-2017": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.72,
+        "evidenceAxes": [
+          "producer",
+          "wine_type",
+          "search_text"
+        ],
+        "snippet": "\"Ridge Monte Bello 2017\"; producer: \"Ridge Vineyards\"; wine_type: \"red\"; search_text_en: \"age-worthy california bordeaux-blend\"",
+        "rationale": "This has moderate-to-strong gift suitability based on explicit catalog evidence: a recognized producer name is present, the wine is a red, and the search text describes it as age-worthy and a California Bordeaux-blend, which supports a premium, gift-friendly profile. However, the catalog lacks explicit classification, occasion tags, pairing language, alcohol, or producer prestige fields, so the score stays conservative rather than high.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.28,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 0.8; acidity: 0.8; tannin: 0.8; search_text_en: \"age-worthy california bordeaux-blend\"; wine_type: red; grape_primary: Cabernet Sauvignon",
+        "rationale": "This looks like a full-bodied, high-acid, high-tannin red, which is typically less beginner-friendly because it can feel intense and drying. The search text also explicitly says \"age-worthy,\" suggesting a more structured style rather than an easy, soft, immediately approachable one. Evidence is limited because sweetness, alcohol, and flavor-profile details are missing, so the score stays conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-sassicaia-2018": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.72,
+        "evidenceAxes": [
+          "search_text",
+          "wine_type",
+          "region"
+        ],
+        "snippet": "search_text_en: \"Tenuta San Guido Sassicaia 2018 ... Bolgheri Sassicaia Cabernet Sauvignon Cabernet Franc super tuscan bordeaux-blend\"; wine_type: \"red\"; country: \"Italy\"; region: \"Tuscany\"",
+        "rationale": "Gift suitability is moderately strong because the catalog explicitly identifies a named, recognizable wine with a specific vintage and a premium-style search description (Sassicaia, Super Tuscan, Bordeaux-blend). However, the structured fields do not provide explicit classification, producer prestige, occasion tags, pairing language, flavor profile, or alcohol data, so the score stays conservative rather than high.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.18,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 0.8; acidity: 0.8; tannin: 0.8; wine_type: red; search_text_en: ... Cabernet Sauvignon Cabernet Franc super tuscan bordeaux-blend",
+        "rationale": "The catalog explicitly shows a very full-bodied, high-acid, high-tannin red wine, which usually makes a wine less immediately beginner-friendly. There is no explicit sweetness, alcohol, or flavor-profile data to soften that assessment, so the score stays low and conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-screaming-eagle-2018": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.78,
+        "evidenceAxes": [
+          "producer",
+          "region",
+          "wine_type",
+          "search_text"
+        ],
+        "snippet": "Screaming Eagle Cabernet Sauvignon 2018; producer: Screaming Eagle; country: USA; region: Napa Valley; search_text_en: \"Screaming Eagle Cabernet Sauvignon 2018 ... cult napa cabernet\"",
+        "rationale": "Gift suitability is supported by explicit evidence of a highly recognizable producer name and strong Napa Valley Cabernet Sauvignon identity in the search text. However, the catalog lacks explicit classification, occasion tags, pairing notes, flavor profile, alcohol, or formal prestige fields, so the score should remain conservative rather than assuming gift appeal from reputation alone.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.18,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 1; acidity: 0.6; tannin: 0.8; wine_type: red; search_text_en: \"Screaming Eagle Cabernet Sauvignon 2018 ... cult napa cabernet\"",
+        "rationale": "The catalog explicitly shows a very light body score (1), but also fairly high tannin (0.8) and moderate acidity (0.6), which usually makes a wine less immediately easy for beginners. There is no explicit sweetness, alcohol, or flavor-profile support to offset that. Because the evidence is limited and leans toward a structured red, the score stays low and conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-solaia-2016": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.78,
+        "evidenceAxes": [
+          "producer",
+          "search_text"
+        ],
+        "snippet": "\"Antinori Solaia 2016\"; \"Marchesi Antinori\"; \"cabernet-led super tuscan\"; \"Toscana IGT Cabernet Sauvignon Sangiovese Cabernet Franc\"",
+        "rationale": "Gift suitability is moderately strong because the catalog explicitly identifies a well-known producer name (Marchesi Antinori) and a premium-style wine description in the search text ('cabernet-led super tuscan'). However, there is no explicit classification, occasion tag, pairing language, flavor profile, alcohol percentage, or other gifting cue in the supplied fields, so the score should remain conservative rather than assuming prestige beyond the text.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.18,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 1; acidity: 0.6; tannin: 0.8; search_text_en: cabernet-led super tuscan",
+        "rationale": "The catalog explicitly shows a very light body, but also fairly high acidity and especially high tannin, which usually makes a wine less easy for beginners. The search text also describes it as a cabernet-led Super Tuscan, reinforcing a structured red style rather than an especially soft or easygoing one. With no sweetness, alcohol, or flavor-profile evidence provided, the score stays conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-solaia-2019": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.78,
+        "evidenceAxes": [
+          "producer",
+          "search_text",
+          "wine_type",
+          "region"
+        ],
+        "snippet": "canonical_label: Antinori Solaia 2019; producer: Marchesi Antinori; country: Italy; region: Tuscany; wine_type: red; search_text_en: ... cabernet-led super tuscan",
+        "rationale": "Gift suitability is moderately strong based on explicit catalog evidence of a recognized producer name (Marchesi Antinori), a premium-seeming search description ('cabernet-led super tuscan'), and a specific Italian Tuscany red wine identity. However, the catalog lacks explicit classification, occasion tags, pairing language, flavor profiles, alcohol, or producer_prestige fields, so the score stays conservative rather than assuming prestige or gifting cues beyond the text provided.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.35,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 1; acidity: 0.6; tannin: 0.8; search_text_en: cabernet-led super tuscan",
+        "rationale": "The catalog explicitly shows a very light body (1), moderate acidity (0.6), and fairly high tannin (0.8). For beginners, the low body helps, but the high tannin and cabernet-led red style suggest a more structured, less immediately easygoing wine. Because sweetness and alcohol are not provided, I’m keeping the score conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-talbot-2009": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.62,
+        "evidenceAxes": [
+          "producer",
+          "search_text"
+        ],
+        "snippet": "search_text_en: \"Château Talbot 2009 Château Talbot France Bordeaux Saint-Julien Cabernet Sauvignon Merlot Petit Verdot classic saint-julien bordeaux\"",
+        "rationale": "Gift suitability is moderately supported by explicit evidence that this is a Château Talbot Bordeaux from Saint-Julien, with grape varieties and the descriptor \"classic saint-julien bordeaux,\" which suggests a recognizable, traditional red wine. However, the catalog fields do not provide explicit classification, producer prestige, occasion tags, pairing language, or flavor-profile detail, so the score stays conservative.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.28,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin",
+          "grape_primary"
+        ],
+        "snippet": "body: 0.8; acidity: 0.6; tannin: 0.8; grape_primary: Cabernet Sauvignon; search_text_en: classic saint-julien bordeaux",
+        "rationale": "This looks like a fairly structured red wine: the catalog shows high body and especially high tannin, with moderate acidity. Those traits usually make a wine less immediately easy for beginners than a lighter, softer style. The catalog also explicitly identifies Cabernet Sauvignon and describes it as classic Saint-Julien Bordeaux, which supports a more traditional, structured profile. Because sweetness and alcohol are not provided and flavor notes are absent, the score stays conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-talbot-2018": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.62,
+        "evidenceAxes": [
+          "producer",
+          "region",
+          "search_text"
+        ],
+        "snippet": "search_text_en: \"Château Talbot 2018 Château Talbot France Bordeaux Saint-Julien Cabernet Sauvignon Merlot Petit Verdot classic saint-julien bordeaux\"",
+        "rationale": "Gift suitability is moderately strong because the catalog explicitly identifies a named Bordeaux producer and a classic Saint-Julien/Bordeaux red blend, which can read as a recognizable, traditional gift choice. However, the record lacks explicit classification, producer prestige, occasion tags, pairing language, flavor profile, alcohol, or packaging evidence, so the score stays conservative.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.35,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 0.8; acidity: 0.6; tannin: 0.8; wine_type: red; search_text_en: classic saint-julien bordeaux",
+        "rationale": "The catalog explicitly shows a full-bodied red with fairly high tannin and moderate acidity, which usually makes it less immediately approachable for beginners than softer, lower-tannin wines. There is no explicit sweetness, alcohol, or flavor-profile evidence to offset that, so the score stays conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-tignanello-2019": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.78,
+        "evidenceAxes": [
+          "producer",
+          "search_text"
+        ],
+        "snippet": "producer: Marchesi Antinori; search_text_en: Antinori Tignanello 2019 Marchesi Antinori Italy Tuscany Toscana IGT Sangiovese Cabernet Sauvignon Cabernet Franc original super tuscan",
+        "rationale": "Gift suitability is supported by explicit producer recognition (Marchesi Antinori) and strong search-text cues suggesting a notable wine ('Tignanello', 'original super tuscan', Toscana IGT, named grape blend). However, the catalog lacks explicit occasion tags, pairing notes, flavor descriptors, alcohol, or formal classification fields, so the score should remain moderately high but not extreme.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.35,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 0.8; acidity: 0.8; tannin: 0.8; wine_type: red; search_text_en: ... original super tuscan",
+        "rationale": "The catalog explicitly shows a full-bodied red with high acidity and high tannin, which usually makes a wine less immediately easy for beginners. There is no sweetness, alcohol, or flavor-profile data to soften that impression, so the score stays conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "w-vega-sicilia-unico-2012": {
+      "sourceDataset": "repo_gold_wine_catalog",
+      "gift": {
+        "score": 0.82,
+        "evidenceAxes": [
+          "producer",
+          "search_text",
+          "wine_type"
+        ],
+        "snippet": "canonical_label: Vega Sicilia Único 2012; producer: Bodegas Vega Sicilia; region: Ribera del Duero; wine_type: red; search_text_en: ... legendary spanish reserva",
+        "rationale": "Gift suitability is strong based on explicit producer recognition in the catalog text ('Vega Sicilia' and 'legendary spanish reserva'), plus a named vintage and premium red wine style from a respected Spanish region. However, the catalog lacks explicit classification, occasion tags, pairing guidance, alcohol, or formal prestige fields, so the score stays high but not maximal.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.18,
+        "evidenceAxes": [
+          "body",
+          "acidity",
+          "tannin"
+        ],
+        "snippet": "body: 1; acidity: 0.8; tannin: 0.8; wine_type: red",
+        "rationale": "This looks unlikely to be especially beginner-friendly because the catalog explicitly shows very low body and high acidity/tannin, which usually signals a more structured, demanding red. The data does not provide sweetness, alcohol, or flavor-profile softness to offset that, so I’m keeping the score low and conservative.",
+        "generationSource": "llm_teacher_generated"
+      }
+    },
+    "yquem-2015": {
+      "sourceDataset": "seed_wines_real",
+      "gift": {
+        "score": 0.96,
+        "evidenceAxes": [
+          "occasion",
+          "classification",
+          "producer_prestige",
+          "pairing",
+          "flavor_profile",
+          "wine_type",
+          "search_text"
+        ],
+        "snippet": "occasion_tags: celebration, dessert course, collector; classification: Premier Cru Supérieur; producer_prestige: 1; pairing_tags: foie gras, blue cheese, fruit tart, crème brûlée; flavor_profiles: apricot, honey, botrytis, orange peel, vanilla, caramel, saffron; wine_type: dessert; search_text_en: ... greatest dessert wine",
+        "rationale": "Very strong gift suitability based on explicit catalog evidence: it is tagged for celebration and collector occasions, carries the prestigious Premier Cru Supérieur classification, and the producer is marked as highly prestigious. The dessert wine type, rich flavor profile, and classic pairing suggestions make it especially suitable for gifting in celebratory or special-occasion contexts. The score is kept below 100 because the catalog does not provide explicit packaging or broader gifting-specific evidence.",
+        "generationSource": "llm_teacher_generated"
+      },
+      "beginner": {
+        "score": 0.72,
+        "evidenceAxes": [
+          "sweetness",
+          "body",
+          "acidity",
+          "tannin",
+          "alcohol_pct",
+          "flavor_profiles",
+          "wine_type"
+        ],
+        "snippet": "wine_type: dessert; body: 0.9; sweetness: 0.98; acidity: 0.78; tannin: 0; alcohol_pct: 14; flavor_profiles: apricot, honey, botrytis, orange peel, vanilla, caramel, saffron",
+        "rationale": "The catalog explicitly shows a very sweet dessert wine with no tannin and high body, which can make it smoother and less challenging than dry tannic wines. The flavor profile is also clearly described with familiar notes like apricot, honey, vanilla, and caramel, which may feel approachable. However, the high sweetness and dessert style can be less beginner-friendly for drinkers who prefer dry wines, and the relatively high acidity plus 14% alcohol add some intensity. Overall, it has several approachable cues but remains a specialized dessert wine, so a moderately high but not top score is appropriate.",
+        "generationSource": "llm_teacher_generated"
       }
     }
   }

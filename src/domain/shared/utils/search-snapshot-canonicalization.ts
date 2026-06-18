@@ -18,6 +18,7 @@ export interface CanonicalAliasSnapshotLike {
   readonly source: string;
   readonly sourceTrust: number;
   readonly confidencePrior: number;
+  readonly phoneticKeys?: readonly string[];
 }
 
 export interface CanonicalAmbiguitySnapshotLike {
@@ -47,6 +48,9 @@ export function canonicalizeAliasSnapshotRecords(
     source: record.source,
     sourceTrust: record.sourceTrust,
     confidencePrior: record.confidencePrior,
+    ...(record.phoneticKeys !== undefined && record.phoneticKeys.length > 0
+      ? { phoneticKeys: [...record.phoneticKeys].sort((left, right) => left.localeCompare(right)) }
+      : {}),
   })).sort((left, right) =>
     left.normalizedValue.localeCompare(right.normalizedValue)
     || left.entityId.localeCompare(right.entityId)

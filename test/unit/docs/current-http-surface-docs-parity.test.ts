@@ -23,6 +23,9 @@ const removedSurfacePatterns = [
   /\/v1\/search\/lookup/,
   /\/v1\/search\/replay/,
   /\/v1\/search\/interpret/,
+  /\/v1\/lookup\/wine['"]/,
+  /\/v1\/entity\/resolve['"]/,
+  /\/v1\/entity\/autocomplete['"]/,
   /\/v1\/feedback/,
   /\/v1\/watchlist/,
   /\/openapi\.json/,
@@ -61,6 +64,10 @@ describe('current HTTP surface docs parity', () => {
   const deployRunbook = readWorkspaceFile('docs/runbook-github-actions-aws-deploy.md');
   const agenticOverview = readWorkspaceFile('docs/system-overview/agentic-process.md');
   const doc2queryIntegration = readWorkspaceFile('docs/system-overview/doc2query-cohere-integration.md');
+  const benchStatus = readWorkspaceFile('docs/bench/STATUS.md');
+  const lookupPlan = readWorkspaceFile('docs/plans/jun-2-genearl/entity-lookup-v2/IMPROVEMENT-PLAN-2026-06-03.md');
+  const lookupChecklist = readWorkspaceFile('docs/plans/jun-2-genearl/entity-lookup-v2/cutover-checklist.md');
+  const lookupBuildStatus = readWorkspaceFile('docs/plans/jun-2-genearl/entity-lookup-v2/STATUS.md');
   const justfile = readWorkspaceFile('justfile');
   const featureCatalogFiles = listFeatureCatalogFiles('tools/feature-catalog/features');
 
@@ -74,10 +81,14 @@ describe('current HTTP surface docs parity', () => {
   });
 
   it('current runbooks point entity lookup and deploy examples at canonical paths', () => {
-    expect(abbreviationRunbook).toContain('/v1/lookup/wine');
+    // V2-only cutover: entity lookup is now POST /v2/entity-lookup.
+    expect(abbreviationRunbook).toContain('/v2/entity-lookup');
+    expect(abbreviationRunbook).toContain('runbook-curation-materialization.md');
+    expect(abbreviationRunbook).not.toContain('/v1/lookup/wine');
     expect(abbreviationRunbook).not.toContain('/v1/search/lookup');
 
-    expect(calibrationRunbook).toContain('/v1/lookup/wine');
+    expect(calibrationRunbook).toContain('/v2/entity-lookup');
+    expect(calibrationRunbook).not.toContain('/v1/lookup/wine');
     expect(calibrationRunbook).not.toContain('/v1/search/lookup');
 
     expect(deployRunbook).toContain('https://asommguide.shop:9011/v1/search/hybrid');
@@ -88,7 +99,10 @@ describe('current HTTP surface docs parity', () => {
     expect(agenticOverview).toContain('`POST /v1/search/hybrid`');
     expect(agenticOverview).toContain('`POST /v1/search/semantic`');
     expect(agenticOverview).toContain('`POST /v1/search/lexical`');
-    expect(agenticOverview).toContain('`POST /v1/lookup/wine`');
+    expect(agenticOverview).toContain('`POST /v2/entity-lookup`');
+    expect(agenticOverview).not.toContain('`POST /v1/lookup/wine`');
+    expect(agenticOverview).not.toContain('`POST /v1/entity/resolve`');
+    expect(agenticOverview).not.toContain('`POST /v1/entity/autocomplete`');
     expect(agenticOverview).toContain('`POST /v1/agent`');
     expect(agenticOverview).not.toContain('| `POST /v1/search` |');
     expect(agenticOverview).not.toContain('| `POST /v1/search/interpret` |');
@@ -100,12 +114,32 @@ describe('current HTTP surface docs parity', () => {
     expect(doc2queryIntegration).not.toContain('HTTP /v1/search 또는');
   });
 
+  it('HTTP contract surface doc uses repo-relative links and documents V2 lookup cutover', () => {
+    expect(contractSurface).not.toContain('/Users/songmin/wine-search-engine');
+    expect(contractSurface).toContain('POST /v2/entity-lookup');
+    expect(contractSurface).toContain('published_awaiting_materialization');
+    expect(contractSurface).toContain('legacy_approved_abbreviation_backlog');
+    expect(contractSurface).toContain('lookup_runtime');
+    expect(contractSurface).toContain('POST /v2/entity-lookup/ops/proposals/review');
+    expect(contractSurface).toContain('POST /v2/entity-lookup/ops/proposals/publish');
+    expect(contractSurface).toContain('POST /v2/entity-lookup/ops/inspect');
+    expect(contractSurface).not.toMatch(/\/v1\/entity\/resolve['"]/);
+  });
+
   it('HTTP contract surface doc no longer references removed OpenAPI bridge or replay routes', () => {
     expect(contractSurface).toContain('pnpm run contracts:http -- data/http-contract-manifest.json');
     expect(contractSurface).not.toContain('contracts:http:openapi-bridge');
     expect(contractSurface).not.toContain('export-http-openapi-bridge.ts');
     expect(contractSurface).not.toContain('http-route-contract-openapi.ts');
     expect(contractSurface).not.toContain('/v1/search/replay');
+  });
+
+  it('lookup authority current docs and archive docs are clearly separated', () => {
+    expect(benchStatus).toContain('이 폴더의 current SSOT는 이 문서다.');
+    expect(benchStatus).not.toContain('lookup authority 품질 판단은 `docs/plans/jun-2-genearl/entity-lookup-v2/cutover-checklist.md`');
+    expect(lookupPlan).toContain('Historical / audit-only document.');
+    expect(lookupChecklist).toContain('Historical / audit-only document.');
+    expect(lookupBuildStatus).toContain('Current authority truth moved to `docs/bench/STATUS.md`');
   });
 
   it('developer smoke commands point at the canonical hybrid path', () => {
@@ -120,6 +154,17 @@ describe('current HTTP surface docs parity', () => {
     for (const relativePath of deletedFeatureCatalogEntries) {
       expect(fs.existsSync(path.join(workspaceRoot, relativePath))).toBe(false);
     }
+  });
+
+  it('known-issues cutover triage doc is marked superseded', () => {
+    const knownIssues = readWorkspaceFile('docs/known-issues-cutover-blockers.md');
+    expect(knownIssues).toContain('Status: superseded');
+  });
+
+  it('eval-only search rails are documented as query runners, not live use-case classes', () => {
+    const batchSearchDoc = readWorkspaceFile('docs/batch-search.md');
+    expect(batchSearchDoc).toContain('buildBatchSearchRunner');
+    expect(batchSearchDoc).not.toContain('BatchSearchUseCase');
   });
 
   it('current feature catalog does not advertise removed HTTP surfaces', () => {

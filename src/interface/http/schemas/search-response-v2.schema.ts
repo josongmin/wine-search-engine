@@ -8,7 +8,7 @@
  * POST /v1/search/hybrid       SearchResponseSchema (V1)    Machine + human adapter
  * POST /v1/search/semantic     SearchResponseSchema (V1)    Machine + human adapter
  * POST /v1/search/lexical      SearchResponseSchema (V1)    Machine + human adapter
- * POST /v1/lookup/wine         SearchResponseSchema (V1)    Machine + human adapter
+ * POST /v2/entity-lookup       EntityLookupV2 (4-state)     Machine + human adapter
  * POST /v1/agent*              WineSearchResponseSchema     Agent runtime
  * (Accept: application/vnd.cuvee.human+json on /v1/*)
  *                              SearchResponseV2Human        Human
@@ -179,8 +179,7 @@ export const SearchResponseV2HumanComparisonSchema = SearchResponseV2HumanCompar
 
 /**
  * V2 human-readable search response envelope.
- * Returned by content negotiation on the canonical `/v1/search/*` primitives
- * and `/v1/lookup/wine`.
+ * Returned by content negotiation on the canonical `/v1/search/*` primitives.
  *
  * Discriminated union: {@code queryType} is {@code search} for normal ranked results,
  * or {@code comparison} for Epic 14 "A vs B" decomposition responses.

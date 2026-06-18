@@ -73,8 +73,8 @@ export interface SearchRequest {
    * Internal primitive-route authority marker set only by dedicated entry
    * surfaces whose URL path semantically fixes the execution contract.
    *
-   * Current use:
-   * - `lookup_wine` → `/v1/lookup/wine` exact canonical-entity surface
+   * Current use (V2-only cutover removed the `lookup_wine` arm — exact entity
+   * lookup is now exclusively the EntityLookupV2 use case / `/v2/entity-lookup`):
    * - `similar_to_entity` → RFC-021 deterministic reference-similarity primitive
    *   ("wines like {entity_id}"). The anchor authority is {@link anchorEntityId},
    *   NOT the query string — the plan builder fixes route=`mixed` /
@@ -84,7 +84,7 @@ export interface SearchRequest {
    * NEVER populate from a request body. This is an application-internal
    * dispatch signal owned by the front-door adapter.
    */
-  readonly primitiveRoute?: 'lookup_wine' | 'similar_to_entity' | undefined;
+  readonly primitiveRoute?: 'similar_to_entity' | undefined;
   /**
    * Resolved canonical anchor entity for the `similar_to_entity` primitive
    * route. This — not {@link query} — is the similarity anchor authority

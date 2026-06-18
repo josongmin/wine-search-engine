@@ -3,24 +3,39 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { linkEvalTrainingReleaseToRuntimeState } from '../../../scripts/eval/run-eval-and-train-ltr.ts';
+import { SEARCH_SNAPSHOT_STATE_VERSION } from '../../../src/domain/shared/constants/search-snapshot.js';
 import { loadSearchSnapshotRuntimeState } from '../../../src/infrastructure/health/search-snapshot-readiness.js';
 import { hashText } from '../../../src/domain/shared/utils/stable-json.js';
+import { buildMinimalLookupRuntimeStatePlane } from '../../helpers/minimal-search-snapshot-runtime-state.js';
 
 async function makeTempDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'eval-training-runtime-provenance-'));
 }
 
 function runtimeStatePayload(runtimeStatePathDir: string, snapshotId: string) {
+  const lookupPlane = buildMinimalLookupRuntimeStatePlane(runtimeStatePathDir);
   return {
-    schemaVersion: 'search_snapshot_runtime_state.v3',
+    schemaVersion: SEARCH_SNAPSHOT_STATE_VERSION,
     snapshotId,
     contentHash: 'content-hash',
     publishedAt: '2026-04-17T00:00:00.000Z',
     manifestPath: path.join(runtimeStatePathDir, 'manifest.json'),
     nlMappingsRuntimePath: path.join(runtimeStatePathDir, 'nl-mappings.json'),
+    lookupAliasRuntimePath: lookupPlane.lookupAliasRuntimePath,
+    lookupExactSafeRuntimePath: lookupPlane.lookupExactSafeRuntimePath,
+    lookupResolverProjectionPath: lookupPlane.lookupResolverProjectionPath,
+    lookupEntityProjectionPath: lookupPlane.lookupEntityProjectionPath,
+    lookupSemanticScopeRuntimePath: lookupPlane.lookupSemanticScopeRuntimePath,
+    lookupReviewedFamilyRecallRuntimePath: lookupPlane.lookupReviewedFamilyRecallRuntimePath,
+    lookupScopeGraphRuntimePath: lookupPlane.lookupScopeGraphRuntimePath,
+    lookupAmbiguityRuntimePath: lookupPlane.lookupAmbiguityRuntimePath,
+    lookupConceptRedirectRuntimePath: lookupPlane.lookupConceptRedirectRuntimePath,
     counts: {
       entities: 10,
       aliases: 12,
+      ...lookupPlane.lookupRuntimeCounts,
+      lookupAliasRuntimeAliases: 12,
+      lookupAmbiguityRuntimeEntries: 2,
       ambiguityRegistry: 2,
       nlMappings: 1,
       activeLtrModels: 1,
@@ -28,6 +43,7 @@ function runtimeStatePayload(runtimeStatePathDir: string, snapshotId: string) {
     hashes: {
       entities: 'entities-hash',
       aliases: 'aliases-hash',
+      ...lookupPlane.lookupRuntimeHashes,
       ambiguityRegistry: 'ambiguity-hash',
       nlMappings: 'nl-hash',
       activeLtrModels: 'ltr-hash',

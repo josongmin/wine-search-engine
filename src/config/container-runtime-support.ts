@@ -15,14 +15,10 @@ import { RedisEmbeddingCache } from '../infrastructure/cache/redis-embedding-cac
 import { RedisPhraseCache } from '../infrastructure/cache/redis-phrase-cache.js';
 import { RedisCircuitBreakerWrapper } from '../infrastructure/db/redis-circuit-breaker-wrapper.js';
 import type { PhraseCachePort } from '../domain/attribute/port/phrase-cache.port.js';
-import { PgLtrModelRegistry } from '../infrastructure/adapter/pg-ltr-model-registry.js';
-import { loadRuntimeLtrModels } from '../infrastructure/adapter/runtime-ltr-model-loader.js';
-import { LTR_FEATURE_SCHEMA_HASH } from '../domain/ranking/service/lambdamart-ranker.js';
 import { DrinkingWindowPredictor } from '../infrastructure/ml/drinking-window-predictor.js';
 import type { DrinkingWindowPredictorPort } from '../domain/drinking-window/port/drinking-window-predictor.port.js';
 import { DeterministicDrinkingWindowPredictor } from '../infrastructure/ml/deterministic-drinking-window-predictor.js';
 import { loadSearchSnapshotRuntimeState } from '../infrastructure/health/search-snapshot-readiness.js';
-import { resolveActiveSnapshot } from '../infrastructure/db/active-snapshot-resolver.js';
 import { isLtrServingEnabled } from './ltr-serving-mode.js';
 import {
   DEFAULT_SEARCH_SNAPSHOT_FIELD_AVAILABILITY,
@@ -33,8 +29,6 @@ import {
 const CACHE_CIRCUIT_BREAKER_THRESHOLD_DEFAULT = 5;
 /** Milliseconds until circuit half-closes after open (matches CacheService default). */
 const CACHE_CIRCUIT_BREAKER_RESET_MS_DEFAULT = 60_000;
-const ACTIVE_SNAPSHOT_RESOLVE_QUERY_TIMEOUT_MS = 1_500;
-
 class RedisJudgmentCacheAdapter implements JudgmentCachePort {
   constructor(
     private readonly redis: RedisClient,
@@ -107,6 +101,7 @@ export interface RuntimeSupportServices {
 export type RuntimeReadinessIssueKind =
   | 'unconfigured'
   | 'disabled'
+  | 'unsupported'
   | 'missing_or_invalid'
   | 'pg_pool_missing'
   | 'active_snapshot_unavailable'
@@ -169,7 +164,8 @@ export async function buildRuntimeSupportServices(
 ): Promise<RuntimeSupportServices> {
   const querySanitizer = new QuerySanitizer();
   const { pool, redisClient } = runtime;
-  const ltrServingEnabled = isLtrServingEnabled();
+  const ltrServingConfigured = isLtrServingEnabled(config);
+  const ltrServingEnabled = false;
 
   // W2-BUG-03: Instantiate the Redis circuit breaker wrapper so the 'redis'
   // breaker is registered in globalCircuitBreakerRegistry at startup.
@@ -265,13 +261,7 @@ export async function buildRuntimeSupportServices(
     }
   }
 
-  let discoveredRegistryLtrModels: ReadonlyMap<string, QueryClassWeights> | undefined;
-  let ltrRegistrySearchSnapshotId: string | undefined;
-  let ltrRegistryIssue: RuntimeReadinessIssueKind | undefined = pool === undefined
-    ? 'pg_pool_missing'
-    : undefined;
-  const ltrRequired = ltrServingEnabled;
-  let runtimeLtrArtifactModels: ReadonlyMap<string, QueryClassWeights> | undefined;
+  const ltrRegistrySearchSnapshotId: string | undefined = undefined;
   let fieldAvailability: SearchSnapshotFieldAvailability = DEFAULT_SEARCH_SNAPSHOT_FIELD_AVAILABILITY;
   if (runtime.searchSnapshotFieldAvailability !== undefined) {
     fieldAvailability = runtime.searchSnapshotFieldAvailability;
@@ -292,99 +282,20 @@ export async function buildRuntimeSupportServices(
       );
     }
   }
-  if (ltrServingEnabled && pool) {
-    const ltrRegistry = new PgLtrModelRegistry(pool);
-    try {
-      ltrRegistrySearchSnapshotId = runtime.searchSnapshotId
-        ?? (await resolveActiveSnapshot(pool, {
-          bypassCache: true,
-          queryTimeoutMs: ACTIVE_SNAPSHOT_RESOLVE_QUERY_TIMEOUT_MS,
-        })).activeSnapshotId;
-    } catch (err) {
-      ltrRegistryIssue = 'active_snapshot_unavailable';
-      bootstrapLogger.warn(
-        { err },
-        '[Container] Active search snapshot unavailable; snapshot-bound LTR load skipped',
-      );
-    }
-
-    for (let attempt = 1; ltrRegistrySearchSnapshotId !== undefined && attempt <= 2; attempt++) {
-      try {
-        discoveredRegistryLtrModels = await ltrRegistry.getAllModels(ltrRegistrySearchSnapshotId);
-        if (discoveredRegistryLtrModels.size > 0) {
-          ltrRegistryIssue = undefined;
-          for (const [queryClass, model] of discoveredRegistryLtrModels.entries()) {
-            if (model.featureSchemaHash !== LTR_FEATURE_SCHEMA_HASH) {
-              throw new Error(
-                `LTR model ${queryClass} feature schema mismatch at startup: model=${model.featureSchemaHash}, current=${LTR_FEATURE_SCHEMA_HASH}`,
-              );
-            }
-          }
-          bootstrapLogger.info(
-            {
-              ltrModelCount: discoveredRegistryLtrModels.size,
-              featureSchemaHash: LTR_FEATURE_SCHEMA_HASH,
-              searchSnapshotId: ltrRegistrySearchSnapshotId,
-            },
-            '[Container] Loaded LTR models from registry',
-          );
-          for (const [queryClass, model] of discoveredRegistryLtrModels.entries()) {
-            const weightDim = model.weights.length;
-            bootstrapLogger.info(
-              { queryClass, weightDim, featureSchemaHash: model.featureSchemaHash },
-              '[Container] LTR model weight dimension at serve time',
-            );
-          }
-        } else {
-          ltrRegistryIssue = 'empty_registry';
-          bootstrapLogger.warn(
-            { searchSnapshotId: ltrRegistrySearchSnapshotId },
-            '[Container] No snapshot-bound LTR models found in registry',
-          );
-        }
-        break; // success
-      } catch (err) {
-        bootstrapLogger.error(
-          { err, attempt },
-          '[Container] LTR model load failed',
-        );
-        ltrRegistryIssue = 'load_failed';
-        if (attempt < 2) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-      }
-    }
-  }
-
-  if (ltrServingEnabled && config.runtimeLtrModelsPath !== undefined) {
-    runtimeLtrArtifactModels = await loadRuntimeLtrModels(config.runtimeLtrModelsPath);
-    if ((discoveredRegistryLtrModels === undefined || discoveredRegistryLtrModels.size === 0)
-      && runtimeLtrArtifactModels !== undefined) {
-      if (discoveredRegistryLtrModels === undefined) {
-        bootstrapLogger.info(
-          { source: 'runtime-file', ltrModelCount: runtimeLtrArtifactModels.size },
-          '[Container] Loaded LTR models from runtime artifact',
-        );
-      } else {
-        bootstrapLogger.warn(
-          {
-            source: 'runtime-file',
-            path: config.runtimeLtrModelsPath,
-            sourceCount: discoveredRegistryLtrModels.size,
-          },
-          '[Container] PG returned no active LTR models; switched to runtime artifact fallback',
-        );
-      }
-    }
-  }
+  const effectiveLtrModels: ReadonlyMap<string, QueryClassWeights> | undefined = undefined;
+  const effectiveSource: RuntimeLtrEffectiveSource = 'none';
 
   bootstrapLogger.info(
     {
       enabled: ltrServingEnabled,
-      registryModelCount: discoveredRegistryLtrModels?.size ?? 0,
-      runtimeArtifactModelCount: runtimeLtrArtifactModels?.size ?? 0,
+      requested: ltrServingConfigured,
+      runtimeLtrModelsPathConfigured: config.runtimeLtrModelsPath !== undefined,
+      effectiveSource,
+      effectiveModelCount: 0,
+      registryModelCount: 0,
+      runtimeArtifactModelCount: 0,
     },
-    '[Container] LTR serving disabled; startup skips model discovery and Ranker wiring',
+    '[Container] LTR serving unsupported; startup skips model discovery and Ranker wiring',
   );
 
   let drinkingWindowPredictor: DrinkingWindowPredictorPort =
@@ -426,55 +337,30 @@ export async function buildRuntimeSupportServices(
     },
     runtimeLtrArtifact: {
       configured: config.runtimeLtrModelsPath !== undefined,
-      loaded: runtimeLtrArtifactModels !== undefined,
-      ...(runtimeLtrArtifactModels !== undefined
-        ? { modelCount: runtimeLtrArtifactModels.size }
-        : {}),
-      ...(!ltrServingEnabled
-        ? { issue: 'disabled' as const }
-        : config.runtimeLtrModelsPath === undefined
-        ? { issue: 'unconfigured' as const }
-        : runtimeLtrArtifactModels === undefined
-          ? { issue: 'missing_or_invalid' as const }
-          : {}),
+      loaded: false,
+      issue: 'unsupported',
     },
     ltrModels: {
       registry: {
         configured: ltrServingEnabled && pool !== undefined,
-        loaded: discoveredRegistryLtrModels !== undefined && discoveredRegistryLtrModels.size > 0,
+        loaded: false,
         ...(ltrRegistrySearchSnapshotId !== undefined
           ? { searchSnapshotId: ltrRegistrySearchSnapshotId }
           : {}),
-        ...(discoveredRegistryLtrModels !== undefined
-          ? { modelCount: discoveredRegistryLtrModels.size }
-          : {}),
-        ...(!ltrServingEnabled
-          ? { issue: 'disabled' as const }
-          : ltrRegistryIssue !== undefined
-          ? { issue: ltrRegistryIssue }
-          : {}),
+        issue: 'unsupported',
       },
       artifact: {
         configured: ltrServingEnabled && config.runtimeLtrModelsPath !== undefined,
-        loaded: runtimeLtrArtifactModels !== undefined,
+        loaded: false,
         selected: false,
-        ...(runtimeLtrArtifactModels !== undefined
-          ? { modelCount: runtimeLtrArtifactModels.size }
-          : {}),
-        ...(!ltrServingEnabled
-          ? { issue: 'disabled' as const }
-          : config.runtimeLtrModelsPath === undefined
-          ? { issue: 'unconfigured' as const }
-          : runtimeLtrArtifactModels === undefined
-            ? { issue: 'missing_or_invalid' as const }
-            : { issue: 'not_selected' as const }),
+        issue: 'unsupported',
       },
       effective: {
-        source: 'none',
+        source: effectiveSource,
         loaded: false,
-        required: ltrServingEnabled && ltrRequired,
+        required: false,
         modelCount: 0,
-        issue: 'disabled',
+        issue: 'unsupported',
       },
     },
     benchmarkPersistence: {
@@ -490,7 +376,7 @@ export async function buildRuntimeSupportServices(
     querySanitizer,
     injectionJudge,
     cacheService,
-    ltrModels: undefined,
+    ltrModels: effectiveLtrModels,
     drinkingWindowPredictor,
     ...(phraseCache !== undefined ? { phraseCache } : {}),
     runtimeReadiness,

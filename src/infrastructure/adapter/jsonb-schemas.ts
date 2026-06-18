@@ -159,7 +159,7 @@ export const LtrScoreComponentsJsonbSchema = z.object({
   producerPrestige: z.number().finite().optional(),
   multilingualScore: z.number().finite().optional(),
   entityPosterior: z.number().finite().optional(),
-  identityExactnessTier: z.enum(['exact', 'alias_exact', 'alias_fuzzy', 'none']).optional(),
+  identityExactnessTier: z.enum(['exact', 'alias_exact', 'alias_fuzzy', 'alias_phonetic', 'none']).optional(),
   lanePresence: z.enum(['corroborated', 'entity_only', 'general_only']).optional(),
 }).strict();
 

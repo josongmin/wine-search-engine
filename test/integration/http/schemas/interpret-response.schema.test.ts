@@ -7,7 +7,7 @@ describe('InterpretResponseSchema', () => {
   it('accepts the planner output for a representative semantic query', async () => {
     const parts = createTestContainer();
 
-    const plan = await parts.container.interpretUseCase.execute({
+    const plan = await parts.interpretQueryRunner.execute({
       query: '오푸스원',
     });
 
@@ -17,7 +17,7 @@ describe('InterpretResponseSchema', () => {
   it('accepts the planner output for a representative hybrid discovery query', async () => {
     const parts = createTestContainer();
 
-    const plan = await parts.container.interpretUseCase.execute({
+    const plan = await parts.interpretQueryRunner.execute({
       query: 'full body red wine',
     });
 
@@ -27,7 +27,7 @@ describe('InterpretResponseSchema', () => {
   it('rejects V2 explain fields so the V1 interpret contract stays fail-closed', async () => {
     const parts = createTestContainer();
 
-    const plan = await parts.container.interpretUseCase.execute({
+    const plan = await parts.interpretQueryRunner.execute({
       query: 'Opus One 2018',
     });
 
@@ -49,7 +49,7 @@ describe('InterpretResponseSchema', () => {
   it('rejects unexpected keys inside typed interpret policy and anchors', async () => {
     const parts = createTestContainer();
 
-    const plan = await parts.container.interpretUseCase.execute({
+    const plan = await parts.interpretQueryRunner.execute({
       query: '오푸스원',
     });
 

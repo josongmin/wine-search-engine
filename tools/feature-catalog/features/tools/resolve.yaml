@@ -1,53 +1,52 @@
 id: tools.resolve
-name: Resolve Use Case (Entity Disambiguation)
+name: Resolve Wire Projection (V2 mapping)
 category: tools
 summary: |
-  쿼리의 entity 후보를 confidence + abstention 결정과 함께 반환하는 internal
-  resolve use case. dedicated HTTP route는 제거되었다.
+  Legacy ResolveResponse wire shape projected from Entity Lookup V2 via
+  `executeResolveViaEntityLookupV2` / `mapEntityLookupV2ResultToResolveResponse`.
+  The former `POST /v1/entity/resolve` HTTP route was removed after the V2 cutover.
+  Public entity resolve is `POST /v2/entity-lookup`.
 
 maturity: 4
 maturity_rationale: |
-  HONEST 4. route boundary 계약을 fast-check property suite (numRuns=100, 9 tests)
-  로 락업: determinism (Math.random/Date/iteration-order 누수 없음), output-envelope
-  conformance (임의 resolver 결과 → 200 body가 ResolveResponseSchema .strict() 검증,
-  snake_case key, candidates ≤ MAX_RESOLVE_CANDIDATES, calibrated_score ∈ [0,1],
-  decision_trace_ref === authority_trace_ref), abstention surfacing (ambiguous/
-  failed status verbatim 통과, top_entity 절대 fabricate 안 함), Korean NFC/NFD
-  transparency (route가 silently re-normalize 안 함 — entity-identity layer 책임,
-  no `\b` on Korean), input schema .strict() (HTTP body라 strict 정당 — rule 10),
-  empty/adversarial safety (whitespace/control/proto-pollution/length-attack
-  no-crash). 기존 19 integration tests 유지. 남은 maturity 5 과제: production
-  abstention rate + coverage SLA dashboard (ops/monitoring gap, code 결함 아님).
+  HONEST 4. Mapping-only fast-check property suite (numRuns=100) locks determinism,
+  ResolveResponseSchema conformance on snake_case wire, abstention surfacing,
+  Korean NFC/NFD transparency, LookupWineRequestSchema strict validation, and
+  adversarial query safety. Live HTTP harness removed — mapping is the contract rail.
 
-status: active
+status: deprecated
 since: 2025-10
-last_reviewed: 2026-05-22
+last_reviewed: 2026-06-10
 owner: core
 
 surfaces:
-  - "Internal resolve use case"
+  - "Mapping: executeResolveViaEntityLookupV2 → ResolveResponse wire"
+  - "Schema: ResolveResponseSchema (historical / agent-compat shape)"
 
 key_files:
-  - src/application/search/resolve.usecase.ts
+  - src/application/search/entity-lookup-v2/entity-lookup-v2-resolve-mapping.ts
+  - src/application/search/entity-lookup-v2/entity-lookup-v2-request-mapping.ts
+  - src/application/search/resolve-response.dto.ts
 
 tests:
   unit:
-    - test/unit/application/search/resolve.usecase.test.ts
+    - src/application/search/entity-lookup-v2/__tests__/entity-lookup-v2-resolve-mapping.test.ts
   regression:
     - test/regression/resolve-tool-properties.regression.test.ts
 
 depends_on:
-  - nlu.entity-resolver
+  - retrieval.entity-lookup-v2
 
 related_rfcs: []
 
 known_limitations:
+  - "ResolveResponse is not the public HTTP contract — V2 4-state response is canonical"
   - "Abstention rate 모니터링 없음"
-  - "Coverage SLA 없음"
 
 next_steps:
-  - "Coverage / abstention dashboard"
+  - "Coverage / abstention dashboard (retrieval.entity-lookup-v2 scope)"
 
 tags:
   - entity-resolution
   - abstention
+  - mapping-only

@@ -74,6 +74,7 @@ import {
   type AnswerResult,
 } from './synthesis-schemas.js';
 import type { SynthesisRunner } from './synthesis-runner.js';
+import { layer4MessageFor } from './synthesis-fallback-templates.js';
 import {
   getCanonicalNormalizedConstraints,
   latestUserMessageIndex,
@@ -535,6 +536,14 @@ export class WineSearchOrchestrator {
     // for template selection. When absent, the synthesizer runs the LLM
     // path as before.
     const dispatchKind = dispatchResult.terminationKind;
+    // Move 2: a router reject caused by an analyzer LLM failure carries the
+    // honest `analysis_unavailable` reason. Route the synthesizer to the
+    // AI-outage template (degradedReason `llm_unavailable`) instead of the
+    // query-blaming unsupported_intent copy. `plan` is in scope here.
+    const blockedKind: 'security_block' | 'unsupported_intent' | 'analysis_unavailable' | undefined =
+      plan.kind === 'reject' && plan.reason === 'analysis_unavailable'
+        ? 'analysis_unavailable'
+        : dispatchKind;
     let answer: AnswerResult;
     try {
       // Wave 3 SOTA++: when any tool outcome carries the decision engine's
@@ -551,7 +560,7 @@ export class WineSearchOrchestrator {
         analysis,
         toolOutcomes: state.toolOutcomes,
         policyBlocked: dispatchKind !== undefined || dispatchResult.policyBlocked,
-        ...(dispatchKind !== undefined ? { blockedKind: dispatchKind } : {}),
+        ...(blockedKind !== undefined ? { blockedKind } : {}),
         ...(decisionStatus !== undefined ? { decisionStatus } : {}),
         perStepTimeoutMs: baseConfig.perStepTimeoutMs,
         maxOutputTokens: ORCHESTRATOR_DEFAULT_SYNTHESIS_MAX_OUTPUT_TOKENS,
@@ -1161,9 +1170,9 @@ export class WineSearchOrchestrator {
     terminationKind?: TerminationKind,
   ): WineSearchResult {
     const totalDurationMs = Math.max(0, this.clock.now() - startMs);
-    const answerText = queryHasHangul
-      ? '요청하신 와인 정보를 현재 처리하지 못했습니다. 검색어를 바꿔서 다시 시도해주세요.'
-      : 'We could not process your wine query. Please try rephrasing or simplifying your search.';
+    // Honest, cause-specific copy instead of reflexively blaming the user's
+    // query — mirrors the synthesizer's Layer 4 selector (SSoT).
+    const answerText = layer4MessageFor(degradedReason, queryHasHangul);
     // S1: `policyBlocked` is true ONLY for a real security block. When the
     // caller passes a `terminationKind` we honor it; otherwise we fall back
     // to the legacy "policy_blocked degradedReason → true" heuristic ONLY

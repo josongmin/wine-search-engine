@@ -14,14 +14,14 @@
 
 | Ticket | 주제 | 상태 | 선행 | 핵심 출력 |
 |---|---|---|---|---|
-| `T-ELV2-01` | dedicated lookup contract | planned | 없음 | `/v2/entity-lookup` contract |
-| `T-ELV2-02` | admission / normalization / concept gate | planned | `T-ELV2-01` | front-door query classifier |
-| `T-ELV2-03` | alias registry v2 / curation substrate | planned | 없음 | dedicated lookup alias plane |
-| `T-ELV2-04` | multi-channel candidate retrieval runtime | planned | `T-ELV2-01`, `T-ELV2-02`, `T-ELV2-03` | candidate union engine |
-| `T-ELV2-05` | learned reranker / calibrator / abstain | planned | `T-ELV2-04` | final decision layer |
-| `T-ELV2-06` | family graph / ambiguity graph | planned | `T-ELV2-03`, `T-ELV2-04` | clarification-capable graph substrate |
-| `T-ELV2-07` | trusted operator plane / curation write plane | planned | `T-ELV2-03`, `T-ELV2-05`, `T-ELV2-06` | ops UI/API |
-| `T-ELV2-08` | hotset eval / shadow compare / cutover | planned | 전부 | V2 proof and cutover |
+| `T-ELV2-01` | dedicated lookup contract | shipped | 없음 | `/v2/entity-lookup` contract |
+| `T-ELV2-02` | admission / normalization / concept gate | shipped | `T-ELV2-01` | front-door query classifier |
+| `T-ELV2-03` | alias registry v2 / curation substrate | partial | 없음 | dedicated lookup alias plane |
+| `T-ELV2-04` | multi-channel candidate retrieval runtime | partial | `T-ELV2-01`, `T-ELV2-02`, `T-ELV2-03` | candidate union engine |
+| `T-ELV2-05` | learned reranker / calibrator / abstain | partial | `T-ELV2-04` | final decision layer |
+| `T-ELV2-06` | family graph / ambiguity graph | partial | `T-ELV2-03`, `T-ELV2-04` | clarification-capable graph substrate |
+| `T-ELV2-07` | trusted operator plane / curation write plane | shipped | `T-ELV2-03`, `T-ELV2-05`, `T-ELV2-06` | ops UI/API |
+| `T-ELV2-08` | hotset eval / shadow compare / cutover | partial | 전부 | V2 proof, cutover shipped, live canary and legacy purge closeout |
 
 ## Wave
 

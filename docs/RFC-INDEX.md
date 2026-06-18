@@ -25,6 +25,8 @@
 19. **RFC-019** — NL Mapper Elevation to Ontology-Grounded Semantic Constraint Compiler
 20. **RFC-020** — Constraint Extraction Measurement Framework
 21. **RFC-021** — Primitive Search Surface and Agent-Orchestrated Query Composition
+22. **RFC-022** — LLM-Structured Query Analysis with Deterministic Tool Dispatch
+23. **RFC-023** — Operational Lexical Authority Plane for Alias, Typo, and Keyword Curation
 
 ## 문서 목록 (파일명)
 
@@ -51,6 +53,8 @@
 | 019 | `docs/rfc/RFC-019-nl-mapper-coverage.md` | Rule table를 ontology-grounded constraint compiler로 승격 |
 | 020 | `docs/rfc/RFC-020-constraint-extraction-measurement.md` | Constraint extraction 측정 프레임워크 |
 | 021 | `docs/rfc/RFC-021-primitive-search-and-agent-orchestration.md` | Public search primitive화 + agent orchestration 경계 |
+| 022 | `docs/rfc/RFC-022-llm-structured-query-analysis.md` | Analyze 단계 LLM-structured 승격(typed analysis) + deterministic tool dispatch 유지 + bounded FSM recovery loop + Failure Explanation Layer + multi-turn session state |
+| 023 | `docs/rfc/RFC-023-operational-lexical-authority-plane.md` | alias/typo/keyword lexical authority를 코드 밖 운영 plane + typo recall plane으로 재구성 |
 
 ## 개념·용어 정렬 (논리 연결)
 
@@ -151,5 +155,5 @@ Query API (RFC-014)
 | `epic-13-query-intelligence.md` | ConstraintSAT, Entropy abstain, BK-tree+Soundex | 4 |
 | `epic-14-decomposition-api.md` | LLM query decomp ("A vs B"), `retrieval_mode` override | 5 |
 | `epic-15-drinking-window.md` | LightGBM drink_from/drink_to regression + ONNX serving | 5 |
-| `epic-16-security-batch.md` | Prompt injection (LLM-as-judge), `/v1/batch-search` 207 | 5 |
+| `epic-16-security-batch.md` | Prompt injection (LLM-as-judge), batch schema (historical `/v1/batch-search` 207 — route removed) | 5 |
 | `epic-17-agentic-async.md` | Claude tool-use, Redis watchlist webhook, confidence refusal | 6 |

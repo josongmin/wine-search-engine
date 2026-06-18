@@ -11,6 +11,12 @@
  */
 
 import {
+  parseCurationAliasEvidence,
+  parseCurationAmbiguityEvidence,
+  parseCurationSuppressionEvidence,
+} from '../../domain/curation/model/curation-proposal-evidence.js';
+import { normalizeForMatch } from '../../domain/alias/service/normalize.js';
+import {
   assertTransition,
   reviewDecisionToStatus,
   type AliasProposal,
@@ -59,15 +65,22 @@ export class CurationUseCase {
   ) {}
 
   submitAliasProposal(input: CreateAliasProposalInput): Promise<AliasProposal> {
-    return this.store.createAliasProposal(input);
+    const evidence = parseCurationAliasEvidence(input.evidence);
+    return this.store.createAliasProposal({ ...input, evidence });
   }
 
   submitAmbiguityProposal(input: CreateAmbiguityProposalInput): Promise<AmbiguityProposal> {
-    return this.store.createAmbiguityProposal(input);
+    const evidence = parseCurationAmbiguityEvidence(input.evidence);
+    return this.store.createAmbiguityProposal({
+      ...input,
+      normalizedForm: normalizeForMatch(input.normalizedForm),
+      evidence,
+    });
   }
 
   submitSuppressionProposal(input: CreateSuppressionProposalInput): Promise<SuppressionProposal> {
-    return this.store.createSuppressionProposal(input);
+    const evidence = parseCurationSuppressionEvidence(input.evidence);
+    return this.store.createSuppressionProposal({ ...input, evidence });
   }
 
   listProposals(filter: ProposalListFilter): Promise<readonly Proposal[]> {

@@ -1,5 +1,10 @@
 # T-EL-01 Lookup Admission Gate And Query-Family Authority
 
+> Historical / audit-only ticket.
+> Current public lookup truth moved to `docs/bench/STATUS.md` and
+> `tools/feature-catalog/features/retrieval/entity-lookup-v2.yaml`.
+> `/v1/lookup/wine` references below describe the pre-cutover lookup edge only.
+
 ## 목표
 
 `/v1/lookup/wine`가 모든 free-text를 entity resolver에 밀어 넣지 않도록, `entity query vs concept/facet/discovery query`를 front-door에서 구분하는 admission gate를 추가한다.

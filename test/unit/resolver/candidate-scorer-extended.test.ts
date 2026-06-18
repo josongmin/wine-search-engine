@@ -56,6 +56,7 @@ function makeSignals(overrides?: Partial<MatchSignalSet>): MatchSignalSet {
 function makeCandidate(
   signals: Partial<MatchSignalSet>,
   aliasMatches: readonly AliasMatchInfo[] = [],
+  overrides?: Partial<ResolverCandidate>,
 ): ResolverCandidate {
   return {
     entityId: createEntityId('entity-test'),
@@ -63,6 +64,7 @@ function makeCandidate(
     canonicalLabel: 'Test Wine',
     aliasMatches,
     sourceSignals: makeSignals(signals),
+    ...overrides,
   };
 }
 
@@ -177,6 +179,27 @@ describe('CandidateScorer (extended)', () => {
       // canonicalNormalized contribution = 0.9 * 0.6 = 0.54
       const expectedAliasExact = WEIGHTS.aliasExactMatch * 0.6;    // 0.48
       const expectedCanonNorm  = WEIGHTS.canonicalNormalizedMatch * 0.6; // 0.54
+      expect(score).toBeCloseTo(expectedAliasExact + expectedCanonNorm, 10);
+    });
+
+    it('does not cap observed_query_alias when a collision-free exact-safe certificate matched the raw query', () => {
+      const candidate = makeCandidate(
+        { aliasExactMatch: 0.8, canonicalNormalizedMatch: 0.6 },
+        [{ aliasValue: '로마네꽁띠', aliasType: 'observed_query_alias', matchScore: 0.98 }],
+        {
+          identityCertificates: [{
+            kind: 'exact_safe',
+            normalizedSurface: '로마네꽁띠',
+            sourceTier: 'curated',
+            singleton: true,
+            collisionFree: true,
+          }],
+        },
+      );
+
+      const score = scorer.score(candidate);
+      const expectedAliasExact = WEIGHTS.aliasExactMatch * 0.8;
+      const expectedCanonNorm = WEIGHTS.canonicalNormalizedMatch * 0.6;
       expect(score).toBeCloseTo(expectedAliasExact + expectedCanonNorm, 10);
     });
   });

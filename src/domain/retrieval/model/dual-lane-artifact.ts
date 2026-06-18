@@ -17,6 +17,7 @@ export type IdentityExactnessTier =
   | 'exact'
   | 'alias_exact'
   | 'alias_fuzzy'
+  | 'alias_phonetic'
   | 'none';
 
 export interface IdentityAliasMatchProvenance {
@@ -30,6 +31,7 @@ export interface IdentityProvenanceSignalSnapshot {
   readonly canonicalNormalizedMatch: number;
   readonly aliasExactMatch: number;
   readonly aliasFuzzyMatch: number;
+  readonly phoneticMatch: number;
   readonly editDistanceScore: number;
 }
 

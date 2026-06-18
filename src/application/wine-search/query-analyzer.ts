@@ -21,6 +21,7 @@ import { z } from 'zod';
 import {
   StructuredLlmCircuitOpenError,
   StructuredLlmPartialOutputError,
+  StructuredLlmProviderError,
   StructuredLlmRefusalError,
   StructuredLlmTimeoutError,
   StructuredLlmValidationError,
@@ -53,6 +54,7 @@ import {
   type IntentClass,
 } from '@domain/agent/service/adaptive-budget.js';
 import {
+  AnalyzerIntentSchema,
   AnchorEntityTypeSchema,
   WineSearchAnalysisSchema,
   WINE_SEARCH_BUDGET_MAX_STEPS,
@@ -469,19 +471,24 @@ export class QueryAnalyzerService {
     try {
       const result = await port.analyze({
         query: input.query,
-        schema: WineSearchAnalysisSchema,
+        schema: LlmFallbackAnalysisSchema,
         systemPrompt: LLM_FALLBACK_SYSTEM_PROMPT,
         maxOutputTokens: LLM_FALLBACK_MAX_OUTPUT_TOKENS,
         perStepTimeoutMs: input.perStepTimeoutMs,
         model: LLM_FALLBACK_MODEL,
         ...(input.abortSignal !== undefined ? { abortSignal: input.abortSignal } : {}),
       });
-      // Always overwrite `preservedSurface` with the byte-identical original;
-      // the LLM MUST NOT mutate this field even if it tries.
+      // Merge the LLM's intent classification into the deterministic shell,
+      // which already carries every other required field (contract, budget,
+      // anchors/constraints, …). `preservedSurface`/`hangulDominant` stay
+      // byte-identical to the deterministic pre-pass — the LLM cannot mutate
+      // them. This keeps the LLM schema tiny (OpenAI-robust) while producing a
+      // fully-valid WineSearchAnalysis.
       return {
         kind: 'success',
         analysis: {
-          ...result.data,
+          ...deterministic,
+          intent: result.data.intent,
           preservedSurface: input.query,
           hangulDominant: deterministic.hangulDominant,
         },
@@ -516,6 +523,7 @@ type LlmFallbackFailureReason =
   | 'validation'
   | 'partial_output'
   | 'circuit_open'
+  | 'provider_unavailable'
   | 'unknown';
 
 /** Map a thrown error from the structured-LLM port to its observability
@@ -525,6 +533,10 @@ type LlmFallbackFailureReason =
 function classifyFallbackFailure(err: unknown): LlmFallbackFailureReason {
   if (err instanceof StructuredLlmTimeoutError) return 'timeout';
   if (err instanceof StructuredLlmRefusalError) return 'refusal';
+  // Move 1: a transport-level provider rejection (auth / credit / 5xx). Checked
+  // before ValidationError so a credit/auth outage is no longer mis-labelled
+  // `validation`.
+  if (err instanceof StructuredLlmProviderError) return 'provider_unavailable';
   if (err instanceof StructuredLlmValidationError) return 'validation';
   if (err instanceof StructuredLlmPartialOutputError) return 'partial_output';
   if (err instanceof StructuredLlmCircuitOpenError) return 'circuit_open';
@@ -534,14 +546,27 @@ function classifyFallbackFailure(err: unknown): LlmFallbackFailureReason {
 /** Cap on logged Zod issues to keep payloads bounded. */
 const MAX_LOGGED_ISSUES = 5;
 
+/**
+ * MINIMAL schema handed to the LLM fallback. The deterministic pre-pass already
+ * built a full {@link WineSearchAnalysis} shell (contract / budget / etc.); the
+ * LLM's only job at this stage is to CLASSIFY INTENT, which we then merge into
+ * that shell. Passing the entire strict/nested `WineSearchAnalysisSchema` to the
+ * model was the bug: OpenAI structured output could not reliably satisfy it, so
+ * the fallback kept failing → intent='unknown' → false `unsupported_intent`.
+ *
+ * No `.strict()` (CLAUDE.md rule 10): LLMs routinely add `reasoning`/`confidence`
+ * keys, and we only read `intent`.
+ */
+const LlmFallbackAnalysisSchema = z.object({
+  intent: AnalyzerIntentSchema,
+});
+
 const LLM_FALLBACK_SYSTEM_PROMPT = [
-  'You are the wine-search query analyzer. Emit a WineSearchAnalysis object',
-  'matching the supplied JSON schema. Preserve the user query byte-for-byte',
-  'in `preservedSurface`. Set `intent` to the closest match in',
-  '("search", "compare", "pair", "drinkability", "unknown"). Anchors and',
-  'normalized constraints MUST come from the user query — do not invent',
-  'entities that are not present. If you cannot identify a wine-domain',
-  'signal, return intent="search" with empty anchors and constraints.',
+  'You classify a wine-search query. Return JSON with a single field',
+  '`intent`, one of: "search", "compare", "pair", "drinkability", "unknown".',
+  'If the query names or mentions ANY wine, region, grape, producer, vintage,',
+  'or asks to find/recommend/compare/pair/age wine, pick the best-fit intent',
+  '(default "search"). Use "unknown" ONLY for clearly non-wine requests.',
 ].join(' ');
 
 // ---------------------------------------------------------------------------

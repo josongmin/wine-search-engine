@@ -46,6 +46,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - name: Typecheck
         run: pnpm run typecheck
@@ -72,6 +73,7 @@ jobs:
     timeout-minutes: 25
     needs: [search-quality]
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - name: Vespa smoke lane
         run: pnpm run test:e2e:vespa:smoke
@@ -91,6 +93,7 @@ jobs:
     timeout-minutes: 40
     needs: [search-quality, vespa-smoke]
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - name: Vespa-heavy verification
         run: pnpm run test:verification:vespa

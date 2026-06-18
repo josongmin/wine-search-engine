@@ -207,5 +207,36 @@ describe('AnchorExtractor', () => {
         }),
       ]);
     });
+
+    it('downgrades atomic entity subspans in a multi-token surface to surface-only recall', async () => {
+      const matcher = new RecordingAliasMatcher();
+      const extractor = new AnchorExtractor(matcher);
+
+      await extractor.extract('샤또 무통 로칠드');
+
+      expect(matcher.calls).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            query: '샤또',
+            scope: 'span',
+            recallMode: 'surface_only',
+          }),
+          expect.objectContaining({
+            query: '무통',
+            scope: 'span',
+            recallMode: 'surface_only',
+          }),
+          expect.objectContaining({
+            query: '로칠드',
+            scope: 'span',
+            recallMode: 'surface_only',
+          }),
+          expect.objectContaining({
+            query: '샤또 무통',
+            scope: 'span',
+          }),
+        ]),
+      );
+    });
   });
 });

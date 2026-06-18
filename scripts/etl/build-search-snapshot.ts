@@ -1,9 +1,9 @@
 #!/usr/bin/env tsx
 
-import { existsSync } from 'node:fs';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { existsSync } from 'node:fs';
 import { z } from 'zod';
 import { parseNdjson } from './ndjson.js';
 import type { EnrichedSilverRecord, PriceBand, WineType } from './types.js';
@@ -21,7 +21,17 @@ import {
 import { resolveAliasClaimsAndBuildAmbiguityRegistry } from './build-ambiguity-registry.js';
 import { SEARCH_SNAPSHOT_SCHEMA_VERSION } from '../../src/domain/shared/constants/search-snapshot.js';
 import { buildAliasArtifact } from './build-alias-artifact.js';
-import type { SnapshotAliasOverlayProposal } from './build-alias-artifact.js';
+import {
+  applyPublishedSuppressionRules,
+  assertConsumedCurationPinsAlignWithSnapshot,
+  buildCurationPinConvergenceError,
+  CURATION_SNAPSHOT_PIN_MAX_PASSES,
+  formatUnconsumedPublishedProposalIds,
+  hasAdditionalPublishedConsumption,
+  loadPublishedCurationProposals,
+  mergePublishedAmbiguityRows,
+  type PublishedCurationConsumption,
+} from './load-published-curation-proposals.js';
 import {
   loadActiveSourceEntityContinuity,
   loadGoldCanonicalLookupForBuild,
@@ -29,11 +39,11 @@ import {
   resolveWineSnapshotEntity,
   type SourceEntityContinuityRecord as _SourceEntityContinuityRecord,
 } from './snapshot-entity-identity.js';
+import { normalizeCanonicalLabelForIdentity } from '../../src/domain/entity/model/identity-signature.js';
 import type {
   CanonicalEntityId,
   SourceRecordId,
 } from '../../src/domain/shared/types/entity-id.js';
-import { parseAliasType } from '../../src/domain/alias/model/alias.js';
 import {
   SOURCE_SYSTEM_BENCHMARK_ANCHOR_CATALOG,
   SOURCE_SYSTEM_VIVINO_SILVER,
@@ -56,11 +66,173 @@ import {
   canonicalizeAmbiguitySnapshotRows,
   canonicalizeEntitySnapshotRecords,
 } from '../../src/domain/shared/utils/search-snapshot-canonicalization.js';
+import {
+  buildLookupAliasRuntimeArtifacts,
+  buildLookupAmbiguityRuntimeArtifact,
+  buildLookupConceptRedirectRuntimeArtifact,
+  buildLookupEntityProjectionArtifact,
+  buildLookupExactSafeRuntimeArtifact,
+  buildLookupResolverProjectionArtifact,
+} from './build-lookup-runtime-pack.js';
+import {
+  buildLookupReviewedFamilyRecallRuntimeArtifact,
+  buildLookupScopeGraphRuntimeArtifact,
+  buildLookupSemanticScopeRuntimeArtifact,
+} from './build-lookup-semantic-runtime-pack.js';
+import {
+  buildLookupAliasBroadRecallRuntimeArtifactHash,
+  buildLookupAliasRuntimeCoreArtifactHash,
+  buildLookupAmbiguityRuntimeArtifactHash,
+  buildLookupConceptRedirectRuntimeArtifactHash,
+  buildLookupEntityProjectionArtifactHash,
+  buildLookupExactSafeRuntimeArtifactHash,
+  buildLookupResolverProjectionArtifactHash,
+} from '../../src/domain/shared/types/search-snapshot-lookup-runtime.js';
+import {
+  buildLookupReviewedFamilyRecallRuntimeArtifactHash,
+  buildLookupScopeGraphRuntimeArtifactHash,
+  buildLookupSemanticScopeRuntimeArtifactHash,
+} from '../../src/domain/shared/types/search-snapshot-lookup-semantic-runtime.js';
+import {
+  buildLookupRuntimeBundleCachePayload,
+  writeLookupRuntimeBundleCache,
+} from '../../src/config/lookup-runtime-bundle-cache.js';
+import { createCanonicalEntityId } from '../../src/domain/shared/types/index.js';
+import {
+  CORE_KOREAN_ICON_AMBIGUITY_CASES,
+  CORE_KOREAN_ICON_QUERY_CASES,
+  CORE_KOREAN_ICON_RELEASE_GATE_CASES,
+} from '../../test/support/core-korean-icon-fixtures.js';
+import {
+  assertLookupExactSafeRegistryVintageConsistency,
+  assertLookupExactSafeRegistryCompatibleWithBaseAliases,
+  buildLookupIdentityCertificatesByEntity,
+  buildLookupRuntimeOverlayAliases,
+  loadLookupExactSafeRegistry,
+  type LookupExactSafeRegistryRow,
+} from './lookup-exact-safe-registry.js';
+import {
+  buildLookupAmbiguityRegistryEntries,
+  buildLookupConceptRedirectRegistryEntries,
+  loadLookupAmbiguityRegistry,
+  loadLookupConceptRedirectRegistry,
+} from './lookup-authority-registries.js';
+import { assertLookupAuthorityBoundaryConsistency } from './lookup-authority-boundaries.js';
+import { loadLookupPolicyConflictRegistrySync } from '../eval/lookup-v2-policy-conflict-registry.js';
+import {
+  loadLookupV2FamilyCollisionRegistrySync,
+  type LookupV2FamilyCollisionRegistryRow,
+} from '../eval/lookup-v2-family-collision-registry.js';
+import {
+  loadLookupV2FamilyCoreWitnessRegistrySync,
+  type LookupV2FamilyCoreWitnessRegistryRow,
+} from '../eval/lookup-v2-family-core-witness-registry.js';
+import {
+  loadLookupV2LocalizedScopeSurfaceRegistrySync,
+  type LookupV2LocalizedScopeSurfaceRegistryRow,
+} from '../eval/lookup-v2-localized-scope-surface-registry.js';
+import { loadLookupV2PolicyFamilyDecisionRegistrySync } from '../eval/lookup-v2-policy-family-decision-registry.js';
+import {
+  loadLookupV2SemanticScopeTargetRegistrySync,
+  type LookupV2SemanticScopeTargetRegistryRow,
+} from '../eval/lookup-v2-semantic-scope-target-registry.js';
+import { buildLookupV2RuntimeSemanticDescriptorMapFromDocuments } from '../eval/lookup-v2-runtime-semantic-descriptors.js';
+import { buildReviewedCollisionFamilyCoreKeysByEntity } from '../eval/lookup-v2-runtime-surface-owner-evidence.js';
 
 export const DEFAULT_INPUT = ETL_ARTIFACT_FILES.trackc;
 export const DEFAULT_OUTPUT_DIR = ETL_ARTIFACT_FILES.searchSnapshotsDir;
 export const DEFAULT_NL_MAPPINGS = ETL_ARTIFACT_FILES.nlMappings;
 export const DEFAULT_RUNTIME_STATE_PATH = resolveDataPath('data/runtime-search-snapshot.json');
+const REPO_GOLD_CATALOG_PATH = path.resolve(
+  path.dirname(new URL(import.meta.url).pathname),
+  '..',
+  '..',
+  'data',
+  'gold-wine-catalog.jsonl',
+);
+const LEGACY_BENCHMARK_ANCHOR_ENTITY_IDS = [
+  'chateau-margaux-2015',
+  'masi-amarone-2015',
+  'moet-brut-nv',
+  'opus-one-2018',
+  'romanee-conti-2015',
+  'sassicaia-2018',
+  'yquem-2015',
+] as const;
+const BENCHMARK_ANCHOR_SUITABILITY_GENERATION_SOURCE = 'llm_teacher_generated';
+const BENCHMARK_ANCHOR_SOURCE_DATASETS = [
+  'seed_wines_real',
+  'repo_gold_wine_catalog',
+] as const;
+
+export type BenchmarkAnchorSuitabilityGenerationSource =
+  typeof BENCHMARK_ANCHOR_SUITABILITY_GENERATION_SOURCE;
+export type BenchmarkAnchorSuitabilitySourceDataset =
+  (typeof BENCHMARK_ANCHOR_SOURCE_DATASETS)[number];
+export const AUTHORITATIVE_BENCHMARK_ANCHOR_ENTITY_IDS = [
+  ...new Set<string>([
+    ...LEGACY_BENCHMARK_ANCHOR_ENTITY_IDS,
+    ...collectCoreIconRequiredBenchmarkTargetIds(),
+  ]),
+].sort();
+
+const LEGACY_BENCHMARK_ANCHOR_ENTITY_ID_SET = new Set<string>(LEGACY_BENCHMARK_ANCHOR_ENTITY_IDS);
+const REPO_GOLD_BENCHMARK_ANCHOR_ENTITY_ID_SET = new Set<string>(
+  collectCoreIconRequiredBenchmarkTargetIds(),
+);
+
+export function resolveBenchmarkAnchorSuitabilitySourceDataset(
+  entityId: string,
+): BenchmarkAnchorSuitabilitySourceDataset {
+  if (LEGACY_BENCHMARK_ANCHOR_ENTITY_ID_SET.has(entityId)) {
+    return 'seed_wines_real';
+  }
+  if (REPO_GOLD_BENCHMARK_ANCHOR_ENTITY_ID_SET.has(entityId)) {
+    return 'repo_gold_wine_catalog';
+  }
+  throw new Error(`Unknown benchmark anchor suitability entityId "${entityId}"`);
+}
+
+function buildReviewedFamilyCoreKeysByEntity(
+  reviewedFamilyCoreWitnessRows: readonly {
+    readonly entityId: string;
+    readonly normalizedSurface: string;
+  }[],
+): ReadonlyMap<CanonicalEntityId, readonly string[]> {
+  const grouped = new Map<CanonicalEntityId, Set<string>>();
+  for (const row of reviewedFamilyCoreWitnessRows) {
+    const existing = grouped.get(row.entityId as CanonicalEntityId) ?? new Set<string>();
+    existing.add(row.normalizedSurface);
+    grouped.set(row.entityId as CanonicalEntityId, existing);
+  }
+  return new Map(
+    [...grouped.entries()].map(([entityId, surfaces]) => [
+      entityId,
+      [...surfaces].sort((left, right) => left.localeCompare(right)),
+    ]),
+  );
+}
+
+const RepoGoldCatalogRowSchema = z.object({
+  entityId: z.string().min(1),
+  canonicalLabel: z.string().min(1),
+  producer: z.string().min(1),
+  country: z.string().min(1),
+  region: z.string().min(1),
+  appellation: z.string().min(1).optional(),
+  grapes: z.array(z.string().min(1)).min(1),
+  wineType: z.enum(['red', 'white', 'sparkling', 'dessert', 'rosé', 'fortified']),
+  vintageYear: z.number().int().min(0).max(2035),
+  priceUsd: z.number().finite().positive(),
+  body: z.number().int().min(1).max(5).nullable(),
+  tannin: z.number().int().min(1).max(5).nullable(),
+  acidity: z.number().int().min(1).max(5).nullable(),
+  criticScore: z.number().int().min(0).max(100),
+  style: z.string().min(1),
+  koreanAliases: z.array(z.string().min(1)),
+}).strict();
+
+type RepoGoldCatalogRow = z.infer<typeof RepoGoldCatalogRowSchema>;
 
 export interface Args {
   readonly input: string;
@@ -68,6 +240,14 @@ export interface Args {
   readonly nlMappings: string;
   readonly fixtureRepoRoot?: string | undefined;
   readonly runtimeStatePath?: string | undefined;
+  readonly reviewedRegistryOverrides?: {
+    readonly exactSafeRows?: readonly LookupExactSafeRegistryRow[] | undefined;
+    readonly familyCollisionRows?: readonly LookupV2FamilyCollisionRegistryRow[] | undefined;
+    readonly familyCoreWitnessRows?: readonly LookupV2FamilyCoreWitnessRegistryRow[] | undefined;
+    readonly carryForwardTargetEntityIds?: readonly CanonicalEntityId[] | undefined;
+    readonly localizedScopeSurfaceRows?: readonly LookupV2LocalizedScopeSurfaceRegistryRow[] | undefined;
+    readonly semanticScopeTargetRows?: readonly LookupV2SemanticScopeTargetRegistryRow[] | undefined;
+  } | undefined;
 }
 
 function parseArgs(argv: readonly string[]): Args {
@@ -118,6 +298,7 @@ export interface BuildSearchSnapshotResult {
   readonly manifest: SearchSnapshotManifest;
   readonly snapshotRoot: string;
   readonly manifestPath: string;
+  readonly consumedCuration: PublishedCurationConsumption;
 }
 
 type SnapshotBuildRecord = EnrichedSilverRecord & {
@@ -149,6 +330,31 @@ function buildFieldAvailability(
   };
 }
 
+function buildLookupExactSafeEntityVintagesById(args: {
+  readonly records: readonly SnapshotBuildRecord[];
+  readonly entityIdBySourceId: ReadonlyMap<SourceRecordId, CanonicalEntityId>;
+}): ReadonlyMap<CanonicalEntityId, readonly number[]> {
+  const grouped = new Map<CanonicalEntityId, Set<number>>();
+  for (const record of args.records) {
+    if (record.vintageYear == null) {
+      continue;
+    }
+    const entityId = args.entityIdBySourceId.get(record.sourceId as SourceRecordId);
+    if (entityId === undefined) {
+      continue;
+    }
+    const existing = grouped.get(entityId) ?? new Set<number>();
+    existing.add(record.vintageYear);
+    grouped.set(entityId, existing);
+  }
+  return new Map(
+    [...grouped.entries()].map(([entityId, vintages]) => [
+      entityId,
+      [...vintages].sort((left, right) => left - right),
+    ]),
+  );
+}
+
 /**
  * Benchmark-anchor suitability artifact.
  *
@@ -171,7 +377,7 @@ function buildFieldAvailability(
  */
 const BENCHMARK_ANCHOR_SUITABILITY_VERSION = 'v1';
 
-const REPO_BENCHMARK_ANCHOR_SUITABILITY_PATH = path.resolve(
+export const REPO_BENCHMARK_ANCHOR_SUITABILITY_PATH = path.resolve(
   path.dirname(new URL(import.meta.url).pathname),
   '..',
   '..',
@@ -189,9 +395,11 @@ const BenchmarkAnchorSuitabilityScoreSchema = z.object({
   evidenceAxes: z.array(z.string().min(1)).max(64),
   snippet: z.string().min(1),
   rationale: z.string().min(1),
+  generationSource: z.literal(BENCHMARK_ANCHOR_SUITABILITY_GENERATION_SOURCE),
 }).strict();
 
 const BenchmarkAnchorSuitabilityEntrySchema = z.object({
+  sourceDataset: z.enum(BENCHMARK_ANCHOR_SOURCE_DATASETS),
   gift: BenchmarkAnchorSuitabilityScoreSchema,
   beginner: BenchmarkAnchorSuitabilityScoreSchema,
 }).strict();
@@ -199,11 +407,15 @@ const BenchmarkAnchorSuitabilityEntrySchema = z.object({
 const BenchmarkAnchorSuitabilityArtifactSchema = z.object({
   version: z.literal(BENCHMARK_ANCHOR_SUITABILITY_VERSION),
   generatedAt: z.string().datetime(),
-  model: z.string().min(1),
+  models: z.object({
+    gift: z.string().min(1),
+    beginner: z.string().min(1),
+  }).strict(),
   promptVersions: z.object({
     gift: z.string().min(1),
     beginner: z.string().min(1),
   }).strict(),
+  requiredEntityIds: z.array(z.string().min(1)).min(1),
   entities: z.record(z.string().min(1), BenchmarkAnchorSuitabilityEntrySchema),
 }).strict();
 
@@ -211,6 +423,69 @@ export type BenchmarkAnchorSuitabilityArtifact = z.infer<typeof BenchmarkAnchorS
 export type BenchmarkAnchorSuitabilityEntry = z.infer<typeof BenchmarkAnchorSuitabilityEntrySchema>;
 
 const benchmarkAnchorSuitabilityCache = new Map<string, BenchmarkAnchorSuitabilityArtifact>();
+
+function diffStringSets(args: {
+  readonly expected: readonly string[];
+  readonly actual: readonly string[];
+}): {
+  readonly missing: readonly string[];
+  readonly extras: readonly string[];
+} {
+  const expectedSet = new Set(args.expected);
+  const actualSet = new Set(args.actual);
+  return {
+    missing: args.expected.filter((value) => !actualSet.has(value)),
+    extras: args.actual.filter((value) => !expectedSet.has(value)),
+  };
+}
+
+function isAuthoritativeBenchmarkAnchorSuitabilityPath(resolvedPath: string): boolean {
+  const normalized = path.resolve(resolvedPath);
+  return (
+    normalized === path.resolve(DEFAULT_BENCHMARK_ANCHOR_SUITABILITY_PATH)
+    || normalized === path.resolve(REPO_BENCHMARK_ANCHOR_SUITABILITY_PATH)
+  );
+}
+
+export function assertAuthoritativeBenchmarkAnchorSuitabilityArtifact(
+  artifact: BenchmarkAnchorSuitabilityArtifact,
+): void {
+  const expectedIds = AUTHORITATIVE_BENCHMARK_ANCHOR_ENTITY_IDS;
+  const actualRequiredIds = [...new Set(artifact.requiredEntityIds)].sort();
+  const requiredIdDiff = diffStringSets({
+    expected: expectedIds,
+    actual: actualRequiredIds,
+  });
+  if (requiredIdDiff.missing.length > 0 || requiredIdDiff.extras.length > 0) {
+    throw new Error(
+      `Benchmark anchor suitability artifact requiredEntityIds drifted: missing=[${requiredIdDiff.missing.join(', ')}] extras=[${requiredIdDiff.extras.join(', ')}]`,
+    );
+  }
+
+  const actualEntityIds = Object.keys(artifact.entities).sort();
+  const entityIdDiff = diffStringSets({
+    expected: expectedIds,
+    actual: actualEntityIds,
+  });
+  if (entityIdDiff.missing.length > 0 || entityIdDiff.extras.length > 0) {
+    throw new Error(
+      `Benchmark anchor suitability artifact entity coverage drifted: missing=[${entityIdDiff.missing.join(', ')}] extras=[${entityIdDiff.extras.join(', ')}]`,
+    );
+  }
+
+  for (const entityId of expectedIds) {
+    const entry = artifact.entities[entityId];
+    if (entry === undefined) {
+      throw new Error(`Benchmark anchor suitability artifact missing entity "${entityId}"`);
+    }
+    const expectedDataset = resolveBenchmarkAnchorSuitabilitySourceDataset(entityId);
+    if (entry.sourceDataset !== expectedDataset) {
+      throw new Error(
+        `Benchmark anchor suitability artifact sourceDataset mismatch for "${entityId}": expected "${expectedDataset}", got "${entry.sourceDataset}"`,
+      );
+    }
+  }
+}
 
 /**
  * Load + validate the benchmark anchor suitability artifact.
@@ -236,6 +511,9 @@ export async function loadBenchmarkAnchorSuitabilityArtifact(
     throw new Error(
       `Benchmark anchor suitability artifact "${resolvedPath}" failed schema validation: ${result.error.message}`,
     );
+  }
+  if (isAuthoritativeBenchmarkAnchorSuitabilityPath(resolvedPath)) {
+    assertAuthoritativeBenchmarkAnchorSuitabilityArtifact(result.data);
   }
   benchmarkAnchorSuitabilityCache.set(resolvedPath, result.data);
   return result.data;
@@ -293,30 +571,214 @@ function resolveFixtureRepoRoot(explicit: string | undefined): string | undefine
   return resolveDefaultFixtureRepoRoot();
 }
 
-async function loadActiveBenchmarkCarryForwardRecords(args: {
+function collectCoreIconRequiredBenchmarkTargetIds(): readonly string[] {
+  const targetIds = new Set<string>();
+  for (const testCase of CORE_KOREAN_ICON_QUERY_CASES) {
+    targetIds.add(testCase.expectedEntityId);
+  }
+  for (const testCase of CORE_KOREAN_ICON_RELEASE_GATE_CASES) {
+    targetIds.add(testCase.expectedEntityId);
+  }
+  return [...targetIds].sort();
+}
+
+export async function loadRepoLocalCoreIconBenchmarkTargetIds(): Promise<readonly string[]> {
+  if (!existsSync(REPO_GOLD_CATALOG_PATH)) {
+    return [];
+  }
+
+  const content = await fs.readFile(REPO_GOLD_CATALOG_PATH, 'utf8');
+  const repoEntityIds = new Set<string>();
+  for (const [index, line] of content.split('\n').entries()) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+    const parsed = RepoGoldCatalogRowSchema.safeParse(JSON.parse(trimmed) as unknown);
+    if (!parsed.success) {
+      throw new Error(
+        `Repo gold catalog schema validation failed at ${REPO_GOLD_CATALOG_PATH}:${index + 1}: ${parsed.error.message}`,
+      );
+    }
+    repoEntityIds.add(parsed.data.entityId);
+  }
+
+  return collectCoreIconRequiredBenchmarkTargetIds()
+    .filter((entityId) => repoEntityIds.has(entityId));
+}
+
+async function loadRequiredBenchmarkTargetIds(
+  explicitFixtureRepoRoot: string | undefined,
+): Promise<readonly string[]> {
+  const required = new Set<string>();
+
+  if (explicitFixtureRepoRoot == null || explicitFixtureRepoRoot.length === 0) {
+    for (const entityId of await loadRepoLocalCoreIconBenchmarkTargetIds()) {
+      required.add(entityId);
+    }
+  }
+
+  const fixtureRepoRoot = resolveFixtureRepoRoot(explicitFixtureRepoRoot);
+  if (fixtureRepoRoot == null) {
+    return [...required].sort();
+  }
+
+  try {
+    for (const entityId of await loadRequiredFixtureTargetIds(fixtureRepoRoot)) {
+      required.add(entityId);
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error;
+    }
+  }
+
+  return [...required].sort();
+}
+
+async function loadRepoLocalCoreIconBenchmarkIdentitySignaturesByTargetId(): Promise<ReadonlyMap<string, string>> {
+  if (!existsSync(REPO_GOLD_CATALOG_PATH)) {
+    return new Map();
+  }
+
+  const content = await fs.readFile(REPO_GOLD_CATALOG_PATH, 'utf8');
+  const rows = content
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line, index) => {
+      const parsed = RepoGoldCatalogRowSchema.safeParse(JSON.parse(line) as unknown);
+      if (!parsed.success) {
+        throw new Error(
+          `Repo gold catalog schema validation failed at ${REPO_GOLD_CATALOG_PATH}:${index + 1}: ${parsed.error.message}`,
+        );
+      }
+      return parsed.data;
+    });
+
+  const identitySafeQueriesByEntityId = collectCoreIconIdentitySafeQueriesByEntityId();
+  const recallOnlyQueriesByEntityId = collectCoreIconRecallOnlyQueriesByEntityId();
+  const suitabilityArtifact = await loadBenchmarkAnchorSuitabilityArtifact();
+  const signatures = new Map<string, string>();
+
+  for (const entry of rows) {
+    const caseQueries = identitySafeQueriesByEntityId.get(entry.entityId) ?? [];
+    const recallOnlyQueries = recallOnlyQueriesByEntityId.get(entry.entityId) ?? [];
+    const identitySafeProjection = uniqueSurfaceList([
+      entry.canonicalLabel,
+      ...entry.koreanAliases,
+      ...caseQueries,
+    ]).filter(isIdentitySafeCoreIconSurface);
+    const noisyRecallProjection = uniqueSurfaceList([
+      ...entry.koreanAliases,
+      ...caseQueries,
+      ...recallOnlyQueries,
+    ]);
+
+    const record = attachBenchmarkAnchorSuitability({
+      sourceId: `benchmark-anchor-${entry.entityId}` as SourceRecordId,
+      externalId: entry.entityId,
+      canonicalLabel: entry.canonicalLabel,
+      producer: entry.producer,
+      vintageYear: entry.vintageYear,
+      country: entry.country,
+      region: entry.region,
+      appellation: entry.appellation ?? null,
+      wineType: entry.wineType,
+      grapePrimary: entry.grapes[0] ?? null,
+      grapes: entry.grapes,
+      body: normalizeSensoryNullable(entry.body),
+      sweetness: inferBenchmarkAnchorSweetness(entry.wineType),
+      acidity: normalizeSensoryNullable(entry.acidity),
+      tannin: normalizeSensoryNullable(entry.tannin),
+      pairingTags: [],
+      flavorProfiles: [],
+      searchTextEn: buildBenchmarkAnchorSearchTextEn(entry),
+      ratingAvg: Number((entry.criticScore / 20).toFixed(2)),
+      ratingsCount: 1_000,
+      priceUsd: entry.priceUsd,
+      priceBand: deriveBenchmarkAnchorPriceBand(entry.priceUsd),
+      popularityScore: Number(Math.max(0.75, entry.criticScore / 100).toFixed(3)),
+      scrapedAt: BENCHMARK_ANCHOR_FIXTURE_SCRAPED_AT,
+      alcoholPct: null,
+      producerPrestige: Number((entry.criticScore / 100).toFixed(3)),
+      isTopRated: entry.criticScore >= 97,
+      benchmarkAnchorEntityId: entry.entityId as CanonicalEntityId,
+      sourceSystemOverride: SOURCE_SYSTEM_BENCHMARK_ANCHOR_CATALOG,
+      aliases: {
+        proposed: identitySafeProjection
+          .filter((value) => value !== entry.canonicalLabel)
+          .map((value) => ({
+            value,
+            type: 'translation' as const,
+            source: 'benchmark-anchor:repo_gold_core_icon_v1',
+            confidencePrior: 0.95,
+            needsReview: false,
+          })),
+        identitySafeProjection,
+        noisyRecallProjection,
+      },
+    }, suitabilityArtifact);
+
+    const resolved = resolveWineSnapshotEntity(record, new Map(), new Map());
+    signatures.set(entry.entityId, resolved.identitySignature);
+  }
+
+  return signatures;
+}
+
+async function loadRepoLocalCoreIconEquivalentPublicIdsByTargetId(
+  explicitFixtureRepoRoot: string | undefined,
+): Promise<ReadonlyMap<string, CanonicalEntityId>> {
+  const fixtureRepoRoot = resolveFixtureRepoRoot(explicitFixtureRepoRoot);
+  if (fixtureRepoRoot == null || !existsSync(REPO_GOLD_CATALOG_PATH)) {
+    return new Map();
+  }
+
+  const [content, fixtureGoldLookup] = await Promise.all([
+    fs.readFile(REPO_GOLD_CATALOG_PATH, 'utf8'),
+    loadGoldCanonicalLookupForBuild({ fixtureRepoRoot: explicitFixtureRepoRoot }),
+  ]);
+  const equivalentPublicIds = new Map<string, CanonicalEntityId>();
+
+  for (const [index, line] of content.split('\n').entries()) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+    const parsed = RepoGoldCatalogRowSchema.safeParse(JSON.parse(trimmed) as unknown);
+    if (!parsed.success) {
+      throw new Error(
+        `Repo gold catalog schema validation failed at ${REPO_GOLD_CATALOG_PATH}:${index + 1}: ${parsed.error.message}`,
+      );
+    }
+    const key = `${normalizeCanonicalLabelForIdentity(parsed.data.canonicalLabel)}|${parsed.data.vintageYear}`;
+    const equivalentPublicId = fixtureGoldLookup.get(key);
+    if (equivalentPublicId !== undefined && equivalentPublicId !== parsed.data.entityId) {
+      equivalentPublicIds.set(parsed.data.entityId, equivalentPublicId as CanonicalEntityId);
+    }
+  }
+
+  return equivalentPublicIds;
+}
+
+export async function loadActiveBenchmarkCarryForwardRecords(args: {
   readonly currentRecords: readonly SnapshotBuildRecord[];
   readonly fixtureRepoRoot?: string | undefined;
   readonly runtimeStatePath?: string | undefined;
+  readonly carryForwardTargetEntityIds?: readonly CanonicalEntityId[] | undefined;
 }): Promise<readonly SnapshotBuildRecord[]> {
-  const fixtureRepoRoot = resolveFixtureRepoRoot(args.fixtureRepoRoot);
-  if (fixtureRepoRoot == null) {
-    return [];
-  }
   const runtimeStatePath = args.runtimeStatePath ?? DEFAULT_RUNTIME_STATE_PATH;
   if (!existsSync(runtimeStatePath)) {
     return [];
   }
 
-  let requiredTargetIds: readonly string[];
-  try {
-    requiredTargetIds = await loadRequiredFixtureTargetIds(fixtureRepoRoot);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return [];
-    }
-    throw error;
+  const requiredTargetIds = new Set<string>(await loadRequiredBenchmarkTargetIds(args.fixtureRepoRoot));
+  for (const entityId of args.carryForwardTargetEntityIds ?? []) {
+    requiredTargetIds.add(entityId);
   }
-  if (requiredTargetIds.length === 0) {
+  const explicitCarryForwardTargetIds = new Set<string>(args.carryForwardTargetEntityIds ?? []);
+  if (requiredTargetIds.size === 0) {
     return [];
   }
 
@@ -350,7 +812,6 @@ async function loadActiveBenchmarkCarryForwardRecords(args: {
   const previousEntities = parseNdjson<EntitySnapshotRecord>(entitiesRaw, entitiesPath).records;
   const previousRecordBySourceId = new Map(previousRecords.map((record) => [record.sourceId, record] as const));
   const currentSourceIds = new Set(args.currentRecords.map((record) => record.sourceId));
-  const requiredSet = new Set(requiredTargetIds);
   const carryForward = new Map<SourceRecordId, SnapshotBuildRecord>();
 
   for (const entity of previousEntities) {
@@ -360,12 +821,25 @@ async function loadActiveBenchmarkCarryForwardRecords(args: {
     };
     const benchmarkEntityId =
       typeof metadata.benchmarkEntityId === 'string' ? metadata.benchmarkEntityId : undefined;
-    if (!requiredSet.has(entity.entityId) && (benchmarkEntityId == null || !requiredSet.has(benchmarkEntityId))) {
+    if (!requiredTargetIds.has(entity.entityId) && (benchmarkEntityId == null || !requiredTargetIds.has(benchmarkEntityId))) {
       continue;
     }
     const refs = Array.isArray(metadata.sourceRecordRefs) ? metadata.sourceRecordRefs : [];
     for (const ref of refs) {
-      if (ref?.sourceSystem !== SOURCE_SYSTEM_VIVINO_SILVER || typeof ref.sourceRecordId !== 'string') {
+      if (
+        (ref?.sourceSystem !== SOURCE_SYSTEM_VIVINO_SILVER
+          && ref?.sourceSystem !== SOURCE_SYSTEM_BENCHMARK_ANCHOR_CATALOG)
+        || typeof ref.sourceRecordId !== 'string'
+      ) {
+        continue;
+      }
+      if (
+        ref.sourceSystem === SOURCE_SYSTEM_BENCHMARK_ANCHOR_CATALOG
+        && !explicitCarryForwardTargetIds.has(entity.entityId)
+        && (benchmarkEntityId === undefined || !explicitCarryForwardTargetIds.has(benchmarkEntityId))
+      ) {
+        // Rebuild benchmark-anchor records from the current authoritative
+        // seed/catalog path instead of reviving stale runtime copies.
         continue;
       }
       if (currentSourceIds.has(ref.sourceRecordId as SourceRecordId)) {
@@ -379,6 +853,32 @@ async function loadActiveBenchmarkCarryForwardRecords(args: {
   }
 
   return [...carryForward.values()].sort((left, right) => left.sourceId.localeCompare(right.sourceId));
+}
+
+async function loadReviewedAuthorityCarryForwardEntityIds(args: {
+  readonly reviewedRegistryOverrides?: Args['reviewedRegistryOverrides'];
+}): Promise<readonly CanonicalEntityId[]> {
+  const overrideIds = args.reviewedRegistryOverrides?.carryForwardTargetEntityIds;
+  if (overrideIds !== undefined) {
+    return [...new Set(overrideIds)].sort((left, right) => left.localeCompare(right));
+  }
+  if (args.reviewedRegistryOverrides !== undefined) {
+    return [];
+  }
+
+  const entityIds = new Set<CanonicalEntityId>();
+  for (const row of loadLookupV2SemanticScopeTargetRegistrySync()) {
+    if (row.decisionStatus === 'approved' && row.entityId !== undefined) {
+      entityIds.add(row.entityId as CanonicalEntityId);
+    }
+  }
+  for (const row of loadLookupV2PolicyFamilyDecisionRegistrySync()) {
+    entityIds.add(row.entityId as CanonicalEntityId);
+  }
+  for (const row of await loadLookupExactSafeRegistry()) {
+    entityIds.add(row.entityId);
+  }
+  return [...entityIds].sort((left, right) => left.localeCompare(right));
 }
 
 async function assertRequiredBenchmarkCoverage(args: {
@@ -397,24 +897,21 @@ async function findMissingRequiredBenchmarkCoverage(args: {
   readonly fixtureRepoRoot?: string | undefined;
   readonly entities: readonly EntitySnapshotRecord[];
 }): Promise<readonly string[]> {
-  const fixtureRepoRoot = resolveFixtureRepoRoot(args.fixtureRepoRoot);
-  if (fixtureRepoRoot == null) {
-    return [];
-  }
-  let requiredTargetIds: readonly string[];
-  try {
-    requiredTargetIds = await loadRequiredFixtureTargetIds(fixtureRepoRoot);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return [];
-    }
-    throw error;
-  }
+  const requiredTargetIds = await loadRequiredBenchmarkTargetIds(args.fixtureRepoRoot);
   if (requiredTargetIds.length === 0) {
     return [];
   }
 
   const covered = new Set<string>();
+  const existingIdentitySignatures = new Set<string>(args.entities.map((entity) => entity.identitySignature));
+  const equivalentPublicIdsByTargetId =
+    args.fixtureRepoRoot == null || args.fixtureRepoRoot.length === 0
+      ? await loadRepoLocalCoreIconEquivalentPublicIdsByTargetId(args.fixtureRepoRoot)
+      : new Map<string, CanonicalEntityId>();
+  const repoLocalIdentitySignaturesByTargetId =
+    args.fixtureRepoRoot == null || args.fixtureRepoRoot.length === 0
+      ? await loadRepoLocalCoreIconBenchmarkIdentitySignaturesByTargetId()
+      : new Map<string, string>();
   for (const entity of args.entities) {
     if (requiredTargetIds.includes(entity.entityId)) {
       covered.add(entity.entityId);
@@ -425,8 +922,224 @@ async function findMissingRequiredBenchmarkCoverage(args: {
     }
   }
 
+  for (const [targetId, identitySignature] of repoLocalIdentitySignaturesByTargetId) {
+    if (requiredTargetIds.includes(targetId) && existingIdentitySignatures.has(identitySignature)) {
+      covered.add(targetId);
+    }
+  }
+  for (const [targetId, equivalentPublicId] of equivalentPublicIdsByTargetId) {
+    if (requiredTargetIds.includes(targetId) && covered.has(equivalentPublicId)) {
+      covered.add(targetId);
+    }
+  }
+
   const missing = requiredTargetIds.filter((targetId) => !covered.has(targetId));
   return missing;
+}
+
+const BENCHMARK_ANCHOR_FIXTURE_SCRAPED_AT = '2026-06-04T00:00:00.000Z';
+
+function uniqueSurfaceList(values: readonly string[]): readonly string[] {
+  const deduped = new Set<string>();
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (trimmed.length > 0) {
+      deduped.add(trimmed);
+    }
+  }
+  return [...deduped];
+}
+
+function normalizeCoreIconSurfaceKey(value: string): string {
+  return value.normalize('NFC').trim().toLowerCase();
+}
+
+const CORE_KOREAN_ICON_AMBIGUOUS_SURFACES = new Set(
+  CORE_KOREAN_ICON_AMBIGUITY_CASES.map((testCase) => normalizeCoreIconSurfaceKey(testCase.query)),
+);
+
+function isIdentitySafeCoreIconSurface(value: string): boolean {
+  return !CORE_KOREAN_ICON_AMBIGUOUS_SURFACES.has(normalizeCoreIconSurfaceKey(value));
+}
+
+function collectCoreIconIdentitySafeQueriesByEntityId(): ReadonlyMap<string, readonly string[]> {
+  const grouped = new Map<string, string[]>();
+  for (const testCase of CORE_KOREAN_ICON_QUERY_CASES) {
+    if (testCase.identitySafe === false) {
+      continue;
+    }
+    const existing = grouped.get(testCase.expectedEntityId) ?? [];
+    if (!existing.includes(testCase.query)) {
+      existing.push(testCase.query);
+    }
+    grouped.set(testCase.expectedEntityId, existing);
+  }
+  for (const testCase of CORE_KOREAN_ICON_RELEASE_GATE_CASES) {
+    if (testCase.identitySafe === false) {
+      continue;
+    }
+    const existing = grouped.get(testCase.expectedEntityId) ?? [];
+    if (!existing.includes(testCase.query)) {
+      existing.push(testCase.query);
+    }
+    grouped.set(testCase.expectedEntityId, existing);
+  }
+  return grouped;
+}
+
+function collectCoreIconRecallOnlyQueriesByEntityId(): ReadonlyMap<string, readonly string[]> {
+  const grouped = new Map<string, string[]>();
+  for (const testCase of CORE_KOREAN_ICON_AMBIGUITY_CASES) {
+    if (testCase.expectedCandidateEntityId === undefined) {
+      continue;
+    }
+    const existing = grouped.get(testCase.expectedCandidateEntityId) ?? [];
+    if (!existing.includes(testCase.query)) {
+      existing.push(testCase.query);
+    }
+    grouped.set(testCase.expectedCandidateEntityId, existing);
+  }
+  for (const testCase of CORE_KOREAN_ICON_RELEASE_GATE_CASES) {
+    if (testCase.identitySafe !== false) {
+      continue;
+    }
+    const existing = grouped.get(testCase.expectedEntityId) ?? [];
+    if (!existing.includes(testCase.query)) {
+      existing.push(testCase.query);
+    }
+    grouped.set(testCase.expectedEntityId, existing);
+  }
+  return grouped;
+}
+
+function normalizeSensoryNullable(value: number | null): number | null {
+  return value === null ? null : Number((value / 5).toFixed(3));
+}
+
+function inferBenchmarkAnchorSweetness(wineType: RepoGoldCatalogRow['wineType']): number {
+  switch (wineType) {
+    case 'dessert':
+      return 0.95;
+    case 'sparkling':
+      return 0.2;
+    default:
+      return 0.1;
+  }
+}
+
+function deriveBenchmarkAnchorPriceBand(priceUsd: number): PriceBand {
+  if (priceUsd < 30) return 'value';
+  if (priceUsd < 100) return 'mid';
+  if (priceUsd < 300) return 'premium';
+  return 'luxury';
+}
+
+function buildBenchmarkAnchorSearchTextEn(entry: RepoGoldCatalogRow): string {
+  return [
+    entry.canonicalLabel,
+    entry.producer,
+    entry.country,
+    entry.region,
+    ...(entry.appellation !== undefined ? [entry.appellation] : []),
+    ...entry.grapes,
+    entry.style,
+  ].join(' ');
+}
+
+export async function loadRepoLocalGoldBenchmarkAnchorRecords(
+  missingTargetIds: readonly string[],
+): Promise<readonly SnapshotBuildRecord[]> {
+  if (missingTargetIds.length === 0 || !existsSync(REPO_GOLD_CATALOG_PATH)) {
+    return [];
+  }
+
+  const content = await fs.readFile(REPO_GOLD_CATALOG_PATH, 'utf8');
+  const rows = content
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line, index) => {
+      const parsed = RepoGoldCatalogRowSchema.safeParse(JSON.parse(line) as unknown);
+      if (!parsed.success) {
+        throw new Error(
+          `Repo gold catalog schema validation failed at ${REPO_GOLD_CATALOG_PATH}:${index + 1}: ${parsed.error.message}`,
+        );
+      }
+      return parsed.data;
+    });
+
+  const rowByEntityId = new Map(rows.map((row) => [row.entityId, row] as const));
+  const identitySafeQueriesByEntityId = collectCoreIconIdentitySafeQueriesByEntityId();
+  const recallOnlyQueriesByEntityId = collectCoreIconRecallOnlyQueriesByEntityId();
+  const suitabilityArtifact = await loadBenchmarkAnchorSuitabilityArtifact();
+  const records: SnapshotBuildRecord[] = [];
+
+  for (const entityId of missingTargetIds) {
+    const entry = rowByEntityId.get(entityId);
+    if (entry === undefined) {
+      continue;
+    }
+
+    const caseQueries = identitySafeQueriesByEntityId.get(entityId) ?? [];
+    const recallOnlyQueries = recallOnlyQueriesByEntityId.get(entityId) ?? [];
+    const identitySafeProjection = uniqueSurfaceList([
+      entry.canonicalLabel,
+      ...entry.koreanAliases,
+      ...caseQueries,
+    ]).filter(isIdentitySafeCoreIconSurface);
+    const noisyRecallProjection = uniqueSurfaceList([
+      ...entry.koreanAliases,
+      ...caseQueries,
+      ...recallOnlyQueries,
+    ]);
+
+    records.push(attachBenchmarkAnchorSuitability({
+      sourceId: `benchmark-anchor-${entry.entityId}` as SourceRecordId,
+      externalId: entry.entityId,
+      canonicalLabel: entry.canonicalLabel,
+      producer: entry.producer,
+      vintageYear: entry.vintageYear,
+      country: entry.country,
+      region: entry.region,
+      appellation: entry.appellation ?? null,
+      wineType: entry.wineType,
+      grapePrimary: entry.grapes[0] ?? null,
+      grapes: entry.grapes,
+      body: normalizeSensoryNullable(entry.body),
+      sweetness: inferBenchmarkAnchorSweetness(entry.wineType),
+      acidity: normalizeSensoryNullable(entry.acidity),
+      tannin: normalizeSensoryNullable(entry.tannin),
+      pairingTags: [],
+      flavorProfiles: [],
+      searchTextEn: buildBenchmarkAnchorSearchTextEn(entry),
+      ratingAvg: Number((entry.criticScore / 20).toFixed(2)),
+      ratingsCount: 1_000,
+      priceUsd: entry.priceUsd,
+      priceBand: deriveBenchmarkAnchorPriceBand(entry.priceUsd),
+      popularityScore: Number(Math.max(0.75, entry.criticScore / 100).toFixed(3)),
+      scrapedAt: BENCHMARK_ANCHOR_FIXTURE_SCRAPED_AT,
+      alcoholPct: null,
+      producerPrestige: Number((entry.criticScore / 100).toFixed(3)),
+      isTopRated: entry.criticScore >= 97,
+      benchmarkAnchorEntityId: entry.entityId as CanonicalEntityId,
+      sourceSystemOverride: SOURCE_SYSTEM_BENCHMARK_ANCHOR_CATALOG,
+      aliases: {
+        proposed: identitySafeProjection
+          .filter((value) => value !== entry.canonicalLabel)
+          .map((value) => ({
+            value,
+            type: 'translation' as const,
+            source: 'benchmark-anchor:repo_gold_core_icon_v1',
+            confidencePrior: 0.95,
+            needsReview: false,
+          })),
+        identitySafeProjection,
+        noisyRecallProjection,
+      },
+    }, suitabilityArtifact));
+  }
+
+  return records.sort((left, right) => left.sourceId.localeCompare(right.sourceId));
 }
 
 async function loadBenchmarkAnchorCatalogRecords(missingTargetIds: readonly string[]): Promise<readonly SnapshotBuildRecord[]> {
@@ -514,7 +1227,62 @@ async function loadBenchmarkAnchorCatalogRecords(missingTargetIds: readonly stri
     }, suitabilityArtifact));
   }
 
-  return records.sort((left, right) => left.sourceId.localeCompare(right.sourceId));
+  const covered = new Set(
+    records
+      .map((record) => record.benchmarkAnchorEntityId)
+      .filter((id): id is CanonicalEntityId => id !== undefined),
+  );
+  const coveredIdentitySignatures = new Set(
+    records.map((record) => resolveWineSnapshotEntity(record, new Map(), new Map()).identitySignature),
+  );
+  const repoLocalIdentitySignaturesByTargetId = await loadRepoLocalCoreIconBenchmarkIdentitySignaturesByTargetId();
+  const equivalentPublicIdsByTargetId = await loadRepoLocalCoreIconEquivalentPublicIdsByTargetId(undefined);
+  for (const [targetId, equivalentPublicId] of equivalentPublicIdsByTargetId) {
+    if (covered.has(equivalentPublicId)) {
+      covered.add(targetId as CanonicalEntityId);
+    }
+  }
+  for (const [targetId, identitySignature] of repoLocalIdentitySignaturesByTargetId) {
+    if (coveredIdentitySignatures.has(identitySignature)) {
+      covered.add(targetId as CanonicalEntityId);
+    }
+  }
+  const unresolved = missingTargetIds.filter((entityId) => !covered.has(entityId as CanonicalEntityId));
+  if (unresolved.length > 0) {
+    records.push(...await loadRepoLocalGoldBenchmarkAnchorRecords(unresolved));
+  }
+
+  return records
+    .sort((left, right) => left.sourceId.localeCompare(right.sourceId))
+    .filter((record, index, all) => all.findIndex((candidate) => candidate.sourceId === record.sourceId) === index);
+}
+
+export function filterIdentityConflictingBenchmarkAnchorRecords(args: {
+  readonly existingEntities: readonly EntitySnapshotRecord[];
+  readonly candidateRecords: readonly SnapshotBuildRecord[];
+  readonly goldLookup: ReadonlyMap<string, string>;
+  readonly sourceContinuityLookup: ReadonlyMap<SourceRecordId, {
+    readonly entityId: CanonicalEntityId;
+    readonly identitySignature: string;
+    readonly benchmarkEntityId?: CanonicalEntityId;
+  }>;
+}): readonly SnapshotBuildRecord[] {
+  const existingEntityIdByIdentitySignature = new Map<string, CanonicalEntityId>(
+    args.existingEntities.map((entity) => [entity.identitySignature, entity.entityId as CanonicalEntityId]),
+  );
+
+  return args.candidateRecords.filter((record) => {
+    if (record.benchmarkAnchorEntityId === undefined) {
+      return true;
+    }
+    const resolved = resolveWineSnapshotEntity(
+      record,
+      args.goldLookup,
+      args.sourceContinuityLookup,
+    );
+    const existingEntityId = existingEntityIdByIdentitySignature.get(resolved.identitySignature);
+    return existingEntityId === undefined || existingEntityId === record.benchmarkAnchorEntityId;
+  });
 }
 
 function resolveSourceSystemForRecord(record: EnrichedSilverRecord): string {
@@ -609,7 +1377,7 @@ export function attachBenchmarkAnchorSuitability(
     giftSuitabilityClassification: {
       score: seed.gift.score,
       fingerprint: {
-        modelId: artifact.model,
+        modelId: artifact.models.gift,
         contentHash: buildGiftSuitabilityContentHash(record),
         version: GIFT_SUITABILITY_VERSION,
         generatedAt: artifact.generatedAt,
@@ -625,7 +1393,7 @@ export function attachBenchmarkAnchorSuitability(
     beginnerSuitabilityClassification: {
       score: seed.beginner.score,
       fingerprint: {
-        modelId: artifact.model,
+        modelId: artifact.models.beginner,
         contentHash: buildBeginnerSuitabilityContentHash(record),
         version: BEGINNER_SUITABILITY_VERSION,
         generatedAt: artifact.generatedAt,
@@ -649,10 +1417,13 @@ async function buildArtifactsForRecords(args: {
     readonly identitySignature: string;
     readonly benchmarkEntityId?: CanonicalEntityId;
   }>;
+  readonly curationTargetSnapshotId?: string | undefined;
 }): Promise<{
   readonly entityArtifact: readonly EntitySnapshotRecord[];
   readonly resolvedAliases: ReturnType<typeof resolveAliasClaimsAndBuildAmbiguityRegistry>['resolvedAliases'];
   readonly ambiguityRows: ReturnType<typeof resolveAliasClaimsAndBuildAmbiguityRegistry>['ambiguityRows'];
+  readonly entityIdBySourceId: ReadonlyMap<SourceRecordId, CanonicalEntityId>;
+  readonly consumedCuration: PublishedCurationConsumption;
 }> {
   const entityArtifact: EntitySnapshotRecord[] = [];
   const entityIdBySourceId = new Map<SourceRecordId, CanonicalEntityId>();
@@ -705,118 +1476,36 @@ async function buildArtifactsForRecords(args: {
     entityIdBySourceId.set(record.sourceId, runtimeEntityId);
   }
   entityArtifact.sort((left, right) => left.entityId.localeCompare(right.entityId));
-  const approvedAbbreviationOverlay = await loadApprovedAbbreviationAliasOverlay(
-    [...entityIdBySourceId.values()],
-  );
+  const snapshotEntityIds = new Set<CanonicalEntityId>([...entityIdBySourceId.values()]);
+  const publishedCuration = await loadPublishedCurationProposals({
+    entityIds: [...snapshotEntityIds],
+    knownEntityIds: snapshotEntityIds,
+    targetSnapshotId: args.curationTargetSnapshotId,
+  });
   const aliasArtifact = buildAliasArtifact(
     args.records,
     entityIdBySourceId,
-    approvedAbbreviationOverlay,
+    publishedCuration.aliasOverlays,
   );
-  const { resolvedAliases, ambiguityRows } = resolveAliasClaimsAndBuildAmbiguityRegistry(aliasArtifact);
-  return { entityArtifact, resolvedAliases, ambiguityRows };
-}
-
-interface ApprovedAbbreviationAliasProposalRow {
-  readonly surface_form: string;
-  readonly target_entity_id: string;
-  readonly proposed_type: string;
-  readonly evidence: unknown;
-  readonly confidence: number;
-}
-
-function isRecordValue(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function parseApprovedAbbreviationAliasProposal(
-  row: ApprovedAbbreviationAliasProposalRow,
-): { readonly targetEntityId: CanonicalEntityId; readonly proposal: SnapshotAliasOverlayProposal } {
-  const aliasType = parseAliasType(row.proposed_type);
-  if (aliasType !== 'abbreviation') {
-    throw new Error(`Unsupported approved alias proposal type=${JSON.stringify(row.proposed_type)}`);
-  }
-  if (typeof row.surface_form !== 'string' || row.surface_form.length === 0) {
-    throw new Error(`Approved abbreviation proposal is missing surface_form for ${row.target_entity_id}`);
-  }
-  if (!Number.isFinite(row.confidence) || row.confidence <= 0) {
-    throw new Error(`Approved abbreviation proposal has invalid confidence for ${row.target_entity_id}`);
-  }
-  if (!isRecordValue(row.evidence)) {
-    throw new Error(`Approved abbreviation proposal evidence is malformed for ${row.target_entity_id}`);
-  }
-
-  const source = row.evidence['source'];
-  const sourceTrust = row.evidence['sourceTrust'];
-  const aliasScope = row.evidence['aliasScope'];
-  if (
-    typeof source !== 'string'
-    || source.length === 0
-    || typeof aliasScope !== 'string'
-    || aliasScope.length === 0
-    || typeof sourceTrust !== 'number'
-    || !Number.isFinite(sourceTrust)
-  ) {
-    throw new Error(`Approved abbreviation proposal evidence is incomplete for ${row.target_entity_id}`);
-  }
-
+  const { resolvedAliases: conflictResolvedAliases, ambiguityRows: collisionAmbiguityRows } =
+    resolveAliasClaimsAndBuildAmbiguityRegistry(aliasArtifact);
+  const resolvedAliases = applyPublishedSuppressionRules(
+    conflictResolvedAliases,
+    publishedCuration.suppressionRules,
+  );
+  const ambiguityRows = mergePublishedAmbiguityRows(
+    collisionAmbiguityRows,
+    publishedCuration.ambiguityRows,
+  );
   return {
-    targetEntityId: row.target_entity_id as CanonicalEntityId,
-    proposal: {
-      value: row.surface_form,
-      type: aliasType,
-      source,
-      sourceTrust,
-      confidencePrior: row.confidence,
-      scope: aliasScope,
-    },
+    entityArtifact,
+    resolvedAliases,
+    ambiguityRows,
+    entityIdBySourceId,
+    consumedCuration: publishedCuration.consumed,
   };
 }
 
-async function loadApprovedAbbreviationAliasOverlay(
-  entityIds: readonly CanonicalEntityId[],
-): Promise<ReadonlyMap<CanonicalEntityId, readonly SnapshotAliasOverlayProposal[]>> {
-  const uniqueEntityIds = [...new Set(entityIds)];
-  if (uniqueEntityIds.length === 0) {
-    return new Map();
-  }
-  if (process.env['DATABASE_URL'] === undefined && process.env['PG_HOST'] === undefined) {
-    return new Map();
-  }
-
-  const [{ loadConfig }, { createPgPool, shouldUsePgPool }] = await Promise.all([
-    import('../../src/config/env.js'),
-    import('../../src/infrastructure/db/pg-pool.js'),
-  ]);
-  const config = loadConfig();
-  if (!shouldUsePgPool(config.pg)) {
-    return new Map();
-  }
-
-  const pool = createPgPool(config.pg);
-  try {
-    const result = await pool.query<ApprovedAbbreviationAliasProposalRow>(
-      `SELECT surface_form, target_entity_id, proposed_type, evidence, confidence
-         FROM alias_proposals
-        WHERE proposed_type = 'abbreviation'
-          AND status IN ('approved', 'promoted')
-          AND target_entity_id = ANY($1::text[])
-        ORDER BY target_entity_id ASC, confidence DESC, proposal_id ASC`,
-      [uniqueEntityIds],
-    );
-
-    const overlay = new Map<CanonicalEntityId, SnapshotAliasOverlayProposal[]>();
-    for (const row of result.rows) {
-      const parsed = parseApprovedAbbreviationAliasProposal(row);
-      const existing = overlay.get(parsed.targetEntityId) ?? [];
-      existing.push(parsed.proposal);
-      overlay.set(parsed.targetEntityId, existing);
-    }
-    return overlay;
-  } finally {
-    await pool.end();
-  }
-}
 
 export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapshotResult> {
   assertCanonicalTrackCArtifactInput(args.input, 'build-search-snapshot');
@@ -830,39 +1519,64 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     .map((record) => stripExperimentalSnapshotFields(record as SnapshotBuildRecord))
     .sort((left, right) => left.sourceId.localeCompare(right.sourceId));
   assertSuitabilityCoverage(baseRecords);
+  const reviewedAuthorityCarryForwardEntityIds = await loadReviewedAuthorityCarryForwardEntityIds({
+    reviewedRegistryOverrides: args.reviewedRegistryOverrides,
+  });
   const [goldLookup, sourceContinuityLookup, carryForwardRecords] = await Promise.all([
     loadGoldCanonicalLookupForBuild({ fixtureRepoRoot: args.fixtureRepoRoot }),
-    loadActiveSourceEntityContinuity(args.runtimeStatePath),
+    loadActiveSourceEntityContinuity(args.runtimeStatePath, {
+      sourceIds: baseRecords.map((record) => record.sourceId),
+    }),
     loadActiveBenchmarkCarryForwardRecords({
       currentRecords: baseRecords,
       fixtureRepoRoot: args.fixtureRepoRoot,
       runtimeStatePath: args.runtimeStatePath,
+      carryForwardTargetEntityIds: reviewedAuthorityCarryForwardEntityIds,
     }),
   ]);
   const records = [...baseRecords, ...carryForwardRecords]
     .sort((left, right) => left.sourceId.localeCompare(right.sourceId));
   let finalRecords = records;
-  let {
+  let entityArtifact: readonly EntitySnapshotRecord[];
+  let resolvedAliases: ReturnType<typeof resolveAliasClaimsAndBuildAmbiguityRegistry>['resolvedAliases'];
+  let ambiguityRows: ReturnType<typeof resolveAliasClaimsAndBuildAmbiguityRegistry>['ambiguityRows'];
+  let entityIdBySourceId: ReadonlyMap<SourceRecordId, CanonicalEntityId>;
+  let consumedCuration: PublishedCurationConsumption = {
+    aliasProposalIds: [],
+    ambiguityProposalIds: [],
+    suppressionProposalIds: [],
+  };
+  ({
     entityArtifact,
     resolvedAliases,
     ambiguityRows,
+    entityIdBySourceId,
+    consumedCuration,
   } = await buildArtifactsForRecords({
     records: finalRecords,
     goldLookup,
     sourceContinuityLookup,
-  });
+  }));
   const missingBenchmarkCoverage = await findMissingRequiredBenchmarkCoverage({
     fixtureRepoRoot: args.fixtureRepoRoot,
     entities: entityArtifact,
   });
   if (missingBenchmarkCoverage.length > 0) {
-    const benchmarkAnchorRecords = await loadBenchmarkAnchorCatalogRecords(missingBenchmarkCoverage);
+    const benchmarkAnchorRecords = filterIdentityConflictingBenchmarkAnchorRecords({
+      existingEntities: entityArtifact,
+      candidateRecords: await loadBenchmarkAnchorCatalogRecords(missingBenchmarkCoverage),
+      goldLookup,
+      sourceContinuityLookup,
+    });
     finalRecords = [...finalRecords, ...benchmarkAnchorRecords]
       .sort((left, right) => left.sourceId.localeCompare(right.sourceId));
+    assertSuitabilityCoverage(finalRecords);
     ({
       entityArtifact,
       resolvedAliases,
       ambiguityRows,
+      entityIdBySourceId,
+      consumedCuration,
     } = await buildArtifactsForRecords({
       records: finalRecords,
       goldLookup,
@@ -874,25 +1588,321 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     entities: entityArtifact,
   });
   const nlMappings = parseNlMappings(nlMappingsRaw);
-
-  const documentsNdjson = serializeNdjson(finalRecords);
-  const entitiesNdjson = serializeNdjson(entityArtifact);
-  const aliasesNdjson = serializeNdjson(resolvedAliases);
-  const ambiguityNdjson = serializeNdjson(ambiguityRows);
+  const generatedAt = new Date().toISOString();
   const nlMappingsCanonical = `${stableJsonStringify(nlMappings.payload)}\n`;
 
-  const hashes = {
-    documents: hashText(documentsNdjson),
-    vespaFeed: hashText(''),
-    entities: hashStableJson(canonicalizeEntitySnapshotRecords(entityArtifact)),
-    aliases: hashStableJson(canonicalizeAliasSnapshotRecords(resolvedAliases)),
-    ambiguityRegistry: hashStableJson(canonicalizeAmbiguitySnapshotRows(ambiguityRows)),
-    nlMappings: hashText(nlMappingsCanonical),
-  } as const;
+  let curationTargetSnapshotId: string | undefined;
+  let snapshotId = '';
+  let snapshotRoot = '';
+  let documentsNdjson = '';
+  let entitiesNdjson = '';
+  let aliasesNdjson = '';
+  let ambiguityNdjson = '';
+  let entityArtifactHash = '';
+  let aliasArtifactHash = '';
+  let ambiguityArtifactHash = '';
+  let snapshotEntityIds = new Set<CanonicalEntityId>();
+  let lookupAliasRuntimeArtifact!: ReturnType<typeof buildLookupAliasRuntimeArtifacts>['coreArtifact'];
+  let lookupAliasBroadRecallRuntimeArtifact!: ReturnType<typeof buildLookupAliasRuntimeArtifacts>['broadRecallArtifact'];
+  let lookupExactSafeRuntimeArtifact!: ReturnType<typeof buildLookupExactSafeRuntimeArtifact>;
+  let lookupResolverProjectionArtifact!: ReturnType<typeof buildLookupResolverProjectionArtifact>;
+  let lookupEntityProjectionArtifact!: ReturnType<typeof buildLookupEntityProjectionArtifact>;
+  let lookupSemanticScopeRuntimeArtifact!: ReturnType<typeof buildLookupSemanticScopeRuntimeArtifact>;
+  let lookupReviewedFamilyRecallRuntimeArtifact!: ReturnType<typeof buildLookupReviewedFamilyRecallRuntimeArtifact>;
+  let lookupScopeGraphRuntimeArtifact!: ReturnType<typeof buildLookupScopeGraphRuntimeArtifact>;
+  let lookupAmbiguityRuntimeArtifact!: ReturnType<typeof buildLookupAmbiguityRuntimeArtifact>;
+  let lookupConceptRedirectRuntimeArtifact!: ReturnType<typeof buildLookupConceptRedirectRuntimeArtifact>;
+  let hashes!: {
+    readonly documents: string;
+    readonly vespaFeed: string;
+    readonly entities: string;
+    readonly aliases: string;
+    readonly lookupAliasRuntime: string;
+    readonly lookupAliasBroadRecallRuntime: string;
+    readonly lookupExactSafeRuntime: string;
+    readonly lookupResolverProjection: string;
+    readonly lookupEntityProjection: string;
+    readonly lookupSemanticScopeRuntime: string;
+    readonly lookupReviewedFamilyRecallRuntime: string;
+    readonly lookupScopeGraphRuntime: string;
+    readonly lookupAmbiguityRuntime: string;
+    readonly lookupConceptRedirectRuntime: string;
+    readonly ambiguityRegistry: string;
+    readonly nlMappings: string;
+  };
+
+  const lookupExactSafeRegistry =
+    args.reviewedRegistryOverrides?.exactSafeRows
+    ?? await loadLookupExactSafeRegistry();
+  const lookupAmbiguityRegistry = await loadLookupAmbiguityRegistry();
+  const lookupConceptRedirectRegistry = await loadLookupConceptRedirectRegistry();
+  const lookupPolicyConflictRegistry = loadLookupPolicyConflictRegistrySync();
+  const lookupPolicyFamilyDecisionRegistry = loadLookupV2PolicyFamilyDecisionRegistrySync();
+
+  for (let curationPinPass = 0; curationPinPass < CURATION_SNAPSHOT_PIN_MAX_PASSES; curationPinPass++) {
+    ({
+      entityArtifact,
+      resolvedAliases,
+      ambiguityRows,
+      entityIdBySourceId,
+      consumedCuration,
+    } = await buildArtifactsForRecords({
+      records: finalRecords,
+      goldLookup,
+      sourceContinuityLookup,
+      curationTargetSnapshotId,
+    }));
+
+    documentsNdjson = serializeNdjson(finalRecords);
+    entitiesNdjson = serializeNdjson(entityArtifact);
+    aliasesNdjson = serializeNdjson(resolvedAliases);
+    ambiguityNdjson = serializeNdjson(ambiguityRows);
+    entityArtifactHash = hashStableJson(canonicalizeEntitySnapshotRecords(entityArtifact));
+    aliasArtifactHash = hashStableJson(canonicalizeAliasSnapshotRecords(resolvedAliases));
+    ambiguityArtifactHash = hashStableJson(canonicalizeAmbiguitySnapshotRows(ambiguityRows));
+    snapshotEntityIds = new Set<CanonicalEntityId>([...entityIdBySourceId.values()]);
+    assertLookupExactSafeRegistryCompatibleWithBaseAliases({
+      baseAliases: resolvedAliases,
+      registryRows: lookupExactSafeRegistry,
+    });
+    assertLookupExactSafeRegistryVintageConsistency({
+      rows: lookupExactSafeRegistry,
+      entityVintagesById: buildLookupExactSafeEntityVintagesById({
+        records: finalRecords,
+        entityIdBySourceId,
+      }),
+    });
+    assertLookupAuthorityBoundaryConsistency({
+      exactSafeRows: lookupExactSafeRegistry,
+      ambiguityRows: lookupAmbiguityRegistry,
+      policyConflictRows: lookupPolicyConflictRegistry,
+      policyFamilyDecisionRows: lookupPolicyFamilyDecisionRegistry,
+    });
+    const lookupRuntimeOverlayAliases = buildLookupRuntimeOverlayAliases(
+      lookupExactSafeRegistry,
+      snapshotEntityIds,
+    );
+    const lookupIdentityCertificatesByEntity = buildLookupIdentityCertificatesByEntity(
+      lookupExactSafeRegistry,
+      snapshotEntityIds,
+    );
+
+    ({
+      coreArtifact: lookupAliasRuntimeArtifact,
+      broadRecallArtifact: lookupAliasBroadRecallRuntimeArtifact,
+    } = buildLookupAliasRuntimeArtifacts({
+      snapshotId: '',
+      generatedAt,
+      aliasRegistryHash: aliasArtifactHash,
+      aliases: resolvedAliases,
+      runtimeOverlayAliases: lookupRuntimeOverlayAliases,
+    }));
+    lookupExactSafeRuntimeArtifact = buildLookupExactSafeRuntimeArtifact({
+      snapshotId: '',
+      generatedAt,
+      rows: lookupExactSafeRegistry,
+      snapshotEntityIds,
+    });
+    lookupResolverProjectionArtifact = buildLookupResolverProjectionArtifact({
+      snapshotId: '',
+      generatedAt,
+      records: finalRecords,
+      entityIdBySourceId,
+      goldCanonicalLookup: goldLookup,
+      sourceContinuityLookup,
+      identityCertificatesByEntity: lookupIdentityCertificatesByEntity,
+    });
+    const lookupReviewedFamilyCoreWitnessRegistry =
+      args.reviewedRegistryOverrides?.familyCoreWitnessRows
+      ?? loadLookupV2FamilyCoreWitnessRegistrySync(undefined, snapshotEntityIds);
+    const lookupReviewedFamilyCollisionRegistry =
+      args.reviewedRegistryOverrides?.familyCollisionRows
+      ?? loadLookupV2FamilyCollisionRegistrySync();
+    const reviewedFamilyCoreKeysByEntity = buildReviewedFamilyCoreKeysByEntity(
+      lookupReviewedFamilyCoreWitnessRegistry,
+    );
+    const provisionalLookupEntityProjectionArtifact = buildLookupEntityProjectionArtifact({
+      snapshotId: '',
+      generatedAt,
+      records: finalRecords,
+      entityIdBySourceId,
+      goldCanonicalLookup: goldLookup,
+      sourceContinuityLookup,
+      identityCertificatesByEntity: lookupIdentityCertificatesByEntity,
+      reviewedFamilyCoreKeysByEntity,
+    });
+    const reviewedCollisionFamilyCoreKeysByEntity = buildReviewedCollisionFamilyCoreKeysByEntity({
+      documents: provisionalLookupEntityProjectionArtifact.documents,
+      reviewedCollisionRows: lookupReviewedFamilyCollisionRegistry,
+      reviewedFamilyCoreWitnessRows: lookupReviewedFamilyCoreWitnessRegistry,
+    });
+    const mergedReviewedFamilyCoreKeysByEntity = new Map<CanonicalEntityId, readonly string[]>();
+    for (const [entityId, surfaces] of reviewedFamilyCoreKeysByEntity.entries()) {
+      mergedReviewedFamilyCoreKeysByEntity.set(entityId, surfaces);
+    }
+    for (const [entityId, surfaces] of reviewedCollisionFamilyCoreKeysByEntity.entries()) {
+      const existing = mergedReviewedFamilyCoreKeysByEntity.get(entityId as CanonicalEntityId) ?? [];
+      mergedReviewedFamilyCoreKeysByEntity.set(
+        entityId as CanonicalEntityId,
+        [...new Set([...existing, ...surfaces])].sort((left, right) => left.localeCompare(right)),
+      );
+    }
+    lookupEntityProjectionArtifact = buildLookupEntityProjectionArtifact({
+      snapshotId: '',
+      generatedAt,
+      records: finalRecords,
+      entityIdBySourceId,
+      goldCanonicalLookup: goldLookup,
+      sourceContinuityLookup,
+      identityCertificatesByEntity: lookupIdentityCertificatesByEntity,
+      reviewedFamilyCoreKeysByEntity: mergedReviewedFamilyCoreKeysByEntity,
+    });
+    const lookupSemanticRuntimeDescriptorMap = buildLookupV2RuntimeSemanticDescriptorMapFromDocuments(
+      lookupEntityProjectionArtifact.documents,
+    );
+    const lookupSemanticScopeTargetRegistry =
+      args.reviewedRegistryOverrides?.semanticScopeTargetRows
+      ?? loadLookupV2SemanticScopeTargetRegistrySync(
+        undefined,
+        lookupSemanticRuntimeDescriptorMap,
+      );
+    const lookupLocalizedScopeSurfaceRegistry =
+      args.reviewedRegistryOverrides?.localizedScopeSurfaceRows
+      ?? loadLookupV2LocalizedScopeSurfaceRegistrySync();
+    lookupSemanticScopeRuntimeArtifact = buildLookupSemanticScopeRuntimeArtifact({
+      snapshotId: '',
+      generatedAt,
+      reviewedRows: lookupSemanticScopeTargetRegistry,
+      scopeSurfaceRows: lookupLocalizedScopeSurfaceRegistry,
+    });
+    lookupReviewedFamilyRecallRuntimeArtifact = buildLookupReviewedFamilyRecallRuntimeArtifact({
+      snapshotId: '',
+      generatedAt,
+      entityProjectionDocuments: lookupEntityProjectionArtifact.documents,
+      reviewedCollisionRows: lookupReviewedFamilyCollisionRegistry,
+      reviewedFamilyCoreWitnessRows: lookupReviewedFamilyCoreWitnessRegistry,
+      localizedScopeSurfaceRows: lookupLocalizedScopeSurfaceRegistry,
+    });
+    lookupScopeGraphRuntimeArtifact = buildLookupScopeGraphRuntimeArtifact({
+      snapshotId: '',
+      generatedAt,
+      entityProjectionDocuments: lookupEntityProjectionArtifact.documents,
+    });
+    lookupAmbiguityRuntimeArtifact = buildLookupAmbiguityRuntimeArtifact({
+      snapshotId: '',
+      generatedAt,
+      ambiguityRows,
+      curatedEntries: buildLookupAmbiguityRegistryEntries(lookupAmbiguityRegistry),
+    });
+    lookupConceptRedirectRuntimeArtifact = buildLookupConceptRedirectRuntimeArtifact({
+      snapshotId: '',
+      generatedAt,
+      entries: buildLookupConceptRedirectRegistryEntries(lookupConceptRedirectRegistry),
+    });
+
+    hashes = {
+      documents: hashText(documentsNdjson),
+      vespaFeed: hashText(''),
+      entities: entityArtifactHash,
+      aliases: aliasArtifactHash,
+      lookupAliasRuntime: buildLookupAliasRuntimeCoreArtifactHash(lookupAliasRuntimeArtifact),
+      lookupAliasBroadRecallRuntime: buildLookupAliasBroadRecallRuntimeArtifactHash(lookupAliasBroadRecallRuntimeArtifact),
+      lookupExactSafeRuntime: buildLookupExactSafeRuntimeArtifactHash(lookupExactSafeRuntimeArtifact),
+      lookupResolverProjection: buildLookupResolverProjectionArtifactHash(lookupResolverProjectionArtifact),
+      lookupEntityProjection: buildLookupEntityProjectionArtifactHash(lookupEntityProjectionArtifact),
+      lookupSemanticScopeRuntime: buildLookupSemanticScopeRuntimeArtifactHash(lookupSemanticScopeRuntimeArtifact),
+      lookupReviewedFamilyRecallRuntime: buildLookupReviewedFamilyRecallRuntimeArtifactHash(lookupReviewedFamilyRecallRuntimeArtifact),
+      lookupScopeGraphRuntime: buildLookupScopeGraphRuntimeArtifactHash(lookupScopeGraphRuntimeArtifact),
+      lookupAmbiguityRuntime: buildLookupAmbiguityRuntimeArtifactHash(lookupAmbiguityRuntimeArtifact),
+      lookupConceptRedirectRuntime: buildLookupConceptRedirectRuntimeArtifactHash(lookupConceptRedirectRuntimeArtifact),
+      ambiguityRegistry: ambiguityArtifactHash,
+      nlMappings: hashText(nlMappingsCanonical),
+    };
+
+    snapshotId = buildSearchSnapshotId(buildSearchSnapshotContentHash(hashes));
+    snapshotRoot = path.join(args.outputDir, snapshotId);
+
+    const pinnedProbe = await loadPublishedCurationProposals({
+      entityIds: [...snapshotEntityIds],
+      knownEntityIds: snapshotEntityIds,
+      targetSnapshotId: snapshotId,
+    });
+    if (!hasAdditionalPublishedConsumption(consumedCuration, pinnedProbe.consumed)) {
+      break;
+    }
+    if (curationPinPass + 1 >= CURATION_SNAPSHOT_PIN_MAX_PASSES) {
+      throw buildCurationPinConvergenceError({
+        snapshotId,
+        passesAttempted: curationPinPass + 1,
+        unconsumedProposalIds: formatUnconsumedPublishedProposalIds(consumedCuration, pinnedProbe.consumed),
+      });
+    }
+    curationTargetSnapshotId = snapshotId;
+  }
+
+  if (snapshotId.length === 0) {
+    throw new Error('Search snapshot build failed: curation pin loop produced no snapshot identity');
+  }
+
+  await assertConsumedCurationPinsAlignWithSnapshot({
+    snapshotId,
+    consumed: consumedCuration,
+  });
 
   const contentHash = buildSearchSnapshotContentHash(hashes);
-  const snapshotId = buildSearchSnapshotId(contentHash);
-  const snapshotRoot = path.join(args.outputDir, snapshotId);
+
+  const finalizedLookupAliasRuntimeArtifact = {
+    ...lookupAliasRuntimeArtifact,
+    snapshotId,
+    aliasRegistryHash: hashes.aliases,
+  };
+  const finalizedLookupAliasBroadRecallRuntimeArtifact = {
+    ...lookupAliasBroadRecallRuntimeArtifact,
+    snapshotId,
+    aliasRegistryHash: hashes.aliases,
+  };
+  const finalizedLookupExactSafeRuntimeArtifact = {
+    ...lookupExactSafeRuntimeArtifact,
+    snapshotId,
+  };
+  const finalizedLookupResolverProjectionArtifact = {
+    ...lookupResolverProjectionArtifact,
+    snapshotId,
+  };
+  const finalizedLookupEntityProjectionArtifact = {
+    ...lookupEntityProjectionArtifact,
+    snapshotId,
+  };
+  const finalizedLookupSemanticScopeRuntimeArtifact = {
+    ...lookupSemanticScopeRuntimeArtifact,
+    snapshotId,
+  };
+  const finalizedLookupReviewedFamilyRecallRuntimeArtifact = {
+    ...lookupReviewedFamilyRecallRuntimeArtifact,
+    snapshotId,
+  };
+  const finalizedLookupScopeGraphRuntimeArtifact = {
+    ...lookupScopeGraphRuntimeArtifact,
+    snapshotId,
+  };
+  const finalizedLookupAmbiguityRuntimeArtifact = {
+    ...lookupAmbiguityRuntimeArtifact,
+    snapshotId,
+  };
+  const finalizedLookupConceptRedirectRuntimeArtifact = {
+    ...lookupConceptRedirectRuntimeArtifact,
+    snapshotId,
+  };
+  const lookupAliasRuntimeJson = `${stableJsonStringify(finalizedLookupAliasRuntimeArtifact)}\n`;
+  const lookupAliasBroadRecallRuntimeJson = `${stableJsonStringify(finalizedLookupAliasBroadRecallRuntimeArtifact)}\n`;
+  const lookupExactSafeRuntimeJson = `${stableJsonStringify(finalizedLookupExactSafeRuntimeArtifact)}\n`;
+  const lookupResolverProjectionJson = `${stableJsonStringify(finalizedLookupResolverProjectionArtifact)}\n`;
+  const lookupEntityProjectionJson = `${stableJsonStringify(finalizedLookupEntityProjectionArtifact)}\n`;
+  const lookupSemanticScopeRuntimeJson = `${stableJsonStringify(finalizedLookupSemanticScopeRuntimeArtifact)}\n`;
+  const lookupReviewedFamilyRecallRuntimeJson = `${stableJsonStringify(finalizedLookupReviewedFamilyRecallRuntimeArtifact)}\n`;
+  const lookupScopeGraphRuntimeJson = `${stableJsonStringify(finalizedLookupScopeGraphRuntimeArtifact)}\n`;
+  const lookupAmbiguityRuntimeJson = `${stableJsonStringify(finalizedLookupAmbiguityRuntimeArtifact)}\n`;
+  const lookupConceptRedirectRuntimeJson = `${stableJsonStringify(finalizedLookupConceptRedirectRuntimeArtifact)}\n`;
   const fieldAvailability = buildFieldAvailability(finalRecords);
   const quality = {
     status: 'canonical' as const,
@@ -905,7 +1915,7 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
   const manifest: SearchSnapshotManifest = {
     schemaVersion: SEARCH_SNAPSHOT_SCHEMA_VERSION,
     snapshotId,
-    generatedAt: new Date().toISOString(),
+    generatedAt,
     contentHash,
     sourceInputPath: args.input,
     artifacts: {
@@ -913,6 +1923,16 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
       vespaFeedNdjson: path.join(snapshotRoot, 'vespa-feed.ndjson'),
       entitiesNdjson: path.join(snapshotRoot, 'entities.ndjson'),
       aliasesNdjson: path.join(snapshotRoot, 'aliases.ndjson'),
+      lookupAliasRuntimeJson: path.join(snapshotRoot, 'lookup-alias-runtime.json'),
+      lookupAliasBroadRecallRuntimeJson: path.join(snapshotRoot, 'lookup-alias-broad-recall-runtime.json'),
+      lookupExactSafeRuntimeJson: path.join(snapshotRoot, 'lookup-exact-safe-runtime.json'),
+      lookupResolverProjectionJson: path.join(snapshotRoot, 'lookup-resolver-projection.json'),
+      lookupEntityProjectionJson: path.join(snapshotRoot, 'lookup-entity-projection.json'),
+      lookupSemanticScopeRuntimeJson: path.join(snapshotRoot, 'lookup-semantic-scope-runtime.json'),
+      lookupReviewedFamilyRecallRuntimeJson: path.join(snapshotRoot, 'lookup-reviewed-family-recall-runtime.json'),
+      lookupScopeGraphRuntimeJson: path.join(snapshotRoot, 'lookup-scope-graph-runtime.json'),
+      lookupAmbiguityRuntimeJson: path.join(snapshotRoot, 'lookup-ambiguity-runtime.json'),
+      lookupConceptRedirectRuntimeJson: path.join(snapshotRoot, 'lookup-concept-redirect-runtime.json'),
       ambiguityRegistryNdjson: path.join(snapshotRoot, 'ambiguity-registry.ndjson'),
       nlMappingsJson: path.join(snapshotRoot, 'nl-mappings.json'),
       metadataJson: path.join(snapshotRoot, 'metadata.json'),
@@ -922,6 +1942,25 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
       vespaFeed: 0,
       entities: entityArtifact.length,
       aliases: resolvedAliases.length,
+      lookupAliasRuntimeAliases: finalizedLookupAliasRuntimeArtifact.aliases.length,
+      lookupAliasBroadRecallRuntimeEntries:
+        Object.keys(finalizedLookupAliasBroadRecallRuntimeArtifact.wholeTokenIndex).length
+        + Object.keys(finalizedLookupAliasBroadRecallRuntimeArtifact.phoneticIndex).length
+        + Object.keys(finalizedLookupAliasBroadRecallRuntimeArtifact.doubleMetaphoneIndex).length
+        + Object.keys(finalizedLookupAliasBroadRecallRuntimeArtifact.doubleMetaphoneKeysByAliasId ?? {}).length
+        + finalizedLookupAliasBroadRecallRuntimeArtifact.prefixCatalog.length
+        + (finalizedLookupAliasBroadRecallRuntimeArtifact.hangulCompletionRecords?.length ?? 0),
+      lookupExactSafeRuntimeEntries:
+        Object.keys(finalizedLookupExactSafeRuntimeArtifact.exactEntries).length
+        + Object.keys(finalizedLookupExactSafeRuntimeArtifact.compactEntries).length,
+      lookupResolverProjectionDocuments: finalizedLookupResolverProjectionArtifact.documents.length,
+      lookupEntityProjectionDocuments: finalizedLookupEntityProjectionArtifact.documents.length,
+      lookupSemanticScopeRuntimeEntries: Object.keys(finalizedLookupSemanticScopeRuntimeArtifact.entries).length,
+      lookupReviewedFamilyRecallRuntimeEntries: Object.keys(finalizedLookupReviewedFamilyRecallRuntimeArtifact.entries).length,
+      lookupScopeGraphRuntimeEdges: Object.values(finalizedLookupScopeGraphRuntimeArtifact.adjacency)
+        .reduce((sum, edges) => sum + edges.length, 0),
+      lookupAmbiguityRuntimeEntries: Object.keys(finalizedLookupAmbiguityRuntimeArtifact.entries).length,
+      lookupConceptRedirectRuntimeEntries: Object.keys(finalizedLookupConceptRedirectRuntimeArtifact.entries).length,
       ambiguityRegistry: ambiguityRows.length,
       nlMappings: nlMappings.mappingCount,
     },
@@ -941,21 +1980,118 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
   } as const;
 
   await fs.mkdir(snapshotRoot, { recursive: true });
-  await Promise.all([
+  const snapshotWrites = [
     atomicWriteFile(manifest.artifacts.documentsNdjson, documentsNdjson),
     fs.rm(manifest.artifacts.vespaFeedNdjson, { force: true }),
     atomicWriteFile(manifest.artifacts.entitiesNdjson, entitiesNdjson),
     atomicWriteFile(manifest.artifacts.aliasesNdjson, aliasesNdjson),
+    atomicWriteFile(manifest.artifacts.lookupAliasRuntimeJson, lookupAliasRuntimeJson),
+    atomicWriteFile(manifest.artifacts.lookupExactSafeRuntimeJson, lookupExactSafeRuntimeJson),
+    atomicWriteFile(manifest.artifacts.lookupResolverProjectionJson, lookupResolverProjectionJson),
+    atomicWriteFile(manifest.artifacts.lookupEntityProjectionJson, lookupEntityProjectionJson),
+    atomicWriteFile(manifest.artifacts.lookupSemanticScopeRuntimeJson, lookupSemanticScopeRuntimeJson),
+    atomicWriteFile(manifest.artifacts.lookupReviewedFamilyRecallRuntimeJson, lookupReviewedFamilyRecallRuntimeJson),
+    atomicWriteFile(manifest.artifacts.lookupScopeGraphRuntimeJson, lookupScopeGraphRuntimeJson),
+    atomicWriteFile(manifest.artifacts.lookupAmbiguityRuntimeJson, lookupAmbiguityRuntimeJson),
+    atomicWriteFile(manifest.artifacts.lookupConceptRedirectRuntimeJson, lookupConceptRedirectRuntimeJson),
     atomicWriteFile(manifest.artifacts.ambiguityRegistryNdjson, ambiguityNdjson),
     atomicWriteFile(manifest.artifacts.nlMappingsJson, nlMappingsCanonical),
     atomicWriteFile(manifest.artifacts.metadataJson, `${JSON.stringify(metadata, null, 2)}\n`),
     atomicWriteFile(path.join(snapshotRoot, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`),
-  ]);
+    ...(manifest.artifacts.lookupAliasBroadRecallRuntimeJson === undefined
+      ? []
+      : [atomicWriteFile(
+        manifest.artifacts.lookupAliasBroadRecallRuntimeJson,
+        lookupAliasBroadRecallRuntimeJson,
+      )]),
+  ];
+  await Promise.all(snapshotWrites);
+
+  const finalizedSemanticDescriptors = [
+    ...buildLookupV2RuntimeSemanticDescriptorMapFromDocuments(
+      finalizedLookupEntityProjectionArtifact.documents,
+    ).entries(),
+  ];
+
+  await writeLookupRuntimeBundleCache(
+    buildLookupRuntimeBundleCachePayload({
+      snapshotId,
+      aliasContentHash: hashes.aliases,
+      manifestPath: path.join(snapshotRoot, 'manifest.json'),
+      artifactPaths: {
+        lookupAliasRuntimeJson: manifest.artifacts.lookupAliasRuntimeJson,
+        lookupExactSafeRuntimeJson: manifest.artifacts.lookupExactSafeRuntimeJson,
+        lookupResolverProjectionJson: manifest.artifacts.lookupResolverProjectionJson,
+        lookupSemanticScopeRuntimeJson: manifest.artifacts.lookupSemanticScopeRuntimeJson,
+        lookupReviewedFamilyRecallRuntimeJson: manifest.artifacts.lookupReviewedFamilyRecallRuntimeJson,
+        lookupScopeGraphRuntimeJson: manifest.artifacts.lookupScopeGraphRuntimeJson,
+        lookupAmbiguityRuntimeJson: manifest.artifacts.lookupAmbiguityRuntimeJson,
+        lookupConceptRedirectRuntimeJson: manifest.artifacts.lookupConceptRedirectRuntimeJson,
+        ...(manifest.artifacts.lookupAliasBroadRecallRuntimeJson === undefined
+          ? {}
+          : {
+            lookupAliasBroadRecallRuntimeJson: manifest.artifacts.lookupAliasBroadRecallRuntimeJson,
+          }),
+      },
+      aliasRuntimeArtifact: finalizedLookupAliasRuntimeArtifact,
+      aliasBroadRecallRuntimeArtifact: finalizedLookupAliasBroadRecallRuntimeArtifact,
+      exactEntries: Object.entries(finalizedLookupExactSafeRuntimeArtifact.exactEntries).map(([surface, entry]) => [
+        surface,
+        {
+          entityId: createCanonicalEntityId(entry.entityId),
+          locale: entry.locale,
+          kind: entry.certificate.kind,
+          normalizedSurface: entry.certificate.normalizedSurface,
+          ...(entry.certificate.compactSurface !== undefined
+            ? { compactSurface: entry.certificate.compactSurface }
+            : {}),
+        },
+      ] as const),
+      compactEntries: Object.entries(finalizedLookupExactSafeRuntimeArtifact.compactEntries).map(([surface, entry]) => [
+        surface,
+        {
+          entityId: createCanonicalEntityId(entry.entityId),
+          locale: entry.locale,
+          kind: entry.certificate.kind,
+          normalizedSurface: entry.certificate.normalizedSurface,
+          ...(entry.certificate.compactSurface !== undefined
+            ? { compactSurface: entry.certificate.compactSurface }
+            : {}),
+        },
+      ] as const),
+      resolverProjectionDocuments: finalizedLookupResolverProjectionArtifact.documents.map((doc) => [
+        doc.entityId,
+        {
+          ...doc,
+          entityId: createCanonicalEntityId(doc.entityId),
+        },
+      ] as const),
+      semanticDescriptors: finalizedSemanticDescriptors,
+      semanticScopeEntries: Object.entries(finalizedLookupSemanticScopeRuntimeArtifact.entries),
+      semanticScopeComponentSurfaces:
+        finalizedLookupSemanticScopeRuntimeArtifact.componentSurfaces ?? {},
+      reviewedFamilyRecallEntries: Object.entries(finalizedLookupReviewedFamilyRecallRuntimeArtifact.entries),
+      scopeGraphAdjacency: Object.entries(finalizedLookupScopeGraphRuntimeArtifact.adjacency),
+      ambiguityEntries: Object.entries(finalizedLookupAmbiguityRuntimeArtifact.entries).map(([normalizedForm, entry]) => [
+        normalizedForm,
+        {
+          types: [...entry.types],
+          severity: entry.severity,
+          ...(entry.entityIds !== undefined ? { entityIds: [...entry.entityIds] } : {}),
+        },
+      ] as const),
+      conceptRedirectEntries: Object.entries(finalizedLookupConceptRedirectRuntimeArtifact.entries).map(([normalizedForm, entry]) => [
+        normalizedForm,
+        entry,
+      ] as const),
+    }),
+  );
 
   return {
     manifest,
     snapshotRoot,
     manifestPath: path.join(snapshotRoot, 'manifest.json'),
+    consumedCuration,
   };
 }
 

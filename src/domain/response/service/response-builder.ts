@@ -2,7 +2,7 @@
  * E4-U1: Main Runtime Response Contract Lock
  *
  * {@link ResponseBuilder} is the **authoritative main runtime response surface**.
- * Route handlers (search.usecase, hybrid.usecase, batch-search) MUST build
+ * Route handlers (search.usecase, batch-search) MUST build
  * SearchResponseV1 through ResponseBuilder.build() — not through any V2 builder.
  *
  * V2 builders are sidecar / adapter surfaces:
@@ -345,6 +345,9 @@ export class ResponseBuilder {
       confidenceSemantics: output.confidenceSemantics,
       ...(output.calibrationTrusted !== undefined
         ? { calibrationTrusted: output.calibrationTrusted }
+        : {}),
+      ...(output.top1RawScore !== undefined
+        ? { top1RawScore: output.top1RawScore }
         : {}),
       decisionTraceRef: output.decisionTraceRef,
       authorityTraceRef: output.decisionTraceRef,

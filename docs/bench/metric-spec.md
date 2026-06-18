@@ -1,5 +1,10 @@
 # Agent benchmark metric specification
 
+> Historical/dormant note: this document preserves the metric contract for the
+> scorer and any future live agent-runner restoration. The current repo-native
+> executable lane is `pnpm run bench:smoke`; `test/benchmark/agent/runner.ts`
+> is absent in this checkout. See `docs/bench/STATUS.md`.
+
 SOTA++ reliability foundation for the agent benchmark. Every numeric aggregate published in `BenchmarkReport.summary` is enumerated below: definition, formula, input domain, edge cases, and rationale. The companion contract test at
 `test/regression/benchmark-metric-contract.regression.test.ts` asserts each entry against hand-crafted fixtures so any future refactor that silently drops a metric (e.g. the `meanHardConstraints = 0 // TODO` regression that lived for sessions) is caught at PR time.
 
@@ -9,7 +14,7 @@ This document is **append-only** for aggregates. Removing one requires removing 
 
 Bench layer files this spec governs:
 - `test/benchmark/agent/scorer.ts` — per-scenario scoring + `weightedGeometricMean`, `aggregateGeoMean`, `aggregateTrimmedGeoMean`.
-- `test/benchmark/agent/runner.ts` — run-level aggregation (`buildReport`, `buildSummaryProvenance`).
+- `test/benchmark/agent/scorer-aggregation.ts` — run-level numeric aggregation helpers.
 - `test/benchmark/agent/benchmark-insight-generator.ts` — threshold-driven insight rules.
 - `test/benchmark/agent/constants.ts` — single source of truth for named thresholds (see §"Constants").
 
@@ -210,7 +215,7 @@ Threshold-driven rules that flag run-level patterns. All thresholds bound to `co
 
 ## A6 — Provenance audit checklist
 
-Before merging any PR that touches `runner.ts` `buildReport()`:
+Before merging any PR that touches the live report builder (`runner.ts` when restored):
 
 1. **New aggregate?** Add (a) the field to `BenchmarkReport.summary`, (b) a `MetricProvenance` entry in `buildSummaryProvenance()`, (c) a row in §A2 above, (d) a fixture column if the value is testable without an LLM.
 2. **Hardcoded `0`, `null`, or TODO?** STOP. The contract test will fail on `'TODO'` in the derivation summary. If you genuinely need a placeholder, gate the field as `number | null` and return `null` — never a stubbed `0`.

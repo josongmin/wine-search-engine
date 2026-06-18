@@ -39,7 +39,7 @@ structured logs. The TS type definition is in `src/domain/observability/pipeline
 | Step | Fields | Source |
 |------|--------|--------|
 | `route.entity.only.start` | `query_class`, `resolver_candidate_count`, `blocker_seed_count` | `search.usecase.ts` |
-| `route.entity.only.done` | `resolve_status`, `candidate_count`, `ranked_count`, `corrective_retry`, `outcome_reason_codes` (optional) | `search.usecase.ts` |
+| `route.entity.only.done` | `resolve_status`, `candidate_count`, `ranked_count`, `outcome_reason_codes` (optional) | `entity-lookup-v2-search-bridge.ts` |
 
 ### Stage 4: Retrieval (hybrid/mixed)
 
@@ -97,28 +97,20 @@ structured logs. The TS type definition is in `src/domain/observability/pipeline
 |------|--------|--------|
 | `search.execute.done` | `latency_ms`, `ranked_count`, `resolve_status` | `search.usecase.ts` |
 
-### Resolve / interpret (planner phase)
+### Entity Lookup V2 / interpret (planner phase)
 
 | Step | Fields | Source |
 |------|--------|--------|
-| `resolve.use_case.start` | `query_class` | `resolve.usecase.ts` |
-| `resolve.constraint_sat.contradicted` | `contradiction_reason` | `resolve.usecase.ts` |
-| `resolve.use_case.done` | `resolve_status`, `candidate_count` | `resolve.usecase.ts` |
-| `interpret.planner.done` | `query_class`, `planner_status` | `interpret-planner.ts` |
-
-### Hybrid execution (use case entry)
-
-| Step | Fields | Source |
-|------|--------|--------|
-| `hybrid.execute.start` | `query_class`, `retrieval_mode` | `hybrid.usecase.ts` |
-| `hybrid.execute.ranked` | `ranked_count`, `latency_ms` | `hybrid.usecase.ts` |
-| `hybrid.execute.stage_timings` | _(per-stage `latency_ms` map)_ | `hybrid.usecase.ts` |
+| `entity_lookup_v2.use_case.start` | `query_preview` (optional), `request_id` (optional) | `entity-lookup-v2.usecase.ts` |
+| `entity_lookup_v2.constraint_sat.contradicted` | `contradiction_reason` (reserved — not yet emitted) | — |
+| `entity_lookup_v2.use_case.done` | `resolve_status`, `decision_status`, `candidate_count` | `entity-lookup-v2.usecase.ts` |
+| `interpret.planner.done` | `query_class`, `route`, `retrieval_mode` | `interpret-query-runner.ts` |
 
 ### Batch
 
 | Step | Fields | Source |
 |------|--------|--------|
-| `batch.search.start` | `batch_size` | `batch-search.usecase.ts` |
+| `batch.search.start` | `batch_size` | `batch-search-runner.ts` |
 
 ### Infrastructure HTTP steps
 
@@ -166,8 +158,6 @@ Promoted from inline string literals to `PipelineDebugStep` constants during the
 | Step | Fields | Source |
 |------|--------|--------|
 | `search.execute.stage_timings` | _(per-stage `latency_ms` map)_ | `search.usecase.ts` |
-| `route.entity.corrective_retry.start` | _(varies)_ | `search.usecase.ts` |
-| `route.entity.corrective_retry.candidates` | _(varies)_ | `search.usecase.ts` |
 | `retrieval.critic.decision` | _(varies)_ | `search-usecase-graph-executor.ts` |
 | `retrieval.critic.budget_exhausted` | _(varies)_ | `search-usecase-graph-executor.ts` |
 | `retrieval.critic.rewriter_declined` | _(varies)_ | `search-usecase-graph-executor.ts` |

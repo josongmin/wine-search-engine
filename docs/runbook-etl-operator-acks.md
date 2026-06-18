@@ -89,11 +89,14 @@ the deploy ticket, not in the shell history:
 
 ## `scripts/ops/reap-snapshots.ts` — runtime plane snapshot reaper
 
-**Purpose**: delete rows from `entities` / `aliases` / `ambiguity_registry`
-whose `search_snapshot_id` is neither the `active_search_snapshot.active_snapshot_id`
-nor `active_search_snapshot.previous_snapshot_id`. This is the GC step that
-keeps the composite-PK runtime plane from growing unbounded after successive
-publishes — see [ADR-008](adr/008-runtime-plane-snapshot-scoped-primary-keys.md).
+**Purpose**: delete rows from the snapshot-bound planes whose
+`search_snapshot_id` is neither `active_search_snapshot.active_snapshot_id`
+nor `active_search_snapshot.previous_snapshot_id`. Reaped tables (FK-safe
+order): `aliases`, `entities`, `ambiguity_registry`, `canonical_aliases`,
+`entity_source_links`, `canonical_entities`. This is the GC step that keeps
+composite-PK runtime **and** canonical planes from growing unbounded after
+successive publishes — see
+[ADR-008](adr/008-runtime-plane-snapshot-scoped-primary-keys.md).
 
 **Default behavior**: `--dry-run` is the default. Counts candidate rows per
 table, issues no `DELETE`, and reports what would have been reaped. Destructive
@@ -115,7 +118,7 @@ runs require `--force`.
 **Usage**:
 
 ```bash
-# Dry run (default) — reports candidate row counts across the 3 tables
+# Dry run (default) — reports candidate row counts across all 6 tables + JSON summary on stdout
 pnpm exec tsx scripts/ops/reap-snapshots.ts
 
 # Destructive run — requires --force AND grace period elapsed
@@ -126,6 +129,9 @@ pnpm exec tsx scripts/ops/reap-snapshots.ts --grace-period-hours 48 --force
 ```
 
 **When to run**:
+- Automatically at the end of a successful `publish-search-snapshot` run (post-
+  promote readiness pass). Manual/cron runs remain useful if publish was skipped
+  or a reap failed with a warning.
 - Nightly cron / weekly cron, after the active snapshot has stabilized.
 - **Required pre-condition** for migration 017 (runtime plane PK rollback):
   the rollback SQL needs the composite-PK tables to contain only

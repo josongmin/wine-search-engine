@@ -225,8 +225,9 @@ async function loadEntitiesFromIds(
     entity_id: string;
     canonical_label: string;
     attributes: unknown;
+    metadata: unknown;
   }>(
-    `SELECT entity_id, canonical_label, attributes
+    `SELECT entity_id, canonical_label, attributes, metadata
        FROM entities
       WHERE search_snapshot_id = (
               SELECT active_snapshot_id
@@ -247,8 +248,9 @@ async function loadAllEntities(
     entity_id: string;
     canonical_label: string;
     attributes: unknown;
+    metadata: unknown;
   }>(
-    `SELECT entity_id, canonical_label, attributes
+    `SELECT entity_id, canonical_label, attributes, metadata
        FROM entities
       WHERE search_snapshot_id = (
               SELECT active_snapshot_id
@@ -267,10 +269,12 @@ function toEntityRow(row: {
   entity_id: string;
   canonical_label: string;
   attributes: unknown;
+  metadata: unknown;
 }): EntityRow {
-  // attributes is JSONB — guard with isRecord and pull vintageYear/producer
-  // via runtime validation (CLAUDE.md rule 11: no direct `as` on JSONB).
+  // attributes/metadata are JSONB — guard with isRecord and pull values via
+  // runtime validation (CLAUDE.md rule 11: no direct `as` on JSONB).
   const attributes = isRecord(row.attributes) ? row.attributes : {};
+  const metadata = isRecord(row.metadata) ? row.metadata : {};
   const rawVintage = attributes['vintage'];
   const vintageYear =
     typeof rawVintage === 'number' && Number.isFinite(rawVintage)
@@ -278,7 +282,15 @@ function toEntityRow(row: {
       : typeof rawVintage === 'string'
         ? safeParseInt(rawVintage)
         : undefined;
-  const rawProducer = attributes['producer'];
+  // producer is written to entities.METADATA (build-search-snapshot), NOT
+  // attributes — reading attributes['producer'] silently yielded undefined for
+  // every row. SCOPE: EntityRow.producer is consumed ONLY by the opt-in --llm
+  // path (buildLlmUserPrompt) as a producer HINT in the prompt; the deterministic
+  // abbreviation rules derive from canonicalLabel, so the bug left the LLM hint
+  // absent (default-off path) — it did NOT suppress deterministic abbreviations.
+  // Prefer metadata, fall back to attributes defensively. (Same column as the
+  // family-graph fix.)
+  const rawProducer = metadata['producer'] ?? attributes['producer'];
   const producer = typeof rawProducer === 'string' ? rawProducer : undefined;
   return {
     entityId: row.entity_id,
@@ -500,12 +512,11 @@ function toLlmProposal(
  *
  * Architectural note (migration 016 invariant — see
  * `test/regression/runtime-plane-insert-authority.regression.test.ts`):
- * `scripts/etl/publish-runtime-substrates.ts` is the **only** authorized
- * writer to the runtime-plane `aliases` table. This ETL writes to
- * `alias_proposals` instead. The operator then uses the existing
- * `publish-runtime-substrates` ETL (or the curator promotion pipeline)
- * to materialize approved proposals into `aliases` on the next snapshot
- * publish.
+ * runtime-plane `aliases` rows are materialized only through snapshot ETL
+ * (`build-search-snapshot` → `publish-search-snapshot`). This script stages
+ * into `alias_proposals`; `load-published-curation-proposals.ts` consumes
+ * legacy `approved` abbreviation rows (and ops `published` rows) on the
+ * next snapshot build. See `docs/runbook-curation-materialization.md`.
  *
  * The proposal evidence shape is:
  *   { abbreviationRule, normalizedSurface, aliasScope }
@@ -542,10 +553,8 @@ export async function commitProposals(
           proposal.surface,
           proposal.entityId,
           // `alias_proposals.proposed_type` is TEXT — we persist
-          // 'abbreviation' verbatim; the downstream
-          // publish-runtime-substrates lane validates the type via
-          // the same closed-world enum as the runtime CHECK constraint
-          // (migration 021).
+          // 'abbreviation' verbatim; snapshot ETL consumes legacy approved rows via
+          // `load-published-curation-proposals.ts` (ops `published` is materialization-tracked).
           'abbreviation',
           JSON.stringify({
             abbreviationRule: proposal.rule ?? 'unknown',
@@ -654,6 +663,7 @@ function isProposalShape(value: unknown): value is AbbreviationProposal {
 // ---------------------------------------------------------------------------
 
 export {
+  toEntityRow,
   generateDeterministicProposals,
   generateLlmProposals,
   normalizeForLookup,
@@ -694,8 +704,9 @@ async function run(): Promise<void> {
           `(approved=${String(proposals.filter((p) => p.status === 'approved').length)})`,
       );
       console.log(
-        'Next step: run `pnpm tsx scripts/etl/publish-runtime-substrates.ts` to publish ' +
-          'the approved proposals into the runtime-plane `aliases` table on the next snapshot.',
+        'Next step: ops-publish through the curation plane (preferred) or run '
+        + '`pnpm run etl:build-search-snapshot` then `pnpm run etl:publish-search-snapshot` '
+        + 'to materialize staging rows into snapshot artifacts (see docs/runbook-curation-materialization.md).',
       );
     } finally {
       await closePgPool(pool);

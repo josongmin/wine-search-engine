@@ -77,6 +77,16 @@ interface BulkFeedResult {
   readonly errors: readonly string[];
 }
 
+export interface VespaVisitedDocument {
+  readonly id: string;
+  readonly fields: Record<string, unknown>;
+}
+
+export interface VespaVisitResponse {
+  readonly documents: readonly VespaVisitedDocument[];
+  readonly continuation?: string;
+}
+
 // ---------------------------------------------------------------------------
 // VespaHttpError
 // ---------------------------------------------------------------------------
@@ -132,11 +142,24 @@ export class VespaNetworkError extends Error {
    */
   readonly isAborted: boolean;
 
-  constructor(message: string, cause: Error, isAborted = false) {
+  /**
+   * Distinguishes transport timeouts from genuine caller aborts so publish-time
+   * indexing can retry transient document PUT timeouts without re-enabling the
+   * old "retry every abort" bug.
+   */
+  readonly abortKind: 'none' | 'internal_timeout' | 'external_signal' | 'unknown_abort';
+
+  constructor(
+    message: string,
+    cause: Error,
+    isAborted = false,
+    abortKind: 'none' | 'internal_timeout' | 'external_signal' | 'unknown_abort' = 'none',
+  ) {
     super(message);
     this.name = 'VespaNetworkError';
     this.cause = cause;
     this.isAborted = isAborted;
+    this.abortKind = abortKind;
   }
 }
 
@@ -257,11 +280,16 @@ async function withRetry<T>(
       if (err instanceof VespaHttpError && err.isClientError && !err.isRateLimited) {
         throw err;
       }
-      // Don't retry aborted requests — the caller cancelled (timeout or external
-      // AbortSignal). Retrying would: (a) waste resources since the caller no
-      // longer cares, and (b) triple-count the failure in the circuit breaker
-      // (threshold = 3), which would open the breaker on a single caller abort.
-      if (err instanceof VespaNetworkError && err.isAborted) {
+      // External caller aborts remain terminal: the caller no longer cares and
+      // retrying would triple-count the failure in the circuit breaker.
+      // Internal document/search timeouts are different: the request is still
+      // desired, and publish/search should get bounded retries on transient
+      // slow transport.
+      if (
+        err instanceof VespaNetworkError
+        && err.isAborted
+        && err.abortKind !== 'internal_timeout'
+      ) {
         throw err;
       }
       if (attempt < config.maxRetries) {
@@ -367,6 +395,7 @@ export class VespaClient {
     externalSignal?: AbortSignal,
   ): Promise<Response> {
     const controller = new AbortController();
+    let timedOut = false;
 
     // If the external signal is already aborted, abort immediately so fetch
     // never starts. Without this, addEventListener would never fire (event
@@ -375,7 +404,10 @@ export class VespaClient {
       controller.abort();
     }
 
-    const id = setTimeout(() => { controller.abort(); }, timeoutMs);
+    const id = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
 
     // Forward future external aborts to our controller.
     const onExternalAbort = (): void => { controller.abort(); };
@@ -402,10 +434,19 @@ export class VespaClient {
       // distinguish transport failures from Vespa application errors.
       const cause = err instanceof Error ? err : new Error(String(err));
       const aborted = controller.signal.aborted;
-      const message = aborted
+      const abortKind = timedOut
+        ? 'internal_timeout'
+        : externalSignal?.aborted === true
+          ? 'external_signal'
+          : aborted
+            ? 'unknown_abort'
+            : 'none';
+      const message = timedOut
         ? `Vespa request timed out after ${timeoutMs}ms (${url})`
+        : abortKind === 'external_signal'
+          ? `Vespa request aborted by caller (${url})`
         : `Vespa network error (${url}): ${cause.message}`;
-      throw new VespaNetworkError(message, cause, aborted);
+      throw new VespaNetworkError(message, cause, aborted, abortKind);
     } finally {
       clearTimeout(id);
       externalSignal?.removeEventListener('abort', onExternalAbort);
@@ -706,6 +747,63 @@ export class VespaClient {
       if (fields === undefined || fields === null) return {};
       assertObject(fields, 'document fields');
       return fields;
+    }, VESPA_RETRY_CONFIG);
+  }
+
+  async visit(
+    docType: string,
+    options?: {
+      readonly wantedDocumentCount?: number;
+      readonly continuation?: string;
+      readonly cluster?: string;
+      readonly timeoutMs?: number;
+    },
+  ): Promise<VespaVisitResponse> {
+    const params = new URLSearchParams();
+    params.set('wantedDocumentCount', String(options?.wantedDocumentCount ?? 500));
+    if (options?.cluster !== undefined) {
+      params.set('cluster', options.cluster);
+    }
+    if (options?.continuation !== undefined) {
+      params.set('continuation', options.continuation);
+    }
+    const url = `${this.baseUrl}/document/v1/${this.namespace}/${docType}/docid/?${params.toString()}`;
+    return withRetry(async () => {
+      const response = await this.fetchWithTimeout(
+        url,
+        {},
+        options?.timeoutMs ?? this.timeouts.documentGetDeleteMs,
+      );
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        handleHttpError(response, 'document VISIT', text);
+      }
+      const data: unknown = await response.json();
+      assertObject(data, 'document VISIT response');
+      const documentsRaw = data['documents'];
+      if (!Array.isArray(documentsRaw)) {
+        throw new Error('document VISIT response missing documents array');
+      }
+      const documents: VespaVisitedDocument[] = [];
+      for (const row of documentsRaw) {
+        assertObject(row, 'document VISIT entry');
+        const id = row['id'];
+        const fields = row['fields'];
+        if (typeof id !== 'string') {
+          throw new Error('document VISIT entry missing id');
+        }
+        if (typeof fields !== 'object' || fields === null || Array.isArray(fields)) {
+          throw new Error(`document VISIT entry missing fields for ${id}`);
+        }
+        documents.push({ id, fields: fields as Record<string, unknown> });
+      }
+      const continuationRaw = data['continuation'];
+      return {
+        documents,
+        ...(typeof continuationRaw === 'string' && continuationRaw.length > 0
+          ? { continuation: continuationRaw }
+          : {}),
+      };
     }, VESPA_RETRY_CONFIG);
   }
 

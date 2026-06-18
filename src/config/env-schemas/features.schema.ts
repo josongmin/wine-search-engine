@@ -98,6 +98,27 @@ export const FeaturesEnvSchema = z.object({
    */
   RUNTIME_LTR_MODELS_PATH: z.string().min(1).optional(),
 
+  /**
+   * Master gate for serving the learned LTR reranker on the LIVE request path
+   * (both the /v1 search Ranker and the /v2 entity-lookup reranker share this
+   * sink). Default 'false' preserves the historical serving-off behaviour.
+   *
+   * WARNING — flipping this to 'true' only wires the model in; it does NOT make
+   * serving correct. A structurally-valid SEARCH-trained model fed through the
+   * /v2 lookup feature projection (toRankingFeatures) is OUT-OF-DISTRIBUTION
+   * (e.g. the bm25Score slot is trained as constant 0.0). Activation requires a
+   * LOOKUP-domain-trained model whose featureSchemaHash === LTR_FEATURE_SCHEMA_HASH,
+   * or explicit owner approval of the projection. TRAIN-SERVE BLOCKER (inlined):
+   * the lookup→ranking projection (toRankingFeatures) puts normalizedAliasEvidence
+   * in the bm25Score slot that a search-trained model only ever saw as 0.0 — out of
+   * distribution. The loader/registry schema-hash+dimension verification is a
+   * structural gate only — it does NOT detect OOD.
+   */
+  LTR_SERVING_ENABLED: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .default('false'),
+
   /** Search-snapshot readiness strictness for runtime (vs LTR) activation checks.
    * Default ON for production and smoke tests: active LTR count must be present
    * before search_snapshot_runtime is marked up. In eval isolation lanes where

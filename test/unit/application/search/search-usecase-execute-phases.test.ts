@@ -7,6 +7,7 @@ import {
   dispatchSearchRouteExecution,
 } from '../../../../src/application/search/search-usecase-route-dispatch.js';
 import { SearchUseCase } from '../../../../src/application/search/search.usecase.js';
+import { makeMinimalLookupV2FailedResult, makeStubEntityLookupV2UseCase } from '../../../../src/application/search/__tests__/entity-lookup-v2-use-case.stub.js';
 import type { QueryPlanV1 } from '../../../../src/domain/query/model/query-plan.js';
 import type { CompiledWineQuery } from '../../../../src/domain/query/model/compiled-wine-query.js';
 import type { EntityResolveResult } from '../../../../src/domain/resolver/model/resolve-result.js';
@@ -175,9 +176,6 @@ describe('SearchUseCase unexpected error fallback', () => {
       queryPlanner: {
         plan: vi.fn().mockRejectedValue(new Error('planner exploded')),
       } as never,
-      entityResolver: {
-        resolve: vi.fn(),
-      } as never,
       candidatePool: {
         generate: vi.fn(),
       } as never,
@@ -199,6 +197,7 @@ describe('SearchUseCase unexpected error fallback', () => {
           sanitizedQuery: query.trim(),
         })),
       } as never,
+      entityLookupV2UseCase: makeStubEntityLookupV2UseCase(),
     });
 
     // The refactored search use case now throws instead of returning a
@@ -208,6 +207,7 @@ describe('SearchUseCase unexpected error fallback', () => {
     ).rejects.toThrow();
   });
 });
+
 
 describe('SearchUseCase hybrid execution topology', () => {
   function buildPlan(): QueryPlanV1 {
@@ -276,11 +276,6 @@ describe('SearchUseCase hybrid execution topology', () => {
   it('keeps api_override hybrid on general_only without invoking identity lane', async () => {
     const plan = buildPlan();
     const compiled = buildCompiled(plan);
-    const entityResolver = {
-      resolve: vi.fn(async () => {
-        throw new Error('identity lane should not run for general_only hybrid execution');
-      }),
-    };
     const candidatePool = {
       execute: vi.fn(async () => ({
         candidates: [
@@ -326,10 +321,11 @@ describe('SearchUseCase hybrid execution topology', () => {
         metadata: { runtimeSignal: undefined, funnelMetrics: undefined },
       })),
     };
+    const entityLookupV2Execute = vi.fn();
     const useCase = new SearchUseCase({
       queryPlanner: { plan: vi.fn() } as never,
       allowCompiledFallback: true,
-      entityResolver: entityResolver as never,
+      entityLookupV2UseCase: makeStubEntityLookupV2UseCase(entityLookupV2Execute),
       candidatePool: candidatePool as never,
       ranker: ranker as never,
       decisionEngine: { decide: vi.fn() } as never,
@@ -345,7 +341,7 @@ describe('SearchUseCase hybrid execution topology', () => {
 
     const result = await (useCase as any).executeHybridRoute(plan, compiled);
 
-    expect(entityResolver.resolve).not.toHaveBeenCalled();
+    expect(entityLookupV2Execute).not.toHaveBeenCalled();
     expect(candidatePool.execute).toHaveBeenCalledTimes(1);
     expect(result.executionTopology).toBe('general_only');
     expect(result.executedCompiled.execution.executionTopology).toBe('general_only');
@@ -361,39 +357,6 @@ describe('SearchUseCase hybrid execution topology', () => {
       executionTopology: 'dual_lane',
       routeSource: 'planner',
     });
-    const identityResolveResult: EntityResolveResult = {
-      status: 'resolved',
-      topEntity: {
-        entityId: createEntityId('wine-1'),
-        canonicalLabel: 'Wine One',
-        calibratedScore: 0.96,
-      },
-      candidates: [
-        {
-          entityId: createEntityId('wine-1'),
-          canonicalLabel: 'Wine One',
-          calibratedScore: 0.96,
-          rank: 1,
-          evidenceRefs: ['identity:1'],
-        },
-      ],
-      decisionConfidenceC: 0.96,
-      decisionTrace: {
-        queryClass: 'known_item',
-        top1CalibratedScore: 0.96,
-        top2CalibratedScore: undefined,
-        calibratedGap: undefined,
-        decisionConfidenceC: 0.96,
-        ambiguityDetected: false,
-        ambiguityTypes: [],
-        appliedThresholds: { resolveThreshold: 0.5, gapThreshold: 0.05 },
-        outcomeReasonCodes: ['EXACT_MATCH'],
-      },
-      conformalSetSize: 1,
-    };
-    const entityResolver = {
-      resolve: vi.fn(async () => identityResolveResult),
-    };
     const candidatePool = {
       execute: vi.fn(async () => ({
         candidates: [
@@ -439,10 +402,31 @@ describe('SearchUseCase hybrid execution topology', () => {
         metadata: { runtimeSignal: undefined, funnelMetrics: undefined },
       })),
     };
+    const entityLookupV2Execute = vi.fn().mockResolvedValue(
+      makeMinimalLookupV2FailedResult({
+        status: 'resolved',
+        topCandidate: {
+          entityId: 'wine-1',
+          canonicalLabel: 'Wine One',
+          calibratedScore: 0.96,
+          rank: 1,
+          channelAgreement: 1,
+          channelHits: [],
+        },
+        candidates: [{
+          entityId: 'wine-1',
+          canonicalLabel: 'Wine One',
+          calibratedScore: 0.96,
+          rank: 1,
+          channelAgreement: 1,
+          channelHits: [],
+        }],
+      }),
+    );
     const useCase = new SearchUseCase({
       queryPlanner: { plan: vi.fn() } as never,
       allowCompiledFallback: true,
-      entityResolver: entityResolver as never,
+      entityLookupV2UseCase: makeStubEntityLookupV2UseCase(entityLookupV2Execute),
       candidatePool: candidatePool as never,
       ranker: ranker as never,
       decisionEngine: { decide: vi.fn() } as never,
@@ -458,11 +442,12 @@ describe('SearchUseCase hybrid execution topology', () => {
 
     const result = await (useCase as any).executeHybridRoute(plan, compiled);
 
-    expect(entityResolver.resolve).toHaveBeenCalledTimes(1);
+    expect(entityLookupV2Execute).toHaveBeenCalledTimes(1);
     expect(candidatePool.execute).toHaveBeenCalledTimes(1);
     expect(result.executionTopology).toBe('dual_lane');
     expect(result.executedCompiled.execution.executionTopology).toBe('dual_lane');
-    expect(result.identityResolveResult).toBe(identityResolveResult);
+    expect(result.identityResolveResult?.status).toBe('resolved');
+    expect(result.identityResolveResult?.topEntity?.entityId).toBe(createEntityId('wine-1'));
     expect(result.laneTrace.identity.participated).toBe(true);
     expect(result.laneTrace.general.participated).toBe(true);
   });

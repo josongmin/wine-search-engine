@@ -19,20 +19,23 @@ describe('VespaNetworkError.isAborted regression (R-ABORT-01)', () => {
   });
 
   it('R-ABORT-02: isAborted=true when explicitly passed', () => {
-    const err = new VespaNetworkError('timed out', new Error('AbortError'), true);
+    const err = new VespaNetworkError('timed out', new Error('AbortError'), true, 'internal_timeout');
     expect(err.isAborted).toBe(true);
+    expect(err.abortKind).toBe('internal_timeout');
   });
 
   it('R-ABORT-03: isAborted=false for transient errors that should be retried', () => {
     const err = new VespaNetworkError('connection refused', new Error('ECONNREFUSED'), false);
     expect(err.isAborted).toBe(false);
+    expect(err.abortKind).toBe('none');
     expect(err.name).toBe('VespaNetworkError');
   });
 
   it('R-ABORT-04: isAborted error is an instance of VespaNetworkError', () => {
-    const err = new VespaNetworkError('aborted', new Error('DOMException'), true);
+    const err = new VespaNetworkError('aborted', new Error('DOMException'), true, 'external_signal');
     expect(err).toBeInstanceOf(VespaNetworkError);
     expect(err).toBeInstanceOf(Error);
+    expect(err.abortKind).toBe('external_signal');
   });
 
   it('R-ABORT-05: cause is preserved correctly', () => {

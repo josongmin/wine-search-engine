@@ -1,29 +1,35 @@
 id: tools.batch-search
-name: Batch Search Use Case
+name: Batch Search Runner
 category: tools
 summary: |
   N개 쿼리를 단일 execution context로 batch 실행하고 결과를 집계하는 internal
-  use case. 대시보드 / 시뮬레이션 사용자 시나리오 용.
+  runner. 대시보드 / 시뮬레이션 / fixture 소비용 — live HTTP surface 없음.
 
 maturity: 3
 maturity_rationale: |
-  Use case + HTTP route 와이어링 완료. 그러나 backpressure / fan-out 제한이 hardcoded,
-  per-query failure isolation 미세분.
+  Runner + request/response schema contract 완료 (regression + unit lane).
+  Public `POST /v1/batch-search` route는 catalog 5.x 제거 이후 미등록.
+  Production Container는 `SearchUseCase`만 노출 — batch는 buildBatchSearchRunner rail.
 
-status: active
+status: deprecated
 since: 2025-10
-last_reviewed: 2026-05-21
+last_reviewed: 2026-06-10
 owner: core
 
 surfaces:
-  - "Internal batch-search use case"
+  - "Eval-only: buildBatchSearchRunner() + retained schema contract"
 
 key_files:
-  - src/application/search/batch-search.usecase.ts
+  - src/application/search/batch-search-runner.ts
+  - src/config/build-batch-search-runner.ts
+  - src/interface/http/schemas/batch-search.schema.ts
+  - docs/batch-search.md
 
 tests:
   unit:
-    - test/unit/application/search/batch-search.usecase.test.ts
+    - test/unit/application/search/batch-search-runner.test.ts
+  regression:
+    - test/regression/batch-search-properties.regression.test.ts
 
 depends_on:
   - retrieval.hybrid-search
@@ -31,6 +37,7 @@ depends_on:
 related_rfcs: []
 
 known_limitations:
+  - "No live HTTP route or production Container port"
   - "Backpressure hardcoded"
   - "Per-query failure isolation 미세분"
 
@@ -40,4 +47,5 @@ next_steps:
 
 tags:
   - batch
+  - internal-only
   - dashboard

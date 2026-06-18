@@ -5,7 +5,6 @@ import type { Config } from '../env.js';
 import type { AliasMatcher } from '../../domain/query/service/anchor-extractor.js';
 import type { MappingTablePort } from '../../domain/attribute/port/mapping-table.port.js';
 import type { NLMapping } from '../../domain/attribute/model/nl-mapping.js';
-import { LazyFuzzyMatcher } from '../../infrastructure/adapter/lazy-fuzzy-matcher.js';
 import {
   FallbackAmbiguityDictionary,
   StaticAmbiguityDictionary,
@@ -74,8 +73,7 @@ describe('buildQueryPlanner', () => {
     expect(pool.query).not.toHaveBeenCalled();
   });
 
-  it('warms the startup-built fuzzy matcher before returning the planner', async () => {
-    const warmSpy = vi.spyOn(LazyFuzzyMatcher.prototype, 'warm');
+  it('builds the startup fuzzy matcher lazily without blocking planner boot', async () => {
     const pool = {
       query: vi.fn().mockResolvedValue({
         rows: [{ surface_form: 'opus one' }],
@@ -84,7 +82,7 @@ describe('buildQueryPlanner', () => {
 
     await buildQueryPlanner(makeAdapters(), pool, undefined, undefined, undefined, undefined, 'search-snapshot:v1:test');
 
-    expect(warmSpy).toHaveBeenCalledTimes(1);
+    expect(pool.query).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -19,6 +19,8 @@
  * the HTTP boundary is enforced).
  */
 
+import type { DegradedReason } from '@domain/shared/types/degraded-reason.js';
+
 /**
  * Token accounting block — SNAKE-cased wire projection of `TokenUsage`
  * (`src/domain/ai/port/structured-llm.port.ts`).
@@ -71,15 +73,9 @@ export type WineSearchTerminationReason =
 export type WineSearchAnswerLayer = 'primary' | 'layer2' | 'layer3' | 'layer4';
 
 /** Optional degradation tag — populated only when the runner fell back. */
-export type WineSearchDegradedReason =
-  | 'malformed_llm_output'
-  | 'timeout'
-  | 'circuit_open'
-  | 'no_results'
-  | 'policy_blocked'
-  | 'unexpected_error'
-  | 'ungrounded_claim'
-  | 'no_corpus_match';
+// SSoT (rule 30): the wire DTO degraded-reason type is the domain
+// `DegradedReason` — no independent copy to drift.
+export type WineSearchDegradedReason = DegradedReason;
 
 /** Query intent classifier output (wire form). */
 export type WineSearchQueryIntent =

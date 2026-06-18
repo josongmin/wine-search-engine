@@ -58,6 +58,15 @@ export interface CoverageHealthResponse {
   queue_by_status: Record<ProposalStatus, number>;
   queue_by_kind: Record<ProposalKind, number>;
   total_proposals: number;
+  published_awaiting_materialization: number;
+  legacy_approved_abbreviation_backlog: number;
+  lookup_runtime?: {
+    search_snapshot_id?: string;
+    family_graph_edge_count: number;
+    ltr_support_status: 'unsupported';
+    ltr_support_reason: 'lookup_domain_model_absent';
+    unwired_substrate_ids: readonly string[];
+  };
 }
 
 export interface ListProposalsRequest {

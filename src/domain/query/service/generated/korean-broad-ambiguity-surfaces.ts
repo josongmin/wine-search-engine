@@ -13,12 +13,12 @@
  * - curated exact aliases remain outside this automatic ambiguity lane
  */
 
-type GeneratedBroadAmbiguityClassifier =
+export type GeneratedBroadAmbiguityClassifier =
   | 'producer_family'
   | 'cross_producer_shared_surface'
   | 'multi_entity_generic_surface';
 
-interface GeneratedKoreanBroadAmbiguitySurfaceEntry {
+export interface GeneratedKoreanBroadAmbiguitySurfaceEntry {
   readonly term: string;
   readonly types: readonly string[];
   readonly severity: 'high';
@@ -30,7 +30,10 @@ interface GeneratedKoreanBroadAmbiguitySurfaceEntry {
 export const GENERATED_KOREAN_BROAD_AMBIGUITY_SURFACES:
 readonly GeneratedKoreanBroadAmbiguitySurfaceEntry[] = [
   { term: "리오하 알타", types: ["entity","generic_surface","producer"], severity: 'high', classifiers: ["multi_entity_generic_surface","producer_family"], sources: ["gold_catalog"], supportingCanonicalValues: ["La Rioja Alta Gran Reserva 904 2011"] },
+  { term: "몬테 벨로", types: ["entity","generic_surface","producer"], severity: 'high', classifiers: ["multi_entity_generic_surface","producer_family"], sources: ["gold_catalog"], supportingCanonicalValues: ["Ridge Monte Bello 2018"] },
+  { term: "볼랭저", types: ["entity","generic_surface","producer"], severity: 'high', classifiers: ["multi_entity_generic_surface","producer_family"], sources: ["gold_catalog"], supportingCanonicalValues: ["Bollinger La Grande Année 2014"] },
   { term: "샤블리", types: ["appellation","entity","generic_surface"], severity: 'high', classifiers: ["multi_entity_generic_surface"], sources: ["gold_catalog"], supportingCanonicalValues: ["Domaine Raveneau Chablis Les Clos Grand Cru 2020"] },
+  { term: "솔라이아", types: ["entity","generic_surface","producer"], severity: 'high', classifiers: ["multi_entity_generic_surface","producer_family"], sources: ["gold_catalog"], supportingCanonicalValues: ["Antinori Solaia 2018"] },
   { term: "아드리아나", types: ["entity","generic_surface"], severity: 'high', classifiers: ["multi_entity_generic_surface"], sources: ["gold_catalog"], supportingCanonicalValues: ["Catena Zapata Adrianna Vineyard River Stones Malbec 2019"] },
   { term: "카테나", types: ["appellation","entity","generic_surface"], severity: 'high', classifiers: ["multi_entity_generic_surface"], sources: ["gold_catalog"], supportingCanonicalValues: ["Catena Zapata Adrianna Vineyard River Stones Malbec 2019"] },
   { term: "토카이", types: ["appellation","entity","generic_surface"], severity: 'high', classifiers: ["multi_entity_generic_surface"], sources: ["gold_catalog"], supportingCanonicalValues: ["Royal Tokaji Aszú 6 Puttonyos 2017"] },

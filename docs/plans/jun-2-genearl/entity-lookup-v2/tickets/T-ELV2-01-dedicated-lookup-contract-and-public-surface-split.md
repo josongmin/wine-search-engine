@@ -1,5 +1,11 @@
 # T-ELV2-01 Dedicated Lookup Contract And Public Surface Split
 
+> Historical / audit-only ticket.
+> Current public lookup truth moved to `docs/bench/STATUS.md` and
+> `tools/feature-catalog/features/retrieval/entity-lookup-v2.yaml`.
+> `/v1/lookup/wine` references below describe the migration target at that time,
+> not the current route contract.
+
 ## 목표
 
 `/v1/lookup/wine`의 primitive-search coupling을 끊고, lookup 전용 public contract `/v2/entity-lookup`를 추가한다.

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   VINTAGE_YEAR_RAW,
   extractVintageYear,
+  extractQueryVintageYear,
   stripVintageYears,
   stripVintageYearsBounded,
   hasVintageYear,
@@ -67,6 +68,25 @@ describe('extractVintageYear', () => {
   // CLAUDE.md rule 5: emoji
   it('extracts vintage from emoji-laden text ("🍷 2019 best")', () => {
     expect(extractVintageYear('🍷 2019 best')).toBe(2019);
+  });
+});
+
+describe('extractQueryVintageYear', () => {
+  it('extracts a single standalone two-digit shorthand from a lookup query', () => {
+    expect(extractQueryVintageYear('오퍼스 원 18', 2026)).toBe(2018);
+    expect(extractQueryVintageYear('샤또 라뚜르 09', 2026)).toBe(2009);
+  });
+
+  it('rejects bare numeric queries without a lexical wine surface', () => {
+    expect(extractQueryVintageYear('18', 2026)).toBeNull();
+  });
+
+  it('rejects multiple two-digit candidates in one query', () => {
+    expect(extractQueryVintageYear('와인 18 19', 2026)).toBeNull();
+  });
+
+  it('still prefers a real four-digit vintage when present', () => {
+    expect(extractQueryVintageYear('오퍼스 원 2018', 2026)).toBe(2018);
   });
 });
 

@@ -2,10 +2,15 @@
 /**
  * PR-level micro-bench gate.
  *
- * The default lane runs the lightweight `bench:smoke` test set (which exits
- * non-zero on its own vitest failures) AND, when an archived baseline is
- * supplied, the paired bootstrap from `bench-compare` against the current
- * archive. The gate exits non-zero when:
+ * The default lane runs the deterministic `bench:smoke` unit/regression set
+ * (which exits non-zero on its own vitest failures) AND, when an archived
+ * report/baseline pair is supplied, the paired bootstrap from `bench-compare`.
+ *
+ * Current repo note: the repo-native live agent runner is absent, so CI only
+ * relies on the `bench:smoke` path. Report/baseline modes remain callable for
+ * externally materialized or historical report artifacts.
+ *
+ * The gate exits non-zero when:
  *
  *   - bench:smoke produces a non-zero exit
  *   - OR the current archive has `criticalFailureCount > 0`
@@ -15,13 +20,13 @@
  * intentionally strict.
  *
  * Usage:
- *   tsx scripts/eval/bench-pr-gate.ts
+ *   pnpm exec tsx scripts/eval/bench-pr-gate.ts
  *     # Runs bench:smoke. Exits 1 on failure.
  *
- *   tsx scripts/eval/bench-pr-gate.ts --report data/bench-archive/<sha>-<ts>.json
+ *   pnpm exec tsx scripts/eval/bench-pr-gate.ts --report data/bench-archive/<sha>-<ts>.json
  *     # Reads `criticalFailureCount` from a completed report; fails on > 0.
  *
- *   tsx scripts/eval/bench-pr-gate.ts --report <current> --baseline <baseline>
+ *   pnpm exec tsx scripts/eval/bench-pr-gate.ts --report <current> --baseline <baseline>
  *     # Adds the bootstrap regression check on top of the critical-failure
  *     # check.
  */
@@ -35,6 +40,7 @@ import process from 'node:process';
 import { pairedBootstrap } from './significance.js';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const BENCH_SMOKE_SCRIPT = 'bench:smoke';
 
 const DEFAULT_REGRESSION_THRESHOLD_PP = 2.0;
 const SIGNIFICANCE_ALPHA = 0.05;
@@ -104,7 +110,7 @@ function isMinimalReport(value: unknown): value is MinimalReport {
 }
 
 function runSmokeTests(): number {
-  const result = spawnSync('pnpm', ['run', 'bench:smoke'], {
+  const result = spawnSync('pnpm', ['run', BENCH_SMOKE_SCRIPT], {
     cwd: REPO_ROOT,
     stdio: 'inherit',
   });

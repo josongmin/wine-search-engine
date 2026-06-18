@@ -22,6 +22,7 @@
 
 import type { CanonicalEntityId, QueryClass } from '../../shared/types/index.js';
 import type { NormalizedQueryViews } from '../../query/model/query-views.js';
+import type { StageTimer } from '../../shared/stage-timer.js';
 
 // ───────────────────────────────────────────────────────────────────────────
 // Public outcome contract
@@ -74,6 +75,28 @@ export interface LookupAdmissionVerdict {
   readonly conceptTermsMatched?: readonly string[] | undefined;
 }
 
+export interface LookupConceptRedirectInfo {
+  readonly conceptClass: 'grape' | 'region' | 'style' | 'recommendation' | 'pairing' | 'generic';
+  readonly redirectReason: 'concept_query' | 'generic_non_entity_query';
+  readonly sourceEvidence: string;
+}
+
+export interface LookupConceptRedirectRegistryPort {
+  get(surfaceForm: string): LookupConceptRedirectInfo | null;
+}
+
+export interface LookupExactSafeMatch {
+  readonly entityId: CanonicalEntityId;
+  readonly locale: 'ko' | 'global';
+  readonly kind: 'exact_safe' | 'compact_exact_safe';
+  readonly normalizedSurface: string;
+  readonly compactSurface?: string | undefined;
+}
+
+export interface LookupExactSafeRegistryPort {
+  match(views: NormalizedQueryViews): LookupExactSafeMatch | null;
+}
+
 /**
  * Front-door admission classifier port.
  *
@@ -104,9 +127,26 @@ export const LOOKUP_RETRIEVAL_CHANNELS = [
   'compact_exact', // whitespace/punctuation-folded exact match
   'transliteration_exact', // transliterated-view exact match
   'jamo_phonetic', // jamo / phonetic-skeleton near-exact match
-  'fuzzy_alias', // trigram / edit-distance fuzzy alias
-  'family_graph', // producer/label family-graph recall
-  'dense', // char-aware dense / late-interaction (long-tail misspellings)
+  // fuzzy_alias: recall/expansion strategies the WIRED substrate emits —
+  // transliterated_fuzzy / lexical_exact / prefix_exact (NOT trigram/edit-distance,
+  // which require the unwired PgAliasMatcher).
+  'fuzzy_alias',
+  // family_graph: producer family recall (T-ELV2-06 Half B). The engine walks
+  // alias-recalled anchors through the snapshot-published EntityScopeGraphPort
+  // (`family` relation edges). Fires when the active search snapshot's scope
+  // graph carries family edges; dormant when unwired or empty. Legacy
+  // `PgFamilyGraph` / `entity_family` is NOT the lookup-lane SSoT.
+  'family_graph',
+  // same producer, different line/cuvee siblings from the snapshot-published
+  // scope graph. Used to surface reviewed scope-local alternatives without
+  // widening to the whole producer family.
+  'line_graph',
+  // same producer+line, different vintages from the snapshot-published scope
+  // graph. Lets the reranker see vintage-local alternatives explicitly.
+  'vintage_graph',
+  // dense: RESERVED — no dense/late-interaction index in the lookup lane. Emitted
+  // ONLY by the reuse-path blocker-seed projection (BLOCKER_SEED_CHANNEL).
+  'dense',
 ] as const;
 
 export type LookupRetrievalChannel = (typeof LOOKUP_RETRIEVAL_CHANNELS)[number];
@@ -135,6 +175,12 @@ export interface LookupCandidate {
   readonly canonicalLabel: string;
   readonly entityType: string;
   readonly channelHits: readonly LookupChannelHit[];
+  readonly scopeFeatureHints?: {
+    readonly lineGraphProximity?: number | undefined;
+    readonly vintageGraphProximity?: number | undefined;
+    readonly scopeQualifierAgreement?: number | undefined;
+    readonly scopeAxisAgreement?: number | undefined;
+  } | undefined;
 }
 
 export interface LookupRetrievalInput {
@@ -143,6 +189,8 @@ export interface LookupRetrievalInput {
   readonly queryClass: QueryClass;
   readonly maxCandidates: number;
   readonly locale?: string | undefined;
+  readonly suppressFamilyGraphExpansion?: boolean | undefined;
+  readonly stageTimer?: StageTimer | undefined;
 }
 
 /** Per-channel coverage rail (latency + hit counts) for observability. */
@@ -181,6 +229,10 @@ export interface LookupCandidateFeatures {
   readonly editDistanceScore: number;
   readonly phoneticConsistency: number;
   readonly familyGraphProximity: number;
+  readonly lineGraphProximity: number;
+  readonly vintageGraphProximity: number;
+  readonly scopeQualifierAgreement: number;
+  readonly scopeAxisAgreement: number;
   readonly popularityPrior: number;
   readonly scriptLanguageConsistency: number;
   readonly ambiguityClusterMembership: number;

@@ -2,6 +2,7 @@ import type {
   SearchRequest,
   SearchResponse,
   EntityResolveResponse,
+  EntitySummary,
   WineSearchRequest,
   WineSearchResponse,
   AgentSessionCreateRequest,
@@ -33,6 +34,71 @@ const DEFAULT_TIMEOUT_MS = 30_000;
  * before synthesis. Aligned with the wire schema's `agent_timeout_ms`
  * upper bound (120_000 ms) plus headroom for network + serialization. */
 const WINE_SEARCH_EXECUTE_TIMEOUT_MS = 180_000;
+
+/**
+ * Result of {@link rawApiCall}: the verbatim status + parsed body of a single
+ * request, captured WITHOUT throwing on non-2xx so the operator API playground
+ * can show 4xx/5xx envelopes as-is. Not for product code — product callers use
+ * `api.*`, which throws typed {@link ApiError}.
+ */
+export interface RawApiResult {
+  ok: boolean;
+  status: number;
+  durationMs: number;
+  body: unknown;
+}
+
+export interface RawApiOptions {
+  body?: string;
+  debugKey?: string;
+  writeKey?: string;
+}
+
+export async function rawApiCall(
+  method: string,
+  path: string,
+  opts: RawApiOptions = {},
+): Promise<RawApiResult> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (opts.debugKey) headers[DEBUG_KEY_HEADER] = opts.debugKey;
+  if (opts.writeKey) headers[WRITE_KEY_HEADER] = opts.writeKey;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+  const start = performance.now();
+  try {
+    const init: RequestInit = { method, headers, signal: controller.signal };
+    if (opts.body !== undefined && method !== 'GET' && method !== 'HEAD') {
+      init.body = opts.body;
+    }
+    const res = await fetch(`${API_BASE}${path}`, init);
+    const text = await res.text();
+    let parsed: unknown = '';
+    if (text.length > 0) {
+      try {
+        parsed = JSON.parse(text) as unknown;
+      } catch {
+        parsed = text;
+      }
+    }
+    return {
+      ok: res.ok,
+      status: res.status,
+      durationMs: Math.round(performance.now() - start),
+      body: parsed,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network error';
+    return {
+      ok: false,
+      status: 0,
+      durationMs: Math.round(performance.now() - start),
+      body: { error: message },
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export class ApiError extends Error {
   constructor(
@@ -144,20 +210,41 @@ export const api = {
   },
 
   async lookupEntity(body: SearchRequest, opts: ApiCallOptions = {}) {
-    const response = await request<SearchResponse>('/v1/lookup/wine', {
+    // V2-only cutover: lookup resolves via POST /v2/entity-lookup (the legacy
+    // /v1/lookup/wine route was removed). The wire body is the snake_case
+    // EntityLookupV2 4-state result.
+    interface LookupV2Candidate {
+      entity_id: string;
+      canonical_label: string;
+      entity_type?: string;
+      calibrated_score?: number;
+    }
+    interface LookupV2Response {
+      status: 'resolved' | 'ambiguous' | 'failed' | 'redirect_discovery';
+      top_candidate: LookupV2Candidate | null;
+      candidates: readonly LookupV2Candidate[];
+    }
+    const response = await request<LookupV2Response>('/v2/entity-lookup', {
       method: 'POST',
-      body: JSON.stringify(body),
+      body: JSON.stringify({ query: body.query }),
       externalSignal: opts.signal,
     });
-    if (response.query_type === 'comparison' || response.results.length === 0) {
+    if (response.status !== 'resolved' || response.top_candidate === null) {
       throw new ApiError(404, 'ENTITY_NOT_FOUND', 'No lookup candidate matched the requested wine');
     }
 
-    const [top, ...rest] = response.results;
+    const top = response.top_candidate;
+    const toSummary = (c: LookupV2Candidate): EntitySummary => ({
+      entity_id: c.entity_id as EntitySummary['entity_id'],
+      canonical_label: c.canonical_label,
+      type: c.entity_type ?? 'wine',
+    });
     return {
-      entity: top.entity,
-      confidence: top.relevance_score,
-      alternatives: rest.map((candidate) => candidate.entity),
+      entity: toSummary(top),
+      confidence: top.calibrated_score ?? 1,
+      alternatives: response.candidates
+        .filter((c) => c.entity_id !== top.entity_id)
+        .map(toSummary),
     } satisfies EntityResolveResponse;
   },
 

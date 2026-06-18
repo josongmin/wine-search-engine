@@ -14,6 +14,7 @@ import { loadSearchSnapshotRuntimeState } from '../../src/infrastructure/health/
 // cache does not affect readiness probes running on separate pools.
 import { getCurrentFeatureSchemaHash } from '../../src/domain/ranking/service/feature-parity-hash.js';
 import { buildSearchSnapshot } from './build-search-snapshot.js';
+import { markPublishedCurationProposalsMaterialized } from './load-published-curation-proposals.js';
 import {
   promoteRuntimeSubstrateArtifacts,
   publishRuntimeSubstrates,
@@ -42,6 +43,11 @@ import {
   type PreparedVespaFeedDocument,
   parsePreparedVespaFeedDocuments,
 } from './index-to-vespa.js';
+import { ingestCanonicalEntityGraphForManifestPath } from './ingest-canonical-entity-graph.js';
+import {
+  createReapSnapshotsPool,
+  reapStaleSnapshotsAfterPublish,
+} from '../ops/reap-snapshots.js';
 import {
   createSnapshotPublishStateMachine,
   hasSnapshotPublishReachedPhase,
@@ -57,7 +63,11 @@ export {
 
 const VESPA_NAMESPACE = 'wine';
 const VESPA_DOC_TYPE = 'wine_entity';
-const VESPA_SNAPSHOT_DOC_ID_QUERY_PAGE_SIZE = 400;
+const VESPA_SNAPSHOT_DOC_ID_QUERY_PAGE_SIZE = 100;
+const VESPA_SNAPSHOT_DOC_ID_VISIT_TIMEOUT_MS = 60_000;
+const VESPA_SNAPSHOT_VISIBILITY_TIMEOUT_MS = 5 * 60_000;
+const VESPA_SNAPSHOT_VISIBILITY_POLL_MS = 5_000;
+const VESPA_SNAPSHOT_REPLAY_MAX_PASSES = 3;
 const SNAPSHOT_PUBLISH_LOCK_LEASE_MS = 60_000;
 const SNAPSHOT_PUBLISH_LOCK_HEARTBEAT_MS = 10_000;
 export const FIXTURE_REPO_REQUIRED_ERROR =
@@ -599,7 +609,8 @@ async function writeCriticalWineTypeCoverageMetadata(
 }
 
 async function loadManifest(manifestPath: string): Promise<SearchSnapshotManifest> {
-  return parseManifest(await fs.readFile(manifestPath, 'utf8'), manifestPath);
+  const raw = await fs.readFile(manifestPath, 'utf8');
+  return parseManifest(raw, manifestPath);
 }
 
 async function rewriteSnapshotManifest(
@@ -693,13 +704,6 @@ async function loadSnapshotEntityIds(entitiesPath: string): Promise<readonly str
     .sort((left, right) => left.localeCompare(right));
 }
 
-async function loadPreparedFeedDocIds(preparedFeedPath: string): Promise<readonly string[]> {
-  const raw = await fs.readFile(preparedFeedPath, 'utf8');
-  return parsePreparedVespaFeedDocuments(raw, preparedFeedPath)
-    .map((doc) => doc.id)
-    .sort((left, right) => left.localeCompare(right));
-}
-
 async function loadCurrentRuntimeEntityIds(snapshotId: string): Promise<readonly string[]> {
   const config = loadConfig();
   if (!shouldUsePgPool(config.pg)) {
@@ -728,36 +732,132 @@ function createPublishVespaClient(): VespaClient {
   return new VespaClient(config.vespa.url, VESPA_NAMESPACE, VESPA_DOC_TYPE, undefined, vespaMtls);
 }
 
+function buildExactSnapshotMatchYql(snapshotId: string): string {
+  return `search_snapshot_id matches ${JSON.stringify(`^${snapshotId}$`)}`;
+}
+
+async function fetchLiveVespaSnapshotDocumentCount(snapshotId: string): Promise<number> {
+  const vespa = createPublishVespaClient();
+  const response = await vespa.query(
+    `select * from wine_entity where ${buildExactSnapshotMatchYql(snapshotId)} limit 0;`,
+  );
+  return response.root.fields?.totalCount ?? 0;
+}
+
 async function loadLiveVespaSnapshotDocIds(snapshotId: string): Promise<readonly string[]> {
   const vespa = createPublishVespaClient();
   const liveDocIds = new Set<string>();
-  let offset = 0;
-  let totalCount = Number.POSITIVE_INFINITY;
+  let continuation: string | undefined;
 
-  while (offset < totalCount) {
-    const response = await vespa.query(
-      `select * from sources * where search_snapshot_id contains ${JSON.stringify(snapshotId)} `
-      + `order by entity_id asc limit ${VESPA_SNAPSHOT_DOC_ID_QUERY_PAGE_SIZE} offset ${offset};`,
-      { 'presentation.summary': 'full' },
-    );
-    totalCount = response.root.fields?.totalCount ?? 0;
-    const hits = response.root.children ?? [];
-    if (hits.length === 0) {
+  for (;;) {
+    const response = await vespa.visit(VESPA_DOC_TYPE, {
+      wantedDocumentCount: VESPA_SNAPSHOT_DOC_ID_QUERY_PAGE_SIZE,
+      cluster: VESPA_NAMESPACE,
+      timeoutMs: VESPA_SNAPSHOT_DOC_ID_VISIT_TIMEOUT_MS,
+      ...(continuation !== undefined ? { continuation } : {}),
+    });
+    if (response.documents.length === 0) {
       break;
     }
-    for (const hit of hits) {
-      const entityId = typeof hit.fields['entity_id'] === 'string' ? hit.fields['entity_id'] : undefined;
+    for (const doc of response.documents) {
+      const docSnapshotId =
+        typeof doc.fields['search_snapshot_id'] === 'string' ? doc.fields['search_snapshot_id'] : undefined;
+      if (docSnapshotId !== snapshotId) {
+        continue;
+      }
+      const entityId = typeof doc.fields['entity_id'] === 'string' ? doc.fields['entity_id'] : undefined;
       if (entityId === undefined || entityId.length === 0) {
         throw new Error(
-          `Vespa live snapshot doc probe returned a hit without entity_id for snapshot ${snapshotId}`,
+          `Vespa live snapshot doc probe returned a doc without entity_id for snapshot ${snapshotId}`,
         );
       }
       liveDocIds.add(entityId);
     }
-    offset += hits.length;
+    continuation = response.continuation;
+    if (continuation === undefined) {
+      break;
+    }
   }
 
   return [...liveDocIds].sort((left, right) => left.localeCompare(right));
+}
+
+function buildPreparedDocIndex(
+  docs: readonly PreparedVespaFeedDocument[],
+): ReadonlyMap<string, PreparedVespaFeedDocument> {
+  return new Map(docs.map((doc) => [doc.id, doc] as const));
+}
+
+async function replayPreparedVespaDocuments(
+  docs: readonly PreparedVespaFeedDocument[],
+): Promise<void> {
+  if (docs.length === 0) {
+    return;
+  }
+  const vespa = createPublishVespaClient();
+  const result = await vespa.bulkFeed(docs.map((doc) => ({
+    id: doc.id,
+    fields: doc.fields,
+  })));
+  if (result.failureCount > 0) {
+    throw new Error(
+      `Missing-doc replay failed for ${result.failureCount}/${docs.length} docs: ${result.errors.slice(0, 3).join('; ')}`,
+    );
+  }
+}
+
+async function waitForVespaSnapshotSearchVisibility(args: {
+  readonly snapshotId: string;
+  readonly expectedDocIds: readonly string[];
+}): Promise<void> {
+  const uniqueExpectedDocIds = uniqueSnapshotDocIds(args.expectedDocIds);
+  const deadline = Date.now() + VESPA_SNAPSHOT_VISIBILITY_TIMEOUT_MS;
+  let lastCount = -1;
+  let lastMissingDocIds: readonly string[] = [];
+  let lastStaleDocIds: readonly string[] = [];
+
+  while (Date.now() <= deadline) {
+    const liveCount = await fetchLiveVespaSnapshotDocumentCount(args.snapshotId);
+    lastCount = liveCount;
+    if (liveCount === uniqueExpectedDocIds.length) {
+      const liveDocIds = await loadLiveVespaSnapshotDocIds(args.snapshotId);
+      const diff = diffSnapshotVespaDocIds({
+        expectedDocIds: uniqueExpectedDocIds,
+        liveDocIds,
+      });
+      lastMissingDocIds = diff.missingDocIds;
+      lastStaleDocIds = diff.staleDocIds;
+      if (diff.missingDocIds.length === 0 && diff.staleDocIds.length === 0) {
+        return;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, VESPA_SNAPSHOT_VISIBILITY_POLL_MS));
+  }
+
+  if (lastCount === uniqueExpectedDocIds.length && lastMissingDocIds.length === 0 && lastStaleDocIds.length === 0) {
+    return;
+  }
+
+  throw new Error(
+    `Vespa search visibility did not converge for ${args.snapshotId}: `
+    + `visible=${lastCount}, expected=${uniqueExpectedDocIds.length}, `
+    + `missing=${lastMissingDocIds.length}, stale=${lastStaleDocIds.length}, `
+    + `missing_sample=${lastMissingDocIds.slice(0, 5).join(',') || '<none>'}, `
+    + `stale_sample=${lastStaleDocIds.slice(0, 5).join(',') || '<none>'}`,
+  );
+}
+
+export function uniqueSnapshotDocIds(docIds: readonly string[]): readonly string[] {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const docId of docIds) {
+    if (seen.has(docId)) {
+      continue;
+    }
+    seen.add(docId);
+    unique.push(docId);
+  }
+  return unique;
 }
 
 export function diffSnapshotVespaDocIds(args: {
@@ -767,10 +867,11 @@ export function diffSnapshotVespaDocIds(args: {
   readonly missingDocIds: readonly string[];
   readonly staleDocIds: readonly string[];
 } {
-  const expectedSet = new Set(args.expectedDocIds);
+  const uniqueExpectedDocIds = uniqueSnapshotDocIds(args.expectedDocIds);
+  const expectedSet = new Set(uniqueExpectedDocIds);
   const liveSet = new Set(args.liveDocIds);
   return {
-    missingDocIds: args.expectedDocIds.filter((docId) => !liveSet.has(docId)),
+    missingDocIds: uniqueExpectedDocIds.filter((docId) => !liveSet.has(docId)),
     staleDocIds: args.liveDocIds.filter((docId) => !expectedSet.has(docId)),
   };
 }
@@ -787,20 +888,53 @@ async function deleteStaleVespaDocuments(docIds: readonly string[]): Promise<voi
 
 async function reconcileTargetSnapshotVespaDocuments(
   snapshotId: string,
-  expectedDocIds: readonly string[],
+  expectedDocs: readonly PreparedVespaFeedDocument[],
 ): Promise<void> {
-  const liveDocIds = await loadLiveVespaSnapshotDocIds(snapshotId);
-  const { staleDocIds } = diffSnapshotVespaDocIds({
-    expectedDocIds,
-    liveDocIds,
-  });
-  if (staleDocIds.length === 0) {
-    return;
+  const expectedDocIds = uniqueSnapshotDocIds(expectedDocs.map((doc) => doc.id));
+  const expectedDocIndex = buildPreparedDocIndex(expectedDocs);
+  let lastMissingDocIds: readonly string[] = [];
+  let lastStaleDocIds: readonly string[] = [];
+
+  for (let pass = 1; pass <= VESPA_SNAPSHOT_REPLAY_MAX_PASSES; pass += 1) {
+    const liveDocIds = await loadLiveVespaSnapshotDocIds(snapshotId);
+    const diff = diffSnapshotVespaDocIds({
+      expectedDocIds,
+      liveDocIds,
+    });
+    lastMissingDocIds = diff.missingDocIds;
+    lastStaleDocIds = diff.staleDocIds;
+
+    if (diff.staleDocIds.length > 0) {
+      console.log(
+        `🧹 Deleting ${diff.staleDocIds.length} stale Vespa docs already present under target snapshot ${snapshotId}`,
+      );
+      await deleteStaleVespaDocuments(diff.staleDocIds);
+    }
+
+    if (diff.missingDocIds.length === 0) {
+      return;
+    }
+
+    const replayDocs = diff.missingDocIds.map((docId) => {
+      const doc = expectedDocIndex.get(docId);
+      if (doc === undefined) {
+        throw new Error(`Prepared feed index missing expected doc ${docId}`);
+      }
+      return doc;
+    });
+    console.log(
+      `🔁 Replaying ${replayDocs.length} missing Vespa docs for snapshot ${snapshotId} `
+      + `(pass ${pass}/${VESPA_SNAPSHOT_REPLAY_MAX_PASSES})`,
+    );
+    await replayPreparedVespaDocuments(replayDocs);
   }
-  console.log(
-    `🧹 Deleting ${staleDocIds.length} stale Vespa docs already present under target snapshot ${snapshotId}`,
+
+  throw new Error(
+    `Target snapshot Vespa doc closure failed for ${snapshotId}: `
+    + `missing=${lastMissingDocIds.length}, stale=${lastStaleDocIds.length}, `
+    + `missing_sample=${lastMissingDocIds.slice(0, 5).join(',') || '<none>'}, `
+    + `stale_sample=${lastStaleDocIds.slice(0, 5).join(',') || '<none>'}`,
   );
-  await deleteStaleVespaDocuments(staleDocIds);
 }
 
 async function acquireSnapshotPublishLock() {
@@ -1152,9 +1286,11 @@ async function run(): Promise<void> {
         fixtureRepoRoot: fixtureRoot,
         previousPreparedManifest,
       });
-      const newSnapshotPreparedDocIds = await loadPreparedFeedDocIds(
+      const newSnapshotPreparedDocs = parsePreparedVespaFeedDocuments(
+        await fs.readFile(manifestWithExactFeed.artifacts.vespaFeedNdjson, 'utf8'),
         manifestWithExactFeed.artifacts.vespaFeedNdjson,
       );
+      const newSnapshotPreparedDocIds = uniqueSnapshotDocIds(newSnapshotPreparedDocs.map((doc) => doc.id));
       const artifactCoverage = await assertSnapshotArtifactCriticalWineTypeCoverage(
         manifestWithExactFeed,
       );
@@ -1178,6 +1314,15 @@ async function run(): Promise<void> {
         'prepared-feed',
         fixtureRoot,
       );
+      await reconcileTargetSnapshotVespaDocuments(
+        manifestWithExactFeed.snapshotId,
+        newSnapshotPreparedDocs,
+      );
+      console.log('👁️ Waiting for Vespa search visibility convergence');
+      await waitForVespaSnapshotSearchVisibility({
+        snapshotId: manifestWithExactFeed.snapshotId,
+        expectedDocIds: newSnapshotPreparedDocIds,
+      });
       publishLock.assertHeld();
       publishState.advance('vespa_indexed');
       if (
@@ -1190,9 +1335,12 @@ async function run(): Promise<void> {
         const staleDocIds = currentRuntimeEntityIds.filter((entityId) => !nextEntityIdSet.has(entityId));
         await deleteStaleVespaDocuments(staleDocIds);
       }
-      await reconcileTargetSnapshotVespaDocuments(
-        manifestWithExactFeed.snapshotId,
-        newSnapshotPreparedDocIds,
+      console.log('🧭 Syncing canonical graph plane');
+      const canonicalGraphIngest = await ingestCanonicalEntityGraphForManifestPath(built.manifestPath);
+      console.log(
+        `🧭 Canonical graph synced: entities=${canonicalGraphIngest.canonical_entities_upserted} `
+          + `aliases=${canonicalGraphIngest.canonical_aliases_inserted} `
+          + `ambiguity=${canonicalGraphIngest.canonical_ambiguity_rows_inserted}`,
       );
       console.log('🗄️ Publishing runtime substrates');
       runtimeState = await publishRuntimeSubstrates({
@@ -1202,6 +1350,7 @@ async function run(): Promise<void> {
         // Full publish always builds a fresh snapshot id; re-publishing over the
         // current active snapshot stays guarded (operator must rollback first).
         refreshActiveRuntimeSubstrates: false,
+        artifactOnlyPromote: false,
       });
       publishState.advance('runtime_substrates_published');
       console.log('✅ Verifying search snapshot readiness');
@@ -1250,6 +1399,26 @@ async function run(): Promise<void> {
         manifestPath: built.manifestPath,
         requirePointerParity: true,
       });
+      await markPublishedCurationProposalsMaterialized({
+        snapshotId: built.manifest.snapshotId,
+        consumed: built.consumedCuration,
+      });
+      console.log('🧹 Reaping stale snapshot rows (retain active + previous for rollback)');
+      const reapPool = createReapSnapshotsPool(config.pg);
+      try {
+        const reapSummary = await reapStaleSnapshotsAfterPublish(reapPool);
+        if (reapSummary.performed === 'skipped') {
+          console.log(`🧹 Snapshot reap skipped: ${reapSummary.skipReason ?? 'unknown reason'}`);
+        } else {
+          const totalDeleted = reapSummary.reports.reduce((sum, r) => sum + r.deletedRowCount, 0);
+          console.log(`🧹 Snapshot reap complete: deleted ${totalDeleted} stale row(s) across ${reapSummary.reports.length} table(s)`);
+        }
+      } catch (reapError) {
+        const reapMessage = reapError instanceof Error ? reapError.message : String(reapError);
+        console.warn(`⚠️ Snapshot reap failed (publish succeeded): ${reapMessage}`);
+      } finally {
+        await reapPool.end();
+      }
     } catch (error) {
       console.error(`↩️ Publish failed during phase=${publishState.current}; attempting rollback`);
       const publishMessage = error instanceof Error ? error.message : String(error);

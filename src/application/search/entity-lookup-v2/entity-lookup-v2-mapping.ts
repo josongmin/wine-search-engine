@@ -6,7 +6,6 @@
  */
 
 import type { DecisionStatus } from '../../../domain/shared/types/index.js';
-import type { QueryPlanV1 } from '../../../domain/query/model/query-plan.js';
 import type { NormalizedQueryViews } from '../../../domain/query/model/query-views.js';
 import type { LookupAdmissionVerdict, LookupV2Status } from '../../../domain/resolver/v2/lookup-v2-types.js';
 import type { NormalizedQueryViewsView } from './entity-lookup-v2.dto.js';
@@ -37,6 +36,26 @@ export function mapResolverStatusToLookupStatus(
   }
 }
 
+/** Wire-facing 3-state decision vocabulary shared by resolve/autocomplete/search-bridge projections. */
+export type LookupV2WireDecisionStatus = Extract<DecisionStatus, 'resolved' | 'ambiguous' | 'failed'>;
+
+/**
+ * Map V2 terminal status into the legacy resolve/autocomplete/search 3-state wire
+ * vocabulary. `redirect_discovery` is not a wire status — it maps to `failed`.
+ */
+export function mapLookupV2StatusToWireDecisionStatus(status: LookupV2Status): LookupV2WireDecisionStatus {
+  switch (status) {
+    case 'resolved':
+      return 'resolved';
+    case 'ambiguous':
+      return 'ambiguous';
+    case 'redirect_discovery':
+    case 'failed':
+    default:
+      return 'failed';
+  }
+}
+
 /** Project a domain {@link NormalizedQueryViews} into the wire-facing artifact. */
 export function projectNormalizedQueryViews(v: NormalizedQueryViews): NormalizedQueryViewsView {
   return {
@@ -53,7 +72,11 @@ export function projectNormalizedQueryViews(v: NormalizedQueryViews): Normalized
 }
 
 /** Build the explicit normalized-query-views artifact from a plan. */
-export function buildNormalizedQueryViewsView(plan: QueryPlanV1): NormalizedQueryViewsView {
+export function buildNormalizedQueryViewsView(plan: {
+  readonly rawQuery: string;
+  readonly normalizedQuery: string;
+  readonly normalizedQueryViews?: NormalizedQueryViews | undefined;
+}): NormalizedQueryViewsView {
   const v = plan.normalizedQueryViews;
   if (v === undefined) {
     const q = plan.normalizedQuery;
@@ -83,6 +106,12 @@ export function decisionReasonText(
     case 'resolved':
       return 'Confidently resolved to a single wine entity.';
     case 'ambiguous':
+      if (reasonCode === 'persisted_ambiguity_surface') {
+        return 'This query is a known ambiguous wine surface and requires clarification.';
+      }
+      if (reasonCode === 'reviewed_family_collision_requires_clarification') {
+        return 'This query matches a reviewed producer-family collision and requires clarification.';
+      }
       return 'Multiple plausible wines match this query — clarification is required.';
     case 'redirect_discovery':
       return admission.detail.length > 0
@@ -97,6 +126,9 @@ export function decisionReasonText(
       }
       if (reasonCode === 'hard_constraint_violation') {
         return 'The query contains contradictory constraints and cannot be resolved.';
+      }
+      if (reasonCode === 'recall_only_no_match') {
+        return 'Only low-trust fuzzy recall candidates were found; treat this as no confident match.';
       }
       return 'Could not confidently identify a wine for this query.';
   }

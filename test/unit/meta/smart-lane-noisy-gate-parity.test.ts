@@ -12,6 +12,13 @@ describe('smart lane noisy gate parity', () => {
   const checkSmartSource = readScript('scripts/test/check-smart.mjs');
   const prepushSmartSource = readScript('scripts/test/prepush-smart.mjs');
 
+  it('keeps check-smart wiring HTTP-contract-sensitive changes to verify:http-contracts', () => {
+    expect(checkSmartSource).toContain('const httpContractSourcePatterns = [');
+    expect(checkSmartSource).toContain('const shouldRunHttpContractVerification = changedFiles.some');
+    expect(checkSmartSource).toContain("npmRun('verify:http-contracts')");
+    expect(checkSmartSource).toContain('/^src\\/application\\/search\\/entity-lookup-v2\\//');
+  });
+
   it('keeps check-smart wiring noisy-sensitive changes to the noisy verification gate', () => {
     expect(checkSmartSource).toContain('const noisyGatePatterns = [');
     expect(checkSmartSource).toContain("/^scripts\\/test\\/check-smart\\.mjs$/");
@@ -36,6 +43,8 @@ describe('smart lane noisy gate parity', () => {
 
   it('keeps prepush-smart delegating branch-diff validation through check-smart before extra heavy lanes', () => {
     expect(prepushSmartSource).toContain("npmRun('check:smart', changedFiles);");
+    expect(prepushSmartSource).toContain('HTTP-contract-sensitive changes detected; running verify:http-contracts.');
+    expect(prepushSmartSource).toContain("npmRun('verify:http-contracts');");
     expect(prepushSmartSource).toContain("const script = files.some((file) => matches(file, heavyPatterns))");
     expect(prepushSmartSource).toContain("? 'git:prepush:heavy'");
     expect(prepushSmartSource).toContain(": 'git:prepush';");

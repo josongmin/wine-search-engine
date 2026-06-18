@@ -1,6 +1,6 @@
 {"qid": "elv2-001", "query": "Opus One 2018", "expected_status": "resolved", "expected_entity_hint": "opus one 2018", "class": "exact_entity", "note": "exact canonical — must resolve"}
 {"qid": "elv2-002", "query": "오푸스원", "expected_status": "resolved", "expected_entity_hint": "opus one", "class": "transliteration", "note": "Korean transliteration of a hot entity"}
-{"qid": "elv2-003", "query": "opu one", "expected_status": "failed", "class": "noisy_typo", "note": "DoD #1 — must NOT wrong-resolve to Opus One"}
+{"qid": "elv2-003", "query": "opu one", "expected_status": "failed", "accepted_statuses": ["failed", "ambiguous"], "class": "noisy_typo", "note": "DoD #1 — must NOT wrong-resolve to Opus One"}
 {"qid": "elv2-004", "query": "까쇼", "expected_status": "redirect_discovery", "class": "concept_grape", "note": "DoD #3 — grape concept, must redirect not resolve"}
 {"qid": "elv2-005", "query": "Cabernet Sauvignon", "expected_status": "redirect_discovery", "class": "concept_grape", "note": "bare grape concept"}
 {"qid": "elv2-006", "query": "full bodied red", "expected_status": "redirect_discovery", "class": "concept_style", "note": "style facet concept"}
@@ -12,4 +12,34 @@
 {"qid": "elv2-012", "query": "a", "expected_status": "failed", "class": "under_specified", "note": "too short to be an entity reference"}
 {"qid": "elv2-013", "query": "wine", "expected_status": "redirect_discovery", "class": "generic", "note": "generic non-entity → discovery"}
 {"qid": "elv2-014", "query": "Caymus Cabernet Sauvignon", "expected_status": "resolved", "expected_entity_hint": "caymus", "class": "producer_grape", "note": "producer token must NOT be swept up as concept (false-positive guard)"}
-{"qid": "elv2-015", "query": "오퍼스원 2019", "expected_status": "ambiguous", "class": "multi_vintage_noisy", "note": "noisy + possible multi-vintage — ambiguous or failed acceptable, never wrong-resolve"}
+{"qid": "elv2-015", "query": "오퍼스원 2019", "expected_status": "ambiguous", "accepted_statuses": ["ambiguous", "failed"], "class": "multi_vintage_noisy", "note": "noisy + possible multi-vintage — ambiguous or failed acceptable, never wrong-resolve"}
+{"qid": "elv2-016", "query": "사시카이아", "expected_status": "resolved", "expected_entity_hint": "sassicaia", "class": "transliteration_hard", "note": "core Korean transliteration must resolve to Sassicaia"}
+{"qid": "elv2-017", "query": "사씨카이아", "expected_status": "resolved", "expected_entity_hint": "sassicaia", "class": "transliteration_hard", "note": "phonetic variant of Sassicaia must still resolve"}
+{"qid": "elv2-018", "query": "돔 페리뇽", "expected_status": "resolved", "expected_entity_hint": "dom perignon", "class": "transliteration_spacing", "note": "space-separated Korean transliteration of Dom Perignon"}
+{"qid": "elv2-019", "query": "돔페리농", "expected_status": "resolved", "expected_entity_hint": "dom perignon", "class": "transliteration_hard", "note": "phonetic misspelling must still land on Dom Perignon"}
+{"qid": "elv2-020", "query": "까베르네 소비뇽", "expected_status": "redirect_discovery", "class": "concept_grape_korean", "note": "Korean grape concept must redirect to discovery, not resolve"}
+{"qid": "elv2-021", "query": "바롤로", "expected_status": "redirect_discovery", "class": "concept_appellation_redirect", "note": "appellation concept must redirect to discovery, not enter entity resolution"}
+{"qid": "elv2-022", "query": "펜폴즈", "expected_status": "ambiguous", "class": "producer_entity_collision", "note": "broad producer surface must not auto-resolve to a single wine"}
+{"qid": "elv2-023", "query": "크리스탈", "expected_status": "ambiguous", "class": "common_noun_entity_collision", "note": "common noun vs iconic entity must stay ambiguous"}
+{"qid": "elv2-024", "query": "Cloudy Dreams Marlborough Sauvignon Blanc", "expected_status": "failed", "class": "adversarial_no_match", "note": "realistic invented wine must fail closed"}
+{"qid": "elv2-025", "query": "Chateau Latour 2099", "expected_status": "ambiguous", "accepted_statuses": ["ambiguous", "failed"], "class": "vintage_conflict_impossible", "note": "real label + impossible vintage must not wrong-resolve"}
+{"qid": "elv2-026", "query": "와인 추천", "expected_status": "redirect_discovery", "class": "generic_korean", "note": "generic Korean discovery intent must redirect, not resolve"}
+{"qid": "elv2-027", "query": "오퍼스 원 18", "expected_status": "resolved", "expected_entity_hint": "opus one", "class": "transliteration_spacing", "note": "alternate Korean transliteration + spaced short vintage suffix"}
+{"qid": "elv2-028", "query": "크루그", "expected_status": "resolved", "expected_entity_hint": "krug", "class": "hot_entity_coverage", "note": "common Korean Krug spelling should resolve"}
+{"qid": "elv2-029", "query": "로마네 콩티", "expected_status": "resolved", "expected_entity_hint": "romanee conti", "class": "hot_entity_coverage", "note": "spaced Korean Romanée-Conti should resolve"}
+{"qid": "elv2-030", "query": "돈 멜초", "expected_status": "resolved", "expected_entity_hint": "don melchor", "class": "hot_entity_coverage", "note": "spaced Korean Don Melchor should resolve"}
+{"qid": "elv2-031", "query": "샴페인 추천", "expected_status": "redirect_discovery", "class": "generic_korean_failed", "note": "category recommendation phrase should redirect through concept registry"}
+{"qid": "elv2-032", "query": "샤토 라피트", "expected_status": "resolved", "expected_entity_hint": "lafite", "class": "hot_entity_coverage", "note": "common Korean Lafite orthography variant"}
+{"qid": "elv2-033", "query": "샤또 무통 로칠드", "expected_status": "resolved", "expected_entity_hint": "mouton", "class": "hot_entity_coverage", "note": "common Korean Rothschild misspelling variant"}
+{"qid": "elv2-034", "query": "돔페리농", "expected_status": "resolved", "expected_entity_hint": "dom perignon", "class": "transliteration_hard", "note": "compact Korean typo of Dom Perignon should still resolve"}
+{"qid": "elv2-035", "query": "크룩 그랑 퀴베", "expected_status": "resolved", "expected_entity_hint": "krug", "class": "hot_entity_coverage", "note": "hard Korean typo for Krug Grande Cuvée"}
+{"qid": "elv2-036", "query": "사시카야", "expected_status": "failed", "accepted_statuses": ["failed", "ambiguous"], "class": "ambiguity_korean_typo", "note": "short Korean Sassicaia typo stays fail-closed on exact lookup and must never wrong-resolve"}
+{"qid": "elv2-037", "query": "페트루스", "expected_status": "ambiguous", "class": "ambiguity_korean_typo", "note": "popular Petrus spelling variant stays fail-closed"}
+{"qid": "elv2-038", "query": "까쇼 추천해줘", "expected_status": "redirect_discovery", "class": "concept_grape_recommendation", "note": "grape shorthand plus recommendation phrase should redirect"}
+{"qid": "elv2-039", "query": "보르도 와인 추천", "expected_status": "failed", "class": "safe_abstain_recommendation_phrase", "note": "region recommendation phrase currently safe-abstains and must never resolve"}
+{"qid": "elv2-040", "query": "샤또 미라쥬 2022", "expected_status": "failed", "class": "adversarial_no_match", "note": "fake Koreanized chateau label must fail closed"}
+{"qid": "elv2-041", "query": "에곤뮬러", "expected_status": "resolved", "expected_entity_hint": "egon muller", "class": "hot_entity_coverage", "note": "compact Korean Egon Muller misspelling"}
+{"qid": "elv2-042", "query": "도미니오 데 핑구스", "expected_status": "resolved", "expected_entity_hint": "pingus", "class": "hot_entity_coverage", "note": "full Korean producer phrase for Pingus"}
+{"qid": "elv2-043", "query": "마고", "expected_status": "ambiguous", "class": "producer_entity_collision", "note": "ultra-short Korean Margaux shorthand must stay ambiguous"}
+{"qid": "elv2-044", "query": "라투르", "expected_status": "ambiguous", "class": "producer_entity_collision", "note": "ultra-short Korean Latour shorthand must stay ambiguous"}
+{"qid": "elv2-045", "query": "샹베르탱", "expected_status": "ambiguous", "class": "appellation_entity_collision", "note": "appellation-like Korean shorthand must stay ambiguous instead of resolving"}

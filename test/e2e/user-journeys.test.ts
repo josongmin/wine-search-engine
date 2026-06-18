@@ -10,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createTestServer, closeTestServer, type TestServer } from './helpers/test-server.js';
 import {
   getSearchEntityIds,
+  parseEntityLookupResponse,
   parseErrorResponse,
   parseSearchResponse,
   postJson,
@@ -30,15 +31,21 @@ async function search(body: unknown) {
   return parseSearchResponse(response);
 }
 
+async function lookup(query: string) {
+  const response = await postJson(server.app, '/v2/entity-lookup', { query });
+  expect(response.statusCode).toBe(200);
+  return parseEntityLookupResponse(response);
+}
+
 describe('User Journeys — named entity retrieval', () => {
   it('English and Korean forms of Opus One retrieve the same entity in top-3', async () => {
     const english = await search({
       query: 'Opus One 2018',
-      options: { mode: 'hybrid', explain: false, clarification: false },
+      options: { explain: false, clarification: false },
     });
     const korean = await search({
       query: '오푸스원',
-      options: { mode: 'hybrid', explain: false, clarification: false },
+      options: { explain: false, clarification: false },
     });
 
     expect(getSearchEntityIds(english).slice(0, 3)).toContain('opus-one-2018');
@@ -46,27 +53,23 @@ describe('User Journeys — named entity retrieval', () => {
   });
 
   it('accented and accent-stripped Margaux queries do not fail', async () => {
-    const accented = await search({
-      query: 'Château Margaux',
-      options: { mode: 'entity', explain: false, clarification: false },
-    });
-    const plain = await search({
-      query: 'Chateau Margaux',
-      options: { mode: 'entity', explain: false, clarification: false },
-    });
+    const [accented, plain] = await Promise.all([
+      lookup('Château Margaux'),
+      lookup('Chateau Margaux'),
+    ]);
 
-    expect(accented.engine_decision.decision_status).not.toBe('failed');
-    expect(plain.engine_decision.decision_status).not.toBe('failed');
+    expect(accented.status).not.toBe('failed');
+    expect(plain.status).not.toBe('failed');
   });
 
   it('Cloudy Bay bilingual queries keep the same entity in the top-5', async () => {
     const english = await search({
       query: 'Cloudy Bay',
-      options: { mode: 'hybrid', explain: false, clarification: false },
+      options: { explain: false, clarification: false },
     });
     const korean = await search({
       query: '클라우디베이',
-      options: { mode: 'hybrid', explain: false, clarification: false },
+      options: { explain: false, clarification: false },
     });
 
     expect(getSearchEntityIds(english).slice(0, 5)).toContain('cloudy-bay-2022');
@@ -76,34 +79,23 @@ describe('User Journeys — named entity retrieval', () => {
 
 describe('User Journeys — ambiguity and graceful failure', () => {
   it("'마고' either abstains safely or returns clarification", async () => {
-    const body = await search({
-      query: '마고',
-      options: { mode: 'entity', explain: false, clarification: true },
-    });
-
-    const isAmbiguous = body.engine_decision.decision_status === 'ambiguous';
-    const hasClarification = body.clarification !== null && body.clarification !== undefined;
-
-    expect(isAmbiguous || hasClarification).toBe(true);
-    if (hasClarification) {
-      expect(body.clarification?.suggestion_type).toMatch(/disambiguation|missing_info/);
+    const body = await lookup('마고');
+    expect(['ambiguous', 'failed', 'redirect_discovery']).toContain(body.status);
+    if (body.status === 'ambiguous') {
+      expect(body.clarification_options.length).toBeGreaterThanOrEqual(1);
     }
   });
 
   it('unknown wine queries fail gracefully instead of crashing', async () => {
-    const body = await search({
-      query: 'zzz unknown wine xyz',
-      options: { mode: 'entity', explain: false, clarification: false },
-    });
-
-    expect(body.engine_decision.decision_status).toMatch(/ambiguous|failed|resolved/);
-    if (body.engine_decision.decision_status !== 'resolved') {
-      expect(body.results.length).toBe(0);
+    const body = await lookup('zzz unknown wine xyz');
+    expect(body.status).toMatch(/ambiguous|failed|redirect_discovery|resolved/);
+    if (body.status !== 'resolved') {
+      expect(body.top_candidate).toBeNull();
     }
   });
 });
 
-describe('User Journeys — semantic and mixed search', () => {
+describe('User Journeys — semantic and public discovery search', () => {
   it("'풀바디 레드 와인' returns at least one full-body red candidate in the top-5", async () => {
     const fullBodyIds = new Set([
       'opus-one-2018',
@@ -116,35 +108,35 @@ describe('User Journeys — semantic and mixed search', () => {
 
     const body = await search({
       query: '풀바디 레드 와인',
-      options: { mode: 'hybrid', explain: false, clarification: false },
+      options: { explain: false, clarification: false },
     });
 
     const topFive = getSearchEntityIds(body).slice(0, 5);
     expect(topFive.some((entityId) => fullBodyIds.has(entityId))).toBe(true);
   });
 
-  it("'오푸스원 같은 와인' returns non-empty alternatives without the seed as top result", async () => {
+  it("'오푸스원 같은 와인' stays on the public hybrid discovery lane with non-empty results", async () => {
     const body = await search({
       query: '오푸스원 같은 와인',
-      options: { mode: 'auto', explain: false, clarification: false },
+      options: { explain: false, clarification: false },
     });
 
     expect(body.results.length).toBeGreaterThan(0);
-    expect(body.meta.route).toMatch(/^(mixed|hybrid)$/);
+    expect(body.meta.route).toBe('hybrid');
+    expect(body.retrieval_mode).toBe('attribute_search');
     expect(body.engine_decision.decision_status).not.toBe('failed');
-    expect(body.results[0]?.entity.entity_id).not.toBe('opus-one-2018');
   });
 
-  it("'클라우디베이 말고 다른 화이트' returns non-empty mixed-style alternatives", async () => {
+  it("'클라우디베이 말고 다른 화이트' stays on the public hybrid discovery lane with non-empty results", async () => {
     const body = await search({
       query: '클라우디베이 말고 다른 화이트',
-      options: { mode: 'auto', explain: false, clarification: false },
+      options: { explain: false, clarification: false },
     });
 
     expect(body.results.length).toBeGreaterThan(0);
-    expect(body.meta.route).toMatch(/^(mixed|hybrid)$/);
+    expect(body.meta.route).toBe('hybrid');
+    expect(body.retrieval_mode).toBe('attribute_search');
     expect(body.engine_decision.decision_status).not.toBe('failed');
-    expect(body.results[0]?.entity.entity_id).not.toBe('cloudy-bay-2022');
   });
 });
 

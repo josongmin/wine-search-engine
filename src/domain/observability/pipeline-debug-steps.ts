@@ -17,8 +17,6 @@ export const PipelineDebugStep = {
   // Entity-only route
   ROUTE_ENTITY_ONLY_START: 'route.entity.only.start',
   ROUTE_ENTITY_ONLY_DONE: 'route.entity.only.done',
-  ROUTE_ENTITY_CORRECTIVE_RETRY_START: 'route.entity.corrective_retry.start',
-  ROUTE_ENTITY_CORRECTIVE_RETRY_CANDIDATES: 'route.entity.corrective_retry.candidates',
 
   // Hybrid anchor resolver (ranked routes)
   RESOLVER_ANCHOR_MISSING: 'resolver.anchor.missing',
@@ -71,18 +69,14 @@ export const PipelineDebugStep = {
   DECISION_ENGINE_RESPONSE: 'decision.engine.response',
   CACHE_SET_SKIPPED: 'cache.set_skipped',
 
-  // Hybrid use case
-  HYBRID_EXECUTE_START: 'hybrid.execute.start',
-  HYBRID_EXECUTE_RANKED: 'hybrid.execute.ranked',
-  HYBRID_EXECUTE_STAGE_TIMINGS: 'hybrid.execute.stage_timings',
-
+  // Hybrid use case removed — hybrid routing lives in SearchUseCase.
   // Batch
   BATCH_SEARCH_START: 'batch.search.start',
 
-  // Resolve / interpret
-  RESOLVE_USE_CASE_START: 'resolve.use_case.start',
-  RESOLVE_CONSTRAINT_SAT_CONTRADICTED: 'resolve.constraint_sat.contradicted',
-  RESOLVE_USE_CASE_DONE: 'resolve.use_case.done',
+  // Entity Lookup V2 / interpret
+  ENTITY_LOOKUP_V2_USE_CASE_START: 'entity_lookup_v2.use_case.start',
+  ENTITY_LOOKUP_V2_CONSTRAINT_SAT_CONTRADICTED: 'entity_lookup_v2.constraint_sat.contradicted',
+  ENTITY_LOOKUP_V2_USE_CASE_DONE: 'entity_lookup_v2.use_case.done',
   INTERPRET_PLANNER_DONE: 'interpret.planner.done',
 
   // Infrastructure HTTP
@@ -119,7 +113,6 @@ export const PIPELINE_STAGE_ORDER = [
   'resolve_interpret',
   'route_dispatch',
   'entity_route',
-  'hybrid_execution',
   'retrieval',
   'anchor_resolution',
   'ranking',
@@ -151,9 +144,9 @@ export const PIPELINE_STAGE_STEPS: Readonly<Record<PipelineStage, readonly Pipel
     PipelineDebugStep.PRE_ROUTE_CONTINUE,
   ],
   resolve_interpret: [
-    PipelineDebugStep.RESOLVE_USE_CASE_START,
-    PipelineDebugStep.RESOLVE_CONSTRAINT_SAT_CONTRADICTED,
-    PipelineDebugStep.RESOLVE_USE_CASE_DONE,
+    PipelineDebugStep.ENTITY_LOOKUP_V2_USE_CASE_START,
+    PipelineDebugStep.ENTITY_LOOKUP_V2_CONSTRAINT_SAT_CONTRADICTED,
+    PipelineDebugStep.ENTITY_LOOKUP_V2_USE_CASE_DONE,
     PipelineDebugStep.INTERPRET_PLANNER_DONE,
   ],
   route_dispatch: [
@@ -165,13 +158,6 @@ export const PIPELINE_STAGE_STEPS: Readonly<Record<PipelineStage, readonly Pipel
   entity_route: [
     PipelineDebugStep.ROUTE_ENTITY_ONLY_START,
     PipelineDebugStep.ROUTE_ENTITY_ONLY_DONE,
-    PipelineDebugStep.ROUTE_ENTITY_CORRECTIVE_RETRY_START,
-    PipelineDebugStep.ROUTE_ENTITY_CORRECTIVE_RETRY_CANDIDATES,
-  ],
-  hybrid_execution: [
-    PipelineDebugStep.HYBRID_EXECUTE_START,
-    PipelineDebugStep.HYBRID_EXECUTE_RANKED,
-    PipelineDebugStep.HYBRID_EXECUTE_STAGE_TIMINGS,
   ],
   retrieval: [
     PipelineDebugStep.RETRIEVAL_HYBRID_CANDIDATES_START,

@@ -29,7 +29,7 @@ describe('PgAmbiguityDictionary', () => {
     const pool = { query };
     const dictionary = new PgAmbiguityDictionary(pool as never, 'search-snapshot:v1:target');
 
-    await expect(dictionary.getAmbiguityInfo('opus one')).resolves.toEqual({
+    await expect(dictionary.getAmbiguityInfo('  Opus   One  ')).resolves.toEqual({
       types: ['producer'],
       severity: 'medium',
     });
@@ -37,6 +37,36 @@ describe('PgAmbiguityDictionary', () => {
     expect(query).toHaveBeenCalledWith(
       expect.stringContaining('search_snapshot_id = $2'),
       ['opus one', 'search-snapshot:v1:target'],
+    );
+  });
+
+  it('normalizes batch lookup inputs but preserves original output keys', async () => {
+    const query = vi.fn().mockResolvedValue({
+      rows: [{
+        normalized_form: '그레인지',
+        ambiguity_types: ['short_form', 'entity'],
+        severity: 'high',
+      }],
+    });
+    const pool = { query };
+    const dictionary = new PgAmbiguityDictionary(pool as never, 'search-snapshot:v1:target');
+
+    await expect(dictionary.getAmbiguityInfoBatch(['그레인지', ' 그레인지 '])).resolves.toEqual(
+      new Map([
+        ['그레인지', {
+          types: ['short_form', 'entity'],
+          severity: 'high',
+        }],
+        [' 그레인지 ', {
+          types: ['short_form', 'entity'],
+          severity: 'high',
+        }],
+      ]),
+    );
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('normalized_form = ANY($1::text[])'),
+      [['그레인지'], 'search-snapshot:v1:target'],
     );
   });
 });

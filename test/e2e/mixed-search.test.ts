@@ -61,7 +61,7 @@ describe('Mixed search E2E', () => {
   it('handles "오푸스원 같은 와인" without crashing and returns results', async () => {
     const res = await post('/v1/search/hybrid', {
       query: '오푸스원 같은 와인',
-      options: { mode: 'auto', explain: false, clarification: false },
+      options: { explain: false, clarification: false },
     });
 
     expect(res.statusCode).toBe(200);
@@ -71,7 +71,7 @@ describe('Mixed search E2E', () => {
   it('handles "클라우디베이 말고 다른 화이트" without crashing and returns results', async () => {
     const res = await post('/v1/search/hybrid', {
       query: '클라우디베이 말고 다른 화이트',
-      options: { mode: 'auto', explain: false, clarification: false },
+      options: { explain: false, clarification: false },
     });
 
     expect(res.statusCode).toBe(200);
@@ -84,7 +84,7 @@ describe('Mixed search E2E', () => {
   it('handles "마고 비슷한 레드" without crashing and returns results', async () => {
     const res = await post('/v1/search/hybrid', {
       query: '마고 비슷한 레드',
-      options: { mode: 'auto', explain: false, clarification: false },
+      options: { explain: false, clarification: false },
     });
 
     expect(res.statusCode).toBe(200);

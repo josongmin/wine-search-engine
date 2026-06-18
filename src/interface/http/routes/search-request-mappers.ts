@@ -1,6 +1,5 @@
 import { type z } from 'zod';
 import type {
-  SearchOptions,
   SearchQueryBudget,
   SearchRequestContext,
   SearchRequest,
@@ -58,20 +57,3 @@ export function toLexicalSearchRequest(body: PrimitiveSearchBody): SearchRequest
   };
 }
 
-export function toLookupWineRequest(body: PrimitiveSearchBody): SearchRequest {
-  // Lookup is decisive — clarification 'did you mean?' deflections are not the
-  // job of `/v1/lookup/wine`. Comparison queries are rejected at the route
-  // handler, not papered over here.
-  const options: SearchOptions = {
-    mode: 'auto',
-    explain: false,
-    clarification: false,
-  };
-  return {
-    query: body.query,
-    ...primitiveAliases(body),
-    options,
-    primitiveRoute: 'lookup_wine',
-    retrieval_mode: 'entity',
-  };
-}

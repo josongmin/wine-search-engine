@@ -33,6 +33,7 @@ import { createCanonicalEntityId } from '../../src/domain/shared/types/index.js'
 import { resolveActiveSnapshot } from '../../src/infrastructure/db/active-snapshot-resolver.js';
 import { inferTransliterationSourceLang } from './transliteration-helpers.js';
 import type { AliasSnapshotRecord } from './search-snapshot-schema.js';
+import { computeAliasPhoneticKeys } from '../../src/domain/alias/service/alias-phonetic-keys.js';
 
 const DEFAULT_OUT_PATH = 'data/transliteration-aliases.ndjson';
 
@@ -182,6 +183,7 @@ function toAliasSnapshotRecord(alias: {
   readonly source: string;
   readonly confidencePrior: number;
 }): AliasSnapshotRecord {
+  const phoneticKeys = computeAliasPhoneticKeys(alias.normalizedValue);
   return {
     aliasId: alias.aliasId,
     entityId: alias.entityId,
@@ -192,6 +194,7 @@ function toAliasSnapshotRecord(alias: {
     source: alias.source,
     sourceTrust: 1.0,
     confidencePrior: alias.confidencePrior,
+    ...(phoneticKeys.length > 0 ? { phoneticKeys } : {}),
   };
 }
 

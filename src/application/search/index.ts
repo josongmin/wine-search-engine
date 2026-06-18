@@ -1,6 +1,6 @@
 /**
  * Application-layer search surface (use cases, DTOs).
- * New code may use `import { SearchUseCase } from '@app/search/index.js'`; existing deep imports remain valid.
+ * Production: `SearchUseCase` only. Eval/fixture rails use dedicated build-*
+ * factories — not exported from this barrel.
  */
 export { SearchUseCase } from './search.usecase.js';
-export { BatchSearchUseCase } from './batch-search.usecase.js';

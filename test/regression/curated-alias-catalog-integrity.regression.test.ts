@@ -85,7 +85,7 @@ describe('curated-alias-catalog 3-tier provenance integrity (property-based)', (
   // Tier baseline counts — concrete assertions so future data drift surfaces
   // -------------------------------------------------------------------------
   it('catalog tier counts are well-known baselines', () => {
-    expect(GOLD_KOREAN_ENTITY_ALIAS_CATALOG.length).toBe(122);
+    expect(GOLD_KOREAN_ENTITY_ALIAS_CATALOG.length).toBe(163);
     expect(SEEDED_KOREAN_ENTITY_ALIAS_CATALOG.length).toBe(138);
     expect(SILVER_KOREAN_ENTITY_ALIAS_CATALOG.length).toBe(0);
     expect(CURATED_ENTITY_ALIAS_CATALOG.length).toBeGreaterThanOrEqual(

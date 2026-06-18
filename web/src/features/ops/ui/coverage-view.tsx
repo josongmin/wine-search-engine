@@ -73,6 +73,24 @@ export function OpsCoverageView() {
                   <div key={k} className="flex justify-between"><span className="text-neutral-500">{k}</span><span>{v}</span></div>
                 ))}
                 <div className="mt-2 flex justify-between border-t pt-1"><span className="text-neutral-500">total</span><span>{health.total_proposals}</span></div>
+                <div className="mt-2 flex justify-between border-t pt-1 font-semibold text-amber-700 dark:text-amber-400">
+                  <span>awaiting materialization</span>
+                  <span>{health.published_awaiting_materialization}</span>
+                </div>
+                <div className="mt-2 flex justify-between border-t pt-1 text-amber-700 dark:text-amber-400">
+                  <span>legacy approved abbreviation</span>
+                  <span>{health.legacy_approved_abbreviation_backlog}</span>
+                </div>
+                {health.lookup_runtime != null && (
+                  <div className="mt-2 space-y-1 border-t pt-2 text-xs text-neutral-500">
+                    <div>snapshot: {health.lookup_runtime.search_snapshot_id ?? '—'}</div>
+                    <div>family graph edges: {health.lookup_runtime.family_graph_edge_count}</div>
+                    <div>LTR: {health.lookup_runtime.ltr_support_status}</div>
+                    {health.lookup_runtime.unwired_substrate_ids.length > 0 && (
+                      <div>unwired: {health.lookup_runtime.unwired_substrate_ids.join(', ')}</div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           ) : <p className="text-neutral-500">Enter the debug key to load health.</p>}

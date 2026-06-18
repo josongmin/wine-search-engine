@@ -498,6 +498,15 @@ export function toVespaFields(
   if (doc.bottleSize !== undefined) fields['bottle_size'] = doc.bottleSize;
   if (doc.closure !== undefined) fields['closure'] = doc.closure;
 
+  // Confidence-derived critic rerank weight (synthetic-proxy trust). Written as
+  // a ranking attribute, not a summary-projection field — the `wine_aware`
+  // second-phase reads it to down-weight low-confidence synthetic critic
+  // scores. Emitted only when present so legacy docs (indexed before this
+  // field) fall back to the ranker's isNan→1.0 default.
+  if (doc.criticConfidenceWeight !== undefined) {
+    fields['critic_confidence_weight'] = doc.criticConfidenceWeight;
+  }
+
   return fields;
 }
 
@@ -627,6 +636,9 @@ export function fromVespaFields(
     ...(summary.producerPrestige !== undefined && { producerPrestige: summary.producerPrestige }),
     ...(summary.criticScoreNormalized !== undefined
       && { criticScoreNormalized: summary.criticScoreNormalized }),
+    ...(getOptionalNumber(fields, 'critic_confidence_weight') !== undefined
+      ? { criticConfidenceWeight: getOptionalNumber(fields, 'critic_confidence_weight') }
+      : {}),
     ...(summary.priceUsd !== undefined && { priceUsd: summary.priceUsd }),
     ...(getOptionalNumber(fields, 'rating_avg') !== undefined
       ? { ratingAvg: getOptionalNumber(fields, 'rating_avg') }

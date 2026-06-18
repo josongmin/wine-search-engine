@@ -9,12 +9,12 @@
  *   POST /v1/search/hybrid    → full RRF fusion (dense + sparse)
  *   POST /v1/search/semantic  → dense-only / embedding similarity
  *   POST /v1/search/lexical   → sparse-only / BM25
- *   POST /v1/lookup/wine      → canonical wine entity resolution
  *
- * The first three return discovery-shaped responses (ranked list, possible
- * comparison decomposition). The fourth (`lookup/wine`) is an *exact*
- * entity surface; comparison queries are rejected with 400 since lookup
- * resolves one wine, not a comparison.
+ * These return discovery-shaped responses (ranked list, possible comparison
+ * decomposition). Exact single-wine identity resolution is NOT here — after the
+ * V2-only cutover it lives exclusively at `POST /v2/entity-lookup`
+ * (EntityLookupV2, 4-state contract). The legacy `/v1/lookup/wine` route was
+ * removed.
  */
 
 import type { FastifyInstance } from 'fastify';
@@ -28,13 +28,11 @@ import { registerContractRoute } from './register-contract-route.js';
 import {
   HybridSearchRouteContract,
   LexicalSearchRouteContract,
-  LookupWineRouteContract,
   SemanticSearchRouteContract,
 } from './route-contracts.js';
 import {
   toHybridSearchRequest,
   toLexicalSearchRequest,
-  toLookupWineRequest,
   toSemanticSearchRequest,
 } from './search-request-mappers.js';
 import { getRequestId } from '../request-id.js';
@@ -44,7 +42,6 @@ import { SearchResponseV2HumanSchema } from '../schemas/search-response-v2.schem
 import { abortSignalFromFastifyRequest, raceWithRequestAbort } from '../request-abort-signal.js';
 import { HTTP_STATUS_OK } from '../constants.js';
 import { createStageTimer } from '../../../domain/shared/stage-timer.js';
-import { DomainError } from '../../../domain/shared/error/domain-error.js';
 import type { SearchRequest } from '../../../application/search/search-request.dto.js';
 import type { SearchResponseV1 } from '../../../domain/response/model/search-response.js';
 import type { ComparisonSearchResponse } from '../../../domain/response/model/comparison-response.js';
@@ -120,41 +117,3 @@ export function registerLexicalSearchRoute(app: FastifyInstance, deps: SearchRou
   });
 }
 
-export function registerLookupWineRoute(app: FastifyInstance, deps: SearchRouteDeps): void {
-  registerContractRoute(app, {
-    method: 'POST',
-    url: '/v1/lookup/wine',
-    contract: LookupWineRouteContract,
-    handler: async (request, reply) => {
-      const parsed = parseContractBody(request, LookupWineRouteContract);
-      const searchRequest = toLookupWineRequest(parsed);
-      const requestId = getRequestId(request);
-      const stageTimer = createStageTimer();
-      const abortSignal = abortSignalFromFastifyRequest(request, reply);
-
-      const response = await raceWithRequestAbort(
-        deps.searchUseCase.execute(searchRequest, requestId, {
-          abortSignal,
-          debugRequest: request.debugRequest,
-          stageTimer,
-        }),
-        abortSignal,
-        'Lookup request aborted',
-      );
-
-      // Decomposition runs upstream of route-dispatch and may bubble a
-      // comparison response even with `retrieval_mode='entity'`. Lookup is an
-      // exact wine-identity surface — reject comparison results explicitly
-      // rather than letting the caller infer "this is two wines" from the
-      // response shape.
-      if (response.queryType === 'comparison') {
-        throw new DomainError(
-          'INVALID_REQUEST',
-          'lookup does not support comparison queries — use POST /v1/search/hybrid for "A vs B" queries',
-        );
-      }
-
-      sendRouteContractResponse(request, reply, LookupWineRouteContract, HTTP_STATUS_OK, response);
-    },
-  });
-}

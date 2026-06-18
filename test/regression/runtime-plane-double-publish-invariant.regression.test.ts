@@ -38,8 +38,11 @@ describe('Runtime plane double-publish append-only invariant', () => {
     const singleColumnTargets = matches.filter((t) =>
       t !== undefined && /^(entity|alias|registry)_id$/.test(t),
     );
-    // 3 runtime-plane INSERTs (+ 1 entity_snapshots with its own snapshot_id PK = 4 total)
-    expect(compositeTargets.length).toBe(3);
+    // 3 runtime-plane INSERT kinds (entities, aliases, ambiguity_registry). Alias
+    // staging may emit two SQL variants (with/without phonetic_keys) after migration
+    // 034, so duplicate composite targets are expected.
+    expect(compositeTargets.length).toBeGreaterThanOrEqual(3);
+    expect(new Set(compositeTargets).size).toBe(3);
     expect(singleColumnTargets.length).toBe(0);
   });
 
@@ -99,6 +102,8 @@ describe('Runtime plane double-publish append-only invariant', () => {
     const aliasesInsert = src.match(/INSERT INTO aliases \(([\s\S]*?)\)\s*SELECT([\s\S]*?)FROM input/);
     expect(aliasesInsert?.[1]).toMatch(/search_snapshot_id/);
     expect(aliasesInsert?.[2]).toMatch(/search_snapshot_id/);
+    expect(src).toMatch(/phonetic_keys/);
+    expect(src).toContain("pgTableHasColumn(args.client, 'aliases', 'phonetic_keys')");
 
     const ambiguityInsert = src.match(/INSERT INTO ambiguity_registry \(([\s\S]*?)\)\s*SELECT([\s\S]*?)FROM input/);
     expect(ambiguityInsert?.[1]).toMatch(/search_snapshot_id/);

@@ -62,6 +62,9 @@ const EXPECTED_SORTED_STEP_VALUES: readonly string[] = [
   'dispatch.hybrid.complete',
   'dispatch.mixed.complete',
   'dispatch.route',
+  'entity_lookup_v2.constraint_sat.contradicted',
+  'entity_lookup_v2.use_case.done',
+  'entity_lookup_v2.use_case.start',
   'http.embedding.http_error',
   'http.embedding.network_error',
   'http.embedding.ok',
@@ -72,9 +75,6 @@ const EXPECTED_SORTED_STEP_VALUES: readonly string[] = [
   'http.reranker.ok',
   'http.reranker.parse_error',
   'http.reranker.timeout',
-  'hybrid.execute.ranked',
-  'hybrid.execute.stage_timings',
-  'hybrid.execute.start',
   'interpret.planner.done',
   'post_route.enter',
   'post_route.entropy_abstain',
@@ -84,9 +84,6 @@ const EXPECTED_SORTED_STEP_VALUES: readonly string[] = [
   'pre_route.continue',
   'pre_route.decomposed_comparison',
   'ranking.hybrid.complete',
-  'resolve.constraint_sat.contradicted',
-  'resolve.use_case.done',
-  'resolve.use_case.start',
   'resolver.anchor.done',
   'resolver.anchor.missing',
   'resolver.anchor.start',
@@ -112,8 +109,6 @@ const EXPECTED_SORTED_STEP_VALUES: readonly string[] = [
   'retrieval.producer_browse.error',
   'retrieval.region_browse',
   'retrieval.region_browse.error',
-  'route.entity.corrective_retry.candidates',
-  'route.entity.corrective_retry.start',
   'route.entity.only.done',
   'route.entity.only.start',
   'search.execute.done',
@@ -145,8 +140,6 @@ function exhaustiveLabel(step: PipelineDebugStepId): string {
     case PipelineDebugStep.SEARCH_EXECUTE_STAGE_TIMINGS:
     case PipelineDebugStep.ROUTE_ENTITY_ONLY_START:
     case PipelineDebugStep.ROUTE_ENTITY_ONLY_DONE:
-    case PipelineDebugStep.ROUTE_ENTITY_CORRECTIVE_RETRY_START:
-    case PipelineDebugStep.ROUTE_ENTITY_CORRECTIVE_RETRY_CANDIDATES:
     case PipelineDebugStep.RESOLVER_ANCHOR_MISSING:
     case PipelineDebugStep.RESOLVER_ANCHOR_START:
     case PipelineDebugStep.RESOLVER_ANCHOR_DONE:
@@ -188,13 +181,10 @@ function exhaustiveLabel(step: PipelineDebugStepId): string {
     case PipelineDebugStep.DECISION_ENGINE_REQUEST:
     case PipelineDebugStep.DECISION_ENGINE_RESPONSE:
     case PipelineDebugStep.CACHE_SET_SKIPPED:
-    case PipelineDebugStep.HYBRID_EXECUTE_START:
-    case PipelineDebugStep.HYBRID_EXECUTE_RANKED:
-    case PipelineDebugStep.HYBRID_EXECUTE_STAGE_TIMINGS:
     case PipelineDebugStep.BATCH_SEARCH_START:
-    case PipelineDebugStep.RESOLVE_USE_CASE_START:
-    case PipelineDebugStep.RESOLVE_CONSTRAINT_SAT_CONTRADICTED:
-    case PipelineDebugStep.RESOLVE_USE_CASE_DONE:
+    case PipelineDebugStep.ENTITY_LOOKUP_V2_USE_CASE_START:
+    case PipelineDebugStep.ENTITY_LOOKUP_V2_CONSTRAINT_SAT_CONTRADICTED:
+    case PipelineDebugStep.ENTITY_LOOKUP_V2_USE_CASE_DONE:
     case PipelineDebugStep.INTERPRET_PLANNER_DONE:
     case PipelineDebugStep.HTTP_EMBEDDING_OK:
     case PipelineDebugStep.HTTP_EMBEDDING_HTTP_ERROR:

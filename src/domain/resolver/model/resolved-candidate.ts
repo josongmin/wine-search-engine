@@ -4,6 +4,7 @@ import type { MatchSignalSet } from './match-signal-set.js';
 import type { EntityCandidateSource } from './entity-candidate-generator-input.js';
 import type { SourceRecordRef } from '../../entity/model/source-record-ref.js';
 import type { ResolverCandidateTrace } from './decision-trace.js';
+import type { LookupIdentityCertificate } from '../../shared/types/search-snapshot-lookup-runtime.js';
 
 /**
  * A candidate that has been scored, calibrated, and ranked by the resolver.
@@ -46,7 +47,7 @@ export interface ResolvedCandidate {
    * pipeline via `blockerOnlyIds` — i.e. the blocker found the entity but the
    * alias extractor did not. Absent (undefined) for anchor-sourced candidates.
    *
-   * Used downstream for provenance tagging and corrective retry logging.
+   * Used downstream for provenance tagging and audit traces.
    */
   readonly blockerSeed?: true | undefined;
 
@@ -82,6 +83,13 @@ export interface ResolverCandidate {
 
   /** Indexed lineage references preserved for entity-route result synthesis. */
   readonly sourceRecordRefs?: readonly SourceRecordRef[] | undefined;
+
+  /**
+   * Registry-backed exact-safe identity certificates that matched the RAW
+   * query surface. Present only for candidates whose anchor/query surface was
+   * promoted by the dedicated lookup exact-safe registry.
+   */
+  readonly identityCertificates?: readonly LookupIdentityCertificate[] | undefined;
 
   /** The full set of match signals for scoring. */
   readonly sourceSignals: MatchSignalSet;

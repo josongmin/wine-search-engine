@@ -1,3 +1,5 @@
+import { extractQueryVintageYear } from '../../shared/utils/vintage.js';
+
 /**
  * Korean wine surface typo / entity-slang → canonical form mapping.
  *
@@ -73,9 +75,7 @@ export const KOREAN_WINE_ALIAS_CORRECTION_ENTRIES = [
   ['사시까이야', '사시카이아'],
   ['싸시까이아', '사시카이아'],
   ['쌔시까이아', '사시카이아'],
-  ['사시카야', '사시카이아'],
   ['사씨카이아', '사시카이아'],
-  ['사씨카이야', '사시카이아'],
   ['사씨까이아', '사시카이아'],
   ['띠냐넬로', '티냐넬로'],
   ['티그나넬로', '티냐넬로'],
@@ -137,8 +137,18 @@ export const KOREAN_WINE_ALIAS_CORRECTION_ENTRIES = [
   ['보졸레누보', '보졸레 누보'],
 ] as const;
 
+const KOREAN_WINE_ALIAS_VINTAGE_GATED_CORRECTION_ENTRIES = [
+  // These bare typo forms are too lossy to auto-promote under strict-entity
+  // semantics, but become safe when the user supplies an explicit vintage.
+  ['사시카야', '사시카이아'],
+  ['사씨카이야', '사시카이아'],
+] as const;
+
 const KOREAN_WINE_ALIAS_CORRECTIONS: ReadonlyMap<string, string> = new Map(
   KOREAN_WINE_ALIAS_CORRECTION_ENTRIES,
+);
+const KOREAN_WINE_ALIAS_VINTAGE_GATED_CORRECTIONS: ReadonlyMap<string, string> = new Map(
+  KOREAN_WINE_ALIAS_VINTAGE_GATED_CORRECTION_ENTRIES,
 );
 
 const KOREAN_WINE_ALIAS_VARIANTS = (() => {
@@ -166,6 +176,13 @@ export function correctKoreanWineTypos(query: string): string {
   for (const [typo, canonical] of KOREAN_WINE_ALIAS_CORRECTIONS) {
     if (corrected.includes(typo)) {
       corrected = corrected.replaceAll(typo, canonical);
+    }
+  }
+  if (extractQueryVintageYear(corrected) !== null) {
+    for (const [typo, canonical] of KOREAN_WINE_ALIAS_VINTAGE_GATED_CORRECTIONS) {
+      if (corrected.includes(typo)) {
+        corrected = corrected.replaceAll(typo, canonical);
+      }
     }
   }
   return corrected;

@@ -17,7 +17,6 @@
  *  | abstain_policy_trace                   | always when abstain occurs           |
  *  | fallback_trace                         | always when agent fallback occurs    |
  *  | hard_filter_drop_log                   | always when hard-filter drops occur  |
- *  | corrective_retry_calibrated_confidence | always when corrective retry accepted|
  *  | determinism_fingerprint                | always (normally in meta, not here)  |
  *
  * ### Debug-only fields (gated by `explain=true` or `X-Debug-Key` header)
@@ -243,15 +242,6 @@ export interface AuditExtension {
   } | undefined;
 
   /**
-   * TA5: Calibrated posterior confidence from corrective retry (TA5).
-   * Present when a corrective retry was accepted; undefined otherwise.
-   * Range: [0.5, 0.9] — 0.9 at rank 1, 0.5 at rank N.
-   *
-   * @stability stable — part of the public API contract.
-   */
-  readonly corrective_retry_calibrated_confidence?: number | undefined;
-
-  /**
    * Agent fallback trace — always emitted when agent fallback occurs.
    * Present when the agent pipeline fell back to layer2/3/4 or a search fallback.
    *
@@ -342,7 +332,6 @@ export const AuditExtensionEnvelopeSchema = z
       .default(CURRENT_AUDIT_EXTENSION_SCHEMA_VERSION),
     request_id: z.string().min(1).max(ENVELOPE_MAX_REQUEST_ID_LENGTH).optional(),
     fallback_trace: FallbackTraceWireSchema.optional(),
-    corrective_retry_calibrated_confidence: z.number().finite().min(0).max(1).optional(),
     determinism_fingerprint: z
       .string()
       .min(1)

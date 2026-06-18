@@ -16,7 +16,7 @@ describe('isOpsRoute — request logging cardinality (R6 H7)', () => {
   it('does NOT classify business routes as ops routes', () => {
     expect(isOpsRoute('/v1/search/hybrid')).toBe(false);
     expect(isOpsRoute('/v1/agent')).toBe(false);
-    expect(isOpsRoute('/v1/lookup/wine')).toBe(false);
+    expect(isOpsRoute('/v2/entity-lookup')).toBe(false);
   });
 
   it('does not false-positive on routes that merely contain a probe substring', () => {

@@ -64,7 +64,7 @@ commands = [
     f"post_json /v1/search/hybrid '{json.dumps({'query': query})}'",
     f"post_json /v1/search/semantic '{json.dumps({'query': query})}'",
     f"post_json /v1/search/lexical '{json.dumps({'query': query})}'",
-    f"post_json /v1/lookup/wine '{json.dumps({'query': lookup_query})}'",
+    f"post_json /v2/entity-lookup '{json.dumps({'query': lookup_query})}'",
     f"post_json /v1/agent '{json.dumps({'messages': [{'role': 'user', 'content': query}]})}'",
 ]
 

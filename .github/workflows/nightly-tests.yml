@@ -16,6 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - run: pnpm run test:verification:core
       - name: Nightly summary
@@ -30,6 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [verification-core]
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - run: pnpm run test:e2e:inmemory
 
@@ -38,6 +40,7 @@ jobs:
     needs: [verification-core]
     timeout-minutes: 25
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - run: pnpm run test:ingest:indexing
 
@@ -46,6 +49,7 @@ jobs:
     needs: [verification-core]
     timeout-minutes: 35
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - run: pnpm run test:verification:vespa
       - name: Vespa verification summary
@@ -62,6 +66,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [verification-core]
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - run: pnpm run test:quality:nightly
 
@@ -69,6 +74,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [verification-core]
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - run: pnpm run eval:offline:smoke:assert-baseline
 
@@ -92,13 +98,39 @@ jobs:
     env:
       PG_TEST_URL: postgresql://wine:wine_test@localhost:5433/wine_engine_test
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - run: pnpm run test:integration:cutover
+
+  curation-pg:
+    runs-on: ubuntu-latest
+    needs: [verification-core]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: wine_engine_test
+          POSTGRES_USER: wine
+          POSTGRES_PASSWORD: wine_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U wine -d wine_engine_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PG_TEST_URL: postgresql://wine:wine_test@localhost:5433/wine_engine_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-node-ci
+      - run: pnpm run test:integration:curation
 
   vespa-quality:
     runs-on: ubuntu-latest
     needs: [vespa-e2e]
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - run: bash scripts/run-vespa-quality.sh
 
@@ -128,6 +160,7 @@ jobs:
     env:
       PG_CONNECTION_STRING: postgresql://wine:wine_test@localhost:5433/wine_engine_test
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - name: Apply migrations
         run: pnpm tsx src/infrastructure/db/migrate.ts

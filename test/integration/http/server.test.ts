@@ -7,6 +7,9 @@ function createHttpServerDeps(): HttpServerDeps {
     searchUseCase: {
       execute: vi.fn(),
     },
+    entityLookupV2UseCase: {
+      execute: vi.fn(),
+    },
     evalRunner: null,
   };
 }

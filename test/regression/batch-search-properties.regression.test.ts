@@ -1,10 +1,10 @@
 /**
- * Property-based regression tests for BatchSearchUseCase
+ * Property-based regression tests for BatchSearchRunner
  * (`tools.batch-search`, feature catalog category `tools`).
  *
  * Batch search dispatches N independent search queries in a single call and
- * aggregates the results. Because it backs the dashboard / simulation surface
- * (POST /v1/batch-search), the following invariants MUST hold; any regression
+ * aggregates the results. No live public HTTP route — eval/fixture rail only
+ * (`buildBatchSearchRunner` / retained schema contract).
  * here corrupts caller correlation, idempotency keys, or batch cardinality.
  *
  * Invariants verified (append-only, SOTA++ grade, numRuns = 100 each):
@@ -39,9 +39,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import fc from 'fast-check';
 import {
-  BatchSearchUseCase,
-  type BatchSearchRequestItem,
-} from '../../src/application/search/batch-search.usecase.js';
+  buildBatchSearchRunner,
+  BATCH_SEARCH_MAX_BATCH_SIZE,
+} from '../../src/application/search/batch-search-runner.js';
+import type { BatchSearchRequestItem } from '../../src/application/search/batch-search.dto.js';
 import type { SearchExecutorPort } from '../../src/application/search/port/search-executor.port.js';
 import type { SearchResponseV1 } from '../../src/domain/response/model/search-response.js';
 
@@ -49,9 +50,7 @@ import type { SearchResponseV1 } from '../../src/domain/response/model/search-re
 // failure so reruns reproduce. All async properties use this run count.
 const NUM_RUNS = 100;
 
-// Mirror of BatchSearchUseCase.MAX_BATCH_SIZE — kept as a named constant so the
-// over-size property does not embed a magic number. Source value: 20.
-const EXPECTED_MAX_BATCH_SIZE = 20;
+const EXPECTED_MAX_BATCH_SIZE = BATCH_SEARCH_MAX_BATCH_SIZE;
 
 function makeSearchResponse(requestId = 'req'): SearchResponseV1 {
   return {
@@ -145,8 +144,8 @@ describe('batch-search properties (regression)', () => {
     await fc.assert(
       fc.asyncProperty(itemsArb(EXPECTED_MAX_BATCH_SIZE), async (items) => {
         const { port } = makeExecutor(() => true);
-        const useCase = new BatchSearchUseCase(port);
-        const res = await useCase.execute(items);
+        const runner = buildBatchSearchRunner(port);
+        const res = await runner.execute(items);
 
         expect(res.total).toBe(items.length);
         expect(res.results.length).toBe(items.length);
@@ -168,18 +167,18 @@ describe('batch-search properties (regression)', () => {
     await fc.assert(
       fc.asyncProperty(itemsArb(EXPECTED_MAX_BATCH_SIZE), async (items) => {
         const { port } = makeExecutor(() => true);
-        const useCase = new BatchSearchUseCase(port);
+        const runner = buildBatchSearchRunner(port);
 
         // Same input → same generated batch id (determinism).
-        const a = await useCase.execute(items);
-        const b = await useCase.execute(items);
+        const a = await runner.execute(items);
+        const b = await runner.execute(items);
         expect(a.batch_id).toBe(b.batch_id);
 
         // NFC vs NFD of the same logical queries → same batch id (invariance).
         const nfcItems = items.map((it) => ({ ...it, query: it.query.normalize('NFC') }));
         const nfdItems = items.map((it) => ({ ...it, query: it.query.normalize('NFD') }));
-        const nfc = await useCase.execute(nfcItems);
-        const nfd = await useCase.execute(nfdItems);
+        const nfc = await runner.execute(nfcItems);
+        const nfd = await runner.execute(nfdItems);
         expect(nfc.batch_id).toBe(nfd.batch_id);
       }),
       { numRuns: NUM_RUNS },
@@ -196,8 +195,8 @@ describe('batch-search properties (regression)', () => {
             query: `query ${String(i)}`,
           }));
           const { port, calls } = makeExecutor(() => true);
-          const useCase = new BatchSearchUseCase(port);
-          const res = await useCase.execute(items);
+          const runner = buildBatchSearchRunner(port);
+          const res = await runner.execute(items);
 
           expect(res.batch_status).toBe('failed');
           expect(res.failed).toBe(count);
@@ -213,8 +212,8 @@ describe('batch-search properties (regression)', () => {
 
   it('invariant 6: empty batch is safe (succeeded, zero counts, no dispatch)', async () => {
     const { port, calls } = makeExecutor(() => true);
-    const useCase = new BatchSearchUseCase(port);
-    const res = await useCase.execute([]);
+    const runner = buildBatchSearchRunner(port);
+    const res = await runner.execute([]);
 
     expect(res.total).toBe(0);
     expect(res.succeeded).toBe(0);
@@ -234,10 +233,10 @@ describe('batch-search properties (regression)', () => {
         async (items, failIdx) => {
           const targetId = `item-${String(failIdx % items.length)}`;
           const { port } = makeExecutor((_q, requestId) => !requestId.endsWith(targetId));
-          const useCase = new BatchSearchUseCase(port);
+          const runner = buildBatchSearchRunner(port);
 
           // Must not reject.
-          const res = await useCase.execute(items, { fail_fast: false });
+          const res = await runner.execute(items, { fail_fast: false });
 
           expect(res.results.length).toBe(items.length);
           // The targeted item failed; everything else succeeded (independence).
@@ -274,8 +273,8 @@ describe('batch-search properties (regression)', () => {
               return makeSearchResponse(requestId);
             }),
           };
-          const useCase = new BatchSearchUseCase(port);
-          const res = await useCase.execute(items, { fail_fast: false });
+          const runner = buildBatchSearchRunner(port);
+          const res = await runner.execute(items, { fail_fast: false });
 
           const anyFailures = res.failed > 0 || res.not_executed > 0;
           const expectedStatus = !anyFailures

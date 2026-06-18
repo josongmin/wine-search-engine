@@ -1,7 +1,8 @@
 # Optional local Postgres (legacy / offline). Default dev DB is RDS via `.env` `DATABASE_URL`.
 # Local dev stack: Postgres only.
 # Vespa runs on Vespa Cloud (p0-lab.wine-searcher) — set VESPA_URL in .env.local.
-# Redis is optional — app boots without it (in-memory cache fallback).
+# Redis is OFFICIAL STACK EXCLUDED until cache policy is re-approved.
+# App boots without Redis (in-memory cache fallback). See README + feature catalog infra.redis.
 name: wine-search-dev
 
 services:

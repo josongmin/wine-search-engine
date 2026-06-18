@@ -14,6 +14,7 @@ dotenv.config({ path: '.env.local', override: true });
 dotenv.config();
 
 import { Pool } from 'pg';
+import { createScriptPgPool } from '../lib/script-pg-pool.js';
 import type { EvalBenchmarkKind } from '../../src/domain/evaluation/model/eval-benchmark-run.js';
 import { PgEvalBenchmarkRunStore } from '../../src/infrastructure/adapter/pg-eval-benchmark-run-store.js';
 
@@ -126,18 +127,7 @@ function formatDate(date: Date): string {
 }
 
 function createPool(): Pool {
-  const connectionString = process.env['DATABASE_URL'];
-  if (connectionString !== undefined && connectionString.length > 0) {
-    return new Pool({ connectionString });
-  }
-
-  const host = process.env['PG_HOST'] ?? process.env['PGHOST'] ?? 'localhost';
-  const port = Number.parseInt(process.env['PG_PORT'] ?? process.env['PGPORT'] ?? '5432', 10);
-  const database = process.env['PG_DATABASE'] ?? process.env['PGDATABASE'] ?? 'wine_search';
-  const user = process.env['PG_USER'] ?? process.env['PGUSER'] ?? 'postgres';
-  const password = process.env['PG_PASSWORD'] ?? process.env['PGPASSWORD'] ?? '';
-
-  return new Pool({ host, port, database, user, password });
+  return createScriptPgPool();
 }
 
 async function run(): Promise<void> {

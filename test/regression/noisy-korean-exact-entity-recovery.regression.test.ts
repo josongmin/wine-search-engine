@@ -3,11 +3,12 @@
  *
  * Append-only — do NOT delete entries.
  * Guards the contract that noisy Korean variants for Château Margaux still
- * resolve to the canonical entity on the exact-recovery path, instead of
- * stopping at an ambiguous-but-top-1-correct state.
+ * resolve to the canonical entity on the V2 lookup authority (via the resolve
+ * delegate), instead of stopping at an ambiguous-but-top-1-correct state.
  */
 
 import { describe, expect, it } from 'vitest';
+import { executeResolveViaEntityLookupV2 } from '../../src/application/search/entity-lookup-v2/entity-lookup-v2-resolve-mapping.js';
 import { createTestContainer } from '../integration/helpers/test-container.js';
 
 const CHATEAU_MARGAUX_ID = 'chateau-margaux-2015';
@@ -30,7 +31,10 @@ describe('Noisy Korean exact entity recovery', () => {
   const parts = createTestContainer();
 
   it.each(NOISY_KOREAN_QUERIES)('resolves %s to chateau-margaux-2015', async (query) => {
-    const result = await parts.container.resolveUseCase.execute({ query });
+    const result = await executeResolveViaEntityLookupV2(
+      parts.container.entityLookupV2UseCase,
+      { query },
+    );
 
     expect(result.status).toBe('resolved');
     expect(result.topEntity?.entityId).toBe(CHATEAU_MARGAUX_ID);
@@ -40,7 +44,10 @@ describe('Noisy Korean exact entity recovery', () => {
   });
 
   it.each(NOISY_KOREAN_OPUS_QUERIES)('resolves %s to opus-one-2018', async (query) => {
-    const result = await parts.container.resolveUseCase.execute({ query });
+    const result = await executeResolveViaEntityLookupV2(
+      parts.container.entityLookupV2UseCase,
+      { query },
+    );
 
     expect(result.status).toBe('resolved');
     expect(result.topEntity?.entityId).toBe(OPUS_ONE_ID);

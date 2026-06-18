@@ -146,12 +146,24 @@ const LookupV2EvidenceSummarySchema = z
   })
   .strict();
 
+/** T-ELV2-03: dedicated alias-registry version identity surfaced in meta. */
+const LookupV2AliasRegistrySchema = z
+  .object({
+    schema_version: z.literal('alias_registry.v2'),
+    source: z.enum(['snapshot_manifest', 'pg_overlay', 'search_index']),
+    snapshot_id: z.string().min(1).optional(),
+    alias_content_hash: z.string().min(1).optional(),
+    alias_count: z.number().int().nonnegative(),
+  })
+  .strict();
+
 const LookupV2MetaSchema = z
   .object({
     request_id: z.string().min(1).max(MAX_ERROR_ENVELOPE_REQUEST_ID_CHARS).optional(),
     query_time_ms: z.number().finite().nonnegative(),
     version: z.string().min(1),
     engine_schema_version: z.literal('entity_lookup_v2'),
+    alias_registry: LookupV2AliasRegistrySchema.optional(),
   })
   .strict();
 

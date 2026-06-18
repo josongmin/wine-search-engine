@@ -4,7 +4,6 @@ import { PgCalibrationStore } from '../infrastructure/adapter/pg-calibration-sto
 import { PgAmbiguityDictionary } from '../infrastructure/adapter/pg-ambiguity-dictionary.js';
 import { PgThresholdStore } from '../infrastructure/adapter/pg-threshold-store.js';
 import { PgRefusalThresholdStore } from '../infrastructure/adapter/pg-refusal-threshold-store.js';
-import { isAliasTableAvailable } from '../infrastructure/adapter/pg-alias-matcher.js';
 import {
   CascadingAliasMatcher,
   ExactOnlySecondaryAliasMatcher,
@@ -15,6 +14,7 @@ import { HttpLearnedMatcherAdapter } from '../infrastructure/adapter/http-learne
 import { SearchSnapshotAliasMatcher } from '../infrastructure/adapter/search-snapshot-alias-matcher.js';
 import { SnapshotScopedSearchIndex } from '../infrastructure/adapter/snapshot-scoped-search-index.js';
 import { CachedAliasMatcher } from '../infrastructure/adapter/cached-alias-matcher.js';
+import { MemoizedCalibrationStore } from '../infrastructure/adapter/memoized-calibration-store.js';
 import { LazyFuzzyMatcher } from '../infrastructure/adapter/lazy-fuzzy-matcher.js';
 import { UnavailableFastFailSearchIndex } from '../infrastructure/adapter/unavailable-fast-fail-search-index.js';
 import { VespaClient } from '../infrastructure/vespa/vespa-client.js';
@@ -61,8 +61,6 @@ import {
   StubEmbeddingService,
   StubThresholdStore,
 } from './container-stubs.js';
-
-const ALIAS_OVERLAY_STARTUP_QUERY_TIMEOUT_MS = 1_500;
 
 export interface CoreAdapterServices {
   readonly searchIndex: SearchIndexPort;
@@ -187,30 +185,21 @@ export async function buildCoreAdapterServices(
     allowCodexFallback: true,
   });
 
-  const isPgAliasOverlayAvailable = pool !== undefined && !config.killSwitch.aliasOverlay
-    ? await isAliasTableAvailable(pool, {
-      queryTimeoutMs: ALIAS_OVERLAY_STARTUP_QUERY_TIMEOUT_MS,
-    })
-    : false;
-
   let inMemoryAliasMatcher: SearchSnapshotAliasMatcher | undefined;
   if (!config.killSwitch.aliasOverlay) {
-    const loadSnapshotBoundAliasMatcher = async (): Promise<SearchSnapshotAliasMatcher | undefined> => (
-      runtimeHandles.searchSnapshotManifestPath !== undefined
-        ? SearchSnapshotAliasMatcher.loadFromManifest(runtimeHandles.searchSnapshotManifestPath)
-        : undefined
-    );
-    if (pool !== undefined && isPgAliasOverlayAvailable) {
-      inMemoryAliasMatcher = await SearchSnapshotAliasMatcher.loadFromPostgres(
-        pool,
-        runtimeHandles.searchSnapshotId,
-        {
-          queryTimeoutMs: ALIAS_OVERLAY_STARTUP_QUERY_TIMEOUT_MS,
-        },
+    if (runtimeHandles.searchSnapshotManifestPath !== undefined) {
+      inMemoryAliasMatcher = await SearchSnapshotAliasMatcher.loadFromManifest(
+        runtimeHandles.searchSnapshotManifestPath,
       );
-      inMemoryAliasMatcher ??= await loadSnapshotBoundAliasMatcher();
-    } else {
-      inMemoryAliasMatcher = await loadSnapshotBoundAliasMatcher();
+      if (inMemoryAliasMatcher === undefined) {
+        throw new Error(
+          `Snapshot-bound lookup runtime artifacts are required but failed to load from ${runtimeHandles.searchSnapshotManifestPath}`,
+        );
+      }
+    } else if (pool !== undefined) {
+      throw new Error(
+        'Pool-backed core adapter wiring requires searchSnapshotManifestPath for artifact-only lookup authority.',
+      );
     }
   }
 
@@ -228,11 +217,6 @@ export async function buildCoreAdapterServices(
     inMemoryAliasMatcher !== undefined
       ? (() => {
           const matcher = new LazyFuzzyMatcher(inMemoryAliasMatcher.getSurfaceForms());
-          // Cold-starting the BK-tree on the first user query caused the
-          // initial hybrid request after deploy to spend tens of seconds in
-          // planner pre-route. Warm the in-memory fuzzy index during startup
-          // so the cost is paid before the server serves traffic.
-          matcher.warm();
           return matcher;
         })()
       : undefined;
@@ -259,7 +243,9 @@ export async function buildCoreAdapterServices(
     blockingPort: pool
       ? new PgBlockingAdapter(pool, runtimeHandles.searchSnapshotId)
       : new StubBlockingPort(),
-    calibrationStore: pool ? new PgCalibrationStore(pool) : new StubCalibrationStore(),
+    calibrationStore: pool
+      ? new MemoizedCalibrationStore(new PgCalibrationStore(pool))
+      : new StubCalibrationStore(),
     ambiguityDict: new FallbackAmbiguityDictionary(
       pool
         ? new PgAmbiguityDictionary(pool, runtimeHandles.searchSnapshotId)

@@ -56,13 +56,7 @@ import type {
   SearchUseCasePort,
 } from '../execution-runner.js';
 import type { SearchUseCaseInput } from '../execution-plan-schemas.js';
-import type { DecomposedSearchUseCasePort } from '../../search/port/search-route-usecases.port.js';
-import type { DrinkingWindowUseCasePort } from '../../drinking-window/port/drinking-window-usecase.port.js';
-import type { EntityDocumentLookupPort } from '../../search/port/search-pipeline-deps.port.js';
 import type { WineSearchAnalysis } from '../wine-search-schemas.js';
-import type { ComparisonSearchResponse } from '../../../domain/response/model/comparison-response.js';
-import type { DrinkingWindowBlock } from '../../../domain/response/model/result-item.js';
-import { createCanonicalEntityId } from '../../../domain/shared/types/index.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -126,6 +120,70 @@ function makeSearchResponse(entityIds: readonly string[]): SearchResponseV1 {
   };
 }
 
+// V2-native lookup stubs (lookup_wine now dispatches to the dedicated
+// EntityLookupV2 port, NOT searchUseCase).
+function makeLookupCandidate(entityId: string, label: string): unknown {
+  return {
+    entityId,
+    canonicalLabel: label,
+    calibratedScore: 0.97,
+    rank: 1,
+    channelAgreement: 1,
+    channelHits: [],
+  };
+}
+
+function makeLookupResolved(entityId: string, label = `Wine ${entityId}`): unknown {
+  const top = makeLookupCandidate(entityId, label);
+  return {
+    status: 'resolved',
+    decisionReason: 'resolved',
+    candidates: [top],
+    topCandidate: top,
+    clarificationOptions: [],
+    normalizedQueryViews: {
+      raw: label, strict: label, accentless: label, compact: label,
+      vintageCanonicalized: label, vintageStripped: label, lookupVariants: [label],
+    },
+    evidenceSummary: {
+      admissionReasonCode: 'admitted_entity_reference',
+      decisionReasonCode: 'calibrated_resolve',
+      calibrationTrusted: true,
+    },
+    meta: { queryTimeMs: 1, version: 'test', engineSchemaVersion: 'entity_lookup_v2' },
+  };
+}
+
+function makeLookupAmbiguous(entityIds: readonly string[]): unknown {
+  return {
+    status: 'ambiguous',
+    decisionReason: 'ambiguous',
+    candidates: entityIds.map((id) => makeLookupCandidate(id, `Wine ${id}`)),
+    topCandidate: null,
+    clarificationOptions: entityIds.map((id) => ({ entityId: id, label: `Wine ${id}` })),
+    normalizedQueryViews: {
+      raw: '', strict: '', accentless: '', compact: '',
+      vintageCanonicalized: '', vintageStripped: '', lookupVariants: [],
+    },
+    evidenceSummary: {
+      admissionReasonCode: 'admitted_entity_reference',
+      decisionReasonCode: 'ambiguous_multi_candidate',
+      calibrationTrusted: true,
+    },
+    meta: { queryTimeMs: 1, version: 'test', engineSchemaVersion: 'entity_lookup_v2' },
+  };
+}
+
+interface StubLookupPort {
+  readonly execute: ReturnType<typeof vi.fn>;
+}
+
+function makeLookupPort(handler?: () => Promise<unknown>): StubLookupPort {
+  return {
+    execute: vi.fn(handler ?? (() => Promise.resolve(makeLookupResolved('default-entity')))),
+  } as unknown as StubLookupPort;
+}
+
 function makeSearchPort(
   impl?: (input: unknown, reqId: string) => Promise<SearchResponseV1>,
 ): SearchUseCasePort & { readonly executeMock: ReturnType<typeof vi.fn> } {
@@ -136,105 +194,11 @@ function makeSearchPort(
   };
 }
 
-function makeComparisonResponse(): ComparisonSearchResponse {
-  return {
-    queryType: 'comparison',
-    originalQuery: 'Wine A vs Wine B',
-    comparisonIntent: 'compare',
-    entities: [
-      {
-        subQuery: 'Wine A',
-        topResult: null,
-        resultCount: 1,
-        resolutionStatus: 'resolved',
-        allResults: [],
-      },
-      {
-        subQuery: 'Wine B',
-        topResult: null,
-        resultCount: 1,
-        resolutionStatus: 'resolved',
-        allResults: [],
-      },
-    ],
-    overallStatus: 'resolved',
-    requestId: REQUEST_ID,
-    executionTimeMs: 10,
-  };
-}
-
-function makeDecomposedSearchPort(
-  impl?: (...args: unknown[]) => Promise<ComparisonSearchResponse>,
-): DecomposedSearchUseCasePort & { readonly executeMock: ReturnType<typeof vi.fn> } {
-  const executeMock = vi.fn(impl ?? (() => Promise.resolve(makeComparisonResponse())));
-  return {
-    executeMock,
-    execute: (...args) => executeMock(...args),
-  } as unknown as DecomposedSearchUseCasePort & { readonly executeMock: ReturnType<typeof vi.fn> };
-}
-
-function makeDrinkingWindowBlock(): DrinkingWindowBlock {
-  return {
-    targetYear: 2026,
-    status: 'optimal',
-    message: 'Ready to drink',
-    confidence: 'high',
-    confidenceScore: 0.9,
-    prediction: {
-      drinkingWindowStart: 2024,
-      drinkingWindowEnd: 2028,
-      peakYear: 2026,
-      confidence: 'high',
-      confidenceScore: 0.9,
-      modelVersion: 'test',
-    },
-  } as unknown as DrinkingWindowBlock;
-}
-
-function makeDrinkingWindowPort(
-  impl?: (request: unknown) => Promise<DrinkingWindowBlock>,
-): DrinkingWindowUseCasePort & { readonly checkMock: ReturnType<typeof vi.fn> } {
-  const checkMock = vi.fn(impl ?? (() => Promise.resolve(makeDrinkingWindowBlock())));
-  return {
-    checkMock,
-    check: (request) => checkMock(request),
-  } as unknown as DrinkingWindowUseCasePort & { readonly checkMock: ReturnType<typeof vi.fn> };
-}
-
-function makeEntityLookupPort(): EntityDocumentLookupPort & {
-  readonly getDrinkingWindowDocumentsMock: ReturnType<typeof vi.fn>;
-} {
-  const entityId = createCanonicalEntityId('wine-1');
-  const getDrinkingWindowDocumentsMock = vi.fn(async () =>
-    new Map([
-      [entityId, {
-        vintageYear: 2018,
-        grapePrimaryEnc: 11,
-        regionEnc: 22,
-        countryEnc: 33,
-        tannin: 0.6,
-        acidity: 0.5,
-        body: 0.7,
-      }],
-    ]),
-  );
-  return {
-    getDocuments: async () => new Map(),
-    getDrinkingWindowDocuments: (entityIds) => getDrinkingWindowDocumentsMock(entityIds),
-    getDrinkingWindowDocumentsMock,
-  };
-}
-
 function makeToolPorts(overrides?: Partial<WineAgentLoopToolPorts>): WineAgentLoopToolPorts {
   return {
     searchUseCase: overrides?.searchUseCase ?? makeSearchPort(),
-    ...(overrides?.decomposedSearchUseCase !== undefined
-      ? { decomposedSearchUseCase: overrides.decomposedSearchUseCase }
-      : {}),
-    ...(overrides?.drinkingWindowUseCase !== undefined
-      ? { drinkingWindowUseCase: overrides.drinkingWindowUseCase }
-      : {}),
-    ...(overrides?.entityLookup !== undefined ? { entityLookup: overrides.entityLookup } : {}),
+    lookupWine: overrides?.lookupWine ?? (makeLookupPort() as unknown as WineAgentLoopToolPorts['lookupWine']),
+    ...overrides,
   };
 }
 
@@ -440,6 +404,7 @@ describe('WineAgentLoopRunner — required tool directive', () => {
 describe('WineAgentLoopRunner — reference similarity primitive (RFC-021 T-PSA-02)', () => {
   it('rejects a non-required tool when the directive requires lookup_wine first', async () => {
     const searchPort = makeSearchPort(() => Promise.resolve(makeSearchResponse(['wine-1', 'wine-2'])));
+    const lookupPort = makeLookupPort(() => Promise.resolve(makeLookupResolved('opus-one-2018', 'Opus One 2018')));
     const llm = makeStubLlm([
       async () => asToolUseResult([toolUse('search_hybrid', { query: 'Opus One cheap alternative' })]),
       async () => asToolUseResult([toolUse('lookup_wine', { query: 'Opus One' })]),
@@ -459,16 +424,19 @@ describe('WineAgentLoopRunner — reference similarity primitive (RFC-021 T-PSA-
         },
         preservedSurface: 'Opus One이랑 비슷한데 더 싼 거',
       }),
-      toolPorts: makeToolPorts({ searchUseCase: searchPort }),
+      toolPorts: makeToolPorts({
+        searchUseCase: searchPort,
+        lookupWine: lookupPort as unknown as WineAgentLoopToolPorts['lookupWine'],
+      }),
       maxSteps: 6,
     }));
 
     expect(out.terminationReason).toBe('answer');
-    expect(searchPort.executeMock).toHaveBeenCalledTimes(2);
+    // lookup_wine dispatches to the dedicated V2 port; only similar_to_entity
+    // hits searchUseCase.
+    expect(lookupPort.execute).toHaveBeenCalledTimes(1);
+    expect(searchPort.executeMock).toHaveBeenCalledTimes(1);
     expect(searchPort.executeMock.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
-      primitiveRoute: 'lookup_wine',
-    }));
-    expect(searchPort.executeMock.mock.calls[1]?.[0]).toEqual(expect.objectContaining({
       anchorEntityId: 'opus-one-2018',
     }));
     const rejectedStep = out.steps.find((step) =>
@@ -480,6 +448,7 @@ describe('WineAgentLoopRunner — reference similarity primitive (RFC-021 T-PSA-
   it('injects lookup_wine first, then similar_to_entity after successful lookup', async () => {
     const observedDirectives: string[] = [];
     const searchPort = makeSearchPort(() => Promise.resolve(makeSearchResponse(['wine-1', 'wine-2'])));
+    const lookupPort = makeLookupPort(() => Promise.resolve(makeLookupResolved('opus-one-2018', 'Opus One 2018')));
     const llm = makeStubLlm([
       async (req) => {
         const directive = [...req.messages]
@@ -512,7 +481,10 @@ describe('WineAgentLoopRunner — reference similarity primitive (RFC-021 T-PSA-
         },
         preservedSurface: 'Opus One이랑 비슷한데 더 싼 거',
       }),
-      toolPorts: makeToolPorts({ searchUseCase: searchPort }),
+      toolPorts: makeToolPorts({
+        searchUseCase: searchPort,
+        lookupWine: lookupPort as unknown as WineAgentLoopToolPorts['lookupWine'],
+      }),
       maxSteps: 5,
     }));
 
@@ -530,13 +502,8 @@ describe('WineAgentLoopRunner — reference similarity primitive (RFC-021 T-PSA-
       value: 60,
       text: '8만원 이하',
     } as unknown as NonNullable<SearchUseCaseInput['preferences']>[number];
-    const searchPort = makeSearchPort((_input, _reqId) => {
-      const callIdx = searchPort.executeMock.mock.calls.length;
-      if (callIdx === 1) {
-        return Promise.resolve(makeSearchResponse(['opus-one-2018']));
-      }
-      return Promise.resolve(makeSearchResponse(['wine-1', 'wine-2']));
-    });
+    const searchPort = makeSearchPort(() => Promise.resolve(makeSearchResponse(['wine-1', 'wine-2'])));
+    const lookupPort = makeLookupPort(() => Promise.resolve(makeLookupResolved('opus-one-2018', 'Opus One 2018')));
     const llm = makeStubLlm([
       async () => asToolUseResult([toolUse('lookup_wine', { query: 'Opus One 2018' })]),
       async () => asTextResult('unused fallback answer'),
@@ -557,14 +524,19 @@ describe('WineAgentLoopRunner — reference similarity primitive (RFC-021 T-PSA-
         preferences: [pricePreference],
         limit: 7,
       },
-      toolPorts: makeToolPorts({ searchUseCase: searchPort }),
+      toolPorts: makeToolPorts({
+        searchUseCase: searchPort,
+        lookupWine: lookupPort as unknown as WineAgentLoopToolPorts['lookupWine'],
+      }),
       maxSteps: 5,
     }));
 
     expect(out.terminationReason).toBe('answer');
     expect(llm.executeMock).toHaveBeenCalledTimes(1);
-    expect(searchPort.executeMock).toHaveBeenCalledTimes(2);
-    expect(searchPort.executeMock.mock.calls[1]?.[0]).toEqual(expect.objectContaining({
+    // lookup_wine → dedicated V2 port; similar_to_entity → searchUseCase (once).
+    expect(lookupPort.execute).toHaveBeenCalledTimes(1);
+    expect(searchPort.executeMock).toHaveBeenCalledTimes(1);
+    expect(searchPort.executeMock.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
       query: 'opus-one-2018',
       anchorEntityId: 'opus-one-2018',
       limit: 7,
@@ -574,13 +546,8 @@ describe('WineAgentLoopRunner — reference similarity primitive (RFC-021 T-PSA-
   });
 
   it('terminates after similar_to_entity empty result instead of opening a relax LLM turn', async () => {
-    const searchPort = makeSearchPort((_input, _reqId) => {
-      const callIdx = searchPort.executeMock.mock.calls.length;
-      if (callIdx === 1) {
-        return Promise.resolve(makeSearchResponse(['opus-one-2018']));
-      }
-      return Promise.resolve(makeSearchResponse([]));
-    });
+    const searchPort = makeSearchPort(() => Promise.resolve(makeSearchResponse([])));
+    const lookupPort = makeLookupPort(() => Promise.resolve(makeLookupResolved('opus-one-2018', 'Opus One 2018')));
     const llm = makeStubLlm([
       async () => asToolUseResult([toolUse('lookup_wine', { query: 'Opus One 2018' })]),
       async () => asTextResult('this should never be consumed'),
@@ -605,18 +572,23 @@ describe('WineAgentLoopRunner — reference similarity primitive (RFC-021 T-PSA-
           { attribute: 'price_usd', operator: '<=', value: 60, text: '8만원 이하' } as never,
         ],
       },
-      toolPorts: makeToolPorts({ searchUseCase: searchPort }),
+      toolPorts: makeToolPorts({
+        searchUseCase: searchPort,
+        lookupWine: lookupPort as unknown as WineAgentLoopToolPorts['lookupWine'],
+      }),
       maxSteps: 5,
     }));
 
     expect(out.terminationReason).toBe('answer');
     expect(llm.executeMock).toHaveBeenCalledTimes(1);
-    expect(searchPort.executeMock).toHaveBeenCalledTimes(2);
+    expect(lookupPort.execute).toHaveBeenCalledTimes(1);
+    expect(searchPort.executeMock).toHaveBeenCalledTimes(1);
     expect(out.toolOutcomes.map((o) => o.kind)).toEqual(['success', 'empty_result']);
   });
 
   it('lookup_wine → similar_to_entity chain: dispatches the anchor by entity_id, not free text', async () => {
     const searchPort = makeSearchPort(() => Promise.resolve(makeSearchResponse(['wine-1', 'wine-2'])));
+    const lookupPort = makeLookupPort(() => Promise.resolve(makeLookupResolved('opus-one-2018', 'Opus One 2018')));
     const llm = makeStubLlm([
       // Step 1: resolve the named wine to a canonical entity.
       async () => asToolUseResult([toolUse('lookup_wine', { query: 'Opus One 2018' })]),
@@ -637,16 +609,20 @@ describe('WineAgentLoopRunner — reference similarity primitive (RFC-021 T-PSA-
         },
         preservedSurface: '오푸스원 비슷한 와인 추천해줘',
       }),
-      toolPorts: makeToolPorts({ searchUseCase: searchPort }),
+      toolPorts: makeToolPorts({
+        searchUseCase: searchPort,
+        lookupWine: lookupPort as unknown as WineAgentLoopToolPorts['lookupWine'],
+      }),
       maxSteps: 5,
     }));
 
     expect(out.terminationReason).toBe('answer');
-    expect(searchPort.executeMock).toHaveBeenCalledTimes(2);
+    expect(lookupPort.execute).toHaveBeenCalledTimes(1);
+    expect(searchPort.executeMock).toHaveBeenCalledTimes(1);
     expect(llm.executeMock).toHaveBeenCalledTimes(2);
     // The similarity leg carries the resolved anchor as anchorEntityId — the
     // path-authoritative similar_to_entity signal — and never a lane `mode`.
-    const similarityCall = searchPort.executeMock.mock.calls[1]?.[0];
+    const similarityCall = searchPort.executeMock.mock.calls[0]?.[0];
     expect(similarityCall).toEqual(expect.objectContaining({
       anchorEntityId: 'opus-one-2018',
     }));
@@ -656,20 +632,8 @@ describe('WineAgentLoopRunner — reference similarity primitive (RFC-021 T-PSA-
     expect(out.toolOutcomes.map((o) => o.tool)).toEqual(['lookup_wine', 'similar_to_entity']);
   });
 
-  it('formats lookup_wine observations with explicit entity_id fields, not id::label preview tokens', async () => {
-    const searchPort = makeSearchPort(() => Promise.resolve({
-      queryType: 'search',
-      engineDecision: { decisionStatus: 'resolved' } as unknown as SearchResponseV1['engineDecision'],
-      results: [
-        {
-          entity: {
-            entityId: 'opus-one-2018',
-            canonicalLabel: 'Opus One 2018',
-          },
-        },
-      ] as unknown as SearchResponseV1['results'],
-      meta: { generatedAt: new Date().toISOString() } as unknown as SearchResponseV1['meta'],
-    }));
+  it('formats a RESOLVED lookup_wine observation V2-native with explicit entity_id + canonical_label', async () => {
+    const lookupPort = makeLookupPort(() => Promise.resolve(makeLookupResolved('opus-one-2018', 'Opus One 2018')));
     const llm = makeStubLlm([
       async () => asToolUseResult([toolUse('lookup_wine', { query: 'Opus One 2018' })]),
       async () => asTextResult('Resolved the wine.'),
@@ -677,15 +641,38 @@ describe('WineAgentLoopRunner — reference similarity primitive (RFC-021 T-PSA-
     const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
     const out = await runner.run(makeInput({
       query: 'Opus One 2018 찾아줘',
-      toolPorts: makeToolPorts({ searchUseCase: searchPort }),
+      toolPorts: makeToolPorts({ lookupWine: lookupPort as unknown as WineAgentLoopToolPorts['lookupWine'] }),
       maxSteps: 4,
     }));
 
     expect(out.terminationReason).toBe('answer');
     const lookupObservation = out.steps[0]?.observations[0] ?? '';
-    expect(lookupObservation).toContain('"entity_id":"opus-one-2018"');
-    expect(lookupObservation).toContain('"canonical_label":"Opus One 2018"');
-    expect(lookupObservation).not.toContain('opus-one-2018::Opus One 2018');
+    expect(lookupObservation).toContain('lookup_wine: resolved');
+    expect(lookupObservation).toContain('entity_id=opus-one-2018');
+    expect(lookupObservation).toContain('Opus One 2018');
+  });
+
+  it('surfaces ambiguous lookup_wine results as V2-native ambiguous observations (no anchor)', async () => {
+    const lookupPort = makeLookupPort(() =>
+      Promise.resolve(makeLookupAmbiguous(['opus-one-2018', 'opus-one-2019'])),
+    );
+    const llm = makeStubLlm([
+      async () => asToolUseResult([toolUse('lookup_wine', { query: 'Opus One' })]),
+      async () => asTextResult('Need clarification.'),
+    ]);
+    const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
+    const out = await runner.run(makeInput({
+      query: 'Opus One 찾아줘',
+      toolPorts: makeToolPorts({ lookupWine: lookupPort as unknown as WineAgentLoopToolPorts['lookupWine'] }),
+      maxSteps: 4,
+    }));
+
+    const lookupObservation = out.steps[0]?.observations[0] ?? '';
+    expect(lookupObservation).toContain('lookup_wine: ambiguous');
+    expect(lookupObservation).toContain('opus-one-2018');
+    expect(lookupObservation).toContain('opus-one-2019');
+    // ambiguous must NOT produce a similar_to_entity anchor.
+    expect(lookupObservation).toContain('Do NOT pass any of these to similar_to_entity');
   });
 
   it('rejects a free-text anchor passed straight into similar_to_entity (no entity_id)', async () => {
@@ -719,8 +706,7 @@ describe('WineAgentLoopRunner — removed convenience tools are unsupported (T-I
   const UNSUPPORTED_PREFIX = (name: string) =>
     `Tool "${name}" is not supported in the wine-agent-loop. Use one of:`;
 
-  it('compare_wines hits the unsupported default branch and never calls decomposedSearchUseCase', async () => {
-    const comparisonPort = makeDecomposedSearchPort();
+  it('compare_wines hits the unsupported default branch', async () => {
     const llm = makeStubLlm([
       async () => asToolUseResult([
         toolUse('compare_wines', { query_a: 'Opus One 2018', query_b: 'Almaviva 2019' }),
@@ -729,13 +715,10 @@ describe('WineAgentLoopRunner — removed convenience tools are unsupported (T-I
     ]);
     const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
     const out = await runner.run(makeInput({
-      toolPorts: makeToolPorts({ decomposedSearchUseCase: comparisonPort }),
       maxSteps: 4,
     }));
 
     expect(out.terminationReason).toBe('answer');
-    // Removed tool: the convenience use case MUST NOT be dispatched.
-    expect(comparisonPort.executeMock).not.toHaveBeenCalled();
     const compareStep = out.steps.find((s) =>
       s.toolCalls.some((c) => c.tool === 'compare_wines'),
     );
@@ -744,9 +727,7 @@ describe('WineAgentLoopRunner — removed convenience tools are unsupported (T-I
     );
   });
 
-  it('check_drinking_window hits the unsupported default branch and never calls the drinking-window use case', async () => {
-    const drinkingWindowPort = makeDrinkingWindowPort();
-    const entityLookup = makeEntityLookupPort();
+  it('check_drinking_window hits the unsupported default branch', async () => {
     const llm = makeStubLlm([
       async () => asToolUseResult([
         toolUse('check_drinking_window', { entity_id: 'wine-1', target_year: 2026 }),
@@ -755,17 +736,10 @@ describe('WineAgentLoopRunner — removed convenience tools are unsupported (T-I
     ]);
     const runner = new WineAgentLoopRunner({ structuredLlm: llm, logger: makeLogger() });
     const out = await runner.run(makeInput({
-      toolPorts: makeToolPorts({
-        drinkingWindowUseCase: drinkingWindowPort,
-        entityLookup,
-      }),
       maxSteps: 4,
     }));
 
     expect(out.terminationReason).toBe('answer');
-    // Removed tool: neither hydration nor the drinking-window use case fire.
-    expect(entityLookup.getDrinkingWindowDocumentsMock).not.toHaveBeenCalled();
-    expect(drinkingWindowPort.checkMock).not.toHaveBeenCalled();
     const dwStep = out.steps.find((s) =>
       s.toolCalls.some((c) => c.tool === 'check_drinking_window'),
     );

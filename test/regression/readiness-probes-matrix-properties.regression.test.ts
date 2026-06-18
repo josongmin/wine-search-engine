@@ -54,6 +54,7 @@ import {
   hashText,
   stableJsonStringify,
 } from '../../src/domain/shared/utils/stable-json.js';
+import { buildMinimalLookupRuntimeStatePlane } from '../helpers/minimal-search-snapshot-runtime-state.js';
 
 interface ReadyResponseBody {
   readonly ready: boolean;
@@ -254,6 +255,13 @@ describe('readiness probe matrix — property-based invariants', () => {
         ? 'corrupted-hash'
         : hashText(`${stableJsonStringify(nlObj)}\n`);
 
+      const {
+        lookupRuntimeCounts,
+        lookupRuntimeHashes,
+        lookupManifestArtifacts: _lookupManifestArtifacts,
+        ...lookupPaths
+      } = buildMinimalLookupRuntimeStatePlane(dir);
+
       const state = {
         schemaVersion: SEARCH_SNAPSHOT_STATE_VERSION,
         snapshotId: 'snapshot-test-001',
@@ -261,6 +269,7 @@ describe('readiness probe matrix — property-based invariants', () => {
         publishedAt: '2026-01-01T00:00:00.000Z',
         manifestPath: path.join(dir, 'manifest.json'),
         nlMappingsRuntimePath: nlPath,
+        ...lookupPaths,
         fieldAvailability: {
           appellation: {
             populatedDocCount: 0,
@@ -291,6 +300,7 @@ describe('readiness probe matrix — property-based invariants', () => {
         counts: {
           entities: opts.entityCount,
           aliases: opts.aliasCount,
+          ...lookupRuntimeCounts,
           ambiguityRegistry: opts.ambiguityCount,
           nlMappings: opts.nlMappingCount,
           activeLtrModels: opts.activeLtrCount,
@@ -298,6 +308,7 @@ describe('readiness probe matrix — property-based invariants', () => {
         hashes: {
           entities: hashStableJson([{ probe: 'entity' }]),
           aliases: hashStableJson([{ probe: 'alias' }]),
+          ...lookupRuntimeHashes,
           ambiguityRegistry: hashStableJson([{ probe: 'amb' }]),
           nlMappings: nlHash,
           activeLtrModels: hashStableJson([{ probe: 'ltr' }]),

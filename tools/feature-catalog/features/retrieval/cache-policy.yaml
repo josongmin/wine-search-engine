@@ -44,7 +44,7 @@ maturity_rationale: |
 
 status: active
 since: 2025-10
-last_reviewed: 2026-05-21
+last_reviewed: 2026-06-10
 owner: core
 
 surfaces:
@@ -70,11 +70,13 @@ depends_on:
 related_rfcs: []
 
 known_limitations:
+  - "Redis-backed cache is OFFICIAL STACK EXCLUDED (2026-06) — policy work applies to in-process path until Redis re-enable"
   - "Invalidation 정책 부분적 ad-hoc (snapshot-bound TTL + 명시적 invalidation API 완전 정형화는 maturity 5)"
   - "분포 카운터는 process-local — 다중 인스턴스 합산은 별도 export pipeline 필요"
   - "constraint/expansion 정렬이 host ICU collator(localeCompare)에 의존 — 크로스-호스트 동일 ICU 가정"
 
 next_steps:
+  - "Redis exclusion: finalize eligibility/TTL/invalidation for official stack re-enable"
   - "Invalidation 정형화 (snapshot-bound TTL + 명시적 invalidation API)"
   - "분포 카운터 → 메트릭 export (Prometheus / OTLP) 연결"
   - "정렬 결정성을 ICU-독립 코드포인트 비교로 전환(크로스-호스트 안정성)"

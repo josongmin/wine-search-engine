@@ -36,12 +36,19 @@ import { DrinkingWindowUseCase } from '../../../src/application/drinking-window/
 import { SearchUseCase } from '../../../src/application/search/search.usecase.js';
 import { DecomposedSearchAdapter } from '../../../src/application/search/decomposed-search-adapter.js';
 import { DecomposedSearchUseCase } from '../../../src/application/search/decomposed-search.usecase.js';
-import { BatchSearchUseCase } from '../../../src/application/search/batch-search.usecase.js';
-import { InterpretUseCase } from '../../../src/application/search/interpret.usecase.js';
-import { ResolveUseCase } from '../../../src/application/search/resolve.usecase.js';
-import { AutocompleteUseCase } from '../../../src/application/search/autocomplete.usecase.js';
-import { HybridUseCase } from '../../../src/application/search/hybrid.usecase.js';
+import { buildInterpretQueryRunnerForEval } from '../../../src/config/build-interpret-query-runner.js';
+import type { InterpretQueryRunner } from '../../../src/application/search/interpret-query-runner.js';
+import { buildAutocompleteQueryRunnerForEval } from '../../../src/config/build-autocomplete-query-runner.js';
+import type { AutocompleteQueryRunner } from '../../../src/application/search/autocomplete-query-runner.js';
+import { EntityLookupV2UseCase } from '../../../src/application/search/entity-lookup-v2/entity-lookup-v2.usecase.js';
+import { MultiChannelRetrievalEngine } from '../../../src/application/search/entity-lookup-v2/multi-channel-retrieval-engine.js';
+import { RuntimeLookupPlanner } from '../../../src/application/search/entity-lookup-v2/runtime-lookup-planner.js';
+import type {
+  LookupExactSafeMatch,
+  LookupExactSafeRegistryPort,
+} from '../../../src/domain/resolver/v2/lookup-v2-types.js';
 import type { Container } from '../../../src/config/container.js';
+import { buildResolverProjectionLookupFromSearchIndex } from './search-index-resolver-projection-lookup.js';
 import type { SnapshotVersions } from '../../../src/application/search/search.usecase.js';
 import {
   InMemoryAmbiguityDictionary,
@@ -57,6 +64,7 @@ import {
   type InMemoryAliasProvenance,
 } from './in-memory-adapters.js';
 import { PlannerV1Adapter } from '../../../src/config/planner-v1-adapter.js';
+import { ConceptAdmissionGate } from '../../../src/domain/resolver/v2/concept-admission-gate.js';
 import {
   FallbackAmbiguityDictionary,
   StaticAmbiguityDictionary,
@@ -71,7 +79,9 @@ import {
   toSimilarityCandidate,
 } from './test-fixtures.js';
 import type { RetrievalDocument } from '../../../src/domain/retrieval/model/retrieval-document.js';
-import type { EntityId } from '../../../src/domain/shared/types/index.js';
+import { createCanonicalEntityId, type EntityId } from '../../../src/domain/shared/types/index.js';
+import { normalizeForMatch } from '../../../src/domain/alias/service/normalize.js';
+import { compactForLookup } from '../../../src/domain/query/service/phonetic-skeleton.js';
 
 export interface TestFixtureAlias {
   readonly surfaceForm: string;
@@ -81,8 +91,59 @@ export interface TestFixtureAlias {
   readonly provenance?: InMemoryAliasProvenance;
 }
 
+/** Production `benchmark-anchor:identity_safe_v1` confidence prior. */
+const FIXTURE_DOCUMENT_IDENTITY_SAFE_CONFIDENCE = 0.95;
+
+/** Production `benchmark-anchor:noisy_recall_v1` confidence prior (Latin surfaces). */
+const FIXTURE_DOCUMENT_NOISY_RECALL_CONFIDENCE = 0.68;
+
+function collectDocumentProjectedFixtureAliases(
+  documents: readonly RetrievalDocument[],
+): readonly TestFixtureAlias[] {
+  const projected: TestFixtureAlias[] = [];
+
+  for (const doc of documents) {
+    for (const surfaceForm of doc.aliasesIdentitySafe) {
+      projected.push({
+        surfaceForm,
+        entityId: doc.entityId,
+        confidence: FIXTURE_DOCUMENT_IDENTITY_SAFE_CONFIDENCE,
+        provenance: 'curated',
+      });
+    }
+    for (const surfaceForm of doc.aliasesNoisyRecall) {
+      projected.push({
+        surfaceForm,
+        entityId: doc.entityId,
+        confidence: FIXTURE_DOCUMENT_NOISY_RECALL_CONFIDENCE,
+        provenance: 'curated',
+      });
+    }
+  }
+
+  return projected;
+}
+
+function registerFixtureAliases(
+  aliasMatcher: InMemoryAliasMatcher,
+  aliases: readonly TestFixtureAlias[],
+): void {
+  for (const alias of aliases) {
+    aliasMatcher.addAlias(
+      alias.surfaceForm,
+      alias.entityId,
+      alias.confidence,
+      alias.provenance ?? 'curated',
+    );
+  }
+}
+
 export interface TestContainerParts {
   container: Container;
+  /** Eval/integration-only autocomplete wiring (not on production Container). */
+  readonly autocompleteQueryRunner: AutocompleteQueryRunner;
+  /** Planner-only interpret surface for schema/regression tests (no live HTTP route). */
+  readonly interpretQueryRunner: InterpretQueryRunner;
   ambiguityDict: InMemoryAmbiguityDictionary;
   blockingAdapter: InMemoryBlockingAdapter;
   searchIndex: InMemorySearchIndex;
@@ -106,6 +167,99 @@ export interface TestContainerOptions {
   readonly drinkingWindowModelVersionOverride?: string;
   readonly fixtureAliases?: readonly TestFixtureAlias[];
   readonly fixtureDocuments?: readonly RetrievalDocument[];
+}
+
+function buildInMemoryExactSafeRegistry(
+  aliases: readonly TestFixtureAlias[],
+): LookupExactSafeRegistryPort {
+  const exactEntries = new Map<string, LookupExactSafeMatch | null>();
+  const compactEntries = new Map<string, LookupExactSafeMatch | null>();
+
+  const writeEntry = (
+    target: Map<string, LookupExactSafeMatch | null>,
+    key: string,
+    value: LookupExactSafeMatch,
+  ): void => {
+    if (key.length === 0) {
+      return;
+    }
+    const existing = target.get(key);
+    if (existing === undefined) {
+      target.set(key, value);
+      return;
+    }
+    if (existing === null) {
+      return;
+    }
+    if (String(existing.entityId) !== String(value.entityId)) {
+      target.set(key, null);
+    }
+  };
+
+  for (const alias of aliases) {
+    const normalizedSurface = normalizeForMatch(alias.surfaceForm);
+    const compactSurface = compactForLookup(alias.surfaceForm);
+    const locale = /[가-힣]/u.test(alias.surfaceForm) ? 'ko' : 'global';
+    writeEntry(exactEntries, normalizedSurface, {
+      entityId: createCanonicalEntityId(alias.entityId),
+      locale,
+      kind: 'exact_safe',
+      normalizedSurface,
+    });
+    writeEntry(compactEntries, compactSurface, {
+      entityId: createCanonicalEntityId(alias.entityId),
+      locale,
+      kind: 'compact_exact_safe',
+      normalizedSurface,
+      compactSurface,
+    });
+  }
+
+  return {
+    match(views) {
+      for (const surface of [
+        views.raw,
+        views.strict,
+        views.accentless,
+        views.collapsedWhitespace,
+        views.punctuationStripped,
+        views.vintageCanonicalized,
+        views.vintageStripped,
+        views.transliterated,
+        ...views.lookupVariants,
+      ]) {
+        if (surface === undefined) {
+          continue;
+        }
+        const hit = exactEntries.get(normalizeForMatch(surface));
+        if (hit !== undefined && hit !== null) {
+          return hit;
+        }
+      }
+
+      for (const surface of [
+        views.raw,
+        views.strict,
+        views.accentless,
+        views.compact,
+        views.vintageCanonicalized,
+        views.vintageStripped,
+        views.transliterated,
+        views.phoneticCompact,
+        ...views.lookupVariants,
+      ]) {
+        if (surface === undefined) {
+          continue;
+        }
+        const hit = compactEntries.get(compactForLookup(surface));
+        if (hit !== undefined && hit !== null) {
+          return hit;
+        }
+      }
+
+      return null;
+    },
+  };
 }
 
 /**
@@ -133,15 +287,6 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
   // pure curated baseline can pass `fixtureAliases: TEST_ALIASES`.
   const fixtureAliases = options.fixtureAliases ?? TEST_ALIASES_WITH_DERIVED;
   const fixtureDocuments = options.fixtureDocuments ?? TEST_DOCUMENTS;
-
-  for (const alias of fixtureAliases) {
-    aliasMatcher.addAlias(
-      alias.surfaceForm,
-      alias.entityId,
-      alias.confidence,
-      alias.provenance ?? 'curated',
-    );
-  }
 
   const materializedDocuments = fixtureDocuments.map((doc) => {
     const baseDoc = options.stripCachedDrinkingWindow === true
@@ -184,6 +329,17 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
       drinkingWindowModelVersion: options.drinkingWindowModelVersionOverride,
     };
   });
+
+  const documentProjectedAliases = collectDocumentProjectedFixtureAliases(materializedDocuments);
+  registerFixtureAliases(aliasMatcher, fixtureAliases);
+  registerFixtureAliases(aliasMatcher, documentProjectedAliases);
+
+  const exactSafeRegistry = buildInMemoryExactSafeRegistry([
+    ...fixtureAliases,
+    ...documentProjectedAliases.filter(
+      (alias) => alias.confidence >= FIXTURE_DOCUMENT_IDENTITY_SAFE_CONFIDENCE,
+    ),
+  ]);
 
   for (const doc of materializedDocuments) {
     searchIndex.upsertDoc(doc);
@@ -252,8 +408,12 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
     signalComputer,
     scoreAggregator,
     evidenceMapper,
-    options.reranker,
-    options.rerankThreshold,
+    {
+      ...(options.reranker !== undefined ? { reranker: options.reranker } : {}),
+      ...(options.rerankThreshold !== undefined
+        ? { rerankThreshold: options.rerankThreshold }
+        : {}),
+    },
   );
 
   // Domain services — decision, response, mixed, security
@@ -297,10 +457,28 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
     return impl;
   });
 
+  const lookupPlanner = new RuntimeLookupPlanner({
+    aliasMatcher,
+    ambiguityDictionary: ambiguityDict,
+    exactSafeRegistry,
+  });
+  const resolverProjectionLookup = buildResolverProjectionLookupFromSearchIndex(searchIndex);
+  const entityLookupV2UseCase = new EntityLookupV2UseCase({
+    admissionGate: new ConceptAdmissionGate(),
+    lookupPlanner,
+    entityResolver,
+    resolverProjectionLookup,
+    candidateRetrieval: new MultiChannelRetrievalEngine({
+      aliasMatcher,
+      resolverProjectionLookup,
+    }),
+    ambiguityDictionary: ambiguityDict,
+    querySanitizer,
+  });
+
   const searchUseCase = new SearchUseCase({
     queryPlanner,
-    entityResolver,
-    entityLookup: searchIndex,
+    entityLookupV2UseCase,
     candidatePool,
     browseRetriever,
     compareRetriever,
@@ -317,63 +495,28 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
   });
 
   decomposedRef.impl = new DecomposedSearchUseCase(searchUseCase);
-  const decomposedSearchUseCase = decomposedRef.impl;
-  const batchSearchUseCase = new BatchSearchUseCase(searchUseCase);
 
-  const interpretUseCase = new InterpretUseCase({
+  const interpretQueryRunner = buildInterpretQueryRunnerForEval({
     queryPlanner,
     querySanitizer,
     injectionJudge,
     judgeTimeoutMs,
   });
-  const resolveUseCase = new ResolveUseCase({
-    queryPlanner,
-    entityResolver,
-    entityLookup: searchIndex,
-    querySanitizer,
-    injectionJudge,
-    judgeTimeoutMs,
-  });
-  const autocompleteUseCase = new AutocompleteUseCase({
-    resolveUseCase,
-    entityLookup: searchIndex,
-  });
-  const hybridUseCase = new HybridUseCase({
-    queryPlanner,
-    candidatePool,
-    browseRetriever,
-    compareRetriever,
-    entityResolver,
-    entityLookup: searchIndex,
-    ranker,
-    decisionEngine,
-    responseBuilder,
-    snapshotVersions,
-    drinkingWindow: drinkingWindowUseCase,
-    querySanitizer,
-    injectionJudge,
-    judgeTimeoutMs,
-    judgeFailureMode: 'fail_closed',
-    decomposedSearch: decomposedSearchUseCase,
+  const autocompleteQueryRunner = buildAutocompleteQueryRunnerForEval({
+    entityLookupV2UseCase,
+    resolverProjectionLookup,
   });
 
   const container = {
     queryPlanner,
-    entityResolver,
     candidatePool,
     ranker,
     decisionEngine,
     responseBuilder,
     mixedSolver,
     searchUseCase,
-    interpretUseCase,
-    resolveUseCase,
-    autocompleteUseCase,
-    hybridUseCase,
-    decomposedSearchUseCase,
-    drinkingWindowUseCase,
+    entityLookupV2UseCase,
     drinkingWindowPredictor,
-    batchSearchUseCase,
     evalRunner: null,
     calibrationStore,
     runtimeReadiness: {} as never,
@@ -381,6 +524,8 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
 
   return {
     container,
+    autocompleteQueryRunner,
+    interpretQueryRunner,
     ambiguityDict,
     blockingAdapter,
     searchIndex,

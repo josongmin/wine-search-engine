@@ -1,6 +1,12 @@
 # Jun 2 General RFC — Entity Lookup Hardening And Operator Tooling
 
 > 목적: `/v1/lookup/wine`를 운영형 entity lookup으로 끌어올리기 위해 `admission`, `abstain`, `alias substrate`, `trusted ops tooling`을 한 묶음으로 재구성한다.
+>
+> Historical / audit-only document.
+> Current public lookup truth moved to `docs/bench/STATUS.md` and
+> `tools/feature-catalog/features/retrieval/entity-lookup-v2.yaml`.
+> `/v1/lookup/wine` references below preserve the pre-cutover hardening plan,
+> not the current route contract.
 
 ---
 

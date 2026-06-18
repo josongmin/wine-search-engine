@@ -41,8 +41,6 @@ describe('di-composition-root regression', () => {
       const required = [
         'searchUseCase',
         'queryPlanner',
-        'entityResolver',
-        'entityLookup',
         'candidatePool',
         'ranker',
         'decisionEngine',
@@ -50,6 +48,7 @@ describe('di-composition-root regression', () => {
         'mixedSolver',
         'drinkingWindowPredictor',
         'calibrationStore',
+        'entityLookupV2UseCase',
       ] as const;
       for (const port of required) {
         expect(manifest.ports).toContain(port);

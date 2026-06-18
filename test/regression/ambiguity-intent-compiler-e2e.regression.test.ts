@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildQueryPlanner } from '../../src/config/container-core-builders.js';
 import { PlannerV1Adapter } from '../../src/config/planner-v1-adapter.js';
+import { makeStubEntityLookupV2UseCase } from '../../src/application/search/__tests__/entity-lookup-v2-use-case.stub.js';
+import { buildInterpretQueryRunnerForEval } from '../../src/config/build-interpret-query-runner.js';
+import type { InterpretQueryRunner } from '../../src/application/search/interpret-query-runner.js';
 import { SearchUseCase } from '../../src/application/search/search.usecase.js';
-import { InterpretUseCase } from '../../src/application/search/interpret.usecase.js';
 import { QuerySanitizer } from '../../src/domain/security/service/query-sanitizer.js';
 import type { ChatCompletionRequest, ChatCompletionResult, ChatLlmPort } from '../../src/domain/ai/port/chat-llm.port.js';
 import type { CoreAdapterServices } from '../../src/config/container-adapters.js';
@@ -48,7 +50,7 @@ class NoopMappingTable implements MappingTablePort {
 }
 
 interface PinotHarness {
-  readonly interpretUseCase: InterpretUseCase;
+  readonly interpretQueryRunner: InterpretQueryRunner;
   readonly searchUseCase: SearchUseCase;
   readonly llm: ScriptedChatLlm;
 }
@@ -238,15 +240,14 @@ async function buildHarness(branchLabel: 'Pinot Noir' | 'Pinot Gris'): Promise<P
     ),
   );
 
-  const interpretUseCase = new InterpretUseCase({
+  const interpretQueryRunner = buildInterpretQueryRunnerForEval({
     queryPlanner: planner,
     querySanitizer: new QuerySanitizer(),
   });
 
   const searchUseCase = new SearchUseCase({
     queryPlanner: planner,
-    entityResolver: parts.container.entityResolver,
-    entityLookup: parts.searchIndex,
+    entityLookupV2UseCase: makeStubEntityLookupV2UseCase(),
     candidatePool: parts.container.candidatePool,
     browseRetriever: parts.browseRetriever,
     compareRetriever: parts.compareRetriever,
@@ -258,7 +259,7 @@ async function buildHarness(branchLabel: 'Pinot Noir' | 'Pinot Gris'): Promise<P
     snapshotVersions: parts.container.snapshotVersions,
   });
 
-  return { interpretUseCase, searchUseCase, llm };
+  return { interpretQueryRunner, searchUseCase, llm };
 }
 
 afterEach(() => {
@@ -272,7 +273,7 @@ describe('Ambiguity intent compiler e2e', () => {
   ] as const)('selecting %s branch narrows clarification and retrieval to %s', async (branchLabel, expectedTopLabel) => {
     const harness = await buildHarness(branchLabel);
 
-    const interpret = await harness.interpretUseCase.execute(
+    const interpret = await harness.interpretQueryRunner.execute(
       { query: QUERY, buildV2: true },
     );
 

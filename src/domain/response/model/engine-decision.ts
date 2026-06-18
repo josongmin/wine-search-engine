@@ -51,6 +51,15 @@ export interface EngineDecision {
   readonly calibrationTrusted?: boolean | undefined;
 
   /**
+   * Raw (pre-calibration) top-1 resolver score, propagated from
+   * {@link DecisionOutput.top1RawScore}. Eval-only signal consumed by the
+   * eval adapter to persist `eval_results.top1_raw_score` for the calibration
+   * trainer. Undefined when no candidate was scored. MUST NOT be treated as a
+   * probability.
+   */
+  readonly top1RawScore?: number | undefined;
+
+  /**
    * Legacy trace string — same value as {@link authorityTraceRef} in Wave 3+.
    * Prefer `authorityTraceRef` for new integrations (OpenAPI migration Phase A–C).
    */

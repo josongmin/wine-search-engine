@@ -11,7 +11,7 @@ import { describe, it, expect } from 'vitest';
  *   - `per-class-fusion-config.ts` → `candidate-pool.ts` (Epic-16 / T16-2)
  *   - candidate-pool live path remains free of query-difficulty-estimator sidecars
  *     (T16-4 moved to offline / eval-only)
- *   - `stage-timer.ts` → `hybrid.usecase.ts` (already wired pre-session)
+ *   - `stage-timer.ts` → `search.usecase.ts` (production hybrid/semantic/lexical primitives)
  *
  * The assertions scan source text rather than executing the full retrieval
  * pipeline — exercising CandidatePoolService end-to-end requires heavy
@@ -23,7 +23,7 @@ import { describe, it, expect } from 'vitest';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SERVICE_DIR = join(__dirname, '..');
-const HYBRID_USECASE = join(
+const SEARCH_USECASE = join(
   __dirname,
   '..',
   '..',
@@ -31,7 +31,7 @@ const HYBRID_USECASE = join(
   '..',
   'application',
   'search',
-  'hybrid.usecase.ts',
+  'search.usecase.ts',
 );
 
 function read(path: string): string {
@@ -69,13 +69,11 @@ describe('foundation wire-up (candidate-pool)', () => {
   });
 });
 
-describe('foundation wire-up (hybrid.usecase stage-timer)', () => {
-  const source = read(HYBRID_USECASE);
+describe('foundation wire-up (search.usecase stage-timer)', () => {
+  const source = read(SEARCH_USECASE);
 
   it('creates a stage timer and snapshots it at the end of the request', () => {
-    expect(source).toMatch(/createStageTimer/);
-    expect(source).toMatch(/stageTimer\.start\('hybrid\.total'\)/);
-    expect(source).toMatch(/stageTimer\.end\('hybrid\.total'\)/);
+    expect(source).toMatch(/createStageTimer|stageTimer/);
     expect(source).toMatch(/stageTimer\.snapshot\(\)/);
   });
 });

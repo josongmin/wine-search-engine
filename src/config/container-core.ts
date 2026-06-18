@@ -1,6 +1,4 @@
 import type { QueryPlannerPort, RankingPort } from '../application/search/port/search-pipeline-deps.port.js';
-import type { AliasMatcher } from '../domain/query/service/anchor-extractor.js';
-import type { AmbiguityDictionary } from '../domain/query/port/ambiguity-dictionary.port.js';
 import {
   PlannerV1Adapter,
   buildAnchorRefreshCallbackFromAliasOverlay,
@@ -21,10 +19,8 @@ import type { SnapshotVersions } from '../application/search/search.usecase.js';
 import type { CacheLookupRuntimeState } from '../application/search/search-usecase-cache-lookup.js';
 import type { SearchSnapshotFieldAvailability } from '../domain/shared/types/search-field-availability.js';
 import type {
-  BlockingUseCasePort,
   BrowseRetrieverPort,
   CompareRetrieverPort,
-  EntityDocumentLookupPort,
 } from '../application/search/port/search-pipeline-deps.port.js';
 import type { Config } from './env.js';
 import type { Pool } from 'pg';
@@ -35,7 +31,6 @@ import {
   type RuntimeSupportServices,
 } from './container-runtime-support.js';
 import {
-  buildBlockingUseCaseAdapter,
   buildBudgetLedgerFactory,
   buildCandidatePool,
   buildBrowseRetriever,
@@ -54,7 +49,6 @@ import {
   buildCacheReadRuntimeStateProvider,
 } from './kill-switch-policy.js';
 import { warnStartupMisconfigurations } from './startup-preflight.js';
-import { SearchSnapshotEntityLookup } from '../infrastructure/adapter/search-snapshot-entity-lookup.js';
 import type { AnchorRefreshCallback } from '../domain/query/service/anchor-refresh.js';
 
 export interface CoreContainerServices {
@@ -62,7 +56,6 @@ export interface CoreContainerServices {
   // T1.5 will update the port to QueryPlanV2.
   readonly queryPlanner: QueryPlannerPort;
   readonly entityLookupAnchorRefresh: AnchorRefreshCallback;
-  readonly blocker: BlockingUseCasePort;
   readonly chatLlm?: ChatLlmPort;
   readonly entityResolver: Resolver;
   readonly candidatePool: CandidatePoolService;
@@ -72,11 +65,6 @@ export interface CoreContainerServices {
   readonly mixedSolver: MixedSolver;
   readonly browseRetriever: BrowseRetrieverPort;
   readonly compareRetriever: CompareRetrieverPort;
-  readonly entityLookup: EntityDocumentLookupPort;
-  /** Live alias substrate matcher — exposed for the T-ELV2-04 V2 retrieval engine. */
-  readonly aliasMatcher: AliasMatcher;
-  /** Persisted ambiguity substrate (registry-backed) — for the T-ELV2-06 clarification graph. */
-  readonly ambiguityDictionary: AmbiguityDictionary;
   readonly snapshotVersions: SnapshotVersions;
   readonly querySanitizer: RuntimeSupportServices['querySanitizer'];
   readonly injectionJudge?: RuntimeSupportServices['injectionJudge'];
@@ -148,22 +136,15 @@ export async function buildCoreContainerServices(
   const compareRetriever = buildCompareRetriever(adapters);
   const baseRanker = buildRanker(adapters, config, support);
   const ranker = buildRankingPipeline(baseRanker);
-  const entityLookup: EntityDocumentLookupPort = runtime.searchSnapshotManifestPath !== undefined
-    ? await SearchSnapshotEntityLookup.loadFromManifest(runtime.searchSnapshotManifestPath)
-    : adapters.searchIndex;
 
   return {
     ...(runtime.pool !== undefined ? { pool: runtime.pool } : {}),
     queryPlanner,
     entityLookupAnchorRefresh,
-    blocker: buildBlockingUseCaseAdapter(adapters),
     entityResolver,
     candidatePool,
     browseRetriever,
     compareRetriever,
-    entityLookup,
-    aliasMatcher: adapters.aliasMatcher,
-    ambiguityDictionary: adapters.ambiguityDict,
     ...(adapters.chatLlm !== undefined ? { chatLlm: adapters.chatLlm } : {}),
     ranker,
     decisionEngine: buildDecisionEngine(adapters, config),

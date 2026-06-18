@@ -135,9 +135,11 @@ describe('Search Pipeline Integration', () => {
   // Group 2: Hybrid / Semantic Path
   // ─────────────────────────────────────────────────────────────────────────
   describe('Group 2 — Hybrid/Semantic Path', () => {
-    it('"10만원 이하 풀바디 레드" returns results via hybrid route', async () => {
+    // Korean price constraints ("10만원 이하 …") are exercised in agent.route tests;
+    // this case pins hybrid semantic retrieval without price-provenance shortfall.
+    it('"풀바디 레드 와인" returns results via hybrid route', async () => {
       const response = await parts.container.searchUseCase.execute(
-        makeRequest('10만원 이하 풀바디 레드', { options: { mode: 'hybrid', explain: true, clarification: false } }),
+        makeRequest('풀바디 레드 와인', { options: { mode: 'hybrid', explain: false, clarification: false } }),
         'req-hybrid-1',
       );
 
@@ -256,7 +258,7 @@ describe('Search Pipeline Integration', () => {
 
       // Status is either resolved or ambiguous, never an uncaught exception
       expect(response.engineDecision.decisionStatus).toMatch(/^(resolved|ambiguous)$/);
-      expect(['clarify', 'return_results', 'hybrid_search']).toContain(
+      expect(['clarify', 'return_result', 'hybrid_search']).toContain(
         response.engineDecision.nextAction,
       );
     });

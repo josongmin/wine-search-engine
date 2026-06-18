@@ -134,6 +134,117 @@ function makePlanner(
 // ── Request-scoped constraint extraction (no shared mutable trace) ───────────
 
 describe('Planner – constraint extraction metadata', () => {
+  it('skips constraint compilation for raw-query exact-safe singleton witnesses in lookup mode', async () => {
+    const planner = new Planner(
+      noAmbiguityDict,
+      new AnchorExtractor(new ExactAliasMatcher(new Map([
+        ['오 푸 스 원 18', [{
+          surfaceForm: '오 푸 스 원 18',
+          normalizedForm: '오 푸 스 원 18',
+          entityIds: ['opus-one-2018'] as unknown as AliasMatchResult['entityIds'],
+          matchConfidence: 1,
+          lookupStrategy: 'exact',
+          aliasType: 'translation',
+        }]],
+      ]))),
+      new ExpansionBuilder(),
+      {
+        mapPhrase: () => Promise.resolve(null),
+        mapConstraints: () => {
+          throw new Error('constraint compiler should be skipped');
+        },
+      } as unknown as NLMapperPort,
+      undefined,
+      undefined,
+      undefined,
+      { skipConstraintParsingOnExactSafeWitness: true },
+    );
+
+    const plan = await planner.plan('오 푸 스 원 18');
+
+    expect(plan.anchors).toHaveLength(1);
+    expect(plan.constraints.hard).toHaveLength(0);
+    expect(plan.constraints.soft).toHaveLength(0);
+  });
+
+  it('disables constraint-compiler fuzzy linking in lookup mode without disabling planner fuzzy fallback', async () => {
+    const planner = new Planner(
+      noAmbiguityDict,
+      new AnchorExtractor(new ExactAliasMatcher(new Map([
+        ['샤또 라뚜르', [{
+          surfaceForm: '샤또 라뚜르',
+          normalizedForm: '샤또 라뚜르',
+          entityIds: ['latour-2018'] as unknown as AliasMatchResult['entityIds'],
+          matchConfidence: 0.96,
+          lookupStrategy: 'exact',
+          aliasType: 'translation',
+        }]],
+      ]))),
+      new ExpansionBuilder(),
+      noOpNLMapper,
+      {
+        match: () => {
+          throw new Error('constraint compiler fuzzy matcher should be disabled');
+        },
+      },
+      undefined,
+      undefined,
+      { disableConstraintCompilerFuzzyMatcher: true },
+    );
+
+    const plan = await planner.plan('샤또 라뚜르');
+
+    expect(plan.rawQuery).toBe('샤또 라뚜르');
+  });
+
+  it('skips planner fuzzy fallback for known ambiguous short surfaces in lookup mode', async () => {
+    const ambiguityDict: AmbiguityDictionary = {
+      isKnownAmbiguous: () => Promise.resolve(true),
+      getAmbiguityInfo: () => Promise.resolve({
+        entityIds: ['yquem-2015', 'dyquem-2015'],
+        types: ['short_form'],
+        severity: 'high',
+      }),
+      getAmbiguityInfoBatch: async (forms) => {
+        const map = new Map<string, {
+          entityIds: readonly string[];
+          types: readonly string[];
+          severity: 'low' | 'medium' | 'high';
+        }>();
+        for (const form of forms) {
+          if (form === '디켐') {
+            map.set(form, {
+              entityIds: ['yquem-2015', 'dyquem-2015'],
+              types: ['short_form'],
+              severity: 'high',
+            });
+          }
+        }
+        return map;
+      },
+    };
+
+    const planner = new Planner(
+      ambiguityDict,
+      new AnchorExtractor(new ExactAliasMatcher(new Map())),
+      new ExpansionBuilder(),
+      noOpNLMapper,
+      {
+        match: () => {
+          throw new Error('planner fuzzy fallback should be skipped');
+        },
+      },
+      undefined,
+      undefined,
+      { skipFuzzyFallbackOnKnownAmbiguousSurface: true },
+    );
+
+    const plan = await planner.plan('디켐');
+
+    expect(plan.anchors).toHaveLength(0);
+    expect(plan.expansions.fuzzyEntityHypotheses).toBeUndefined();
+  });
+
   it('concurrent plan() calls each keep their own constraintExtraction from NLMapper', async () => {
     const tracingNLMapper: NLMapper = {
       mapPhrase: () => Promise.resolve(null),
@@ -229,8 +340,8 @@ describe('Planner – constraint extraction metadata', () => {
 
     expect(plan.anchors.length).toBeGreaterThan(0);
     expect(plan.anchors.some((anchor) => anchor.source === 'planner_heuristic')).toBe(true);
-    expect(batchLookup).toHaveBeenCalledTimes(3);
-    expect(batchLookup.mock.calls[2]?.[0]).toEqual(expect.arrayContaining(['opus one']));
+    expect(batchLookup).toHaveBeenCalledTimes(4);
+    expect(batchLookup.mock.calls[3]?.[0]).toEqual(expect.arrayContaining(['opus one']));
   });
 
   it('promotes queryClass to ambiguous_short_form when constraint parsing emits ambiguity hints', async () => {
@@ -481,8 +592,33 @@ describe('Planner – suggestedRoute matches expected routing', () => {
     expect(plan.suggestedRoute).toBe('hybrid');
   });
 
+  it('partial producer-label surface Barolo Giacomo keeps entity posture and route', async () => {
+    const planner = new Planner(
+      noAmbiguityDict,
+      new AnchorExtractor(new ExactAliasMatcher(new Map([
+        ['barolo giacomo', [makeMatchResult('Barolo Giacomo', 0.88, ['barolo-giacomo'])]],
+      ]))),
+      new ExpansionBuilder(),
+      noOpNLMapper,
+    );
+    const plan = await planner.plan('Barolo Giacomo');
+
+    expect(plan.queryClass).toBe('short_entity');
+    expect(plan.intent).toBe('entity_exact');
+    expect(plan.suggestedRoute).toBe('entity');
+    expect(['entity_lookup', 'entity_resolution']).toContain(plan.suggestedRetrievalMode);
+  });
+
+  it('single-token appellation Barolo without anchor stays on discovery lane', async () => {
+    const planner = makePlanner(new Map());
+    const plan = await planner.plan('Barolo');
+
+    expect(plan.intent).toBe('semantic_discovery');
+    expect(plan.queryClass).toBe('semantic_preference');
+    expect(plan.suggestedRoute).toBe('hybrid');
+  });
+
   it.each([
-    ['풀바디 레드 와인'],
     ['상큼한 화이트 와인'],
     ['호주 쉬라즈 풀바디'],
     ['강한 타닌 네비올로'],
@@ -1392,6 +1528,37 @@ describe('Planner – regression (same query → same intent, anchors, constrain
     );
     expect(plan.suggestedRoute).toBe('entity');
     expect(plan.suggestedRetrievalMode).toBe('entity_lookup');
+  });
+
+  it('drops atomic grape and region span anchors when they are deterministic constraint surfaces inside a longer query', async () => {
+    const grapeEntityId = 'wine-generic-sauvignon';
+    const regionEntityId = 'wine-generic-marlborough';
+    const planner = new Planner(
+      noAmbiguityDict,
+      new AnchorExtractor(new ExactAliasMatcher(new Map([
+        ['sauvignon', [{
+          surfaceForm: '1997 Dunn Cabernet Sauvignon',
+          normalizedForm: '1997 dunn cabernet sauvignon',
+          entityIds: [grapeEntityId] as unknown as AliasMatchResult['entityIds'],
+          matchConfidence: 1,
+          lookupStrategy: 'lexical_exact',
+        }]],
+        ['marlborough', [{
+          surfaceForm: 'Cloudy Bay Marlborough Sauvignon Blanc',
+          normalizedForm: 'cloudy bay marlborough sauvignon blanc',
+          entityIds: [regionEntityId] as unknown as AliasMatchResult['entityIds'],
+          matchConfidence: 1,
+          lookupStrategy: 'lexical_exact',
+        }]],
+      ]))),
+      new ExpansionBuilder(),
+      noOpNLMapper,
+    );
+
+    const plan = await planner.plan('Cloudy Dreams Marlborough Sauvignon Blanc');
+
+    expect(plan.anchors).toHaveLength(0);
+    expect(plan.queryClass).not.toBe('ambiguous_short_form');
   });
 
   it('uncertainty is populated with expected shape', async () => {

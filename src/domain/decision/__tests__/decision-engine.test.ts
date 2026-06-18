@@ -801,6 +801,56 @@ describe('DecisionEngine', () => {
         'NOISY_SHORT_QUERY_GUARD_BYPASSED_HIGH_CONFIDENCE',
       );
     });
+
+    it('bypasses the guard for a unique alias_fuzzy singleton typo witness below the high-confidence floor', async () => {
+      const output = await expectDecisionStatus({
+        queryPlan: {
+          ...makeQueryPlan('short_entity'),
+          rawQuery: 'opuss one',
+          normalizedQuery: 'opuss one',
+        },
+        resolveResult: makeResolverResult(0.679, undefined, false, {
+          anchorLookupStrategies: ['fuzzy_char_ngram'],
+          anchorLookupVariants: ['opus one'],
+        }),
+        evidenceSummary: makeStrongIdentityEvidence({
+          identityEvidence: {
+            exactnessTier: 'alias_fuzzy',
+            identityEvidenceRefCount: 1,
+          },
+        }),
+      }, 'resolved');
+
+      expect(output.decisionTrace.rulesApplied).toContain(
+        'NOISY_SHORT_QUERY_GUARD_BYPASSED_UNIQUE_FUZZY_IDENTITY',
+      );
+      expect(output.decisionTrace.rulesApplied).not.toContain('NOISY_SHORT_QUERY_GUARD');
+    });
+
+    it('bypasses the guard for a unique alias_phonetic singleton witness below the high-confidence floor', async () => {
+      const output = await expectDecisionStatus({
+        queryPlan: {
+          ...makeQueryPlan('short_entity'),
+          rawQuery: 'romane conti',
+          normalizedQuery: 'romane conti',
+        },
+        resolveResult: makeResolverResult(0.86, undefined, false, {
+          anchorLookupStrategies: ['phonetic_exact'],
+          anchorLookupVariants: ['romanee conti'],
+        }),
+        evidenceSummary: makeStrongIdentityEvidence({
+          identityEvidence: {
+            exactnessTier: 'alias_phonetic',
+            identityEvidenceRefCount: 1,
+          },
+        }),
+      }, 'resolved');
+
+      expect(output.decisionTrace.rulesApplied).toContain(
+        'NOISY_SHORT_QUERY_GUARD_BYPASSED_UNIQUE_PHONETIC_IDENTITY',
+      );
+      expect(output.decisionTrace.rulesApplied).not.toContain('NOISY_SHORT_QUERY_GUARD');
+    });
   });
 
   // ── Boundary coverage for the noisy-short-query guard constants ──
@@ -1070,6 +1120,39 @@ describe('DecisionEngine', () => {
       expect(output.decisionStatus).toBe('ambiguous');
       expect(output.decisionTrace.rulesApplied).toContain('POLICY_REQUIRE_EXACT_DOWNGRADE');
     });
+
+    it.each([
+      ['alias_fuzzy', 'alias_fuzzy' as const],
+      ['alias_phonetic', 'alias_phonetic' as const],
+    ])(
+      'requireExact=true with unique singleton %s witness still resolves',
+      async (_label, exactnessTier) => {
+        const base = makeResolverResult(0.995, 0.20, false);
+        const input = makeInput({
+          resolveResult: {
+            ...base,
+            decisionTrace: {
+              ...base.decisionTrace,
+              calibratedGap: undefined,
+              top2CalibratedScore: undefined,
+            },
+          },
+          policy: makeClarifyPolicy({
+            requireExact: true,
+            allowApproximate: false,
+          }),
+          evidenceSummary: makeStrongIdentityEvidence({
+            identityEvidence: {
+              exactnessTier,
+            },
+          }),
+        });
+        const output = await engine.decide(input, TEST_SNAPSHOT);
+        expect(output.decisionStatus).toBe('resolved');
+        expect(output.decisionTrace.rulesApplied).toContain('POLICY_REQUIRE_EXACT_SATISFIED');
+        expect(output.decisionTrace.rulesApplied).not.toContain('POLICY_REQUIRE_EXACT_DOWNGRADE');
+      },
+    );
 
     it.each([
       [

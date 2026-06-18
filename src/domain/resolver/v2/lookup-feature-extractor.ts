@@ -8,6 +8,18 @@
 
 import type { LookupCandidateFeatures, LookupChannelHit, LookupRetrievalChannel } from './lookup-v2-types.js';
 
+/**
+ * Map a candidate's membership in a persisted ambiguity cluster to a bounded
+ * [0,1) feature. Parameter-free + monotonic: a member of a size-N cluster scores
+ * `1 - 1/N` (size 2 → 0.5, size 5 → 0.8, → asymptote 1 as the cluster grows),
+ * a non-member (or a cluster of size < 2) scores 0. No magic threshold — the
+ * larger the contested cluster, the stronger the ambiguity signal. (T-ELV2-06.)
+ */
+export function ambiguityClusterMembershipScore(isMember: boolean, clusterSize: number): number {
+  if (!isMember || !Number.isFinite(clusterSize) || clusterSize < 2) return 0;
+  return 1 - 1 / clusterSize;
+}
+
 function bestChannelScore(hits: readonly LookupChannelHit[], channel: LookupRetrievalChannel): number {
   let best = 0;
   for (const hit of hits) {
@@ -31,6 +43,19 @@ function clamp01(value: number): number {
 export function extractLookupFeatures(
   channelHits: readonly LookupChannelHit[],
   calibratedScore: number,
+  /**
+   * Persisted ambiguity-cluster membership signal in [0,1) — computed by the
+   * caller via {@link ambiguityClusterMembershipScore} from the registry-backed
+   * cluster (T-ELV2-06 Half A). 0 when the candidate is not in a known cluster
+   * or the substrate is unavailable.
+   */
+  ambiguityClusterMembership = 0,
+  scopeHints?: {
+    readonly lineGraphProximity?: number | undefined;
+    readonly vintageGraphProximity?: number | undefined;
+    readonly scopeQualifierAgreement?: number | undefined;
+    readonly scopeAxisAgreement?: number | undefined;
+  },
 ): LookupCandidateFeatures {
   const distinctChannels = new Set(channelHits.map((h) => h.channel));
   return {
@@ -40,6 +65,20 @@ export function extractLookupFeatures(
     editDistanceScore: bestChannelScore(channelHits, 'fuzzy_alias'),
     phoneticConsistency: bestChannelScore(channelHits, 'jamo_phonetic'),
     familyGraphProximity: bestChannelScore(channelHits, 'family_graph'),
+    lineGraphProximity: clamp01(
+      Math.max(
+        bestChannelScore(channelHits, 'line_graph'),
+        scopeHints?.lineGraphProximity ?? 0,
+      ),
+    ),
+    vintageGraphProximity: clamp01(
+      Math.max(
+        bestChannelScore(channelHits, 'vintage_graph'),
+        scopeHints?.vintageGraphProximity ?? 0,
+      ),
+    ),
+    scopeQualifierAgreement: clamp01(scopeHints?.scopeQualifierAgreement ?? 0),
+    scopeAxisAgreement: clamp01(scopeHints?.scopeAxisAgreement ?? 0),
     // No popularity/script substrate at this layer yet — carry the calibrated
     // resolver score as the popularity-prior proxy (deterministic, bounded).
     popularityPrior: clamp01(calibratedScore),
@@ -50,8 +89,9 @@ export function extractLookupFeatures(
       bestChannelScore(channelHits, 'transliteration_exact') > 0
         ? 1
         : 0,
-    // Filled by T-ELV2-06 persisted ambiguity graph; 0 until wired.
-    ambiguityClusterMembership: 0,
+    // T-ELV2-06 persisted ambiguity graph: cluster-membership signal supplied by
+    // the caller (reranker-gated path) from the registry-backed cluster.
+    ambiguityClusterMembership: clamp01(ambiguityClusterMembership),
     channelAgreement: distinctChannels.size,
   };
 }

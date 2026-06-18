@@ -5,5 +5,5 @@ Applied:
 - Removed dead exports/functions (agent-tool-execution-support, lookup-wine-execution, decomposition-detector, agent-tool-attempt-schema parse helpers, search-tool-contract descriptions, search-tool-retrieval-core shouldPreferTypedStructuredQuery)
 - Removed unused bench profile ID blocks from test/benchmark/agent/scenarios.ts
 - Deleted test/integration/grounded-claim-emission-flag-on.integration.test.ts (imports non-existent domain/response modules)
-- Fixed regression import paths (log-search-event, EntityDocumentLookupPort)
+- Fixed regression import paths (log-search-event, EntityDocumentBatchLookup stub rename)
 - knip.json: explicit scorer-*.ts ignoreIssues + intentional API type ignores

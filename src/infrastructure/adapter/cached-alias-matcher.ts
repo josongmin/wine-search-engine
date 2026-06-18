@@ -3,6 +3,7 @@ import type {
   AliasMatcher,
   AliasLookupOptions,
 } from '../../domain/query/service/anchor-extractor.js';
+import type { AliasRegistryVersion } from '../../domain/alias/model/alias-registry-version.js';
 
 interface CachedAliasMatcherOptions {
   readonly maxEntries?: number | undefined;
@@ -53,6 +54,16 @@ export class CachedAliasMatcher implements AliasMatcher {
     this.maxEntries = Number.isFinite(options.maxEntries ?? CachedAliasMatcher.DEFAULT_MAX_ENTRIES)
       ? Math.max(1, options.maxEntries ?? CachedAliasMatcher.DEFAULT_MAX_ENTRIES)
       : CachedAliasMatcher.DEFAULT_MAX_ENTRIES;
+  }
+
+  /**
+   * Delegate the alias-registry version through to the wrapped matcher. THIS IS
+   * THE LOAD-BEARING DELEGATION (T-ELV2-03): core.aliasMatcher on the V2 path is
+   * ALWAYS a CachedAliasMatcher, so without this the V2 response stamp silently
+   * vanishes (dead foundation). Regression-tested.
+   */
+  getRegistryVersion(): AliasRegistryVersion | undefined {
+    return this.inner.getRegistryVersion?.();
   }
 
   async findMatches(

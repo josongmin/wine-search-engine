@@ -87,8 +87,6 @@ export interface SearchRouteExecutionResultBase<
   readonly retrievalFusionTrace?: RrfFusionTrace | undefined;
   /** E4: Hard-filter drop log from the candidate pool, when hybrid RRF path was used. */
   readonly hardFilterDropLog?: readonly CandidateDropRecord[] | undefined;
-  /** TA5: Calibrated posterior confidence from corrective retry, when accepted. */
-  readonly correctiveRetryCalibration?: number | undefined;
   /**
    * ADR-015 Axis 2: rewrites + exhaustion signal from the executor-internal
    * critic loop. Absent when the `RETRIEVAL_EXECUTOR_CRITIC` flag was off

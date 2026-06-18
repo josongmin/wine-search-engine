@@ -107,4 +107,15 @@ describe('buildAliasArtifact', () => {
         && alias.source === 'etl:abbreviation_derivation_v1'),
     ).toBe(true);
   });
+
+  it('materializes Double Metaphone phonetic keys for Latin alias surfaces', () => {
+    const record = makeRecord();
+    const goldLookup = new Map<string, string>([[silverGoldMatchKey(record), 'opus-one-2018']]);
+    const entityIdBySourceId = buildEntityIdBySourceId([record], goldLookup);
+    const aliases = buildAliasArtifact([record], entityIdBySourceId);
+
+    const canonicalAlias = aliases.find((alias) => alias.type === 'canonical');
+    expect(canonicalAlias?.phoneticKeys).toBeDefined();
+    expect(canonicalAlias?.phoneticKeys?.length).toBeGreaterThan(0);
+  });
 });

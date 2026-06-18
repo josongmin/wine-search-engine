@@ -91,6 +91,29 @@ describe('QueryAnalyzerService — deterministic pipeline', () => {
     expect(llm.analyzeMock).not.toHaveBeenCalled();
   }, 10_000);
 
+  it('anchor + constraint recommendation query stays discovery-style, not anchored_similarity', async () => {
+    const result = await analyze('부르고뉴 피노누아 추천');
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    expect(result.analysis.callerInterpretation).toEqual({
+      authority: 'caller',
+      intent: 'mixed_query',
+      queryClass: 'semantic_preference',
+    });
+    expect(result.analysis.expectedMultiStep).toBe(false);
+  });
+
+  it('explicit similarity query projects to anchored_similarity', async () => {
+    const result = await analyze('Opus One이랑 비슷한데 더 싼 거');
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    expect(result.analysis.callerInterpretation).toEqual({
+      authority: 'caller',
+      intent: 'mixed_query',
+      queryClass: 'anchored_similarity',
+    });
+  });
+
   it('Exact entity with vintage — anchors include the entity, vintage captured', async () => {
     const result = await analyze('Opus One 2018');
     expect(result.kind).toBe('ok');
@@ -297,6 +320,37 @@ describe('QueryAnalyzerService — LLM fallback', () => {
     // orchestrator can tell a real LLM rescue apart from a deterministic
     // analysis or a preserved-unknown failure. See `llmFallbackOutcome` regression file.
     expect(result.analysis.llmFallbackOutcome).toEqual({ kind: 'success' });
+  });
+
+  it('passes a MINIMAL schema to the LLM and merges {intent} into the deterministic shell (OpenAI-robust)', async () => {
+    // Structural fix: the fallback must NOT ask the LLM to emit the entire
+    // (huge, strict, nested) WineSearchAnalysis — OpenAI structured output
+    // cannot reliably satisfy it, so the analyzer kept failing → intent=unknown
+    // → false "unsupported_intent". Instead the LLM emits only the intent (+ may
+    // sprinkle extra reasoning fields, rule 10), which we merge into the
+    // deterministic shell that already carries contract/budget/etc.
+    const stub = makeStubLlm(() =>
+      Promise.resolve({
+        // minimal output + an extra reasoning field the LLM may add
+        data: { intent: 'search', reasoning: 'mentions a wine region' } as never,
+        usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheCreationTokens: 0 },
+        durationMs: 1,
+      }),
+    );
+    const result = await analyze('asdf', { structuredLlm: stub });
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    // intent came from the LLM; the shell supplied the rest
+    expect(result.analysis.intent).toBe('search');
+    expect(result.analysis.contract).toBeDefined();
+    expect(result.analysis.recommendedBudget).toBeDefined();
+    expect(result.analysis.expectedMultiStep).toBe(false);
+    expect(result.analysis.preservedSurface).toBe('asdf');
+    expect(result.analysis.llmFallbackOutcome).toEqual({ kind: 'success' });
+    // The schema handed to the LLM is MINIMAL — it accepts `{ intent }` alone
+    // (the full WineSearchAnalysisSchema would reject that for missing fields).
+    const passedSchema = stub.analyzeMock.mock.calls[0]?.[0]?.schema;
+    expect(passedSchema?.safeParse({ intent: 'search' }).success).toBe(true);
   });
 
   it('does NOT invoke structuredLlm when deterministic pipeline yields constraints', async () => {

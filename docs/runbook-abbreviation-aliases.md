@@ -103,24 +103,41 @@ The commit step:
 - upserts into the **staging** `alias_proposals` table keyed by
   `proposal_id`. Re-running the commit is safe (idempotent).
 
-**Architectural note:** the runtime-plane `aliases` table has a single
-authorized writer — `scripts/etl/publish-runtime-substrates.ts`
-(migration 016 invariant, gated by
-`test/regression/runtime-plane-insert-authority.regression.test.ts`).
-This ETL stages into `alias_proposals`; the publisher picks up the
-approved staging rows on the next snapshot publish and materializes
-them into `aliases` with the correct `search_snapshot_id`.
+**Architectural note:** runtime `aliases` rows are materialized only through the
+snapshot ETL (`build-search-snapshot` → `publish-search-snapshot`), not by a
+standalone publisher script. Ops-published proposals (`status=published`) and
+legacy `approved` abbreviation rows are consumed by
+`scripts/etl/load-published-curation-proposals.ts` during snapshot build; see
+[docs/runbook-curation-materialization.md](runbook-curation-materialization.md).
 
-### 5. Publish to the runtime plane
+### 5. Materialize into the runtime plane
+
+After ops publish (or legacy `--commit` into staging), run snapshot build +
+publish so proposals land in alias/ambiguity artifacts and the active lookup
+runtime:
 
 ```sh
-pnpm tsx --env-file=.env scripts/etl/publish-runtime-substrates.ts
+pnpm run etl:build-search-snapshot
+pnpm run etl:publish-search-snapshot
 ```
 
-The publisher reads `alias_proposals WHERE status='approved' AND proposed_type='abbreviation'`
-and INSERTs the rows into `aliases` against the active search snapshot.
-After the publish, the new abbreviation aliases participate in the
-`PgAliasMatcher` exact-match phase on the next request.
+`publish-search-snapshot` promotes the active pointer **and** marks
+`materialized_snapshot_id` on consumed `published` rows (migration 033).
+Build alone does not clear `published_awaiting_materialization` backlog.
+
+### 5b. Preferred ops path (Entity Lookup V2 write plane)
+
+For operator-reviewed abbreviation rows, prefer the V2 curation API instead of
+direct `--commit` when possible:
+
+1. Submit via `POST /v2/entity-lookup/ops/proposals/submit` with
+   `kind: alias`, `proposed_type: abbreviation`.
+2. Review (`/proposals/review`) → publish (`/proposals/publish`) with
+   `X-Ops-Write-Key`.
+3. Run snapshot build + publish (§5 above).
+
+Next.js `/ops/curation` and `entity-lookup-ops-web` ProposalsInbox both
+support approve / reject / publish for the same staging tables.
 
 ## Reviewing LLM proposals
 
@@ -219,7 +236,7 @@ SELECT entity_id, surface_form, normalized_value, alias_type, source
 
 ```sh
 # Should resolve to chateau-margaux-2015 with high confidence.
-curl -sX POST http://localhost:3001/v1/lookup/wine \
+curl -sX POST http://localhost:3001/v2/entity-lookup \
   -H 'Content-Type: application/json' \
   -d '{"query":"CM 15"}' | jq .
 ```

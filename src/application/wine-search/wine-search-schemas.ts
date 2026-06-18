@@ -350,6 +350,11 @@ export const LlmFallbackOutcomeSchema = z.discriminatedUnion('kind', [
       'validation',
       'partial_output',
       'circuit_open',
+      // Move 1: provider rejected at the transport layer (auth / credit / 5xx)
+      // — distinct from `validation` (200 OK but model output failed our
+      // schema). Was mis-logged as `validation` because the adapter conflated
+      // HTTP 400 "credit balance too low" into a ValidationError.
+      'provider_unavailable',
       'unknown',
     ]),
   }).strict(),

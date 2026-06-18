@@ -7,6 +7,53 @@ import {
   executeDualLaneHybridRoute,
   executeDualLaneSearch,
 } from '../../../../src/application/search/search-usecase-dual-lane-execution.js';
+import {
+  makeMinimalLookupV2FailedResult,
+  makeStubEntityLookupV2UseCase,
+} from '../../../../src/application/search/__tests__/entity-lookup-v2-use-case.stub.js';
+
+function toLookupV2Result(resolveResult: EntityResolveResult) {
+  const status = resolveResult.status === 'resolved'
+    ? 'resolved'
+    : resolveResult.status === 'ambiguous'
+      ? 'ambiguous'
+      : 'failed';
+  return makeMinimalLookupV2FailedResult({
+    status,
+    topCandidate: resolveResult.topEntity !== undefined
+      ? {
+          entityId: String(resolveResult.topEntity.entityId),
+          canonicalLabel: resolveResult.topEntity.canonicalLabel,
+          calibratedScore: resolveResult.topEntity.calibratedScore,
+          rank: 1,
+          channelAgreement: 1,
+          channelHits: [],
+        }
+      : null,
+    candidates: resolveResult.candidates.map((candidate) => ({
+      entityId: String(candidate.entityId),
+      canonicalLabel: candidate.canonicalLabel,
+      calibratedScore: candidate.calibratedScore,
+      rank: candidate.rank,
+      channelAgreement: 1,
+      channelHits: [],
+    })),
+  });
+}
+
+function makeEntityLookupV2ExecuteMock(
+  ...resolveResults: EntityResolveResult[]
+) {
+  const execute = vi.fn();
+  if (resolveResults.length === 0) {
+    execute.mockResolvedValue(toLookupV2Result(buildResolveResult()));
+  } else {
+    for (const resolveResult of resolveResults) {
+      execute.mockResolvedValueOnce(toLookupV2Result(resolveResult));
+    }
+  }
+  return execute;
+}
 
 function buildPlan(): QueryPlanV1 {
   return {
@@ -139,9 +186,7 @@ describe('search-usecase-dual-lane-execution', () => {
   it('runs identity and general lanes together and materializes fused SSOT artifacts', async () => {
     const plan = buildPlan();
     const compiled = buildCompiled(plan);
-    const entityResolver = {
-      resolve: vi.fn(async () => buildResolveResult()),
-    };
+    const entityLookupV2Execute = makeEntityLookupV2ExecuteMock();
     const candidatePool = {
       execute: vi.fn(async () => ([
         buildGeneralCandidate('wine-1', 'Wine One', 0.91),
@@ -153,7 +198,7 @@ describe('search-usecase-dual-lane-execution', () => {
     const executionPromise = executeDualLaneSearch(
       plan,
       {
-        entityResolver: entityResolver as never,
+        entityLookupV2UseCase: makeStubEntityLookupV2UseCase(entityLookupV2Execute),
         candidatePool: candidatePool as never,
         ranker: {} as never,
       },
@@ -162,7 +207,7 @@ describe('search-usecase-dual-lane-execution', () => {
 
     await Promise.resolve();
 
-    expect(entityResolver.resolve).toHaveBeenCalledTimes(1);
+    expect(entityLookupV2Execute).toHaveBeenCalledTimes(1);
     expect(candidatePool.execute).toHaveBeenCalledTimes(1);
 
     const execution = await executionPromise;
@@ -190,9 +235,7 @@ describe('search-usecase-dual-lane-execution', () => {
     const plan = buildPlan();
     const compiled = buildCompiled(plan, 'compare_candidates');
     const resolveResult = buildResolveResult();
-    const entityResolver = {
-      resolve: vi.fn(async () => resolveResult),
-    };
+    const entityLookupV2Execute = makeEntityLookupV2ExecuteMock(resolveResult);
     const compareRetriever = {
       compareAgainstAnchor: vi.fn(async () => ([
         buildGeneralCandidate('wine-1', 'Wine One', 0.81),
@@ -229,7 +272,7 @@ describe('search-usecase-dual-lane-execution', () => {
     const execution = await executeDualLaneHybridRoute(
       plan,
       {
-        entityResolver: entityResolver as never,
+        entityLookupV2UseCase: makeStubEntityLookupV2UseCase(entityLookupV2Execute),
         compareRetriever: compareRetriever as never,
         candidatePool: {} as never,
         ranker: ranker as never,
@@ -237,16 +280,22 @@ describe('search-usecase-dual-lane-execution', () => {
       compiled,
     );
 
-    expect(entityResolver.resolve).toHaveBeenCalledTimes(1);
+    expect(entityLookupV2Execute).toHaveBeenCalledTimes(1);
     expect(compareRetriever.compareAgainstAnchor).toHaveBeenCalledWith(
       createEntityId('wine-1'),
       plan.constraints,
       20,
       undefined,
     );
-    expect(execution.dualLaneExecution.identityResolveResult).toBe(resolveResult);
+    expect(execution.dualLaneExecution.identityResolveResult.status).toBe('resolved');
+    expect(execution.dualLaneExecution.identityResolveResult.topEntity?.entityId).toBe(
+      resolveResult.topEntity?.entityId,
+    );
     expect(execution.routeExecution.executionTopology).toBe('dual_lane');
-    expect(execution.routeExecution.identityResolveResult).toBe(resolveResult);
+    expect(execution.routeExecution.identityResolveResult.status).toBe('resolved');
+    expect(execution.routeExecution.identityResolveResult.topEntity?.entityId).toBe(
+      resolveResult.topEntity?.entityId,
+    );
     expect(execution.routeExecution.dualLaneExecutionAttemptId).toMatch(/^dual-lane-attempt-/u);
     expect(execution.routeExecution.laneArtifacts.identity).toHaveLength(2);
     expect(execution.routeExecution.laneArtifacts.general).toHaveLength(2);
@@ -277,9 +326,7 @@ describe('search-usecase-dual-lane-execution', () => {
   it('rejects general-only compiled carriers instead of upgrading them into dual-lane', async () => {
     const plan = buildPlan();
     const compiled = buildCompiled(plan, 'recommendation', 'general_only');
-    const entityResolver = {
-      resolve: vi.fn(async () => buildResolveResult()),
-    };
+    const entityLookupV2Execute = makeEntityLookupV2ExecuteMock();
     const candidatePool = {
       execute: vi.fn(async () => [
         buildGeneralCandidate('wine-1', 'Wine One', 0.91),
@@ -317,7 +364,7 @@ describe('search-usecase-dual-lane-execution', () => {
       executeDualLaneHybridRoute(
         plan,
         {
-          entityResolver: entityResolver as never,
+          entityLookupV2UseCase: makeStubEntityLookupV2UseCase(entityLookupV2Execute),
           candidatePool: candidatePool as never,
           ranker: ranker as never,
         },
@@ -364,12 +411,10 @@ describe('search-usecase-dual-lane-execution', () => {
         decisionConfidenceC: 0.88,
       },
     };
-    const entityResolver = {
-      resolve: vi
-        .fn()
-        .mockResolvedValueOnce(firstResolveResult)
-        .mockResolvedValueOnce(relaxedResolveResult),
-    };
+    const entityLookupV2Execute = makeEntityLookupV2ExecuteMock(
+      firstResolveResult,
+      relaxedResolveResult,
+    );
     const candidatePool = {
       execute: vi.fn(async () => [
         buildGeneralCandidate('wine-9', 'Relaxed Wine', 0.93),
@@ -411,17 +456,21 @@ describe('search-usecase-dual-lane-execution', () => {
     const execution = await executeDualLaneHybridRoute(
       plan,
       {
-        entityResolver: entityResolver as never,
+        entityLookupV2UseCase: makeStubEntityLookupV2UseCase(entityLookupV2Execute),
         candidatePool: candidatePool as never,
         ranker: ranker as never,
       },
       compiled,
     );
 
-    expect(entityResolver.resolve).toHaveBeenCalledTimes(2);
+    expect(entityLookupV2Execute).toHaveBeenCalledTimes(2);
     expect(candidatePool.execute).toHaveBeenCalledTimes(2);
-    expect(execution.dualLaneExecution.identityResolveResult).toBe(relaxedResolveResult);
-    expect(execution.routeExecution.identityResolveResult).toBe(relaxedResolveResult);
+    expect(execution.dualLaneExecution.identityResolveResult.topEntity?.entityId).toBe(
+      createEntityId('wine-9'),
+    );
+    expect(execution.routeExecution.identityResolveResult.topEntity?.entityId).toBe(
+      createEntityId('wine-9'),
+    );
     expect(
       execution.routeExecution.rankedResults.map((result) => String(result.entityId)),
     ).toEqual(['wine-9']);

@@ -28,6 +28,6 @@ Three error-handling tiers with distinct rules:
 
 ## Consequences
 
-- The outer catch-alls in `search.usecase.ts` and `hybrid.usecase.ts` now throw instead of fabricating 200 responses
+- The outer catch-all in `search.usecase.ts` now throws instead of fabricating 200 responses
 - `post-route-phase.ts` no longer catches `decisionEngine.decide()` errors
 - Every new use case must follow Tier 2 rules (enforced via code review + `no-catch-fabricate-success` convention in CLAUDE.md)

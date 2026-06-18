@@ -3,12 +3,18 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { parseNdjson } from '../../scripts/etl/ndjson.js';
 import type { GoldenQuery } from '../../scripts/etl/types.js';
 import { closeTestServer, createTestServer, type TestServer } from './helpers/test-server.js';
-import { getSearchEntityIds, parseSearchResponse, postJson } from './helpers/http-transport.js';
+import {
+  getSearchEntityIds,
+  parseEntityLookupResponse,
+  parseSearchResponse,
+  postJson,
+} from './helpers/http-transport.js';
 
 interface SmokeCase {
   readonly qid: string;
   readonly query: string;
   readonly queryClass: GoldenQuery['query_class'];
+  readonly retrievalMode: GoldenQuery['retrieval_mode'];
   readonly expectedDecisionStatus: GoldenQuery['decision_labels']['expected_decision_status'];
   readonly expectedEntityId: string | null;
 }
@@ -27,6 +33,7 @@ beforeAll(async () => {
     qid: record.qid,
     query: record.query,
     queryClass: record.query_class,
+    retrievalMode: record.retrieval_mode,
     expectedDecisionStatus: record.decision_labels.expected_decision_status,
     expectedEntityId: record.decision_labels.expected_entity_id ?? null,
   }));
@@ -40,13 +47,18 @@ async function search(query: string) {
   const response = await postJson(server.app, '/v1/search/hybrid', {
     query,
     options: {
-      mode: 'hybrid',
       explain: false,
       clarification: false,
     },
   });
   expect(response.statusCode).toBe(200);
   return parseSearchResponse(response);
+}
+
+async function lookup(query: string) {
+  const response = await postJson(server.app, '/v2/entity-lookup', { query });
+  expect(response.statusCode).toBe(200);
+  return parseEntityLookupResponse(response);
 }
 
 describe('Offline Smoke Release Gate', () => {
@@ -63,10 +75,14 @@ describe('Offline Smoke Release Gate', () => {
   });
 
   it('keeps exact-entity top1 recovery at 100%', async () => {
-    const exactCases = cases.filter((entry) => entry.queryClass === 'exact_entity');
-    const bodies = await Promise.all(exactCases.map((entry) => search(entry.query)));
+    const exactCases = cases.filter((entry) =>
+      entry.queryClass === 'exact_entity'
+      && entry.retrievalMode === 'entity_lookup',
+    );
+    const bodies = await Promise.all(exactCases.map((entry) => lookup(entry.query)));
     const top1Accuracy = bodies.filter((body, index) =>
-      getSearchEntityIds(body)[0] === exactCases[index]?.expectedEntityId,
+      body.status === exactCases[index]?.expectedDecisionStatus
+      && body.top_candidate?.entity_id === exactCases[index]?.expectedEntityId,
     ).length / exactCases.length;
 
     expect(top1Accuracy).toBe(1);

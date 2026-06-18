@@ -27,6 +27,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import process from 'node:process';
 import { Pool } from 'pg';
+import { createScriptPgPool } from '../lib/script-pg-pool.js';
+import { pgTableHasColumn } from '../../src/infrastructure/db/pg-schema-capabilities.js';
 import { isQueryClass } from '../../src/domain/shared/types/query-class.js';
 import type { QueryClass } from '../../src/domain/shared/types/index.js';
 
@@ -185,18 +187,7 @@ export function serialiseTraceToNdjson(rows: readonly CalibrationTraceRow[]): st
 // ────────────────────────────────────────────────────────────────
 
 function createPool(): Pool {
-  const connectionString = process.env['DATABASE_URL'];
-  if (connectionString !== undefined && connectionString.length > 0) {
-    return new Pool({ connectionString });
-  }
-  const port = Number.parseInt(process.env['PG_PORT'] ?? process.env['PGPORT'] ?? '5432', 10);
-  return new Pool({
-    host: process.env['PG_HOST'] ?? process.env['PGHOST'] ?? 'localhost',
-    port,
-    database: process.env['PG_DATABASE'] ?? process.env['PGDATABASE'] ?? 'wine_search',
-    user: process.env['PG_USER'] ?? process.env['PGUSER'] ?? 'postgres',
-    password: process.env['PG_PASSWORD'] ?? process.env['PGPASSWORD'] ?? '',
-  });
+  return createScriptPgPool();
 }
 
 async function fetchRows(
@@ -205,10 +196,22 @@ async function fetchRows(
 ): Promise<readonly EvalResultJoinedRow[]> {
   const sinceMs = Date.now() - sinceDays * MS_PER_DAY;
   const sinceDate = new Date(sinceMs);
+  // Calibration MUST be keyed by the class the runtime resolver looks up at
+  // decision time (`runtime_query_class`), NOT the eval gold class
+  // (`eval_cases.query_class`). They differ — e.g. gold `exact_entity` vs
+  // runtime `short_entity` — and a mismatch means the fitted params are stored
+  // under a key the resolver never queries, so calibration silently never
+  // applies (the trust gate then downgrades even exact matches to ambiguous).
+  // Migration 025 adds `runtime_query_class`; pre-migration rows fall back to
+  // the gold class via COALESCE.
+  const hasRuntimeClass = await pgTableHasColumn(pool, 'eval_results', 'runtime_query_class');
+  const queryClassExpr = hasRuntimeClass
+    ? 'COALESCE(er.runtime_query_class, ec.query_class)'
+    : 'ec.query_class';
   const result = await pool.query<EvalResultJoinedRow>(
     `SELECT er.top1_raw_score,
             er.is_correct_resolve,
-            ec.query_class,
+            ${queryClassExpr} AS query_class,
             er.created_at
        FROM eval_results er
        JOIN eval_cases   ec ON ec.case_id = er.case_id

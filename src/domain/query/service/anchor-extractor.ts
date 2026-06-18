@@ -1,8 +1,10 @@
 import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { AliasType } from '../../alias/model/alias.js';
+import type { AliasRegistryVersion } from '../../alias/model/alias-registry-version.js';
 import type { AnchorCandidate } from '../model/anchor-candidate.js';
 import type { AnchorConditionedQuery } from '../model/relative-query.js';
 import type { NormalizedQueryViews } from '../model/query-views.js';
+import { buildNormalizedQueryViews } from './query-normalizer.js';
 import { parseSpans } from '../../attribute/service/span-parser.js';
 import {
   isDirectEntityResolution,
@@ -10,12 +12,13 @@ import {
 } from '../../attribute/service/entity-resolver.js';
 import { RelativeQueryExtractor } from './relative-query-extractor.js';
 import { compareScoreWithTiebreaker } from '../../shared/utils/stable-comparator.js';
-import { buildAliasSurfaceLookupPlan } from './alias-lookup-plan.js';
+import { buildAliasLookupPlan, buildAliasSurfaceLookupPlan } from './alias-lookup-plan.js';
 import { isExactLikeLookupStrategy } from './lookup-strategy-taxonomy.js';
 import { pickHigherTrustAliasType } from '../../alias/service/conflict-resolver.js';
 import { extractRuleBasedConstraints } from './rule-based-constraint-extractor.js';
 import { bootstrapLogger } from '../../shared/bootstrap-logger.js';
 import { globalSilentSkipCounter } from '../../observability/silent-skip-counters.js';
+import type { StageTimer } from '../../shared/stage-timer.js';
 
 /**
  * Result returned by an {@link AliasMatcher} lookup.
@@ -45,17 +48,25 @@ export interface AliasMatchResult {
 
 export type AliasLookupScope = 'surface' | 'span';
 export type AliasRecallMode = 'surface_only';
-type DeterministicConstraintEntityType = 'country' | 'region' | 'wine_type';
+type DeterministicConstraintEntityType =
+  | 'country'
+  | 'region'
+  | 'wine_type'
+  | 'grape_primary'
+  | 'grape_family';
 
 const DETERMINISTIC_CONSTRAINT_ENTITY_TYPES: ReadonlySet<DeterministicConstraintEntityType> = new Set([
   'country',
   'region',
   'wine_type',
+  'grape_primary',
+  'grape_family',
 ]);
 
 export interface AliasLookupOptions {
   readonly scope?: AliasLookupScope;
   readonly recallMode?: AliasRecallMode | undefined;
+  readonly stageTimer?: StageTimer | undefined;
 }
 
 function isDeterministicConstraintEntityType(
@@ -91,6 +102,13 @@ export interface AliasMatcher {
     normalizedQueries: readonly string[],
     options?: AliasLookupOptions,
   ): Promise<ReadonlyMap<string, readonly AliasMatchResult[]>>;
+  /**
+   * Optional dedicated alias-registry version identity over the substrate this
+   * matcher serves (T-ELV2-03). Optional so existing implementers (PG, fuzzy,
+   * stubs) need no change; decorators MUST delegate it through to their inner
+   * matcher or the V2 response stamp silently vanishes (dead-foundation guard).
+   */
+  getRegistryVersion?(): AliasRegistryVersion | undefined;
 }
 
 /**
@@ -266,9 +284,10 @@ export class AnchorExtractor {
   async extract(
     normalizedQuery: string,
     queryViews?: NormalizedQueryViews,
+    stageTimer?: StageTimer,
   ): Promise<readonly AnchorCandidate[]> {
     const lookupQueries = this.buildLookupQueries(normalizedQuery, queryViews);
-    return this.extractFromLookupQueries(lookupQueries);
+    return this.extractFromLookupQueries(lookupQueries, stageTimer);
   }
 
   /**
@@ -286,6 +305,7 @@ export class AnchorExtractor {
   async extractWithRelative(
     normalizedQuery: string,
     queryViews?: NormalizedQueryViews,
+    stageTimer?: StageTimer,
   ): Promise<AnchorExtractionWithRelative> {
     const relativeQuery = this.relativeQueryExtractor.extract(normalizedQuery);
     const extraBaseQueries = new Set<string>();
@@ -299,6 +319,7 @@ export class AnchorExtractor {
 
     const anchors = await this.extractFromLookupQueries(
       this.buildLookupQueries(normalizedQuery, queryViews, extraBaseQueries),
+      stageTimer,
     );
 
     return { anchors, relativeQuery };
@@ -319,6 +340,10 @@ export class AnchorExtractor {
     const spanQueries: LookupQueryPlan[] = [];
     const seenBase = new Set<string>();
     const seenSpanRecallMode = new Map<string, AliasRecallMode | undefined>();
+    const fullQueryTokenCount = tokenizeConstraintSurface(normalizedQuery).length;
+    const globalDeterministicConstraintTokens = fullQueryTokenCount > 1
+      ? this.collectDeterministicConstraintTokens(normalizedQuery)
+      : new Set<string>();
     const add = (target: string[], seen: Set<string>, value: string): void => {
       const trimmed = value.trim();
       if (trimmed.length === 0 || seen.has(trimmed)) {
@@ -359,6 +384,16 @@ export class AnchorExtractor {
     const lookupPlan = buildAliasSurfaceLookupPlan(normalizedQuery, queryViews);
     const primaryQueries = lookupPlan.tokenList;
     for (const query of primaryQueries) {
+      if (this.shouldSkipAtomicDeterministicConstraintQuery(
+        query,
+        fullQueryTokenCount,
+        globalDeterministicConstraintTokens,
+      )) {
+        continue;
+      }
+      add(baseQueries, seenBase, query);
+    }
+    for (const query of this.collectShortMixedCanonicalBaseQueries(normalizedQuery, queryViews)) {
       add(baseQueries, seenBase, query);
     }
     for (const query of extraBaseQueries) {
@@ -376,11 +411,21 @@ export class AnchorExtractor {
     ]);
     for (const query of spanSeedQueries) {
       const parsedSpans = parseSpans(query);
+      const queryTokenCount = tokenizeConstraintSurface(query).length;
       const surfaceOnlyAtomicSpans = this.collectSurfaceOnlyAtomicSpans(parsedSpans);
       const deterministicConstraintTokens = tokenizeConstraintSurface(query).length > 1
         ? this.collectDeterministicConstraintTokens(query)
         : new Set<string>();
       for (const span of parsedSpans) {
+        if (
+          this.shouldSkipAtomicDeterministicConstraintQuery(
+            span.text,
+            queryTokenCount,
+            deterministicConstraintTokens,
+          )
+        ) {
+          continue;
+        }
         const spanTokens = tokenizeConstraintSurface(span.text);
         if (
           deterministicConstraintTokens.size > 0
@@ -389,9 +434,15 @@ export class AnchorExtractor {
         ) {
           continue;
         }
+        const surfaceOnlyAtomicSpan =
+          span.tokenCount === 1
+          && (
+            surfaceOnlyAtomicSpans.has(span.text)
+            || queryTokenCount > 1
+          );
         addSpanQuery(
           span.text,
-          span.tokenCount === 1 && surfaceOnlyAtomicSpans.has(span.text)
+          surfaceOnlyAtomicSpan
             ? 'surface_only'
             : undefined,
         );
@@ -399,6 +450,68 @@ export class AnchorExtractor {
     }
 
     return { baseQueries, spanQueries };
+  }
+
+  private collectShortMixedCanonicalBaseQueries(
+    normalizedQuery: string,
+    queryViews?: NormalizedQueryViews,
+  ): readonly string[] {
+    const sourceSurface = queryViews?.raw ?? normalizedQuery;
+    const queryTokens = sourceSurface
+      .trim()
+      .split(/\s+/u)
+      .filter((token) => token.length > 0);
+    if (queryTokens.length !== 2) {
+      return [];
+    }
+
+    const trailingToken = queryTokens[1]!;
+    const lookupPlan = buildAliasLookupPlan(normalizedQuery, queryViews);
+    const candidates = new Set<string>(
+      lookupPlan.tokenList.filter((candidate) => {
+        const candidateTokens = candidate
+          .trim()
+          .split(/\s+/u)
+          .filter((token) => token.length > 0);
+        return (
+          candidateTokens.length > 1
+          && !candidateTokens.includes(trailingToken)
+        );
+      }),
+    );
+    const views = queryViews ?? buildNormalizedQueryViews(normalizedQuery);
+    for (const surface of [views.strict, views.transliterated]) {
+      if (typeof surface !== 'string' || surface.length === 0) {
+        continue;
+      }
+      const suffix = ` ${trailingToken}`;
+      if (!surface.endsWith(suffix)) {
+        continue;
+      }
+      const stripped = surface.slice(0, -suffix.length).trim();
+      if (
+        stripped.length > 0
+        && stripped.split(/\s+/u).filter((token) => token.length > 0).length > 1
+      ) {
+        candidates.add(stripped);
+      }
+    }
+    return trimDeduped(candidates);
+  }
+
+  private shouldSkipAtomicDeterministicConstraintQuery(
+    query: string,
+    fullQueryTokenCount: number,
+    deterministicConstraintTokens: ReadonlySet<string>,
+  ): boolean {
+    if (fullQueryTokenCount <= 1) {
+      return false;
+    }
+    const tokens = tokenizeConstraintSurface(query);
+    if (tokens.length !== 1) {
+      return false;
+    }
+    return deterministicConstraintTokens.has(tokens[0]!);
   }
 
   private collectDeterministicConstraintTokens(normalizedQuery: string): ReadonlySet<string> {
@@ -414,6 +527,9 @@ export class AnchorExtractor {
       }
     }
     for (const span of parseSpans(normalizedQuery)) {
+      if (span.tokenCount <= 1) {
+        continue;
+      }
       const resolved = resolveEntity(span.text, { preferEntityOverStyle: true });
       if (
         !isDirectEntityResolution(resolved)
@@ -423,6 +539,21 @@ export class AnchorExtractor {
       }
       for (const token of tokenizeConstraintSurface(resolved.matchedSurface)) {
         coveredTokens.add(token);
+      }
+    }
+    const queryTokens = tokenizeConstraintSurface(normalizedQuery);
+    for (let start = 0; start < queryTokens.length; start += 1) {
+      for (let end = start + 2; end <= queryTokens.length; end += 1) {
+        const candidateSurface = queryTokens.slice(start, end).join(' ');
+        const resolved = resolveEntity(candidateSurface, { preferEntityOverStyle: true });
+        if (
+          isDirectEntityResolution(resolved)
+          && isDeterministicConstraintEntityType(resolved.entityType)
+        ) {
+          for (const token of tokenizeConstraintSurface(resolved.matchedSurface)) {
+            coveredTokens.add(token);
+          }
+        }
       }
     }
     return coveredTokens;
@@ -509,8 +640,9 @@ export class AnchorExtractor {
 
   private async extractFromLookupQueries(
     lookupQueries: LookupQuerySet,
+    stageTimer?: StageTimer,
   ): Promise<readonly AnchorCandidate[]> {
-    const aliasMatches = await this.lookupAliasMatchesWithSpanFallback(lookupQueries);
+    const aliasMatches = await this.lookupAliasMatchesWithSpanFallback(lookupQueries, stageTimer);
 
     const candidates: AnchorCandidate[] = aliasMatches.map((match) => ({
       surfaceForm: match.surfaceForm,
@@ -540,6 +672,7 @@ export class AnchorExtractor {
 
   private async lookupAliasMatchesWithSpanFallback(
     lookupQueries: LookupQuerySet,
+    stageTimer?: StageTimer,
   ): Promise<readonly (AliasMatchResult & { readonly lookupVariants: readonly string[] })[]> {
     const baseQueries = lookupQueries.baseQueries.map((query) => ({
       query,
@@ -547,6 +680,7 @@ export class AnchorExtractor {
     }));
     const baseMatches = await this.lookupAliasMatches(
       baseQueries,
+      stageTimer,
     );
     if (
       lookupQueries.spanQueries.length === 0 ||
@@ -561,6 +695,7 @@ export class AnchorExtractor {
         scope: 'span' as const,
         ...(queryPlan.recallMode !== undefined ? { recallMode: queryPlan.recallMode } : {}),
       })),
+      stageTimer,
     );
     return this.mergeLookupMatches(baseMatches, spanMatches);
   }
@@ -592,6 +727,7 @@ export class AnchorExtractor {
 
   private async lookupAliasMatches(
     lookupQueries: readonly ScopedLookupQuery[],
+    stageTimer?: StageTimer,
   ): Promise<readonly (AliasMatchResult & { readonly lookupVariants: readonly string[] })[]> {
     const normalizedLookupQueries = lookupQueries
       .map(({ query, scope, recallMode }) => ({
@@ -600,7 +736,7 @@ export class AnchorExtractor {
         ...(recallMode !== undefined ? { recallMode } : {}),
       }))
       .filter(({ query }) => query.length > 0);
-    const effectiveBatchMatches = await this.lookupAliasMatchesBatch(normalizedLookupQueries);
+    const effectiveBatchMatches = await this.lookupAliasMatchesBatch(normalizedLookupQueries, stageTimer);
     const merged = new Map<
       string,
       {
@@ -624,6 +760,7 @@ export class AnchorExtractor {
         ?? await this.aliasMatcher.findMatches(trimmedLookupQuery, {
           scope: lookupQuery.scope,
           ...(lookupQuery.recallMode !== undefined ? { recallMode: lookupQuery.recallMode } : {}),
+          ...(stageTimer !== undefined ? { stageTimer } : {}),
         });
       for (const match of aliasMatches) {
         const key = `${match.surfaceForm}\u0000${match.normalizedForm}\u0000${match.entityIds.map(String).join(',')}`;
@@ -667,6 +804,7 @@ export class AnchorExtractor {
 
   private async lookupAliasMatchesBatch(
     lookupQueries: readonly ScopedLookupQuery[],
+    stageTimer?: StageTimer,
   ): Promise<ReadonlyMap<string, readonly AliasMatchResult[]>> {
     const groupedQueries = new Map<string, {
       scope: AliasLookupScope;
@@ -701,6 +839,7 @@ export class AnchorExtractor {
         ? await this.aliasMatcher.findMatchesBatch(queries, {
           scope: group.scope,
           ...(group.recallMode !== undefined ? { recallMode: group.recallMode } : {}),
+          ...(stageTimer !== undefined ? { stageTimer } : {}),
         })
         : undefined;
       if (batch === undefined) {

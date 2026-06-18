@@ -18,6 +18,7 @@ import {
   deriveDecisionConfidenceSemantics,
   isCorruptedSnapshot,
 } from '../../shared/types/index.js';
+import { globalCalibrationHealthRegistry } from '../../observability/calibration-health-registry.js';
 import { isLegacyRequireClarificationHardGate } from '../../query/model/query-policy.js';
 import type { ExecutionRetrievalMode } from '../../query/model/engine-execution-contract.js';
 import { isExploratoryRetrievalMode } from '../../query/model/retrieval-mode-classification.js';
@@ -31,7 +32,9 @@ import {
 } from '../../query/model/threshold-profile.js';
 import {
   hasExactMatchCandidate,
-  hasUniqueFuzzyIdentityWitness,
+  hasTrustedUniqueApproximateIdentityWitness,
+  hasTrustedUniqueFuzzyIdentityWitness,
+  hasTrustedUniquePhoneticIdentityWitness,
   type DecisionInput,
 } from '../model/decision-input.js';
 import type { DecisionOutput } from '../model/decision-output.js';
@@ -435,7 +438,7 @@ export class DecisionEngine {
     if (
       requireEffectiveRetrievalMode(input) === 'no_match_detection'
       && !hasExactMatchCandidate(input.evidenceSummary)
-      && !hasUniqueFuzzyIdentityWitness(input.evidenceSummary, input.resolveResult.decisionTrace)
+      && !hasTrustedUniqueApproximateIdentityWitness(input)
     ) {
       rulesApplied.push('NO_MATCH_DETECTION_FAIL_CLOSED');
       return {
@@ -443,7 +446,7 @@ export class DecisionEngine {
         nextAction: 'fail',
         rulesApplied: [...rulesApplied],
         finalReason:
-          'Planner classified the query as no_match_detection and no exact or unique fuzzy identity witness exists; ' +
+          'Planner classified the query as no_match_detection and no exact, unique fuzzy, or unique phonetic identity witness exists; ' +
           'decision short-circuited to FAILED.',
       };
     }
@@ -897,8 +900,13 @@ export class DecisionEngine {
     // undefined, no ambiguity). The NOISY_SHORT_QUERY_GUARD downstream remains
     // the multi-candidate backstop: it only bypasses for singletons / wide-gap
     // matches, so non-unique fuzzy matches still abstain there.
-    if (hasUniqueFuzzyIdentityWitness(input.evidenceSummary, input.resolveResult.decisionTrace)) {
+    if (hasTrustedUniqueFuzzyIdentityWitness(input)) {
       rulesApplied.push('CALIBRATION_TRUST_GATE_UNIQUE_FUZZY_IDENTITY');
+      return state;
+    }
+
+    if (hasTrustedUniquePhoneticIdentityWitness(input)) {
+      rulesApplied.push('CALIBRATION_TRUST_GATE_UNIQUE_PHONETIC_IDENTITY');
       return state;
     }
 
@@ -920,6 +928,13 @@ export class DecisionEngine {
       return state;
     }
 
+    // True calibration-caused downgrade: reached only after the exact-identity,
+    // fuzzy, and exploratory-semantic bypasses above have all been ruled out.
+    // Record here (not earlier) so the health counter reflects calibration
+    // causality, not evidence/policy downgrades — operators can alert when a
+    // query class accrues downgrades, i.e. it is served with no trusted
+    // calibration (the silent recall-killer this whole pass uncovered).
+    globalCalibrationHealthRegistry.recordTrustGateDowngrade(input.queryPlan.queryClass);
     rulesApplied.push('CALIBRATION_TRUST_GATE_DOWNGRADE');
     return {
       status: 'ambiguous',
@@ -989,8 +1004,9 @@ export class DecisionEngine {
     // support an exact match, downgrade
     if (input.policy.requireExact && state.status === 'resolved') {
       const hasExactMatch = hasExactMatchCandidate(input.evidenceSummary);
+      const hasUniqueApproximateWitness = hasTrustedUniqueApproximateIdentityWitness(input);
 
-      if (!hasExactMatch) {
+      if (!hasExactMatch && !hasUniqueApproximateWitness) {
         rulesApplied.push('POLICY_REQUIRE_EXACT_DOWNGRADE');
         return {
           status: 'ambiguous',
@@ -1058,11 +1074,21 @@ export class DecisionEngine {
     }
 
     const exactnessTier = input.evidenceSummary?.identityEvidence?.exactnessTier ?? 'none';
-    if (exactnessTier !== 'alias_fuzzy') {
+    if (exactnessTier !== 'alias_fuzzy' && exactnessTier !== 'alias_phonetic') {
       return state;
     }
 
     const resolverTrace = input.resolveResult.decisionTrace;
+    if (hasTrustedUniqueFuzzyIdentityWitness(input)) {
+      rulesApplied.push('NOISY_SHORT_QUERY_GUARD_BYPASSED_UNIQUE_FUZZY_IDENTITY');
+      return state;
+    }
+
+    if (hasTrustedUniquePhoneticIdentityWitness(input)) {
+      rulesApplied.push('NOISY_SHORT_QUERY_GUARD_BYPASSED_UNIQUE_PHONETIC_IDENTITY');
+      return state;
+    }
+
     const requiredGap = Math.max(dynamicGapThreshold, NOISY_SHORT_QUERY_GAP_FLOOR);
     // C2 (fail-loud): singleton → no runner-up → no gap. A singleton on a
     // noisy short query can still bypass the guard via high confidence,
@@ -1085,7 +1111,7 @@ export class DecisionEngine {
       nextAction: 'clarify',
       rulesApplied: [...rulesApplied],
       finalReason:
-        `Short query resolved through alias_fuzzy identity evidence without enough margin ` +
+        `Short query resolved through ${exactnessTier} identity evidence without enough margin ` +
         `(C=${resolverTrace.decisionConfidenceC.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)}, gap=${gapLog}).`,
     };
   }
@@ -1252,6 +1278,9 @@ export class DecisionEngine {
         resolverTrace.calibrationTrusted,
       ),
       calibrationTrusted: resolverTrace.calibrationTrusted,
+      ...(resolverTrace.top1RawScore !== undefined
+        ? { top1RawScore: resolverTrace.top1RawScore }
+        : {}),
       ...(isResolved
         ? {
             selectedEntity: {

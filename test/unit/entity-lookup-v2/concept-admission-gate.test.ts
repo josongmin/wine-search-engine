@@ -7,6 +7,7 @@ import type {
   EntityResolverPort,
   QueryPlannerPort,
 } from '../../../src/application/search/port/search-pipeline-deps.port.js';
+import type { LookupConceptRedirectRegistryPort } from '../../../src/domain/resolver/v2/lookup-v2-types.js';
 
 function makeViews(query: string): NormalizedQueryViews {
   const lower = query.toLowerCase();
@@ -61,6 +62,53 @@ describe('ConceptAdmissionGate — concept/facet redirect (T-ELV2-02)', () => {
     const v = gate.classify({ rawQuery: 'wine', views: makeViews('wine') });
     expect(v.decision).toBe('redirect_discovery');
     expect(v.reasonCode).toBe('generic_non_entity_query');
+  });
+
+  it('uses the concept redirect runtime registry before lexicon fallback', () => {
+    const registry: LookupConceptRedirectRegistryPort = {
+      get(surfaceForm: string) {
+        if (surfaceForm === '샴페인 추천') {
+          return {
+            conceptClass: 'recommendation',
+            redirectReason: 'concept_query',
+            sourceEvidence: 'registry:test',
+          };
+        }
+        return null;
+      },
+    };
+    const runtimeGate = new ConceptAdmissionGate(registry);
+
+    const v = runtimeGate.classify({ rawQuery: '샴페인 추천', views: makeViews('샴페인 추천') });
+
+    expect(v.decision).toBe('redirect_discovery');
+    expect(v.reasonCode).toBe('concept_query');
+    expect(v.detail).toContain('recommendation');
+  });
+
+  it('uses the concept redirect runtime registry for Korean pairing queries', () => {
+    const registry: LookupConceptRedirectRegistryPort = {
+      get(surfaceForm: string) {
+        if (surfaceForm === '스테이크랑 어울리는 와인') {
+          return {
+            conceptClass: 'pairing',
+            redirectReason: 'concept_query',
+            sourceEvidence: 'registry:test',
+          };
+        }
+        return null;
+      },
+    };
+    const runtimeGate = new ConceptAdmissionGate(registry);
+
+    const v = runtimeGate.classify({
+      rawQuery: '스테이크랑 어울리는 와인',
+      views: makeViews('스테이크랑 어울리는 와인'),
+    });
+
+    expect(v.decision).toBe('redirect_discovery');
+    expect(v.reasonCode).toBe('concept_query');
+    expect(v.detail).toContain('pairing');
   });
 
   it('ADMITS a producer + grape (residual proper-name token) — false-positive guard (rule 23)', () => {
@@ -143,5 +191,37 @@ describe('EntityLookupV2UseCase — concept admission short-circuit', () => {
     // the planner runs — the planner (NL parse + alias-overlay anchor refresh)
     // is never invoked for a non-admitted query.
     expect(queryPlanner.plan).not.toHaveBeenCalled();
+  });
+
+  it('short-circuits registry-owned concept redirect queries before the planner runs', async () => {
+    const resolver: EntityResolverPort = { resolve: vi.fn() };
+    const queryPlanner: QueryPlannerPort = {
+      plan: vi.fn(),
+    };
+    const conceptRegistry: LookupConceptRedirectRegistryPort = {
+      get(surfaceForm: string) {
+        if (surfaceForm === '샴페인 추천') {
+          return {
+            conceptClass: 'recommendation',
+            redirectReason: 'concept_query',
+            sourceEvidence: 'registry:test',
+          };
+        }
+        return null;
+      },
+    };
+    const useCase = new EntityLookupV2UseCase({
+      admissionGate: new ConceptAdmissionGate(conceptRegistry),
+      queryPlanner,
+      entityResolver: resolver,
+      querySanitizer: { sanitize: vi.fn((q: string) => ({ safe: true, sanitizedQuery: q })) } as never,
+    });
+
+    const out = await useCase.execute({ query: '샴페인 추천', maxCandidates: 10, mode: 'default' });
+
+    expect(out.status).toBe('redirect_discovery');
+    expect(out.evidenceSummary.admissionReasonCode).toBe('concept_query');
+    expect(queryPlanner.plan).not.toHaveBeenCalled();
+    expect(resolver.resolve).not.toHaveBeenCalled();
   });
 });

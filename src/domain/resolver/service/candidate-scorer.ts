@@ -1,6 +1,14 @@
 import type { ResolverCandidate } from '../model/resolved-candidate.js';
 import type { MatchSignalSet } from '../model/match-signal-set.js';
 
+function hasCollisionFreeExactSafeCertificate(candidate: ResolverCandidate): boolean {
+  return candidate.identityCertificates?.some((certificate) =>
+    (certificate.kind === 'exact_safe' || certificate.kind === 'compact_exact_safe')
+    && certificate.singleton === true
+    && certificate.collisionFree === true,
+  ) ?? false;
+}
+
 /**
  * Scoring weights for the weighted-sum scoring function, per RFC-006 §5.
  *
@@ -166,7 +174,11 @@ export class CandidateScorer {
     // observed_query_alias: allow contribution but ensure it does not
     // override canonical or translation matches by capping at the
     // canonical normalized match level when no core match is present.
-    if (hasObservedQuery && !this.hasCoreAliasMatch(candidate)) {
+    if (
+      hasObservedQuery
+      && !this.hasCoreAliasMatch(candidate)
+      && !hasCollisionFreeExactSafeCertificate(candidate)
+    ) {
       aliasExactMatch = Math.min(aliasExactMatch, signals.canonicalNormalizedMatch);
       aliasFuzzyMatch = Math.min(aliasFuzzyMatch, signals.canonicalNormalizedMatch);
     }

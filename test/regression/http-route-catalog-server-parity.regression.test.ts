@@ -39,6 +39,13 @@ function createStubDeps(): HttpServerDeps {
   });
   return {
     searchUseCase: noopExecute,
+    // V2 lookup surface (sole public lookup authority after the V2-only cutover)
+    // + operator curation plane. Both are dep-gated in server.ts, so the parity
+    // test must wire them or their catalog entries appear unregistered. Only
+    // route REGISTRATION is exercised here (hasRoute), never the handlers, so
+    // structural stubs suffice.
+    entityLookupV2UseCase: noopExecute as never,
+    curationUseCase: {} as never,
     wineSearch: {
       wineSearchOrchestrator: orchestrator,
       agentUseCase: new AgentUseCase({

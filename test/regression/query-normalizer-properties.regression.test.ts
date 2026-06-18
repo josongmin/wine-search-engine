@@ -49,6 +49,7 @@
 import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
 import { QueryNormalizer } from '../../src/domain/query/service/query-normalizer.js';
+import { Transliterator } from '../../src/domain/alias/service/transliterator.js';
 
 const normalizer = new QueryNormalizer();
 
@@ -358,6 +359,97 @@ describe('QueryNormalizer documented locked behaviors', () => {
         expect(v.lookupVariants).toEqual(expect.arrayContaining([expected]));
       });
     }
+  });
+
+  describe('Transliterator SSoT — curated exact romanizations enter lookupVariants', () => {
+    // Regression: the query-side transliteration used a private rule table that
+    // had drifted from the Transliterator SSoT the alias-matcher recall path
+    // uses (CLAUDE.md rules 25/30). It lacked "돔페리뇽"→"dom pérignon", so the
+    // query produced NO Latin identity surface; the resolver's identity-key
+    // overlap gate then zeroed every identity lane and abstained (recall hole
+    // vs V1). Fix sources curated exact romanizations from Transliterator.
+    // Identity-surface comparison strips diacritics (normalizeIdentitySurface
+    // NFKD + \p{Diacritic}), so the accented "dom pérignon" overlaps the doc's
+    // accentless "dom perignon" — assert via the same diacritic-folded form.
+    const foldDiacritics = (s: string): string =>
+      s.normalize('NFKD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+
+    const hasLatinDomPerignon = (variants: readonly string[]): boolean =>
+      variants.some((v) => foldDiacritics(v).includes('dom perignon'));
+
+    it('"돔페리뇽" yields a Latin "dom pérignon" identity surface', () => {
+      const v = normalizer.normalize('돔페리뇽');
+      expect(v.lookupVariants).toEqual(
+        expect.arrayContaining([expect.stringMatching(/dom\s*p[ée]rignon/iu)]),
+      );
+      expect(hasLatinDomPerignon(v.lookupVariants)).toBe(true);
+    });
+
+    it('"돔 페리뇽" (spaced) yields the same Latin surface', () => {
+      expect(hasLatinDomPerignon(normalizer.normalize('돔 페리뇽').lookupVariants)).toBe(true);
+    });
+
+    it('"돔페리뇽 2012" (vintage-bearing) still romanizes (vintage stripped)', () => {
+      expect(hasLatinDomPerignon(normalizer.normalize('돔페리뇽 2012').lookupVariants)).toBe(true);
+    });
+
+    it('PRECISION: romanizeWineTerm is EXACT-key — returns undefined on a bare prefix', () => {
+      // Pins the exact-key contract that keeps the fix precision-safe: the
+      // curated romanizer can only inject a Latin surface when the WHOLE query
+      // equals a curated exception, so it cannot manufacture a complete Latin
+      // identity surface (e.g. "opus one") from an incomplete query like "오푸".
+      // This guards against a future swap to the recall-phase prefix expander
+      // (romanizeWineTermPrefix) leaking into the query identity-key set.
+      expect(Transliterator.romanizeWineTerm('오푸')).toBeUndefined();
+      expect(Transliterator.romanizeWineTerm('돔페리뇽')).toBe('dom pérignon');
+    });
+
+    it('FALLBACK retained: a compositional term not in the curated index still romanizes via the local rule table', () => {
+      // "카베르네 소비뇽" is produced by the local KOREAN_TRANSLITERATION_* rule
+      // tables (compositional), proving the SSoT addition did not shadow the
+      // fallback path that handles terms outside the curated exception index.
+      const v = normalizer.normalize('카베르네 소비뇽');
+      expect(v.lookupVariants).toEqual(expect.arrayContaining(['cabernet sauvignon']));
+    });
+  });
+
+  describe('vintage shorthand vs name-internal numbers (noisy_recall identity surface)', () => {
+    // Regression: every bare 2-digit token was treated as a vintage shorthand
+    // and stripped/expanded, so name-internal numbers ("Vineyard 29",
+    // "Numero 89") were destroyed. That broke the resolver's identity-key
+    // overlap against the doc (which keeps the number) → calibrated score 0 →
+    // abstain, even though the entity was recalled at rank 1. Two live
+    // noisy_recall misses ("…vineyard 29 …13", "…numero 89 …17") had exactly
+    // this shape. Fix: a 2-digit token is a vintage only when NOT followed by a
+    // name word; trailing 2-digit shorthand ("Margaux 15") is unchanged.
+    it('preserves a name-internal 2-digit number followed by a name word', () => {
+      const v = normalizer.normalize('2013 vineyard 29 estate cabernet sauvignon 13');
+      // "29" kept (name component), leading 2013 + trailing 13 dropped.
+      expect(v.vintageStripped).toBe('vineyard 29 estate cabernet sauvignon');
+    });
+
+    it('preserves a name-internal number in a long label (numero 89)', () => {
+      const v = normalizer.normalize('2017 bindi sergardi mocenni numero 89 gran selezione chianti classico 17');
+      expect(v.vintageStripped).toBe('bindi sergardi mocenni numero 89 gran selezione chianti classico');
+    });
+
+    it('still treats a TRAILING 2-digit token as vintage shorthand ("Margaux 15" → 2015)', () => {
+      const v = normalizer.normalize('Margaux 15');
+      expect(v.vintageCanonicalized).toBe('margaux 2015');
+      expect(v.vintageStripped).toBe('margaux');
+    });
+
+    it('still strips a 4-digit (19xx/20xx) vintage regardless of following word', () => {
+      expect(normalizer.normalize('Opus One 2018').vintageStripped).toBe('opus one');
+      // 4-digit followed by a name word is still a vintage (unconditional).
+      expect(normalizer.normalize('2018 Opus One').vintageStripped).toBe('opus one');
+    });
+
+    it('Korean: a 2-digit number before a Hangul name word is preserved (\\p{L} boundary)', () => {
+      // "95" precedes the name word "와인" → not a vintage → kept.
+      const v = normalizer.normalize('보르도 95 와인');
+      expect(v.vintageStripped).toContain('95');
+    });
   });
 
   describe('emoji passthrough (locked behavior)', () => {

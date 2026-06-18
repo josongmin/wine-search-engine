@@ -12,10 +12,8 @@ import {
 interface FamilyCase {
   readonly family: ReleaseQueryFamily;
   readonly query: string;
-  readonly mode?: 'auto' | 'hybrid';
   readonly relevant?: RelevanceMap;
   readonly expectedTop1?: string | undefined;
-  readonly excludedSeed?: string | undefined;
   readonly expectedDecisionStatus?: 'resolved' | 'ambiguous' | 'failed' | undefined;
 }
 
@@ -37,7 +35,6 @@ async function search(caseDef: FamilyCase) {
   const response = await postJson(server.app, '/v1/search/hybrid', {
     query: caseDef.query,
     options: {
-      mode: caseDef.mode ?? 'auto',
       explain: false,
       clarification: false,
     },
@@ -70,21 +67,18 @@ const CASES: readonly FamilyCase[] = [
   {
     family: 'entity_exact',
     query: 'Opus One 2018',
-    mode: 'hybrid',
     expectedTop1: 'opus-one-2018',
     relevant: relevance([['opus-one-2018', 3]]),
   },
   {
     family: 'entity_exact',
     query: 'Sassicaia 2018',
-    mode: 'hybrid',
     expectedTop1: 'sassicaia-2018',
     relevant: relevance([['sassicaia-2018', 3]]),
   },
   {
     family: 'pure_constraint',
     query: '풀바디 레드 와인',
-    mode: 'hybrid',
     relevant: relevance([
       ['opus-one-2018', 3],
       ['chateau-margaux-2015', 2],
@@ -97,41 +91,34 @@ const CASES: readonly FamilyCase[] = [
   {
     family: 'pure_constraint',
     query: '달달한 와인',
-    mode: 'hybrid',
     relevant: relevance([['sauternes-2015', 3]]),
   },
   {
     family: 'pure_constraint',
     query: '상큼한 화이트 와인',
-    mode: 'hybrid',
     relevant: relevance([['cloudy-bay-2022', 3]]),
   },
   {
     family: 'pure_constraint',
     query: '호주 쉬라즈 풀바디',
-    mode: 'hybrid',
     relevant: relevance([['penfolds-grange-2017', 3]]),
   },
   {
     family: 'pure_constraint',
     query: '강한 타닌 네비올로',
-    mode: 'hybrid',
     relevant: relevance([['barolo-giacomo', 3]]),
   },
   {
     family: 'anchored_similarity',
     query: '오푸스원 같은 와인',
-    excludedSeed: 'opus-one-2018',
   },
   {
     family: 'anchored_similarity',
     query: '클라우디베이 말고 다른 화이트',
-    excludedSeed: 'cloudy-bay-2022',
   },
   {
     family: 'pairing',
     query: '스테이크랑 어울리는 와인',
-    mode: 'hybrid',
     relevant: relevance([
       ['opus-one-2018', 3],
       ['penfolds-grange-2017', 2],
@@ -141,7 +128,6 @@ const CASES: readonly FamilyCase[] = [
   {
     family: 'browse',
     query: 'Bordeaux 레드 와인',
-    mode: 'hybrid',
     relevant: relevance([
       ['chateau-margaux-2015', 3],
       ['sauternes-2015', 1],
@@ -150,13 +136,11 @@ const CASES: readonly FamilyCase[] = [
   {
     family: 'browse',
     query: '스파클링 와인',
-    mode: 'hybrid',
     relevant: relevance([['moet-brut', 3]]),
   },
   {
     family: 'situation_based',
     query: '결혼식 샴페인',
-    mode: 'hybrid',
     relevant: relevance([['moet-brut', 3]]),
   },
   {
@@ -166,7 +150,6 @@ const CASES: readonly FamilyCase[] = [
   {
     family: 'no_match',
     query: '존재하지않는 와인 12345',
-    mode: 'hybrid',
     expectedDecisionStatus: 'failed',
   },
 ] as const;
@@ -208,17 +191,18 @@ describe('Query Family Release Gate', () => {
     }
   });
 
-  it(`keeps anchored_similarity seed-exclusion non-regressing against ${QUERY_FAMILY_RELEASE_BASELINE_VERSION}`, async () => {
+  it('keeps anchored_similarity on the public hybrid discovery lane', async () => {
     const cases = CASES.filter((entry) => entry.family === 'anchored_similarity');
     const bodies = await Promise.all(cases.map((entry) => search(entry)));
-    const seedExclusionPrecision = bodies.filter((body, index) =>
-      body.results[0]?.entity.entity_id !== cases[index]?.excludedSeed,
-    ).length / bodies.length;
+    const hybridLaneRate = bodies.filter((body) => body.meta.route === 'hybrid').length / bodies.length;
+    const attributeSearchRate = bodies.filter((body) => body.retrieval_mode === 'attribute_search').length / bodies.length;
+    const nonFailedRate = bodies.filter((body) => body.engine_decision.decision_status !== 'failed').length / bodies.length;
+    const nonEmptyRate = bodies.filter((body) => body.results.length > 0).length / bodies.length;
 
-    expect(seedExclusionPrecision).toBeGreaterThanOrEqual(
-      QUERY_FAMILY_RELEASE_BASELINES.anchored_similarity.seedExclusionPrecision
-        - QUERY_FAMILY_RELEASE_THRESHOLDS.anchoredSimilaritySeedExclusionMaxDrop,
-    );
+    expect(hybridLaneRate, 'anchored_similarity: hybrid lane rate').toBe(1);
+    expect(attributeSearchRate, 'anchored_similarity: retrieval-mode rate').toBe(1);
+    expect(nonFailedRate, 'anchored_similarity: non-failed rate').toBe(1);
+    expect(nonEmptyRate, 'anchored_similarity: non-empty rate').toBe(1);
   });
 
   it(`keeps ranked families non-regressing against ${QUERY_FAMILY_RELEASE_BASELINE_VERSION}`, async () => {

@@ -39,7 +39,7 @@ interface RankingStagePipelineOptions {
 
 /**
  * E3-U1: RankingStagePipeline is the **authoritative outer seam** for all
- * ranking execution. Route-specific callers (search.usecase, hybrid.usecase,
+ * ranking execution. Route-specific callers (search.usecase,
  * batch-search) MUST go through this pipeline — not directly through Ranker.
  *
  * Stage ownership:

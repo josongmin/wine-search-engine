@@ -108,13 +108,6 @@ export const SearchUseCaseInputSchema = z.object({
    */
   retrievalLane: z.enum(['hybrid', 'semantic_only', 'lexical_only']).optional(),
   /**
-   * Internal primitive-route authority marker for exact entity lookup. Used by
-   * the canonical `lookup_wine` tool so the adapter emits the same
-   * path-authoritative contract as `/v1/lookup/wine`, instead of relying on
-   * the legacy `mode='entity'` route hint.
-   */
-  primitiveRoute: z.enum(['lookup_wine']).optional(),
-  /**
    * RFC-021 T-PSA-02: resolved canonical anchor entity for the
    * `similar_to_entity` reference-similarity primitive. When present, the
    * `SearchUseCaseAdapter` maps it onto a path-authoritative
@@ -169,6 +162,16 @@ export const PlanRejectReasonSchema = z.enum([
    * (no half-baked compare/pair/drinkability outputs).
    */
   'tool_unavailable',
+  /**
+   * Move 2 (honest failure propagation): the query had no deterministic
+   * signal (intent=unknown, no anchors/constraints) AND the analyzer's LLM
+   * fallback was ATTEMPTED and FAILED (provider down / malformed output —
+   * see `WineSearchAnalysis.llmFallbackOutcome`). Distinct from
+   * `unsupported_intent` (a genuinely out-of-scope query) so the synthesizer
+   * renders an honest "AI analysis temporarily unavailable" message instead
+   * of blaming the user's query. Maps to degradedReason `llm_unavailable`.
+   */
+  'analysis_unavailable',
 ]);
 export type PlanRejectReason = z.infer<typeof PlanRejectReasonSchema>;
 

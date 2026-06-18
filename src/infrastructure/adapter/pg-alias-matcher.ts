@@ -24,6 +24,7 @@ import { doubleMetaphoneKeys } from '../../domain/alias/service/double-metaphone
 import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import { readPgSqlState } from '../db/pg-sqlstate.js';
 import { runAbortablePgQuery } from '../db/abortable-pg-query.js';
+import { pgTableHasColumn } from '../db/pg-schema-capabilities.js';
 import {
   ACTIVE_SNAPSHOT_POINTER_CACHE_TTL_MS,
   isActiveSnapshotSubstrateBootstrapAllowed,
@@ -291,6 +292,7 @@ interface BatchExactLookupPayload {
   readonly compact: readonly string[];
   readonly transliterated: readonly string[];
   readonly phonetic: readonly string[];
+  readonly doubleMetaphoneKeys: readonly string[];
 }
 
 interface BatchFuzzyLookupPayload {
@@ -554,8 +556,16 @@ function resolveQueryId(row: PgAliasMatcherRow): number | undefined {
 export class PgAliasMatcher implements AliasMatcher {
   private activeSnapshotMissingTableUntil = 0;
   private activeSnapshotMissingTableLogged = false;
+  private phoneticKeysColumnProbe: Promise<boolean> | undefined;
 
   constructor(private readonly pool: Pool) {}
+
+  private phoneticKeysColumnEnabled(): Promise<boolean> {
+    this.phoneticKeysColumnProbe ??= pgTableHasColumn(this.pool, 'aliases', 'phonetic_keys').catch(
+      () => false,
+    );
+    return this.phoneticKeysColumnProbe;
+  }
 
   async findMatches(normalizedQuery: string): Promise<readonly AliasMatchResult[]> {
     const trimmed = normalizedQuery.trim();
@@ -618,6 +628,9 @@ export class PgAliasMatcher implements AliasMatcher {
         compact: plan.compactList,
         transliterated: plan.transliteratedList,
         phonetic: plan.phoneticList,
+        doubleMetaphoneKeys: [...plan.phoneticDoubleMetaphoneKeys].sort((left, right) =>
+          left.localeCompare(right),
+        ),
       });
     }
 
@@ -627,8 +640,59 @@ export class PgAliasMatcher implements AliasMatcher {
       const exactRowsById = new Map<number, QueryBoundAliasRow[]>(
         exactPayload.map((payload) => [payload.queryId, []]),
       );
+      const phoneticKeysColumnEnabled = await this.phoneticKeysColumnEnabled();
       const exactRows = await this.queryAliases(
-        `SELECT candidate.entity_id,
+        phoneticKeysColumnEnabled
+          ? `SELECT candidate.entity_id,
+           candidate.surface_form,
+           candidate.normalized_value,
+           candidate.confidence,
+           candidate.alias_type,
+           q.query_id
+         FROM unnest($1::int[], $2::text[][], $3::text[][], $4::text[][], $5::text[][], $6::text[][])
+              AS q(query_id, exact_values, compact_values, transliterated_values, phonetic_values, dm_keys)
+         CROSS JOIN LATERAL (
+           SELECT entity_id, surface_form, normalized_value, confidence, alias_type
+           FROM aliases
+           WHERE search_snapshot_id = $7
+             AND (
+               normalized_value = ANY(q.exact_values)
+               OR regexp_replace(normalized_value, '[^[:alnum:]]', '', 'g') = ANY(q.compact_values)
+               OR lower(regexp_replace(normalized_value, '[^[:alnum:]]', '', 'g')) = ANY(q.transliterated_values)
+               OR regexp_replace(
+                    lower(
+                      regexp_replace(
+                        regexp_replace(
+                          regexp_replace(
+                            regexp_replace(
+                              regexp_replace(
+                                regexp_replace(
+                                  regexp_replace(normalized_value, '[^[:alnum:]]', '', 'g'),
+                                  'sch', 'ch', 'g'
+                                ),
+                                'sh', 'ch', 'g'
+                              ),
+                              'ph', 'f', 'g'
+                            ),
+                            'eaux', 'o', 'g'
+                          ),
+                          'eau', 'o', 'g'
+                        ),
+                        'aux', 'o', 'g'
+                      )
+                    ),
+                    '[aeiouy]', '', 'g'
+                  ) = ANY(q.phonetic_values)
+               OR (
+                 cardinality(q.dm_keys) > 0
+                 AND phonetic_keys && q.dm_keys
+               )
+             )
+             AND is_suppressed = FALSE
+           ORDER BY confidence DESC
+         ) AS candidate
+         ORDER BY q.query_id, confidence DESC`
+          : `SELECT candidate.entity_id,
            candidate.surface_form,
            candidate.normalized_value,
            candidate.confidence,
@@ -673,14 +737,24 @@ export class PgAliasMatcher implements AliasMatcher {
            ORDER BY confidence DESC
          ) AS candidate
          ORDER BY q.query_id, confidence DESC`,
-        [
-          exactPayloadQueryIds,
-          exactPayload.map((payload) => payload.exact),
-          exactPayload.map((payload) => payload.compact),
-          exactPayload.map((payload) => payload.transliterated),
-          exactPayload.map((payload) => payload.phonetic),
-          activeSnapshotId,
-        ],
+        phoneticKeysColumnEnabled
+          ? [
+            exactPayloadQueryIds,
+            exactPayload.map((payload) => payload.exact),
+            exactPayload.map((payload) => payload.compact),
+            exactPayload.map((payload) => payload.transliterated),
+            exactPayload.map((payload) => payload.phonetic),
+            exactPayload.map((payload) => payload.doubleMetaphoneKeys),
+            activeSnapshotId,
+          ]
+          : [
+            exactPayloadQueryIds,
+            exactPayload.map((payload) => payload.exact),
+            exactPayload.map((payload) => payload.compact),
+            exactPayload.map((payload) => payload.transliterated),
+            exactPayload.map((payload) => payload.phonetic),
+            activeSnapshotId,
+          ],
         exactPayloadQueryIds,
       );
 

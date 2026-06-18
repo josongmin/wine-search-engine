@@ -2,13 +2,14 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Compass, Sparkles } from 'lucide-react';
+import { Compass, Sparkles, TerminalSquare } from 'lucide-react';
 import { cn } from '@/shared/lib';
 import { ThemeToggle } from '@/features/theme';
 
 const NAV = [
   { href: '/explore', label: '탐색', icon: Compass },
   { href: '/wine-search-lab', label: '와인 검색 랩', icon: Sparkles },
+  { href: '/api-playground', label: 'API 테스트', icon: TerminalSquare },
 ] as const;
 
 export function Header() {

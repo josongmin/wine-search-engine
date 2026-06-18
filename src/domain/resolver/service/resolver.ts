@@ -1,6 +1,5 @@
 import type { DecisionStatus, NextAction, QueryClass } from '../../shared/types/index.js';
 import { bootstrapLogger } from '../../../domain/shared/bootstrap-logger.js';
-import type { AnchorCandidate } from '../../query/model/anchor-candidate.js';
 import type { ThresholdEntry } from '../../query/model/threshold-profile.js';
 import { DEFAULT_THRESHOLD_PROFILE } from '../../query/model/threshold-profile.js';
 import { hasExactLikeLookupStrategy } from '../../query/service/lookup-strategy-taxonomy.js';
@@ -22,7 +21,6 @@ import type {
 import { computeMatcherFeatures } from './learned-matcher-features.js';
 import type { MatcherFeatureVector } from './learned-matcher-features.js';
 import { compareScoreWithTiebreaker } from '../../shared/utils/stable-comparator.js';
-import { CORRECTIVE_RETRY_CONFIDENCE_THRESHOLD as RESOLVER_CORRECTIVE_RETRY_CONFIDENCE_THRESHOLD } from '../model/corrective-retry-thresholds.js';
 import {
   MAX_RESOLVED_CANDIDATES,
   sanitizeRawScore,
@@ -32,12 +30,17 @@ import {
   computeConformalSetSize,
   DEFAULT_ALPHA,
 } from './resolver-conformal.js';
-import {
-  applyLookupStrategyAdjustments,
-  computeLookupStrategyAdjustment,
-} from './resolver-lookup-strategy.js';
+import { applyLookupStrategyAdjustments } from './resolver-lookup-strategy.js';
 import type { LookupStrategyAdjustment } from './resolver-lookup-strategy.js';
 import type { ResolverInput } from '../model/resolver-input.js';
+import {
+  collectAnchorLookupStrategies,
+  collectAnchorLookupVariants,
+  collectBlockerSeedEntityIds,
+  collectCandidateSourceBreakdown,
+  collectCandidateSources,
+  collectLookupStrategyAdjustments,
+} from './resolver-collectors.js';
 
 // Re-export the public API so external import paths
 // (`service/resolver.js`) remain stable after the split.
@@ -48,6 +51,13 @@ export type { ResolverInput } from '../model/resolver-input.js';
 /** Blend resolver raw score with learned match probability. */
 const LEARNED_MATCH_RAW_SCORE_BLEND = 0.6;
 const LEARNED_MATCH_PROBABILITY_BLEND = 0.4;
+
+function hasCollisionFreeExactSafeCertificate(candidate: ResolverCandidate | undefined): boolean {
+  // Every identity certificate is collision-free + singleton by type
+  // (singleton: true, collisionFree: true literals — see search-snapshot-lookup-runtime),
+  // so presence of any certificate is exactly "has a collision-free exact-safe certificate".
+  return (candidate?.identityCertificates?.length ?? 0) > 0;
+}
 
 /**
  * The core entity resolver — Track A of the Wine Intelligence Engine,
@@ -131,7 +141,7 @@ export class Resolver {
       candidate,
       rawScore: sanitizeRawScore(this.candidateScorer.score(candidate)),
     }));
-    const lookupStrategyAdjustments = this.collectLookupStrategyAdjustments(input);
+    const lookupStrategyAdjustments = collectLookupStrategyAdjustments(input);
     const adjustedScored = applyLookupStrategyAdjustments(scored, lookupStrategyAdjustments);
 
     // Step 2.5: Optionally blend learned match probabilities (RFC-006 §5.2).
@@ -271,14 +281,21 @@ export class Resolver {
     const thresholds = this.getThresholds(input.queryClass);
     const singletonBypass = !learnedMatcherDegraded
       && blendedScored.length === 1
-      && calibrated.decisionConfidenceC >= thresholds.resolveTau;
+      && (
+        calibrated.decisionConfidenceC >= thresholds.resolveTau
+        || hasCollisionFreeExactSafeCertificate(blendedScored[0]?.candidate)
+      );
 
     // Step 6: Apply decision boundary
     const { status, nextAction, reasonCodes } = singletonBypass
       ? {
           status: 'resolved' as const,
           nextAction: 'return_result' as const,
-          reasonCodes: ['SINGLETON_BYPASS_RESOLVED'],
+          reasonCodes: [
+            hasCollisionFreeExactSafeCertificate(blendedScored[0]?.candidate)
+              ? 'SINGLETON_EXACT_SAFE_CERTIFICATE_RESOLVED'
+              : 'SINGLETON_BYPASS_RESOLVED',
+          ],
         }
       : this.applyDecisionBoundary(
           input,
@@ -307,6 +324,7 @@ export class Resolver {
       reasonCodes,
       lookupStrategyAdjustments,
       learnedMatcherOutputs,
+      top1Entry.rawScore,
     );
 
     const conformalSetSize = computeConformalSetSize(
@@ -384,7 +402,7 @@ export class Resolver {
     // C2 (fail-loud): when there is no runner-up, the gap is meaningless.
     // Treat gap-threshold as "not applicable" rather than silently reading
     // a synthetic 0 gap. Singletons below the confidence threshold still
-    // flow to corrective retry / failed paths below.
+    // flow to clarify / failed paths below.
     //
     // When hasRunnerUp=true the calibrator contract guarantees a defined
     // calibratedGap (see CalibratedResolutionScore). A `?? 0` fallback here
@@ -448,20 +466,16 @@ export class Resolver {
       return { status: 'ambiguous', nextAction: 'clarify', reasonCodes };
     }
 
-    // Low confidence, no ambiguity detected — check whether corrective retry
-    // is warranted (TA3-1): zero anchors OR confidence below retry threshold.
-    //
-    // corrective_retry takes precedence over hybrid_search: it is a targeted
-    // exact-recovery retry, not a broad fallback. The application layer
-    // (executeEntityRoute) honours this recommendation to run Pass 2.
+    // Low confidence, no ambiguity — fail closed. Exact-recovery is owned by
+    // Entity Lookup V2 (multi-channel recall + calibrated abstain), not a
+    // second in-request retry loop.
     const zeroAnchors = input.anchorCandidates.length === 0;
     const rawConfidence = calibrated.decisionConfidenceC;
     const confidenceFinite = Number.isFinite(rawConfidence) ? rawConfidence : 0;
-    const belowRetryThreshold = confidenceFinite < RESOLVER_CORRECTIVE_RETRY_CONFIDENCE_THRESHOLD;
 
-    if (zeroAnchors || belowRetryThreshold) {
-      reasonCodes.push('CORRECTIVE_RETRY_WARRANTED');
-      return { status: 'failed', nextAction: 'corrective_retry', reasonCodes };
+    if (zeroAnchors || confidenceFinite <= 0) {
+      reasonCodes.push('LOW_CONFIDENCE_NO_VIABLE_ANCHOR');
+      return { status: 'failed', nextAction: 'fail', reasonCodes };
     }
 
     if (calibrated.decisionConfidenceC > 0) {
@@ -485,7 +499,7 @@ export class Resolver {
       return false;
     }
 
-    const strategies = this.collectAnchorLookupStrategies(input.anchorCandidates);
+    const strategies = collectAnchorLookupStrategies(input.anchorCandidates);
     const hasNoisyLookup =
       strategies.includes('compact_exact') ||
       strategies.includes('fuzzy_char_ngram') ||
@@ -552,7 +566,7 @@ export class Resolver {
         calibratedScore = Math.max(0, calibrated.top1CalibratedScore * ratio);
       }
 
-      const candidateSources = this.collectCandidateSources(entry.candidate);
+      const candidateSources = collectCandidateSources(entry.candidate);
       const primarySource = candidateSources[0] ?? 'alias';
 
       // T-E4-02: Per-candidate structured trace
@@ -691,8 +705,8 @@ export class Resolver {
     input: ResolverInput,
     candidates?: readonly ResolverCandidate[],
   ): LearnedMatcherContext | undefined {
-    const anchorLookupVariants = this.collectAnchorLookupVariants(input.anchorCandidates);
-    const anchorLookupStrategies = this.collectAnchorLookupStrategies(input.anchorCandidates);
+    const anchorLookupVariants = collectAnchorLookupVariants(input.anchorCandidates);
+    const anchorLookupStrategies = collectAnchorLookupStrategies(input.anchorCandidates);
 
     // Compute per-candidate feature vectors for the learned matcher (Step 18.5)
     const candidateFeatures = new Map<string, MatcherFeatureVector>();
@@ -749,12 +763,13 @@ export class Resolver {
     thresholds: ThresholdEntry,
     reasonCodes: readonly string[],
     lookupStrategyAdjustments: readonly LookupStrategyAdjustment[],
-    learnedOutputs?: readonly LearnedMatcherOutput[],
+    learnedOutputs: readonly LearnedMatcherOutput[] | undefined,
+    top1RawScore: number,
   ): ResolverDecisionTrace {
-    const anchorLookupVariants = this.collectAnchorLookupVariants(input.anchorCandidates);
-    const anchorLookupStrategies = this.collectAnchorLookupStrategies(input.anchorCandidates);
-    const blockerSeedEntityIds = this.collectBlockerSeedEntityIds(candidates);
-    const candidateSourceBreakdown = this.collectCandidateSourceBreakdown(candidates);
+    const anchorLookupVariants = collectAnchorLookupVariants(input.anchorCandidates);
+    const anchorLookupStrategies = collectAnchorLookupStrategies(input.anchorCandidates);
+    const blockerSeedEntityIds = collectBlockerSeedEntityIds(candidates);
+    const candidateSourceBreakdown = collectCandidateSourceBreakdown(candidates);
     const queryProvenance =
       input.normalizedQueryViews !== undefined ||
       anchorLookupVariants.length > 0 ||
@@ -806,6 +821,7 @@ export class Resolver {
       top2CalibratedScore: calibrated.top2CalibratedScore,
       calibratedGap: calibrated.calibratedGap,
       decisionConfidenceC: calibrated.decisionConfidenceC,
+      ...(Number.isFinite(top1RawScore) ? { top1RawScore } : {}),
       calibrationTrusted: calibrated.calibrationTrusted,
       ambiguityDetected: ambiguity.detected,
       ambiguityTypes: ambiguity.types,
@@ -819,129 +835,4 @@ export class Resolver {
     };
   }
 
-  private collectAnchorLookupVariants(anchors: readonly AnchorCandidate[]): readonly string[] {
-    const variants = new Set<string>();
-    for (const anchor of anchors) {
-      for (const variant of anchor.lookupVariants ?? []) {
-        if (variant.length > 0) {
-          variants.add(variant);
-        }
-      }
-    }
-
-    return [...variants].sort();
-  }
-
-  private collectAnchorLookupStrategies(anchors: readonly AnchorCandidate[]): readonly string[] {
-    const strategies = new Set<string>();
-    for (const anchor of anchors) {
-      for (const strategy of anchor.lookupStrategies ?? []) {
-        if (strategy.length > 0) {
-          strategies.add(strategy);
-        }
-      }
-    }
-
-    return [...strategies].sort();
-  }
-
-  private collectBlockerSeedEntityIds(
-    candidates: readonly ResolverCandidate[],
-  ): readonly string[] {
-    const blockerSeedEntityIds = new Set<string>();
-    for (const candidate of candidates) {
-      if (this.collectCandidateSources(candidate).includes('blocker_seed')) {
-        blockerSeedEntityIds.add(String(candidate.entityId));
-      }
-    }
-
-    return [...blockerSeedEntityIds].sort();
-  }
-
-  private collectCandidateSourceBreakdown(
-    candidates: readonly ResolverCandidate[],
-  ): readonly {
-    readonly source: EntityCandidateSource;
-    readonly entityIds: readonly string[];
-    readonly count: number;
-  }[] {
-    const bySource = new Map<EntityCandidateSource, Set<string>>();
-    for (const candidate of candidates) {
-      for (const source of this.collectCandidateSources(candidate)) {
-        const entityIds = bySource.get(source) ?? new Set<string>();
-        entityIds.add(String(candidate.entityId));
-        bySource.set(source, entityIds);
-      }
-    }
-
-    const sourceOrder: readonly EntityCandidateSource[] = [
-      'alias',
-      'planner_heuristic',
-      'entity_lookup',
-      'blocker_seed',
-    ];
-
-    return sourceOrder
-      .filter((source) => bySource.has(source))
-      .map((source) => {
-        const entityIds = [...(bySource.get(source) ?? new Set<string>())].sort();
-        return {
-          source,
-          entityIds,
-          count: entityIds.length,
-        };
-      });
-  }
-
-  private collectCandidateSources(
-    candidate: Pick<ResolverCandidate, 'source' | 'sources'>,
-  ): readonly EntityCandidateSource[] {
-    const combined = new Set<EntityCandidateSource>();
-    for (const source of candidate.sources ?? []) {
-      combined.add(source);
-    }
-    if (candidate.source !== undefined) {
-      combined.add(candidate.source);
-    }
-    return [...combined].sort();
-  }
-
-  private collectLookupStrategyAdjustments(
-    input: ResolverInput,
-  ): readonly LookupStrategyAdjustment[] {
-    const byEntity = new Map<string, Set<string>>();
-
-    for (const anchor of input.anchorCandidates) {
-      const strategies = anchor.lookupStrategies ?? [];
-      if (strategies.length === 0) {
-        continue;
-      }
-
-      for (const entityId of anchor.candidateEntityIds) {
-        const key = String(entityId);
-        const existing = byEntity.get(key) ?? new Set<string>();
-        for (const strategy of strategies) {
-          if (strategy.length > 0) {
-            existing.add(strategy);
-          }
-        }
-        byEntity.set(key, existing);
-      }
-    }
-
-    return [...byEntity.entries()]
-      .map(([entityId, strategies]) => {
-        const strategyList = [...strategies].sort();
-        const rawScoreDelta = computeLookupStrategyAdjustment(
-          strategyList,
-          input.queryClass,
-        );
-        return {
-          entityId,
-          strategies: strategyList,
-          rawScoreDelta,
-        };
-      })
-      .filter((entry) => entry.rawScoreDelta !== 0);
-  }
 }

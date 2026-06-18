@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createStageTimer } from '../../shared/stage-timer.js';
+import { createStageTimer, MAX_STAGE_TIMER_SNAPSHOT_KEYS } from '../../shared/stage-timer.js';
 
 describe('StageTimer', () => {
   beforeEach(() => {
@@ -69,5 +69,42 @@ describe('StageTimer', () => {
     timer.start('llm');
     expect(timer.end('llm')).toBe(30);
     spy.mockRestore();
+  });
+
+  // Regression: the HTTP `stage_timings` field is schema-bounded; a pipeline
+  // that emitted >MAX distinct stages (observed on the LLM-degradation path)
+  // 500'd the ENTIRE search over a best-effort telemetry field. The timer now
+  // guarantees the bound at the source.
+  it('caps snapshot at MAX_STAGE_TIMER_SNAPSHOT_KEYS, keeping the largest-duration stages', () => {
+    let clock = 0;
+    const timer = createStageTimer({ now: () => clock });
+    const overflow = 10;
+    const total = MAX_STAGE_TIMER_SNAPSHOT_KEYS + overflow;
+    for (let i = 0; i < total; i++) {
+      clock = 0;
+      timer.start(`stage_${String(i)}`);
+      clock = i + 1; // duration = i+1 → monotone increasing with i
+      timer.end(`stage_${String(i)}`);
+    }
+    const snap = timer.snapshot();
+    expect(Object.keys(snap).length).toBe(MAX_STAGE_TIMER_SNAPSHOT_KEYS);
+    // the `overflow` smallest-duration stages are dropped...
+    expect(snap['stage_0']).toBeUndefined();
+    expect(snap[`stage_${String(overflow - 1)}`]).toBeUndefined();
+    // ...the largest-duration stages survive
+    expect(snap[`stage_${String(total - 1)}`]).toBe(total);
+    expect(snap[`stage_${String(overflow)}`]).toBe(overflow + 1);
+  });
+
+  it('returns all stages unchanged when at or under the cap', () => {
+    let clock = 0;
+    const timer = createStageTimer({ now: () => clock });
+    for (let i = 0; i < MAX_STAGE_TIMER_SNAPSHOT_KEYS; i++) {
+      clock = 0;
+      timer.start(`s${String(i)}`);
+      clock = 1;
+      timer.end(`s${String(i)}`);
+    }
+    expect(Object.keys(timer.snapshot()).length).toBe(MAX_STAGE_TIMER_SNAPSHOT_KEYS);
   });
 });

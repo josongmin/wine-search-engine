@@ -6,6 +6,8 @@
  * minimum thresholds on utility, wrong-resolve rate, and ECE before
  * any model or threshold change is promoted to production.
  */
+import type { QueryClass } from '../../shared/types/query-class.js';
+
 export interface EvalMetrics {
   /** Aggregate Decision Utility score (mean across all cases). */
   readonly decisionUtility: number;
@@ -68,6 +70,39 @@ export interface EvalMetrics {
 
   /** 95th percentile end-to-end latency in milliseconds. */
   readonly p95LatencyMs: number;
+
+  /**
+   * Fraction of cases where the gold-set query class disagrees with the
+   * runtime classifier's query class (`goldRuntimeQueryClassMismatch === true`).
+   *
+   * This is a FIRST-CLASS taxonomy-health metric (RFC-009 §10 / migration 025):
+   * calibration is keyed by the RUNTIME query class (see
+   * `extract-calibration-trace.ts`, which stratifies via
+   * `COALESCE(runtime_query_class, gold_query_class)`). When this rate is high,
+   * gold-labelled cases are being routed under a different class than the one
+   * calibration was fit for, so per-class calibration trust degrades silently.
+   *
+   * A healthy taxonomy reports `0`. Divide-by-zero is guarded: an empty result
+   * set reports `0`, never `NaN`.
+   *
+   * NOTE: this metric is intentionally DISJOINT from slice-underperformance
+   * flagging (utility / wrong-resolve / ECE deltas). A high mismatch rate must
+   * NOT itself trip the slice flags — it is a separate diagnostic axis.
+   */
+  readonly goldRuntimeQueryClassMismatchRate: number;
+
+  /**
+   * Per-class breakdown of the mismatch rate, keyed by the RUNTIME query class
+   * (falling back to `'unknown'` when the runtime class was not recorded —
+   * mirrors the `COALESCE` fallback in `extract-calibration-trace.ts`).
+   *
+   * exactOptionalPropertyTypes choice: this is a REQUIRED `ReadonlyMap` that may
+   * be EMPTY, not an optional field. This mirrors `selectiveRiskAtCoverage`
+   * above and avoids the conditional-spread / `undefined`-assignment hazards of
+   * an optional key entirely — callers always get a Map and iterate it safely
+   * (an empty map for an empty result set).
+   */
+  readonly mismatchRateByClass: ReadonlyMap<QueryClass, number>;
 }
 
 /**

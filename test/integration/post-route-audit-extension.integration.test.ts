@@ -4,7 +4,7 @@
  * Tests that deriveAuditExtension (module-private) is correctly wired through
  * runRankedRouteDecisionPhase() — when explain=true, the response should
  * include typed audit_extension fields built from planner trace, ranking
- * metadata, abstain decisions, drop logs, and corrective retry calibration.
+ * metadata, abstain decisions, and drop logs.
  *
  * Since deriveAuditExtension is not exported, we test it indirectly via
  * runRankedRouteDecisionPhase(), which is the public entry point that calls it.
@@ -398,25 +398,6 @@ describe('Post-route AuditExtension derivation via runRankedRouteDecisionPhase',
     expect(audit!.hard_filter_drop_log![1]!.entityId).toBe('drop-6');
   });
 
-  it('emits corrective_retry_calibrated_confidence when correctiveRetryCalibration is provided', async () => {
-    const ctx = makeBaseContext({ correctiveRetryCalibration: 0.78 });
-
-    await runRankedRouteDecisionPhase(ctx);
-
-    const audit = getAuditExtensionFromBuildCall(ctx);
-    expect(audit).toBeDefined();
-    expect(audit?.corrective_retry_calibrated_confidence).toBe(0.78);
-  });
-
-  it('does not emit corrective_retry_calibrated_confidence when value is NaN', async () => {
-    const ctx = makeBaseContext({ correctiveRetryCalibration: Number.NaN });
-
-    await runRankedRouteDecisionPhase(ctx);
-
-    const audit = getAuditExtensionFromBuildCall(ctx);
-    // NaN is not finite so the field should be omitted
-    expect(audit?.corrective_retry_calibrated_confidence).toBeUndefined();
-  });
 
   it('produces minimal audit extension when no optional inputs are present', async () => {
     const ctx = makeBaseContext();
@@ -435,7 +416,6 @@ describe('Post-route AuditExtension derivation via runRankedRouteDecisionPhase',
       expect(audit.ranking_delta_trace).toBeUndefined();
       expect(audit.abstain_policy_trace).toBeUndefined();
       expect(audit.hard_filter_drop_log).toBeUndefined();
-      expect(audit.corrective_retry_calibrated_confidence).toBeUndefined();
     }
   });
 

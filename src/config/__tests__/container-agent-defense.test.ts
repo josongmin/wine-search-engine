@@ -26,7 +26,6 @@ const mockCore = {
   calibrationStore: {} as never,
   browseRetriever: {} as never,
   compareRetriever: {} as never,
-  entityLookup: {} as never,
   snapshotVersions: {} as never,
   cacheLookupRuntimeState: {} as never,
   cacheLookupRuntimeStateProvider: {} as never,
@@ -45,12 +44,22 @@ vi.mock('../container-core.js', () => ({
 
 vi.mock('../container-features.js', () => ({
   buildFeatureContainerServices: vi.fn(() => ({
+    entityLookupV2UseCase: { execute: vi.fn() } as never,
     searchUseCase: {} as never,
-    decomposedSearchUseCase: { execute: vi.fn() } as never,
-    interpretUseCase: {} as never,
-    resolveUseCase: {} as never,
-    hybridUseCase: {} as never,
-    batchSearchUseCase: {} as never,
+  })),
+}));
+
+vi.mock('../lookup-authority.js', () => ({
+  createLookupAuthorityServices: vi.fn(async () => ({
+    entityLookupV2UseCase: { execute: vi.fn() } as never,
+    bootstrapProfile: {} as never,
+    metadata: {} as never,
+  })),
+  buildLookupOpsRuntimeHealthView: vi.fn(() => ({
+    unwiredSubstrateIds: [],
+    familyGraphEdgeCount: 0,
+    ltrSupportStatus: 'unsupported',
+    ltrSupportReason: 'lookup_domain_model_absent',
   })),
 }));
 

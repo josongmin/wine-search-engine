@@ -1,37 +1,35 @@
 id: tools.interpret
-name: Interpret Use Case (Query Interpretation Trace)
+name: Interpret Query Runner (Query Interpretation Trace)
 category: tools
 summary: |
-  입력 쿼리에 대한 NLU/planner 해석 결과를 생성하는 internal use case
+  입력 쿼리에 대한 NLU/planner 해석 결과를 생성하는 eval/integration query runner
   (intent, constraints, anchors, decomposition, situational policy 결과 등).
 
 maturity: 3
 maturity_rationale: |
-  HTTP route 전용 회귀 테스트 스위트 추가로 응답 형상이 고정됨 — 13 케이스가
-  Use-case port 시점에서 mock 하여 외부 NLU/LLM 호출 없이 InterpretResponseSchema
-  (V1) 와 InterpretResponseV2Schema (Accept: human+json) 양쪽의 안정성을
-  검증한다. 커버 영역: Korean/English/Mixed plain query, 구속조건 추출(가격+지역),
-  pairing intent, comparison decomposition (V2), OOD (unknown query_class),
-  RFC-014 envelope (empty / oversized / whitespace / missing-field), Unicode NFC/NFD
-  forwarding, MAX_QUERY_LENGTH boundary. Schema는 여전히 InterpretResponseSchema /
-  InterpretResponseV2Schema 가 SSoT.
+  Eval/integration runner + schema contract tests lock InterpretResponseSchema (V1)
+  and InterpretResponseV2Schema (Accept: human+json). Coverage: Korean/English/Mixed
+  plain query, constraints, pairing intent, comparison decomposition (V2), OOD,
+  RFC-014 envelope boundaries, Unicode NFC/NFD forwarding, MAX_QUERY_LENGTH.
+  No live HTTP route after V2 cutover — runner-only rail.
 
-status: active
+status: deprecated
 since: 2025-10
-last_reviewed: 2026-05-21
+last_reviewed: 2026-06-10
 owner: core
 
 surfaces:
-  - "Internal interpret use case"
+  - "Eval/integration: buildInterpretQueryRunnerForEval() (no public HTTP route)"
 
 key_files:
-  - src/application/search/interpret.usecase.ts
+  - src/application/search/interpret-query-runner.ts
+  - src/config/build-interpret-query-runner.ts
   - src/interface/http/schemas/search-response.schema.ts
   - src/interface/http/schemas/search-response-v2.schema.ts
 
 tests:
   unit:
-    - test/unit/application/search/interpret.usecase.test.ts
+    - test/unit/application/search/interpret-query-runner.test.ts
     - src/interface/http/schemas/__tests__/interpret-response.schema.test.ts
 
 depends_on:

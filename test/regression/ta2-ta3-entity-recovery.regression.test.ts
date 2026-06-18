@@ -6,42 +6,25 @@
  *  2. AnchorCandidate.source union includes 'blocker_seed' (TA2-2)
  *  3. buildResolverCandidatesFromGenerator — anchor + blocker paths (TA2-3)
  *  4. Resolver merges blockerSeedCandidates into candidate pool (TA2-4)
- *  5. shouldTriggerCorrectiveRetry — trigger conditions (TA3-1)
- *  6. resolveCorrectiveRetryOutcome — exit conditions (TA3-2)
+ *  (TA3 corrective-retry loop removed — Entity Lookup V2 cutover)
  *
  * These tests are append-only (regression suite rules). Never delete.
  */
 
 import { describe, expect, it, vi } from 'vitest';
 import {
-  shouldTriggerCorrectiveRetry,
-  resolveCorrectiveRetryOutcome,
-  alignRetryResultStatusToOutcome,
-  computeCorrectiveRetryCalibration,
-} from '../../src/application/search/search-usecase-corrective-retry.js';
+  emptyEntityDocumentBatchLookup,
+  makeEntityDocumentBatchLookupFromEntries,
+  makeUniformEntityDocumentBatchLookup,
+  wrapEntityDocumentBatchLookupAsResolverProjection,
+  type EntityDocumentBatchLookup,
+} from '../../src/application/search/__tests__/resolver-projection-lookup.stub.js';
 import { buildResolverCandidatesFromGenerator } from '../../src/application/search/search-usecase-resolver-candidates.js';
 import type { EntityCandidateGeneratorInput } from '../../src/domain/resolver/model/entity-candidate-generator-input.js';
 import type { AnchorCandidate } from '../../src/domain/query/model/anchor-candidate.js';
-import type { EntityResolveResult } from '../../src/domain/resolver/model/resolve-result.js';
-import type { QueryPlanV1 } from '../../src/domain/query/model/query-plan.js';
-import type { EntityDocumentLookupPort } from '../../src/application/search/port/search-pipeline-deps.port.js';
 import { createEntityId } from '../../src/domain/shared/types/index.js';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
-
-function makePlan(overrides: Partial<QueryPlanV1> = {}): QueryPlanV1 {
-  return {
-    rawQuery: 'opus one 2019',
-    normalizedQuery: 'opus one 2019',
-    queryClass: 'entity_exact',
-    intent: 'entity',
-    anchors: [],
-    constraints: {},
-    policy: { requireExact: false, allowApproximate: true },
-    uncertainty: { level: 'low', signals: [] },
-    ...overrides,
-  } as unknown as QueryPlanV1;
-}
 
 function makeAnchor(overrides: Partial<AnchorCandidate> = {}): AnchorCandidate {
   const lookupStrategies = overrides.lookupStrategies ?? [];
@@ -67,17 +50,6 @@ function makeAnchor(overrides: Partial<AnchorCandidate> = {}): AnchorCandidate {
   };
 }
 
-function makeResolveResult(overrides: Partial<EntityResolveResult> = {}): EntityResolveResult {
-  return {
-    status: 'failed',
-    decisionConfidenceC: 0.3,
-    candidates: [],
-    decisionTrace: {} as EntityResolveResult['decisionTrace'],
-    conformalSetSize: 0,
-    ...overrides,
-  };
-}
-
 // ─── TA2-1: EntityCandidateGeneratorInput contract ────────────────────────────
 
 describe('EntityCandidateGeneratorInput (TA2-1)', () => {
@@ -92,7 +64,7 @@ describe('EntityCandidateGeneratorInput (TA2-1)', () => {
       anchors: [],
       // blockerOnlyIds 없음
     };
-    const result = await buildResolverCandidatesFromGenerator(input, { getDocument: async () => null, getDocuments: async () => new Map() });
+    const result = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(emptyEntityDocumentBatchLookup()));
     const blockerSeeds = result.filter((c) => c.source === 'blocker_seed');
     expect(blockerSeeds).toHaveLength(0);
   });
@@ -108,33 +80,43 @@ describe('EntityCandidateGeneratorInput (TA2-1)', () => {
       anchors: [],
       blockerOnlyIds: [createEntityId('wine-blocker-only')],
     };
-    const result = await buildResolverCandidatesFromGenerator(input, {
-      getDocument: async (id) => ({ entityId: id, entityType: 'wine', canonicalLabel: 'Opus One' }),
-      getDocuments: async (ids) => { const m = new Map(); for (const id of ids) m.set(id, { entityId: id, entityType: 'wine', canonicalLabel: 'Opus One' }); return m; },
-    });
+    const result = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(makeUniformEntityDocumentBatchLookup('Opus One')));
     expect(result).toHaveLength(1);
     expect(result[0]?.source).toBe('blocker_seed');
     expect(String(result[0]?.entityId)).toBe('wine-blocker-only');
   });
 
-  it('preloadedDocs 캐시 히트 → getDocument 미호출 (N+1 방어)', async () => {
-    // 실질 검증: preloadedDocs에 이미 있는 ID는 getDocument를 호출하면 안 됨
+  it('preloadedDocs 캐시 히트 → batch projection lookup은 identity overlay만 호출 (N+1 방어)', async () => {
+    // 실질 검증: preloadedDocs에 이미 있는 ID는 getDocuments를 호출하면 안 됨
     const { buildResolverCandidatesFromGenerator } = await import(
       '../../src/application/search/search-usecase-resolver-candidates.js'
     );
     const entityId = createEntityId('wine-preloaded');
     const preloadedDocs = new Map([[String(entityId), { entityId, entityType: 'wine' as const, canonicalLabel: 'Preloaded Wine' }]]);
-    const getDocument = vi.fn(async () => null);
+    const getDocuments = vi.fn(async () => new Map());
     const input: EntityCandidateGeneratorInput = {
       rawQuery: 'opus one',
       normalizedQuery: 'opus one',
       anchors: [makeAnchor({ candidateEntityIds: [entityId] })],
       preloadedDocs,
     };
-    const getDocuments = vi.fn(async () => new Map());
-    await buildResolverCandidatesFromGenerator(input, { getDocument, getDocuments });
-    expect(getDocument).not.toHaveBeenCalled();
+    const getResolverProjections = vi.fn(async (ids: readonly typeof entityId[]) => {
+      const m = new Map();
+      for (const id of ids) {
+        m.set(id, {
+          entityId: id,
+          entityType: 'wine',
+          canonicalLabel: 'Preloaded Wine',
+          aliasesIdentitySafe: [],
+          identitySafeKeys: [],
+          identityCertificates: [],
+        });
+      }
+      return m;
+    });
+    await buildResolverCandidatesFromGenerator(input, { getResolverProjections });
     expect(getDocuments).not.toHaveBeenCalled();
+    expect(getResolverProjections).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -153,10 +135,7 @@ describe("AnchorCandidate.source union (TA2-2)", () => {
       normalizedQuery: 'test',
       anchors: [makeAnchor({ source: 'blocker_seed', candidateEntityIds: [entityId] })],
     };
-    const result = await buildResolverCandidatesFromGenerator(input, {
-      getDocument: async (id) => ({ entityId: id, entityType: 'wine', canonicalLabel: 'Test' }),
-      getDocuments: async (ids) => { const m = new Map(); for (const id of ids) m.set(id, { entityId: id, entityType: 'wine', canonicalLabel: 'Test' }); return m; },
-    });
+    const result = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(makeUniformEntityDocumentBatchLookup('Test')));
     expect(result[0]?.source).toBe('blocker_seed');
   });
 
@@ -175,10 +154,7 @@ describe("AnchorCandidate.source union (TA2-2)", () => {
         makeAnchor({ source: 'planner_heuristic', candidateEntityIds: [idB] }),
       ],
     };
-    const result = await buildResolverCandidatesFromGenerator(input, {
-      getDocument: async (id) => ({ entityId: id, entityType: 'wine', canonicalLabel: 'Wine' }),
-      getDocuments: async (ids) => { const m = new Map(); for (const id of ids) m.set(id, { entityId: id, entityType: 'wine', canonicalLabel: 'Wine' }); return m; },
-    });
+    const result = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(makeUniformEntityDocumentBatchLookup('Wine')));
     const aliasCandidate = result.find((c) => String(c.entityId) === String(idA));
     const heuristicCandidate = result.find((c) => String(c.entityId) === String(idB));
     expect(aliasCandidate?.source).toBe('alias');
@@ -189,7 +165,7 @@ describe("AnchorCandidate.source union (TA2-2)", () => {
 // ─── TA2-3: buildResolverCandidatesFromGenerator module exports ───────────────
 
 describe('buildResolverCandidatesFromGenerator module (TA2-3)', () => {
-  it('anchor entityId가 getDocument에서 null 반환 시 hydration 불완전이면 reject', async () => {
+  it('anchor entityId가 batch lookup에서 누락되면 hydration 불완전으로 reject', async () => {
     // 실질 검증: 일부 ID만 복원되면 조용히 축소된 후보를 내지 말고 실패해야 함
     const { buildResolverCandidatesFromGenerator } = await import(
       '../../src/application/search/search-usecase-resolver-candidates.js'
@@ -201,11 +177,7 @@ describe('buildResolverCandidatesFromGenerator module (TA2-3)', () => {
       normalizedQuery: 'test',
       anchors: [makeAnchor({ candidateEntityIds: [existingId, missingId] })],
     };
-    await expect(buildResolverCandidatesFromGenerator(input, {
-      getDocument: async (id) =>
-        String(id) === String(existingId)
-          ? { entityId: id, entityType: 'wine', canonicalLabel: 'Exists' }
-          : null,
+    await expect(buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection({
       getDocuments: async (ids) => {
         const m = new Map();
         for (const id of ids) {
@@ -215,7 +187,7 @@ describe('buildResolverCandidatesFromGenerator module (TA2-3)', () => {
         }
         return m;
       },
-    })).rejects.toMatchObject({
+    }))).rejects.toMatchObject({
       code: 'INTERNAL_INCONSISTENCY',
     });
   });
@@ -228,7 +200,7 @@ describe('buildResolverCandidatesFromGenerator module (TA2-3)', () => {
     expect('buildResolverCandidatesFromPlan' in mod).toBe(false);
   });
 
-  it('fails closed when entityLookup is undefined but candidate IDs are present', async () => {
+  it('fails closed when resolver projection lookup returns no documents for anchored ids', async () => {
     const { buildResolverCandidatesFromGenerator } = await import(
       '../../src/application/search/search-usecase-resolver-candidates.js'
     );
@@ -237,7 +209,9 @@ describe('buildResolverCandidatesFromGenerator module (TA2-3)', () => {
       normalizedQuery: 'test',
       anchors: [makeAnchor()],
     };
-    await expect(buildResolverCandidatesFromGenerator(input, undefined)).rejects.toMatchObject({
+    await expect(buildResolverCandidatesFromGenerator(input, {
+      getResolverProjections: async () => new Map(),
+    })).rejects.toMatchObject({
       code: 'INTERNAL_INCONSISTENCY',
     });
   });
@@ -251,9 +225,8 @@ describe('buildResolverCandidatesFromGenerator module (TA2-3)', () => {
       normalizedQuery: 'test',
       anchors: [],
     };
-    // entityLookup provided but no IDs to look up
-    const fakeLookup = { getDocument: async () => null, getDocuments: async () => new Map() };
-    const result = await buildResolverCandidatesFromGenerator(input, fakeLookup);
+    // resolver projection lookup provided but no IDs to look up
+    const result = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(emptyEntityDocumentBatchLookup()));
     expect(result).toHaveLength(0);
   });
 
@@ -269,21 +242,9 @@ describe('buildResolverCandidatesFromGenerator module (TA2-3)', () => {
       anchors: [anchor],
       blockerOnlyIds: [sharedId], // same ID → should produce only 1 candidate
     };
-    const fakeLookup = {
-      getDocument: async (id: string) => ({
-        entityId: id,
-        entityType: 'wine',
-        canonicalLabel: 'Opus One 2019',
-      }),
-      getDocuments: async (ids: readonly string[]) => {
-        const m = new Map();
-        for (const id of ids) m.set(id, { entityId: id, entityType: 'wine', canonicalLabel: 'Opus One 2019' });
-        return m;
-      },
-    };
     const result = await buildResolverCandidatesFromGenerator(
       input,
-      fakeLookup as unknown as Parameters<typeof buildResolverCandidatesFromGenerator>[1],
+      wrapEntityDocumentBatchLookupAsResolverProjection(makeUniformEntityDocumentBatchLookup('Opus One 2019')),
     );
     // The shared ID appears only once in output
     expect(result.filter((c) => String(c.entityId) === sharedId)).toHaveLength(1);
@@ -474,383 +435,8 @@ describe('ResolverQueryProvenance blocker-seed trace (T7)', () => {
   });
 });
 
-// ─── TA3-1: shouldTriggerCorrectiveRetry ────────────────────────────────────
-
-describe('shouldTriggerCorrectiveRetry (TA3-1)', () => {
-  it('returns false when status is resolved', () => {
-    const plan = makePlan();
-    const result = makeResolveResult({ status: 'resolved', decisionConfidenceC: 0.9 });
-    expect(shouldTriggerCorrectiveRetry(plan, result)).toBe(false);
-  });
-
-  it('returns false when resolver recommends clarify', () => {
-    const plan = makePlan();
-    const result = makeResolveResult({ recommendedNextAction: 'clarify' });
-    expect(shouldTriggerCorrectiveRetry(plan, result)).toBe(false);
-  });
-
-  it('returns false when resolver recommends fail', () => {
-    const plan = makePlan();
-    const result = makeResolveResult({ recommendedNextAction: 'fail' });
-    expect(shouldTriggerCorrectiveRetry(plan, result)).toBe(false);
-  });
-
-  it('returns false when ambiguity is detected', () => {
-    const plan = makePlan();
-    const result = makeResolveResult({
-      ambiguity: {
-        types: ['homonym'],
-        severity: 'high',
-        explanationCodes: ['AMBIGUITY_HOMONYM'],
-      },
-    });
-    expect(shouldTriggerCorrectiveRetry(plan, result)).toBe(false);
-  });
-
-  it('returns true when zero anchors and failed status', () => {
-    const plan = makePlan({ anchors: [] });
-    const result = makeResolveResult({ status: 'failed', decisionConfidenceC: 0.1 });
-    expect(shouldTriggerCorrectiveRetry(plan, result)).toBe(true);
-  });
-
-  it('returns true when confidence < threshold and no ambiguity', () => {
-    const plan = makePlan({ anchors: [makeAnchor()] });
-    const result = makeResolveResult({ status: 'ambiguous', decisionConfidenceC: 0.2 });
-    // Note: result.ambiguity field is undefined here (no structural ambiguity)
-    expect(shouldTriggerCorrectiveRetry(plan, result)).toBe(true);
-  });
-
-  it('returns false when confidence is above threshold', () => {
-    const plan = makePlan({ anchors: [makeAnchor()] });
-    const result = makeResolveResult({ status: 'ambiguous', decisionConfidenceC: 0.8 });
-    expect(shouldTriggerCorrectiveRetry(plan, result)).toBe(false);
-  });
-
-  it('NaN confidence: treated as 0 (retry triggers)', () => {
-    const plan = makePlan({ anchors: [makeAnchor()] });
-    const result = makeResolveResult({ status: 'failed', decisionConfidenceC: NaN });
-    // NaN is not finite, so treated as 0 → below threshold → trigger
-    expect(shouldTriggerCorrectiveRetry(plan, result)).toBe(true);
-  });
-
-  it('missing confidence: remains retry-eligible without collapsing absence into 0', () => {
-    const plan = makePlan({ anchors: [makeAnchor()] });
-    const result = makeResolveResult({ status: 'failed', decisionConfidenceC: undefined });
-    expect(shouldTriggerCorrectiveRetry(plan, result)).toBe(true);
-  });
-
-  // T6: resolver now emits corrective_retry as recommendedNextAction — honour it
-  it("returns true when resolver explicitly recommends corrective_retry (T6)", () => {
-    // High-confidence plan with anchors — would not trigger via C1/C2 conditions alone
-    const plan = makePlan({ anchors: [makeAnchor()] });
-    const result = makeResolveResult({
-      status: 'failed',
-      decisionConfidenceC: 0.8, // above threshold — would normally not trigger
-      recommendedNextAction: 'corrective_retry',
-    });
-    // The resolver recommendation takes precedence over local condition evaluation
-    expect(shouldTriggerCorrectiveRetry(plan, result)).toBe(true);
-  });
-});
-
-// ─── TA3-2: resolveCorrectiveRetryOutcome ───────────────────────────────────
-
-describe('resolveCorrectiveRetryOutcome (TA3-2)', () => {
-  it("returns 'accept' when retry produced a resolved result", () => {
-    const result = makeResolveResult({ status: 'resolved', decisionConfidenceC: 0.9 });
-    expect(resolveCorrectiveRetryOutcome(result)).toBe('accept');
-  });
-
-  it("returns 'clarify' when ambiguity detected after retry", () => {
-    const result = makeResolveResult({
-      status: 'ambiguous',
-      ambiguity: {
-        types: ['homonym'],
-        severity: 'medium',
-        explanationCodes: [],
-      },
-    });
-    expect(resolveCorrectiveRetryOutcome(result)).toBe('clarify');
-  });
-
-  it("returns 'fail' when resolver recommends fail after retry", () => {
-    const result = makeResolveResult({
-      status: 'failed',
-      recommendedNextAction: 'fail',
-    });
-    expect(resolveCorrectiveRetryOutcome(result)).toBe('fail');
-  });
-
-  it("returns 'clarify' when confidence still below threshold after retry", () => {
-    const result = makeResolveResult({
-      status: 'failed',
-      decisionConfidenceC: 0.3,
-    });
-    expect(resolveCorrectiveRetryOutcome(result)).toBe('clarify');
-  });
-
-  it("returns 'accept' for marginal improvement (confidence just above threshold)", () => {
-    const result = makeResolveResult({
-      status: 'ambiguous',
-      decisionConfidenceC: 0.6,
-    });
-    expect(resolveCorrectiveRetryOutcome(result)).toBe('accept');
-  });
-
-  it('NaN confidence: treated as below threshold → clarify', () => {
-    const result = makeResolveResult({ status: 'failed', decisionConfidenceC: NaN });
-    expect(resolveCorrectiveRetryOutcome(result)).toBe('clarify');
-  });
-
-  it('missing confidence: clarify after retry rather than accepting synthetic certainty', () => {
-    const result = makeResolveResult({ status: 'failed', decisionConfidenceC: undefined });
-    expect(resolveCorrectiveRetryOutcome(result)).toBe('clarify');
-  });
-});
-
-// ─── TA3-2: alignRetryResultStatusToOutcome ──────────────────────────────────
-//
-// Guards the entity_lookup contract: the corrective-retry exit decision must
-// be reflected in the EntityResolveResult.status passed to the decision
-// engine, so a 'fail'/'clarify' outcome never reaches admission as 'resolved'.
-
-describe('alignRetryResultStatusToOutcome (TA3-2 outcome propagation)', () => {
-  it("passthrough on outcome='accept' (resolver already in agreement)", () => {
-    const retry = makeResolveResult({ status: 'resolved', decisionConfidenceC: 0.9 });
-    const aligned = alignRetryResultStatusToOutcome(retry, 'accept');
-    expect(aligned).toBe(retry);
-  });
-
-  it("status drift on 'fail': resolver said 'resolved' but outcome forced 'fail' → downgrade to 'failed'", () => {
-    const retry = makeResolveResult({
-      status: 'resolved',
-      decisionConfidenceC: 0.9,
-      recommendedNextAction: 'fail',
-    });
-    const aligned = alignRetryResultStatusToOutcome(retry, 'fail');
-    expect(aligned.status).toBe('failed');
-    expect(aligned.decisionConfidenceC).toBe(0.9);
-    expect(aligned.recommendedNextAction).toBe('fail');
-  });
-
-  it("status drift on 'clarify': resolver said 'resolved' but outcome forced 'clarify' → downgrade to 'ambiguous'", () => {
-    const retry = makeResolveResult({
-      status: 'resolved',
-      decisionConfidenceC: 0.4,
-    });
-    const aligned = alignRetryResultStatusToOutcome(retry, 'clarify');
-    expect(aligned.status).toBe('ambiguous');
-  });
-
-  it("'fail' outcome with already-failed status: preserved verbatim (no churn)", () => {
-    const retry = makeResolveResult({ status: 'failed', recommendedNextAction: 'fail' });
-    const aligned = alignRetryResultStatusToOutcome(retry, 'fail');
-    expect(aligned).toBe(retry);
-  });
-
-  it("'clarify' outcome preserves an explicit 'failed' status (no upgrade from failed to ambiguous)", () => {
-    const retry = makeResolveResult({ status: 'failed', decisionConfidenceC: 0.3 });
-    const aligned = alignRetryResultStatusToOutcome(retry, 'clarify');
-    expect(aligned.status).toBe('failed');
-  });
-
-  it("'clarify' outcome preserves an existing 'ambiguous' status", () => {
-    const retry = makeResolveResult({
-      status: 'ambiguous',
-      ambiguity: { types: ['homonym'], severity: 'medium', explanationCodes: [] },
-    });
-    const aligned = alignRetryResultStatusToOutcome(retry, 'clarify');
-    expect(aligned.status).toBe('ambiguous');
-    expect(aligned.ambiguity).toBe(retry.ambiguity);
-  });
-});
-
-// ─── TA5: computeCorrectiveRetryCalibration ───────────────────────────────────
-
-describe('computeCorrectiveRetryCalibration (TA5)', () => {
-  function makeResultWithCandidates(
-    topEntityId: string,
-    topRank: number,
-    totalCandidates: number,
-    status: EntityResolveResult['status'] = 'resolved',
-  ): EntityResolveResult {
-    const candidates = Array.from({ length: totalCandidates }, (_, i) => ({
-      entityId: i === topRank - 1 ? topEntityId : `other-wine-${i}`,
-      canonicalLabel: i === topRank - 1 ? 'Top Wine' : `Other Wine ${i}`,
-      calibratedScore: 1 - i * 0.1,
-      rank: i + 1,
-      evidenceRefs: [],
-    }));
-    return {
-      status,
-      decisionConfidenceC: 0.8,
-      topEntity: {
-        entityId: topEntityId,
-        canonicalLabel: 'Top Wine',
-        calibratedScore: 1.0,
-      },
-      candidates,
-      decisionTrace: {} as EntityResolveResult['decisionTrace'],
-      conformalSetSize: 1,
-    };
-  }
-
-  it('rank-1 of 1 → confidence = 0.9 (best possible, single candidate)', () => {
-    const result = makeResultWithCandidates('wine-abc', 1, 1);
-    const confidence = computeCorrectiveRetryCalibration(result, 'accept');
-    // rank 1, total 1 → normalizedRank = 0/max(0,1) = 0 → 0.5 + 0.4*1 = 0.9
-    expect(confidence).toBeCloseTo(0.9);
-  });
-
-  it('rank-1 of 5 → confidence = 0.9 (best rank in pool)', () => {
-    const result = makeResultWithCandidates('wine-abc', 1, 5);
-    const confidence = computeCorrectiveRetryCalibration(result, 'accept');
-    // rank 1, total 5 → normalizedRank = 0/4 = 0 → 0.5 + 0.4*1 = 0.9
-    expect(confidence).toBeCloseTo(0.9);
-  });
-
-  it('rank-5 of 5 → confidence = 0.5 (worst rank in pool)', () => {
-    const result = makeResultWithCandidates('wine-abc', 5, 5);
-    const confidence = computeCorrectiveRetryCalibration(result, 'accept');
-    // rank 5, total 5 → normalizedRank = 4/4 = 1 → 0.5 + 0.4*0 = 0.5
-    expect(confidence).toBeCloseTo(0.5);
-  });
-
-  it('rank-3 of 5 → confidence = 0.7 (mid-pool)', () => {
-    const result = makeResultWithCandidates('wine-abc', 3, 5);
-    const confidence = computeCorrectiveRetryCalibration(result, 'accept');
-    // rank 3, total 5 → normalizedRank = 2/4 = 0.5 → 0.5 + 0.4*0.5 = 0.7
-    expect(confidence).toBeCloseTo(0.7);
-  });
-
-  it("outcome 'clarify' → returns undefined (no calibrated confidence for clarify)", () => {
-    const result = makeResultWithCandidates('wine-abc', 1, 3);
-    const confidence = computeCorrectiveRetryCalibration(result, 'clarify');
-    expect(confidence).toBeUndefined();
-  });
-
-  it("outcome 'fail' → returns undefined", () => {
-    const result = makeResultWithCandidates('wine-abc', 1, 3);
-    const confidence = computeCorrectiveRetryCalibration(result, 'fail');
-    expect(confidence).toBeUndefined();
-  });
-
-  it('empty candidates → returns undefined', () => {
-    const result = makeResolveResult({ status: 'resolved', candidates: [] });
-    const confidence = computeCorrectiveRetryCalibration(result, 'accept');
-    expect(confidence).toBeUndefined();
-  });
-
-  it('topEntity absent → returns undefined', () => {
-    const result: EntityResolveResult = {
-      status: 'resolved',
-      decisionConfidenceC: 0.8,
-      candidates: [
-        { entityId: 'wine-x', canonicalLabel: 'X', calibratedScore: 0.9, rank: 1, evidenceRefs: [] },
-      ],
-      decisionTrace: {} as EntityResolveResult['decisionTrace'],
-      conformalSetSize: 1,
-    };
-    // No topEntity field
-    const confidence = computeCorrectiveRetryCalibration(result, 'accept');
-    expect(confidence).toBeUndefined();
-  });
-
-  it('confidence range: rank-1 always >= rank-N for any N', () => {
-    for (let total = 1; total <= 10; total++) {
-      const best = computeCorrectiveRetryCalibration(makeResultWithCandidates('wine-abc', 1, total), 'accept');
-      const worst = computeCorrectiveRetryCalibration(makeResultWithCandidates('wine-abc', total, total), 'accept');
-      expect(best).toBeDefined();
-      expect(worst).toBeDefined();
-      // best >= worst always
-      expect(best!).toBeGreaterThanOrEqual(worst!);
-      // calibrated confidence is always in [0.5, 0.9]
-      expect(best!).toBeGreaterThanOrEqual(0.5);
-      expect(best!).toBeLessThanOrEqual(0.9);
-      expect(worst!).toBeGreaterThanOrEqual(0.5);
-      expect(worst!).toBeLessThanOrEqual(0.9);
-    }
-  });
-});
-
-// ─── TA3: 1-retry-max structural guarantee ───────────────────────────────────
-//
-// The corrective retry is implemented as a sequential if-block (no loop).
-// These tests guard that the control-flow contract — at most ONE retry per
-// request — is structurally preserved and cannot silently become a loop.
-
-describe('TA3: 1-retry-max structural guarantee', () => {
-  it('TA3-MAX-01: shouldTriggerCorrectiveRetry returns false for resolved results — no retry after success', () => {
-    // Even if we call shouldTriggerCorrectiveRetry on the retry result, it must
-    // return false when status=resolved. This is the gate that prevents a 3rd pass.
-    const plan = makePlan({ anchors: [] });
-    const resolvedResult = makeResolveResult({ status: 'resolved', decisionConfidenceC: 0.9 });
-    expect(shouldTriggerCorrectiveRetry(plan, resolvedResult)).toBe(false);
-  });
-
-  it('TA3-MAX-02: shouldTriggerCorrectiveRetry returns false for clarify recommendation — retry never escalates clarify', () => {
-    const plan = makePlan({ anchors: [] });
-    const clarifyResult = makeResolveResult({
-      status: 'ambiguous',
-      decisionConfidenceC: 0.2,
-      recommendedNextAction: 'clarify',
-    });
-    expect(shouldTriggerCorrectiveRetry(plan, clarifyResult)).toBe(false);
-  });
-
-  it('TA3-MAX-03: shouldTriggerCorrectiveRetry returns false for fail recommendation — hard failure is not retried', () => {
-    const plan = makePlan({ anchors: [] });
-    const failResult = makeResolveResult({
-      status: 'failed',
-      decisionConfidenceC: 0.1,
-      recommendedNextAction: 'fail',
-    });
-    expect(shouldTriggerCorrectiveRetry(plan, failResult)).toBe(false);
-  });
-
-  it('TA3-MAX-04: shouldTriggerCorrectiveRetry returns false for ambiguous result even with low confidence — ambiguity → clarify not retry', () => {
-    const plan = makePlan({ anchors: [] });
-    const ambiguousResult = makeResolveResult({
-      status: 'ambiguous',
-      decisionConfidenceC: 0.1,
-      ambiguity: { type: 'entity_ambiguity', candidates: [] } as EntityResolveResult['ambiguity'],
-    });
-    expect(shouldTriggerCorrectiveRetry(plan, ambiguousResult)).toBe(false);
-  });
-
-  it('TA3-MAX-05: after corrective_retry recommendation, resolveCorrectiveRetryOutcome(resolved)=accept — loop terminates', () => {
-    // Simulates the retry pass returning resolved: outcome=accept means the
-    // caller must return, not re-enter the retry path.
-    const retryResult = makeResolveResult({ status: 'resolved', decisionConfidenceC: 0.85 });
-    expect(resolveCorrectiveRetryOutcome(retryResult)).toBe('accept');
-  });
-
-  it('TA3-MAX-06: resolveCorrectiveRetryOutcome(failed) — low confidence after retry → clarify, not another retry', () => {
-    // After exactly 1 retry, continued low confidence routes to clarify.
-    // There is no 'retry_again' outcome — the loop cannot continue.
-    const retryResult = makeResolveResult({ status: 'failed', decisionConfidenceC: 0.2 });
-    const outcome = resolveCorrectiveRetryOutcome(retryResult);
-    expect(outcome).toBe('clarify');
-    // Crucially: outcome is never 'retry' — the only outcomes are accept/clarify/fail
-    expect(['accept', 'clarify', 'fail']).toContain(outcome);
-  });
-
-  it('TA3-MAX-07: resolveCorrectiveRetryOutcome union is closed — no retry outcome exists', () => {
-    // Type-level guard: the return type of resolveCorrectiveRetryOutcome is
-    // 'accept' | 'clarify' | 'fail'. There is no 'retry' value.
-    // This test exhausts all three branches to confirm no fourth branch exists.
-    const resolved = makeResolveResult({ status: 'resolved', decisionConfidenceC: 0.9 });
-    const ambiguous = makeResolveResult({
-      status: 'ambiguous',
-      ambiguity: { type: 'entity_ambiguity', candidates: [] } as EntityResolveResult['ambiguity'],
-    });
-    const hardFail = makeResolveResult({ status: 'failed', decisionConfidenceC: 0.6, recommendedNextAction: 'fail' });
-
-    expect(resolveCorrectiveRetryOutcome(resolved)).toBe('accept');
-    expect(resolveCorrectiveRetryOutcome(ambiguous)).toBe('clarify');
-    expect(resolveCorrectiveRetryOutcome(hardFail)).toBe('fail');
-  });
-});
+// TA3 corrective-retry application loop removed (Entity Lookup V2 cutover).
+// Resolver + multi-channel V2 authority owns exact-recovery; see entity-lookup-v2.usecase.ts.
 
 // ─── P0-2 (TA2-T2): Noisy evidence formalization ─────────────────────────────
 //
@@ -863,24 +449,8 @@ describe('TA3: 1-retry-max structural guarantee', () => {
 
 describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-to-end', () => {
   // ── helper: minimal entity lookup ──────────────────────────────────────────
-  function makeEntityLookup(entries: Array<[string, string]>): EntityDocumentLookupPort {
-    const map = new Map(entries);
-    const singleFetch = async (id: unknown) => {
-      const label = map.get(String(id));
-      if (label == null) return null;
-      return { entityId: id, entityType: 'wine' as const, canonicalLabel: label };
-    };
-    return {
-      getDocument: singleFetch,
-      getDocuments: async (ids: readonly unknown[]) => {
-        const result = new Map();
-        for (const id of ids) {
-          const doc = await singleFetch(id);
-          if (doc != null) result.set(id, doc);
-        }
-        return result;
-      },
-    };
+  function makeEntityLookup(entries: Array<[string, string]>): EntityDocumentBatchLookup {
+    return makeEntityDocumentBatchLookupFromEntries(entries);
   }
 
   // ── helper: anchor builder ──────────────────────────────────────────────────
@@ -920,7 +490,7 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
       anchors: [makeAnchorFor('opus-one-2019', { source: 'alias', lookupStrategies: ['exact'] })],
     };
 
-    const candidates = await buildResolverCandidatesFromGenerator(input, lookup);
+    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(lookup));
 
     expect(candidates).toHaveLength(1);
     expect(candidates[0]?.source).toBe('alias');
@@ -944,7 +514,7 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
       })],
     };
 
-    const candidates = await buildResolverCandidatesFromGenerator(input, lookup);
+    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(lookup));
 
     expect(candidates[0]?.source).toBe('alias');
     // lookupStrategies must not be lost — signals derived from it
@@ -968,7 +538,7 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
       })],
     };
 
-    const candidates = await buildResolverCandidatesFromGenerator(input, lookup);
+    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(lookup));
 
     expect(candidates[0]?.source).toBe('planner_heuristic');
     expect(candidates[0]?.sources).toContain('planner_heuristic');
@@ -993,7 +563,7 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
       })],
     };
 
-    const candidates = await buildResolverCandidatesFromGenerator(input, lookup);
+    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(lookup));
 
     expect(candidates[0]?.source).toBe('planner_heuristic');
     expect(candidates[0]?.sourceSignals.aliasFuzzyMatch).toBeGreaterThan(0);
@@ -1015,7 +585,7 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
       })],
     };
 
-    const candidates = await buildResolverCandidatesFromGenerator(input, lookup);
+    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(lookup));
 
     expect(candidates[0]?.source).toBe('planner_heuristic');
     expect(candidates[0]?.sourceSignals.aliasFuzzyMatch).toBeGreaterThan(0);
@@ -1030,7 +600,7 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
       blockerOnlyIds: [createEntityId('opus-one-2019')],
     };
 
-    const candidates = await buildResolverCandidatesFromGenerator(input, lookup);
+    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(lookup));
 
     expect(candidates[0]?.source).toBe('blocker_seed');
     expect(candidates[0]?.sources).toEqual(['blocker_seed']);
@@ -1055,7 +625,7 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
       })],
     };
 
-    const candidates = await buildResolverCandidatesFromGenerator(input, lookup);
+    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(lookup));
 
     expect(candidates[0]?.source).toBe('entity_lookup');
     expect(candidates[0]?.sources).toContain('entity_lookup');
@@ -1075,7 +645,7 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
       ],
     };
 
-    const candidates = await buildResolverCandidatesFromGenerator(input, lookup);
+    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(lookup));
 
     expect(candidates).toHaveLength(1); // merged, not duplicated
     expect(candidates[0]?.entityId).toEqual(id);
@@ -1106,7 +676,7 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
       blockerOnlyIds: [id], // same entity in blockerOnlyIds
     };
 
-    const candidates = await buildResolverCandidatesFromGenerator(input, lookup);
+    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(lookup));
 
     // Only one candidate (not two)
     expect(candidates).toHaveLength(1);
@@ -1131,7 +701,7 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
       })],
     };
 
-    const candidates = await buildResolverCandidatesFromGenerator(input, lookup);
+    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(lookup));
 
     expect(candidates[0]?.source).toBe('alias');
     expect(candidates[0]?.sourceSignals.phoneticMatch).toBeGreaterThan(0);
@@ -1155,7 +725,7 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
       })],
     };
 
-    const candidates = await buildResolverCandidatesFromGenerator(input, lookup);
+    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(lookup));
 
     expect(candidates[0]?.sourceSignals.phoneticMatch).toBeGreaterThan(0);
     expect(candidates[0]?.sourceSignals.editDistanceScore).toBeGreaterThan(0);
@@ -1179,7 +749,7 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
       blockerOnlyIds: [id1, id2, id3],
     };
 
-    const candidates = await buildResolverCandidatesFromGenerator(input, lookup);
+    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(lookup));
 
     expect(candidates).toHaveLength(3);
     for (const candidate of candidates) {
@@ -1202,15 +772,24 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
       ],
     };
 
-    await expect(buildResolverCandidatesFromGenerator(input, lookup)).rejects.toMatchObject({
+    await expect(buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(lookup))).rejects.toMatchObject({
       code: 'INTERNAL_INCONSISTENCY',
     });
   });
 
-  it('P0-2-N: preloadedDocs cache — entity lookup not called for cached IDs', async () => {
+  it('P0-2-N: preloadedDocs cache — skips full batch hydration but still runs identity overlay', async () => {
     const id = createEntityId('cached-wine');
-    const getDocumentSpy = vi.fn().mockResolvedValue(null); // spy returns null for all
-    const lookup: EntityDocumentLookupPort = { getDocument: getDocumentSpy, getDocuments: vi.fn(async () => new Map()) };
+    const getDocumentsSpy = vi.fn(async () => new Map([
+      [id, {
+        entityId: id,
+        entityType: 'wine',
+        canonicalLabel: 'Cached Wine',
+        identityCertificates: [],
+        aliasesIdentitySafe: [],
+        identitySafeKeys: [],
+      }],
+    ]));
+    const lookup: EntityDocumentBatchLookup = { getDocuments: getDocumentsSpy };
 
     const preloadedDocs: ReadonlyMap<string, { entityId: unknown; entityType: string; canonicalLabel: string }> =
       new Map([['cached-wine', { entityId: id, entityType: 'wine', canonicalLabel: 'Cached Wine' }]]);
@@ -1222,10 +801,11 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
       preloadedDocs: preloadedDocs as EntityCandidateGeneratorInput['preloadedDocs'],
     };
 
-    const candidates = await buildResolverCandidatesFromGenerator(input, lookup);
+    const candidates = await buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection(lookup));
 
-    // Candidate built from cache — getDocument was not called
-    expect(getDocumentSpy).not.toHaveBeenCalled();
+    // Prefetch covers canonical fields; overlay fetch runs once for identity projection only.
+    expect(getDocumentsSpy).toHaveBeenCalledTimes(1);
+    expect(getDocumentsSpy).toHaveBeenCalledWith([id]);
     expect(candidates).toHaveLength(1);
     expect(candidates[0]?.canonicalLabel).toBe('Cached Wine');
   });
@@ -1256,188 +836,9 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
       })],
     };
 
-    const candidatesWith = await buildResolverCandidatesFromGenerator(withVariants, lookup);
-    const candidatesWithout = await buildResolverCandidatesFromGenerator(withoutVariants, lookup);
+    const candidatesWith = await buildResolverCandidatesFromGenerator(withVariants, wrapEntityDocumentBatchLookupAsResolverProjection(lookup));
+    const candidatesWithout = await buildResolverCandidatesFromGenerator(withoutVariants, wrapEntityDocumentBatchLookupAsResolverProjection(lookup));
 
     expect(candidatesWith[0]?.sourceSignals).toEqual(candidatesWithout[0]?.sourceSignals);
-  });
-});
-
-// ─── 수학적 완결성: shouldTriggerCorrectiveRetry OR-조건 독립성 ───────────────────
-//
-// shouldTriggerCorrectiveRetry 의 반환식은 `zeroAnchors || lowConfidence`.
-// OR 논리: C1 단독으로 충분하고, C2 단독으로도 충분하다.
-// 각 조건이 독립적으로 트리거를 활성화하는지 검증한다.
-
-describe('shouldTriggerCorrectiveRetry — OR 조건 독립성 (수학적 완결성)', () => {
-  it('TA3-OR-01: C1 단독 (zeroAnchors=true, confidence >= threshold) → true', () => {
-    // C1 만 만족: anchors=[], confidence=0.9 (threshold 초과)
-    // C2 불만족이어도 C1 만으로 retry 발생해야 함
-    const plan = makePlan({ anchors: [] });
-    const result = makeResolveResult({
-      status: 'failed',
-      decisionConfidenceC: 0.9, // CORRECTIVE_RETRY_CONFIDENCE_THRESHOLD=0.5 초과
-    });
-    expect(shouldTriggerCorrectiveRetry(plan, result)).toBe(true);
-  });
-
-  it('TA3-OR-02: C2 단독 (zeroAnchors=false, confidence < threshold) → true', () => {
-    // C2 만 만족: anchors=[valid anchor], confidence=0.1 (threshold 미만)
-    // C1 불만족이어도 C2 만으로 retry 발생해야 함
-    const plan = makePlan({ anchors: [makeAnchor()] });
-    const result = makeResolveResult({
-      status: 'failed',
-      decisionConfidenceC: 0.1, // CORRECTIVE_RETRY_CONFIDENCE_THRESHOLD=0.5 미만
-    });
-    expect(shouldTriggerCorrectiveRetry(plan, result)).toBe(true);
-  });
-
-  it('TA3-OR-03: C1 && C2 모두 (zeroAnchors=true, confidence < threshold) → true', () => {
-    // 두 조건 모두 만족 — OR 로도 true
-    const plan = makePlan({ anchors: [] });
-    const result = makeResolveResult({
-      status: 'failed',
-      decisionConfidenceC: 0.1,
-    });
-    expect(shouldTriggerCorrectiveRetry(plan, result)).toBe(true);
-  });
-
-  it('TA3-OR-04: C1 && C2 모두 불만족 (anchors 있음, confidence >= threshold) → false', () => {
-    // OR 에서 두 조건 모두 false → 전체 false
-    const plan = makePlan({ anchors: [makeAnchor()] });
-    const result = makeResolveResult({
-      status: 'failed',
-      decisionConfidenceC: 0.9,
-    });
-    expect(shouldTriggerCorrectiveRetry(plan, result)).toBe(false);
-  });
-
-  it('TA3-OR-05: C1 단독 — threshold 경계값 (confidence = 0.5 정확히) → false (엄격한 < 비교)', () => {
-    // confidence === 0.5 는 `< 0.5` 를 만족하지 않으므로 C2 불만족
-    // anchors 있으면 → false
-    const plan = makePlan({ anchors: [makeAnchor()] });
-    const result = makeResolveResult({
-      status: 'failed',
-      decisionConfidenceC: 0.5, // exactly at threshold → NOT < threshold
-    });
-    expect(shouldTriggerCorrectiveRetry(plan, result)).toBe(false);
-  });
-
-  it('TA3-OR-06: C2 threshold 바로 아래 (confidence = 0.499…) → true', () => {
-    // threshold = 0.5: 0.4999 < 0.5 → C2 true → retry
-    const plan = makePlan({ anchors: [makeAnchor()] });
-    const result = makeResolveResult({
-      status: 'failed',
-      decisionConfidenceC: 0.4999,
-    });
-    expect(shouldTriggerCorrectiveRetry(plan, result)).toBe(true);
-  });
-});
-
-// ─── 수학적 완결성: computeCorrectiveRetryCalibration 공식 단조성 및 수렴 ─────────
-//
-// 공식: BASE + RANGE * (1 - (rank-1) / max(total-1, 1))
-//   = 0.5 + 0.4 * (1 - normalizedRank)
-//
-// 단조성: rank가 증가할수록 confidence가 감소 (strong monotone decreasing)
-// 수렴: rank=1 → 0.9, rank=total → 0.5 (N에 무관하게 항상)
-// 범위: 모든 (rank, total) 에서 [0.5, 0.9]
-
-describe('computeCorrectiveRetryCalibration — 공식 단조성 및 수렴 (수학적 완결성)', () => {
-  function makeResultAtRank(
-    rank: number,
-    total: number,
-  ): EntityResolveResult {
-    const candidates = Array.from({ length: total }, (_, i) => ({
-      entityId: i === rank - 1 ? 'wine-target' : `wine-other-${i}`,
-      canonicalLabel: i === rank - 1 ? 'Target' : `Other ${i}`,
-      calibratedScore: 1 - i * 0.05,
-      rank: i + 1,
-      evidenceRefs: [],
-    }));
-    return {
-      status: 'resolved',
-      decisionConfidenceC: 0.8,
-      topEntity: {
-        entityId: 'wine-target',
-        canonicalLabel: 'Target',
-        calibratedScore: 1.0,
-      },
-      candidates,
-      decisionTrace: {} as EntityResolveResult['decisionTrace'],
-      conformalSetSize: 1,
-    };
-  }
-
-  it('TA5-CONV-01: rank=1 → 0.9 — 풀 크기에 무관하게 항상 수렴', () => {
-    for (const total of [1, 2, 3, 5, 10, 20]) {
-      const conf = computeCorrectiveRetryCalibration(makeResultAtRank(1, total), 'accept');
-      expect(conf).toBeCloseTo(0.9, 9);
-    }
-  });
-
-  it('TA5-CONV-02: rank=total → 0.5 — 풀 크기에 무관하게 항상 수렴', () => {
-    for (const total of [2, 3, 5, 10, 20]) {
-      const conf = computeCorrectiveRetryCalibration(makeResultAtRank(total, total), 'accept');
-      expect(conf).toBeCloseTo(0.5, 9);
-    }
-  });
-
-  it('TA5-MONO-01: 단조 감소 — rank 증가 시 confidence 단조 감소 (N=5)', () => {
-    const total = 5;
-    const values = [1, 2, 3, 4, 5].map((rank) =>
-      computeCorrectiveRetryCalibration(makeResultAtRank(rank, total), 'accept')!,
-    );
-    for (let i = 0; i < values.length - 1; i++) {
-      expect(values[i]!).toBeGreaterThan(values[i + 1]!);
-    }
-  });
-
-  it('TA5-MONO-02: 단조 감소 — N=10 전체 구간 검증', () => {
-    const total = 10;
-    const values = Array.from({ length: total }, (_, i) =>
-      computeCorrectiveRetryCalibration(makeResultAtRank(i + 1, total), 'accept')!,
-    );
-    for (let i = 0; i < values.length - 1; i++) {
-      expect(values[i]!).toBeGreaterThan(values[i + 1]!);
-    }
-  });
-
-  it('TA5-RANGE-01: 모든 (rank, total) 에서 값이 [0.5, 0.9] 범위 내', () => {
-    for (const total of [1, 2, 5, 10]) {
-      for (let rank = 1; rank <= total; rank++) {
-        const conf = computeCorrectiveRetryCalibration(makeResultAtRank(rank, total), 'accept')!;
-        expect(conf).toBeGreaterThanOrEqual(0.5);
-        expect(conf).toBeLessThanOrEqual(0.9);
-      }
-    }
-  });
-
-  it('TA5-FORMULA-01: rank=3, total=5 — 공식 직접 검증 (0.5 + 0.4*0.5 = 0.7)', () => {
-    // normalizedRank = (3-1)/(5-1) = 2/4 = 0.5
-    // confidence = 0.5 + 0.4 * (1 - 0.5) = 0.5 + 0.2 = 0.7
-    const conf = computeCorrectiveRetryCalibration(makeResultAtRank(3, 5), 'accept');
-    expect(conf).toBeCloseTo(0.7, 9);
-  });
-
-  it('TA5-FORMULA-02: rank=2, total=3 — 공식 직접 검증 (0.5 + 0.4*(1/3))', () => {
-    // normalizedRank = (2-1)/(3-1) = 1/2 = 0.5
-    // confidence = 0.5 + 0.4 * (1 - 0.5) = 0.7
-    const conf = computeCorrectiveRetryCalibration(makeResultAtRank(2, 3), 'accept');
-    expect(conf).toBeCloseTo(0.7, 9);
-  });
-
-  it('TA5-FORMULA-03: rank=1, total=1 — max(0, 1) 분모 0 방어 (단일 후보)', () => {
-    // total=1 → max(total-1, 1) = max(0, 1) = 1 (0 나누기 방지)
-    // normalizedRank = (1-1)/1 = 0 → confidence = 0.9
-    const conf = computeCorrectiveRetryCalibration(makeResultAtRank(1, 1), 'accept');
-    expect(conf).toBeCloseTo(0.9, 9);
-  });
-
-  it('TA5-FORMULA-04: rank=2, total=2 — 분모=max(1,1)=1 → normalizedRank=1 → 0.5', () => {
-    // max(2-1, 1) = 1
-    // normalizedRank = (2-1)/1 = 1 → confidence = 0.5
-    const conf = computeCorrectiveRetryCalibration(makeResultAtRank(2, 2), 'accept');
-    expect(conf).toBeCloseTo(0.5, 9);
   });
 });

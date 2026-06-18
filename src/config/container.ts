@@ -10,23 +10,15 @@ import { buildCoreContainerServices } from './container-core.js';
 import { buildFeatureContainerServices } from './container-features.js';
 import type { RuntimeHandles } from './runtime-handles.js';
 import type { RuntimeReadinessSnapshot } from './container-runtime-support.js';
-import type { DrinkingWindowUseCasePort } from '../application/drinking-window/port/drinking-window-usecase.port.js';
 import type { DrinkingWindowPredictorPort } from '../domain/drinking-window/port/drinking-window-predictor.port.js';
 import type { SearchExecutorPort } from '../application/search/port/search-executor.port.js';
 import type { CurationUseCase } from '../application/curation/curation.usecase.js';
 import type {
-  AutocompleteUseCasePort,
-  BatchSearchUseCasePort,
-  DecomposedSearchUseCasePort,
   EntityLookupV2UseCasePort,
-  HybridUseCasePort,
-  InterpretUseCasePort,
-  ResolveUseCasePort,
 } from '../application/search/port/search-route-usecases.port.js';
 import type {
   CandidatePoolPort,
   DecisionEnginePort,
-  EntityResolverPort,
   MixedSolverPort,
   QueryPlannerPort,
   RankingPort,
@@ -35,7 +27,6 @@ import type {
 import type { EvalRunnerContract } from './container-eval-contracts.js';
 import type { ChatLlmPort } from '../domain/ai/port/chat-llm.port.js';
 import type { CalibrationStore } from '../domain/resolver/port/calibration-store.port.js';
-import type { EntityDocumentLookupPort } from '../application/search/port/search-pipeline-deps.port.js';
 // ── Plan-then-Execute (wine-search) wiring — canonical agentic entry point
 // after the 3.0.0 cutover. Construction lives inside
 // `buildWineSearchContainerServices`.
@@ -66,29 +57,23 @@ import { createSqliteAgentSessionStore } from '../infrastructure/db/agent-sessio
 import { AgentSessionService } from '../application/wine-search/agent-session-service.js';
 import { AgentUseCase } from '../application/wine-search/agent-usecase.js';
 import type { AgentUseCasePort } from '../application/wine-search/port/agent-usecase.port.js';
+import { bindLiveSearchSnapshotRuntimeHandles } from './runtime-handles.js';
+import { createLookupAuthorityServices, buildLookupOpsRuntimeHealthView, type LookupOpsRuntimeHealthView } from './lookup-authority.js';
 export interface Container {
   /** Chat LLM when an OpenAI credential pool or Codex ChatGPT login token is available. */
   readonly chatLlm?: ChatLlmPort;
   readonly queryPlanner: QueryPlannerPort;
-  readonly entityResolver: EntityResolverPort;
   readonly candidatePool: CandidatePoolPort;
   readonly ranker: RankingPort;
   readonly decisionEngine: DecisionEnginePort;
   readonly responseBuilder: ResponseBuilderPort;
   readonly mixedSolver: MixedSolverPort;
-  readonly entityLookup: EntityDocumentLookupPort;
   readonly searchUseCase: SearchExecutorPort;
-  readonly interpretUseCase: InterpretUseCasePort;
-  readonly resolveUseCase: ResolveUseCasePort;
   readonly entityLookupV2UseCase: EntityLookupV2UseCasePort;
   /** Operator curation plane (T-ELV2-07); present only when a PG pool is wired. */
   readonly curationUseCase?: CurationUseCase | undefined;
-  readonly autocompleteUseCase: AutocompleteUseCasePort;
-  readonly hybridUseCase: HybridUseCasePort;
-  readonly decomposedSearchUseCase: DecomposedSearchUseCasePort;
-  readonly drinkingWindowUseCase: DrinkingWindowUseCasePort;
+  readonly lookupOpsRuntime?: LookupOpsRuntimeHealthView | undefined;
   readonly drinkingWindowPredictor: DrinkingWindowPredictorPort;
-  readonly batchSearchUseCase: BatchSearchUseCasePort;
   readonly evalRunner: EvalRunnerContract | null;
   readonly calibrationStore: CalibrationStore;
   readonly runtimeReadiness: RuntimeReadinessSnapshot;
@@ -235,9 +220,7 @@ function buildWineSearchContainerServices(
   //       (CLAUDE.md rule 30 — SSoT for tool ports).
   const wineAgentLoopToolBundle = buildWineAgentLoopToolBundle({
     searchUseCase: searchAdapter,
-    decomposedSearchUseCase: features.decomposedSearchUseCase,
-    drinkingWindowUseCase: features.drinkingWindowUseCase,
-    entityLookup: _core.entityLookup,
+    lookupWine: features.entityLookupV2UseCase,
   });
 
   // ── 4b) Comparison LLM fallback. One-shot grounded synthesis for stalled
@@ -297,7 +280,9 @@ export async function createContainer(
   config: Config,
   runtime: Pool | RuntimeHandles = {},
 ): Promise<Container> {
-  const runtimeHandles = normalizeRuntimeHandles(runtime);
+  const runtimeHandles = await bindLiveSearchSnapshotRuntimeHandles(
+    normalizeRuntimeHandles(runtime),
+  );
   const core = await buildCoreContainerServices(config, runtimeHandles);
 
   // Construct the shared StructuredLlmPort BEFORE feature services so
@@ -323,7 +308,21 @@ export async function createContainer(
     };
   })();
 
-  const features = buildFeatureContainerServices(config, core, runtimeHandles, useCaseExtensions);
+  const lookupAuthority = await createLookupAuthorityServices(
+    config,
+    runtimeHandles,
+    {
+      calibrationStore: core.calibrationStore,
+      entityResolver: core.entityResolver,
+    },
+  );
+  const features = buildFeatureContainerServices(
+    config,
+    core,
+    lookupAuthority,
+    runtimeHandles,
+    useCaseExtensions,
+  );
   // Defense-in-depth: env validation already throws when AGENT_ENABLED=true
   // and no OpenAI credential is set (see config/env.ts). If we somehow reach here
   // without a chatLlm, fail loudly rather than silently 404 the agent route.
@@ -346,8 +345,6 @@ export async function createContainer(
   return {
     ...(core.chatLlm !== undefined ? { chatLlm: core.chatLlm } : {}),
     queryPlanner: core.queryPlanner,
-    entityResolver: core.entityResolver,
-    entityLookup: core.entityLookup,
     candidatePool: core.candidatePool,
     ranker: core.ranker,
     decisionEngine: core.decisionEngine,
@@ -357,6 +354,7 @@ export async function createContainer(
     drinkingWindowPredictor: core.drinkingWindowPredictor,
     calibrationStore: core.calibrationStore,
     runtimeReadiness: core.runtimeReadiness,
+    lookupOpsRuntime: buildLookupOpsRuntimeHealthView(lookupAuthority),
     ...(wineSearch !== undefined ? { wineSearch } : {}),
   };
 }

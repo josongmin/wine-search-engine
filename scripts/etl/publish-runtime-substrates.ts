@@ -6,7 +6,7 @@ import type { PoolClient } from 'pg';
 import { loadConfig } from '../../src/config/env.js';
 import { createPgPool, shouldUsePgPool } from '../../src/infrastructure/db/pg-pool.js';
 import { loadSearchSnapshotRuntimeState } from '../../src/infrastructure/health/search-snapshot-readiness.js';
-import { atomicWriteFile } from './etl-utils.js';
+import { atomicWriteFile, chunkArray } from './etl-utils.js';
 import { parseNdjson } from './ndjson.js';
 import {
   type AliasSnapshotRecord,
@@ -19,17 +19,48 @@ import {
 } from './search-snapshot-schema.js';
 import { SEARCH_SNAPSHOT_STATE_VERSION } from '../../src/domain/shared/constants/search-snapshot.js';
 import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
-import { applyFullCanonicalGraphSync } from './canonical-entity-graph-sync.js';
-import { pgTableHasColumn } from '../../src/infrastructure/db/pg-schema-capabilities.js';
 import {
-  canonicalizeAliasSnapshotRecords,
-  canonicalizeAmbiguitySnapshotRows,
-  canonicalizeEntitySnapshotRecords,
-} from '../../src/domain/shared/utils/search-snapshot-canonicalization.js';
+  buildLookupAliasBroadRecallRuntimeArtifactHash,
+  buildLookupAliasRuntimeArtifactHash,
+  buildLookupAliasRuntimeCoreArtifactHash,
+  buildLookupAmbiguityRuntimeArtifactHash,
+  buildLookupConceptRedirectRuntimeArtifactHash,
+  buildLookupEntityProjectionArtifactHash,
+  buildLookupExactSafeRuntimeArtifactHash,
+  buildLookupResolverProjectionArtifactHash,
+  parseLookupAliasBroadRecallRuntimeArtifact,
+  parseLookupAliasRuntimeArtifact,
+  parseLookupAliasRuntimeCoreArtifact,
+  parseLookupAmbiguityRuntimeArtifact,
+  parseLookupConceptRedirectRuntimeArtifact,
+  parseLookupExactSafeRuntimeArtifact,
+  parseLookupResolverProjectionArtifact,
+  parseLookupEntityProjectionArtifact,
+} from '../../src/domain/shared/types/search-snapshot-lookup-runtime.js';
+import {
+  buildLookupReviewedFamilyRecallRuntimeArtifactHash,
+  buildLookupScopeGraphRuntimeArtifactHash,
+  buildLookupSemanticScopeRuntimeArtifactHash,
+  parseLookupReviewedFamilyRecallRuntimeArtifact,
+  parseLookupScopeGraphRuntimeArtifact,
+  parseLookupSemanticScopeRuntimeArtifact,
+} from '../../src/domain/shared/types/search-snapshot-lookup-semantic-runtime.js';
+import { pgTableHasColumn } from '../../src/infrastructure/db/pg-schema-capabilities.js';
+import { computeAliasPhoneticKeys } from '../../src/domain/alias/service/alias-phonetic-keys.js';
+import { createRuntimeSubstratePublishStateMachine } from './runtime-substrate-publish-state-machine.js';
 
 const DEFAULT_RUNTIME_STATE_PATH = resolveDataPath('data/runtime-search-snapshot.json');
 const DEFAULT_RUNTIME_NL_MAPPINGS_PATH = resolveDataPath('data/nl-mappings.json');
 const RUNTIME_SUBSTRATE_PUBLISH_STATEMENT_TIMEOUT_MS = 5 * 60_000;
+const RUNTIME_SUBSTRATE_PUBLISH_ADVISORY_LOCK_KEY = 864_209_317;
+const RUNTIME_SUBSTRATE_ENTITY_STAGE_BATCH_SIZE = 2_000;
+// Alias batches dominate runtime substrate publish cost. At ~80k aliases, a
+// 2k-row jsonb_to_recordset statement held the transaction open for >1 minute
+// per batch on the live publish path, eventually tripping publish-time limits.
+// Keep entity batches large, but bound alias stage batches so each statement
+// stays comfortably below the publish timeout budget.
+const RUNTIME_SUBSTRATE_ALIAS_STAGE_BATCH_SIZE = 500;
+const RUNTIME_SUBSTRATE_AMBIGUITY_STAGE_BATCH_SIZE = 1_000;
 
 // ---------------------------------------------------------------------------
 // Runtime substrate freshness / version constants
@@ -105,6 +136,7 @@ interface Args {
   readonly runtimeStatePath: string;
   readonly runtimeNlMappingsPath: string;
   readonly refreshActiveRuntimeSubstrates: boolean;
+  readonly artifactOnlyPromote: boolean;
 }
 
 interface StageSnapshotRuntimeSubstratesArgs {
@@ -124,6 +156,7 @@ function parseArgs(argv: readonly string[]): Args {
   let runtimeStatePath = DEFAULT_RUNTIME_STATE_PATH;
   let runtimeNlMappingsPath = DEFAULT_RUNTIME_NL_MAPPINGS_PATH;
   let refreshActiveRuntimeSubstrates = false;
+  let artifactOnlyPromote = false;
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--manifest' || arg === '-m') {
@@ -137,6 +170,8 @@ function parseArgs(argv: readonly string[]): Args {
       i += 1;
     } else if (arg === '--refresh-active-runtime-substrates') {
       refreshActiveRuntimeSubstrates = true;
+    } else if (arg === '--artifact-only-promote') {
+      artifactOnlyPromote = true;
     } else if (arg === '--allow-missing-ltr') {
       throw new Error('--allow-missing-ltr has been removed; LTR is now optional for canonical runtime publish and the flag is obsolete');
     }
@@ -144,7 +179,13 @@ function parseArgs(argv: readonly string[]): Args {
   if (manifestPath.length === 0) {
     throw new Error('--manifest is required');
   }
-  return { manifestPath, runtimeStatePath, runtimeNlMappingsPath, refreshActiveRuntimeSubstrates };
+  return {
+    manifestPath,
+    runtimeStatePath,
+    runtimeNlMappingsPath,
+    refreshActiveRuntimeSubstrates,
+    artifactOnlyPromote,
+  };
 }
 
 function buildSnapshotArtifactPath(basePath: string, snapshotId: string): string {
@@ -204,6 +245,24 @@ export async function promoteRuntimeSubstrateArtifacts(args: {
   return activeState;
 }
 
+export async function acquireRuntimeSubstratePublishAdvisoryLock(
+  client: Pick<PoolClient, 'query'>,
+): Promise<void> {
+  const result = await client.query<{ locked: boolean }>(
+    'SELECT pg_try_advisory_lock($1)::bool AS locked',
+    [RUNTIME_SUBSTRATE_PUBLISH_ADVISORY_LOCK_KEY],
+  );
+  if (result.rows[0]?.locked !== true) {
+    throw new Error('runtime substrate publish advisory lock already held');
+  }
+}
+
+export async function releaseRuntimeSubstratePublishAdvisoryLock(
+  client: Pick<PoolClient, 'query'>,
+): Promise<void> {
+  await client.query('SELECT pg_advisory_unlock($1)', [RUNTIME_SUBSTRATE_PUBLISH_ADVISORY_LOCK_KEY]);
+}
+
 export async function restoreRuntimeSubstrateArtifacts(args: {
   readonly activeRuntimeStatePath: string;
   readonly previousRuntimeStateContents: string | undefined;
@@ -251,20 +310,18 @@ async function isSnapshotRuntimeSubstratePlaneAlreadyStaged(args: {
   readonly manifest: SearchSnapshotManifest;
 }): Promise<boolean> {
   const snapshotId = args.manifest.snapshotId;
-  const [entityCount, aliasCount, ambiguityCount] = await Promise.all([
-    args.client.query<{ count: string }>(
-      'SELECT COUNT(*)::text AS count FROM entities WHERE search_snapshot_id = $1',
-      [snapshotId],
-    ),
-    args.client.query<{ count: string }>(
-      'SELECT COUNT(*)::text AS count FROM aliases WHERE search_snapshot_id = $1',
-      [snapshotId],
-    ),
-    args.client.query<{ count: string }>(
-      'SELECT COUNT(*)::text AS count FROM ambiguity_registry WHERE search_snapshot_id = $1',
-      [snapshotId],
-    ),
-  ]);
+  const entityCount = await args.client.query<{ count: string }>(
+    'SELECT COUNT(*)::text AS count FROM entities WHERE search_snapshot_id = $1',
+    [snapshotId],
+  );
+  const aliasCount = await args.client.query<{ count: string }>(
+    'SELECT COUNT(*)::text AS count FROM aliases WHERE search_snapshot_id = $1',
+    [snapshotId],
+  );
+  const ambiguityCount = await args.client.query<{ count: string }>(
+    'SELECT COUNT(*)::text AS count FROM ambiguity_registry WHERE search_snapshot_id = $1',
+    [snapshotId],
+  );
 
   return Number(entityCount.rows[0]?.count ?? '0') === args.manifest.counts.entities
     && Number(aliasCount.rows[0]?.count ?? '0') === args.manifest.counts.aliases
@@ -283,121 +340,147 @@ async function stageSnapshotRuntimeRowsInPg(args: {
   if (await isSnapshotRuntimeSubstratePlaneAlreadyStaged(args)) {
     return;
   }
-  const entityRowsJson = buildEntityRowsJson(args.entities, args.manifest.snapshotId);
-  const entitySnapshotRowsJson = buildEntitySnapshotRowsJson(
-    args.entities,
-    args.manifest.snapshotId,
-    args.manifest.generatedAt,
-  );
-  const aliasRowsJson = buildAliasRowsJson(args.aliases, args.manifest.snapshotId);
-  const ambiguityRowsJson = buildAmbiguityRowsJson(args.ambiguityRows, args.manifest.snapshotId);
-  const entityIds = args.entities.map((entity) => entity.entityId);
-
   await assertEntityIdentitySignatureConsistency(args.client, args.entities);
   await assertSnapshotNotAlreadyPublished(args.client, args.manifest.snapshotId, {
     allowExistingActiveSnapshot: args.allowExistingActiveSnapshot,
   });
-  await args.client.query(
-    `WITH input AS (
-       SELECT *
-     FROM jsonb_to_recordset($1::jsonb) AS rows(
-         entity_id text,
-         search_snapshot_id text,
-         entity_type text,
-         canonical_label text,
-         identity_signature text,
-         relations jsonb,
-         attributes jsonb,
-         metadata jsonb
-       )
-     )
-     INSERT INTO entities (
-       entity_id, search_snapshot_id, entity_type, canonical_label, identity_signature,
-       relations, attributes, metadata
-     )
-     SELECT
-       entity_id, search_snapshot_id, entity_type, canonical_label, identity_signature,
-       relations, attributes, metadata
-     FROM input
-     ON CONFLICT (search_snapshot_id, entity_id) DO NOTHING`,
-    [entityRowsJson],
-  );
-  await args.client.query(
-    `WITH input AS (
-       SELECT *
+  const phoneticKeysColumnEnabled = await pgTableHasColumn(args.client, 'aliases', 'phonetic_keys');
+  for (const entityBatch of chunkArray(args.entities, RUNTIME_SUBSTRATE_ENTITY_STAGE_BATCH_SIZE)) {
+    await args.client.query(
+      `WITH input AS (
+         SELECT *
        FROM jsonb_to_recordset($1::jsonb) AS rows(
-         snapshot_id text,
-         entity_id text,
-         snapshot_data jsonb
+           entity_id text,
+           search_snapshot_id text,
+           entity_type text,
+           canonical_label text,
+           identity_signature text,
+           relations jsonb,
+           attributes jsonb,
+           metadata jsonb
+         )
        )
-     )
-     INSERT INTO entity_snapshots (snapshot_id, entity_id, snapshot_data)
-     SELECT snapshot_id, entity_id, snapshot_data
-     FROM input
-     ON CONFLICT (snapshot_id) DO NOTHING`,
-    [entitySnapshotRowsJson],
-  );
-  void entityIds;
-  await args.client.query(
-    `WITH input AS (
-       SELECT *
-       FROM jsonb_to_recordset($1::jsonb) AS rows(
-         alias_id text,
-         search_snapshot_id text,
-         entity_id text,
-         alias_type text,
-         alias_scope text,
-         surface_form text,
-         normalized_value text,
-         source text,
-         source_trust double precision,
-         confidence double precision
+       INSERT INTO entities (
+         entity_id, search_snapshot_id, entity_type, canonical_label, identity_signature,
+         relations, attributes, metadata
        )
-     )
-     INSERT INTO aliases (
-       alias_id, search_snapshot_id, entity_id, alias_type, alias_scope, surface_form,
-       normalized_value, source, source_trust, confidence, is_suppressed
-     )
-     SELECT
-       alias_id, search_snapshot_id, entity_id, alias_type, alias_scope, surface_form,
-       normalized_value, source, source_trust, confidence, FALSE
-     FROM input
-     ON CONFLICT (search_snapshot_id, alias_id) DO NOTHING`,
-    [aliasRowsJson],
-  );
-  await args.client.query(
-    `WITH input AS (
-       SELECT *
-       FROM jsonb_to_recordset($1::jsonb) AS rows(
-         registry_id text,
-         search_snapshot_id text,
-         normalized_form text,
-         entity_ids jsonb,
-         ambiguity_types jsonb,
-         severity text
+       SELECT
+         entity_id, search_snapshot_id, entity_type, canonical_label, identity_signature,
+         relations, attributes, metadata
+       FROM input
+       ON CONFLICT (search_snapshot_id, entity_id) DO NOTHING`,
+      [buildEntityRowsJson(entityBatch, args.manifest.snapshotId)],
+    );
+    await args.client.query(
+      `WITH input AS (
+         SELECT *
+         FROM jsonb_to_recordset($1::jsonb) AS rows(
+           snapshot_id text,
+           entity_id text,
+           snapshot_data jsonb
+         )
        )
-     )
-     INSERT INTO ambiguity_registry (
-       registry_id, search_snapshot_id, normalized_form, entity_ids, ambiguity_types, severity
-     )
-     SELECT
-       registry_id,
-       search_snapshot_id,
-       normalized_form,
-       ARRAY(SELECT jsonb_array_elements_text(entity_ids)),
-       ARRAY(SELECT jsonb_array_elements_text(ambiguity_types)),
-       severity
-     FROM input
-     ON CONFLICT (search_snapshot_id, registry_id) DO NOTHING`,
-    [ambiguityRowsJson],
-  );
+       INSERT INTO entity_snapshots (snapshot_id, entity_id, snapshot_data)
+       SELECT snapshot_id, entity_id, snapshot_data
+       FROM input
+       ON CONFLICT (snapshot_id) DO NOTHING`,
+      [buildEntitySnapshotRowsJson(
+        entityBatch,
+        args.manifest.snapshotId,
+        args.manifest.generatedAt,
+      )],
+    );
+  }
+  for (const aliasBatch of chunkArray(args.aliases, RUNTIME_SUBSTRATE_ALIAS_STAGE_BATCH_SIZE)) {
+    if (phoneticKeysColumnEnabled) {
+      await args.client.query(
+        `WITH input AS (
+         SELECT *
+         FROM jsonb_to_recordset($1::jsonb) AS rows(
+           alias_id text,
+           search_snapshot_id text,
+           entity_id text,
+           alias_type text,
+           alias_scope text,
+           surface_form text,
+           normalized_value text,
+           source text,
+           source_trust double precision,
+           confidence double precision,
+           phonetic_keys text[]
+         )
+       )
+       INSERT INTO aliases (
+         alias_id, search_snapshot_id, entity_id, alias_type, alias_scope, surface_form,
+         normalized_value, source, source_trust, confidence, is_suppressed, phonetic_keys
+       )
+       SELECT
+         alias_id, search_snapshot_id, entity_id, alias_type, alias_scope, surface_form,
+         normalized_value, source, source_trust, confidence, FALSE, phonetic_keys
+       FROM input
+       ON CONFLICT (search_snapshot_id, alias_id) DO NOTHING`,
+        [buildAliasRowsJson(aliasBatch, args.manifest.snapshotId, { materializePhoneticKeys: true })],
+      );
+      continue;
+    }
 
-  await applyFullCanonicalGraphSync(args.client, {
-    entities: args.entities,
-    aliases: args.aliases,
-    ambiguityRows: args.ambiguityRows,
-    searchSnapshotId: args.manifest.snapshotId,
-  });
+    await args.client.query(
+      `WITH input AS (
+         SELECT *
+         FROM jsonb_to_recordset($1::jsonb) AS rows(
+           alias_id text,
+           search_snapshot_id text,
+           entity_id text,
+           alias_type text,
+           alias_scope text,
+           surface_form text,
+           normalized_value text,
+           source text,
+           source_trust double precision,
+           confidence double precision
+         )
+       )
+       INSERT INTO aliases (
+         alias_id, search_snapshot_id, entity_id, alias_type, alias_scope, surface_form,
+         normalized_value, source, source_trust, confidence, is_suppressed
+       )
+       SELECT
+         alias_id, search_snapshot_id, entity_id, alias_type, alias_scope, surface_form,
+         normalized_value, source, source_trust, confidence, FALSE
+       FROM input
+       ON CONFLICT (search_snapshot_id, alias_id) DO NOTHING`,
+      [buildAliasRowsJson(aliasBatch, args.manifest.snapshotId, { materializePhoneticKeys: false })],
+    );
+  }
+  for (const ambiguityBatch of chunkArray(args.ambiguityRows, RUNTIME_SUBSTRATE_AMBIGUITY_STAGE_BATCH_SIZE)) {
+    await args.client.query(
+      `WITH input AS (
+         SELECT *
+         FROM jsonb_to_recordset($1::jsonb) AS rows(
+           registry_id text,
+           search_snapshot_id text,
+           normalized_form text,
+           entity_ids jsonb,
+           ambiguity_types jsonb,
+           severity text
+         )
+       )
+       INSERT INTO ambiguity_registry (
+         registry_id, search_snapshot_id, normalized_form, entity_ids, ambiguity_types, severity
+       )
+       SELECT
+         registry_id,
+         search_snapshot_id,
+         normalized_form,
+         ARRAY(SELECT jsonb_array_elements_text(entity_ids)),
+         ARRAY(SELECT jsonb_array_elements_text(ambiguity_types)),
+         severity
+       FROM input
+       ON CONFLICT (search_snapshot_id, registry_id) DO NOTHING`,
+      [buildAmbiguityRowsJson(ambiguityBatch, args.manifest.snapshotId)],
+    );
+  }
+
 }
 
 export async function stageSnapshotRuntimeSubstratesToPg(
@@ -478,6 +561,223 @@ async function loadAmbiguityRows(manifest: SearchSnapshotManifest): Promise<read
   return parseNdjson<AmbiguityRegistrySnapshotRow>(raw, manifest.artifacts.ambiguityRegistryNdjson).records;
 }
 
+async function assertLookupRuntimeArtifactsReady(
+  manifest: SearchSnapshotManifest,
+): Promise<void> {
+  const [
+    aliasRuntimeRaw,
+    aliasBroadRecallRuntimeRaw,
+    exactSafeRuntimeRaw,
+    resolverProjectionRaw,
+    entityProjectionRaw,
+    semanticScopeRuntimeRaw,
+    reviewedFamilyRecallRuntimeRaw,
+    scopeGraphRuntimeRaw,
+    ambiguityRuntimeRaw,
+    conceptRedirectRuntimeRaw,
+  ] = await Promise.all([
+    fs.readFile(manifest.artifacts.lookupAliasRuntimeJson, 'utf8'),
+    manifest.artifacts.lookupAliasBroadRecallRuntimeJson === undefined
+      ? Promise.resolve(undefined)
+      : fs.readFile(manifest.artifacts.lookupAliasBroadRecallRuntimeJson, 'utf8'),
+    fs.readFile(manifest.artifacts.lookupExactSafeRuntimeJson, 'utf8'),
+    fs.readFile(manifest.artifacts.lookupResolverProjectionJson, 'utf8'),
+    fs.readFile(manifest.artifacts.lookupEntityProjectionJson, 'utf8'),
+    fs.readFile(manifest.artifacts.lookupSemanticScopeRuntimeJson, 'utf8'),
+    fs.readFile(manifest.artifacts.lookupReviewedFamilyRecallRuntimeJson, 'utf8'),
+    fs.readFile(manifest.artifacts.lookupScopeGraphRuntimeJson, 'utf8'),
+    fs.readFile(manifest.artifacts.lookupAmbiguityRuntimeJson, 'utf8'),
+    fs.readFile(manifest.artifacts.lookupConceptRedirectRuntimeJson, 'utf8'),
+  ]);
+  const aliasRuntime = manifest.artifacts.lookupAliasBroadRecallRuntimeJson === undefined
+    ? parseLookupAliasRuntimeArtifact(
+      aliasRuntimeRaw,
+      manifest.artifacts.lookupAliasRuntimeJson,
+    )
+    : parseLookupAliasRuntimeCoreArtifact(
+      aliasRuntimeRaw,
+      manifest.artifacts.lookupAliasRuntimeJson,
+    );
+  const aliasBroadRecallRuntime =
+    manifest.artifacts.lookupAliasBroadRecallRuntimeJson === undefined || aliasBroadRecallRuntimeRaw === undefined
+      ? undefined
+      : parseLookupAliasBroadRecallRuntimeArtifact(
+        aliasBroadRecallRuntimeRaw,
+        manifest.artifacts.lookupAliasBroadRecallRuntimeJson,
+      );
+  const exactSafeRuntime = parseLookupExactSafeRuntimeArtifact(
+    exactSafeRuntimeRaw,
+    manifest.artifacts.lookupExactSafeRuntimeJson,
+  );
+  const resolverProjection = parseLookupResolverProjectionArtifact(
+    resolverProjectionRaw,
+    manifest.artifacts.lookupResolverProjectionJson,
+  );
+  const entityProjection = parseLookupEntityProjectionArtifact(
+    entityProjectionRaw,
+    manifest.artifacts.lookupEntityProjectionJson,
+  );
+  const semanticScopeRuntime = parseLookupSemanticScopeRuntimeArtifact(
+    semanticScopeRuntimeRaw,
+    manifest.artifacts.lookupSemanticScopeRuntimeJson,
+  );
+  const reviewedFamilyRecallRuntime = parseLookupReviewedFamilyRecallRuntimeArtifact(
+    reviewedFamilyRecallRuntimeRaw,
+    manifest.artifacts.lookupReviewedFamilyRecallRuntimeJson,
+  );
+  const scopeGraphRuntime = parseLookupScopeGraphRuntimeArtifact(
+    scopeGraphRuntimeRaw,
+    manifest.artifacts.lookupScopeGraphRuntimeJson,
+  );
+  const ambiguityRuntime = parseLookupAmbiguityRuntimeArtifact(
+    ambiguityRuntimeRaw,
+    manifest.artifacts.lookupAmbiguityRuntimeJson,
+  );
+  const conceptRedirectRuntime = parseLookupConceptRedirectRuntimeArtifact(
+    conceptRedirectRuntimeRaw,
+    manifest.artifacts.lookupConceptRedirectRuntimeJson,
+  );
+
+  if (aliasRuntime.aliases.length !== manifest.counts.lookupAliasRuntimeAliases) {
+    throw new Error(
+      `Lookup alias runtime count mismatch: manifest=${manifest.counts.lookupAliasRuntimeAliases} artifact=${aliasRuntime.aliases.length}`,
+    );
+  }
+  if (
+    aliasBroadRecallRuntime !== undefined
+    && manifest.counts.lookupAliasBroadRecallRuntimeEntries !== undefined
+  ) {
+    const aliasBroadRecallRuntimeEntryCount =
+      Object.keys(aliasBroadRecallRuntime.wholeTokenIndex).length
+      + Object.keys(aliasBroadRecallRuntime.phoneticIndex).length
+      + Object.keys(aliasBroadRecallRuntime.doubleMetaphoneIndex).length
+      + Object.keys(aliasBroadRecallRuntime.doubleMetaphoneKeysByAliasId ?? {}).length
+      + aliasBroadRecallRuntime.prefixCatalog.length
+      + (aliasBroadRecallRuntime.hangulCompletionRecords?.length ?? 0);
+    if (aliasBroadRecallRuntimeEntryCount !== manifest.counts.lookupAliasBroadRecallRuntimeEntries) {
+      throw new Error(
+        `Lookup alias broad-recall runtime count mismatch: manifest=${manifest.counts.lookupAliasBroadRecallRuntimeEntries} artifact=${aliasBroadRecallRuntimeEntryCount}`,
+      );
+    }
+  }
+  const exactSafeRuntimeEntryCount =
+    Object.keys(exactSafeRuntime.exactEntries).length
+    + Object.keys(exactSafeRuntime.compactEntries).length;
+  if (exactSafeRuntimeEntryCount !== manifest.counts.lookupExactSafeRuntimeEntries) {
+    throw new Error(
+      `Lookup exact-safe runtime count mismatch: manifest=${manifest.counts.lookupExactSafeRuntimeEntries} artifact=${exactSafeRuntimeEntryCount}`,
+    );
+  }
+  if (resolverProjection.documents.length !== manifest.counts.lookupResolverProjectionDocuments) {
+    throw new Error(
+      `Lookup resolver projection count mismatch: manifest=${manifest.counts.lookupResolverProjectionDocuments} artifact=${resolverProjection.documents.length}`,
+    );
+  }
+  if (entityProjection.documents.length !== manifest.counts.lookupEntityProjectionDocuments) {
+    throw new Error(
+      `Lookup entity projection count mismatch: manifest=${manifest.counts.lookupEntityProjectionDocuments} artifact=${entityProjection.documents.length}`,
+    );
+  }
+  if (Object.keys(semanticScopeRuntime.entries).length !== manifest.counts.lookupSemanticScopeRuntimeEntries) {
+    throw new Error(
+      `Lookup semantic scope runtime count mismatch: manifest=${manifest.counts.lookupSemanticScopeRuntimeEntries} artifact=${Object.keys(semanticScopeRuntime.entries).length}`,
+    );
+  }
+  if (Object.keys(reviewedFamilyRecallRuntime.entries).length !== manifest.counts.lookupReviewedFamilyRecallRuntimeEntries) {
+    throw new Error(
+      `Lookup reviewed family recall runtime count mismatch: manifest=${manifest.counts.lookupReviewedFamilyRecallRuntimeEntries} artifact=${Object.keys(reviewedFamilyRecallRuntime.entries).length}`,
+    );
+  }
+  const scopeGraphEdgeCount = Object.values(scopeGraphRuntime.adjacency).reduce((sum, edges) => sum + edges.length, 0);
+  if (scopeGraphEdgeCount !== manifest.counts.lookupScopeGraphRuntimeEdges) {
+    throw new Error(
+      `Lookup scope graph runtime count mismatch: manifest=${manifest.counts.lookupScopeGraphRuntimeEdges} artifact=${scopeGraphEdgeCount}`,
+    );
+  }
+  if (Object.keys(ambiguityRuntime.entries).length !== manifest.counts.lookupAmbiguityRuntimeEntries) {
+    throw new Error(
+      `Lookup ambiguity runtime count mismatch: manifest=${manifest.counts.lookupAmbiguityRuntimeEntries} artifact=${Object.keys(ambiguityRuntime.entries).length}`,
+    );
+  }
+  if (Object.keys(conceptRedirectRuntime.entries).length !== manifest.counts.lookupConceptRedirectRuntimeEntries) {
+    throw new Error(
+      `Lookup concept redirect runtime count mismatch: manifest=${manifest.counts.lookupConceptRedirectRuntimeEntries} artifact=${Object.keys(conceptRedirectRuntime.entries).length}`,
+    );
+  }
+
+  const aliasRuntimeHash = manifest.artifacts.lookupAliasBroadRecallRuntimeJson === undefined
+    ? buildLookupAliasRuntimeArtifactHash(
+      aliasRuntime as import('../../src/domain/shared/types/search-snapshot-lookup-runtime.js').LookupAliasRuntimeArtifact,
+    )
+    : buildLookupAliasRuntimeCoreArtifactHash(
+      aliasRuntime as import('../../src/domain/shared/types/search-snapshot-lookup-runtime.js').LookupAliasRuntimeCoreArtifact,
+    );
+  if (aliasRuntimeHash !== manifest.hashes.lookupAliasRuntime) {
+    throw new Error(
+      `Lookup alias runtime hash mismatch: manifest=${manifest.hashes.lookupAliasRuntime} artifact=${aliasRuntimeHash}`,
+    );
+  }
+  if (
+    aliasBroadRecallRuntime !== undefined
+    && manifest.hashes.lookupAliasBroadRecallRuntime !== undefined
+  ) {
+    const aliasBroadRecallRuntimeHash = buildLookupAliasBroadRecallRuntimeArtifactHash(aliasBroadRecallRuntime);
+    if (aliasBroadRecallRuntimeHash !== manifest.hashes.lookupAliasBroadRecallRuntime) {
+      throw new Error(
+        `Lookup alias broad-recall runtime hash mismatch: manifest=${manifest.hashes.lookupAliasBroadRecallRuntime} artifact=${aliasBroadRecallRuntimeHash}`,
+      );
+    }
+  }
+  const exactSafeRuntimeHash = buildLookupExactSafeRuntimeArtifactHash(exactSafeRuntime);
+  if (exactSafeRuntimeHash !== manifest.hashes.lookupExactSafeRuntime) {
+    throw new Error(
+      `Lookup exact-safe runtime hash mismatch: manifest=${manifest.hashes.lookupExactSafeRuntime} artifact=${exactSafeRuntimeHash}`,
+    );
+  }
+  const resolverProjectionHash = buildLookupResolverProjectionArtifactHash(resolverProjection);
+  if (resolverProjectionHash !== manifest.hashes.lookupResolverProjection) {
+    throw new Error(
+      `Lookup resolver projection hash mismatch: manifest=${manifest.hashes.lookupResolverProjection} artifact=${resolverProjectionHash}`,
+    );
+  }
+  const entityProjectionHash = buildLookupEntityProjectionArtifactHash(entityProjection);
+  if (entityProjectionHash !== manifest.hashes.lookupEntityProjection) {
+    throw new Error(
+      `Lookup entity projection hash mismatch: manifest=${manifest.hashes.lookupEntityProjection} artifact=${entityProjectionHash}`,
+    );
+  }
+  const semanticScopeRuntimeHash = buildLookupSemanticScopeRuntimeArtifactHash(semanticScopeRuntime);
+  if (semanticScopeRuntimeHash !== manifest.hashes.lookupSemanticScopeRuntime) {
+    throw new Error(
+      `Lookup semantic scope runtime hash mismatch: manifest=${manifest.hashes.lookupSemanticScopeRuntime} artifact=${semanticScopeRuntimeHash}`,
+    );
+  }
+  const reviewedFamilyRecallRuntimeHash = buildLookupReviewedFamilyRecallRuntimeArtifactHash(reviewedFamilyRecallRuntime);
+  if (reviewedFamilyRecallRuntimeHash !== manifest.hashes.lookupReviewedFamilyRecallRuntime) {
+    throw new Error(
+      `Lookup reviewed family recall runtime hash mismatch: manifest=${manifest.hashes.lookupReviewedFamilyRecallRuntime} artifact=${reviewedFamilyRecallRuntimeHash}`,
+    );
+  }
+  const scopeGraphRuntimeHash = buildLookupScopeGraphRuntimeArtifactHash(scopeGraphRuntime);
+  if (scopeGraphRuntimeHash !== manifest.hashes.lookupScopeGraphRuntime) {
+    throw new Error(
+      `Lookup scope graph runtime hash mismatch: manifest=${manifest.hashes.lookupScopeGraphRuntime} artifact=${scopeGraphRuntimeHash}`,
+    );
+  }
+  const ambiguityRuntimeHash = buildLookupAmbiguityRuntimeArtifactHash(ambiguityRuntime);
+  if (ambiguityRuntimeHash !== manifest.hashes.lookupAmbiguityRuntime) {
+    throw new Error(
+      `Lookup ambiguity runtime hash mismatch: manifest=${manifest.hashes.lookupAmbiguityRuntime} artifact=${ambiguityRuntimeHash}`,
+    );
+  }
+  const conceptRedirectRuntimeHash = buildLookupConceptRedirectRuntimeArtifactHash(conceptRedirectRuntime);
+  if (conceptRedirectRuntimeHash !== manifest.hashes.lookupConceptRedirectRuntime) {
+    throw new Error(
+      `Lookup concept redirect runtime hash mismatch: manifest=${manifest.hashes.lookupConceptRedirectRuntime} artifact=${conceptRedirectRuntimeHash}`,
+    );
+  }
+}
+
 async function loadNlMappingsCount(runtimePath: string): Promise<number> {
   const raw = await fs.readFile(runtimePath, 'utf8');
   const parsed: unknown = JSON.parse(raw);
@@ -507,6 +807,74 @@ async function restoreRuntimeNlMappings(
     return;
   }
   await atomicWriteFile(runtimePath, previousContents);
+}
+
+function buildArtifactOnlyRuntimeState(args: {
+  readonly manifest: SearchSnapshotManifest;
+  readonly manifestPath: string;
+  readonly runtimeNlMappingsPath: string;
+  readonly runtimeNlMappingsCount: number;
+}): SearchSnapshotRuntimeState {
+  return {
+    schemaVersion: SEARCH_SNAPSHOT_STATE_VERSION,
+    snapshotId: args.manifest.snapshotId,
+    contentHash: args.manifest.contentHash,
+    publishedAt: new Date().toISOString(),
+    manifestPath: args.manifestPath,
+    nlMappingsRuntimePath: args.runtimeNlMappingsPath,
+    lookupAliasRuntimePath: args.manifest.artifacts.lookupAliasRuntimeJson,
+    ...(args.manifest.artifacts.lookupAliasBroadRecallRuntimeJson !== undefined
+      ? { lookupAliasBroadRecallRuntimePath: args.manifest.artifacts.lookupAliasBroadRecallRuntimeJson }
+      : {}),
+    lookupExactSafeRuntimePath: args.manifest.artifacts.lookupExactSafeRuntimeJson,
+    lookupResolverProjectionPath: args.manifest.artifacts.lookupResolverProjectionJson,
+    lookupEntityProjectionPath: args.manifest.artifacts.lookupEntityProjectionJson,
+    lookupSemanticScopeRuntimePath: args.manifest.artifacts.lookupSemanticScopeRuntimeJson,
+    lookupReviewedFamilyRecallRuntimePath: args.manifest.artifacts.lookupReviewedFamilyRecallRuntimeJson,
+    lookupScopeGraphRuntimePath: args.manifest.artifacts.lookupScopeGraphRuntimeJson,
+    lookupAmbiguityRuntimePath: args.manifest.artifacts.lookupAmbiguityRuntimeJson,
+    lookupConceptRedirectRuntimePath: args.manifest.artifacts.lookupConceptRedirectRuntimeJson,
+    quality: args.manifest.quality,
+    fieldAvailability: args.manifest.fieldAvailability,
+    counts: {
+      entities: args.manifest.counts.entities,
+      aliases: args.manifest.counts.aliases,
+      lookupAliasRuntimeAliases: args.manifest.counts.lookupAliasRuntimeAliases,
+      ...(args.manifest.counts.lookupAliasBroadRecallRuntimeEntries !== undefined
+        ? { lookupAliasBroadRecallRuntimeEntries: args.manifest.counts.lookupAliasBroadRecallRuntimeEntries }
+        : {}),
+      lookupExactSafeRuntimeEntries: args.manifest.counts.lookupExactSafeRuntimeEntries,
+      lookupResolverProjectionDocuments: args.manifest.counts.lookupResolverProjectionDocuments,
+      lookupEntityProjectionDocuments: args.manifest.counts.lookupEntityProjectionDocuments,
+      lookupSemanticScopeRuntimeEntries: args.manifest.counts.lookupSemanticScopeRuntimeEntries,
+      lookupReviewedFamilyRecallRuntimeEntries: args.manifest.counts.lookupReviewedFamilyRecallRuntimeEntries,
+      lookupScopeGraphRuntimeEdges: args.manifest.counts.lookupScopeGraphRuntimeEdges,
+      lookupAmbiguityRuntimeEntries: args.manifest.counts.lookupAmbiguityRuntimeEntries,
+      lookupConceptRedirectRuntimeEntries: args.manifest.counts.lookupConceptRedirectRuntimeEntries,
+      ambiguityRegistry: args.manifest.counts.ambiguityRegistry,
+      nlMappings: args.runtimeNlMappingsCount,
+      activeLtrModels: 0,
+    },
+    hashes: {
+      entities: args.manifest.hashes.entities,
+      aliases: args.manifest.hashes.aliases,
+      lookupAliasRuntime: args.manifest.hashes.lookupAliasRuntime,
+      ...(args.manifest.hashes.lookupAliasBroadRecallRuntime !== undefined
+        ? { lookupAliasBroadRecallRuntime: args.manifest.hashes.lookupAliasBroadRecallRuntime }
+        : {}),
+      lookupExactSafeRuntime: args.manifest.hashes.lookupExactSafeRuntime,
+      lookupResolverProjection: args.manifest.hashes.lookupResolverProjection,
+      lookupEntityProjection: args.manifest.hashes.lookupEntityProjection,
+      lookupSemanticScopeRuntime: args.manifest.hashes.lookupSemanticScopeRuntime,
+      lookupReviewedFamilyRecallRuntime: args.manifest.hashes.lookupReviewedFamilyRecallRuntime,
+      lookupScopeGraphRuntime: args.manifest.hashes.lookupScopeGraphRuntime,
+      lookupAmbiguityRuntime: args.manifest.hashes.lookupAmbiguityRuntime,
+      lookupConceptRedirectRuntime: args.manifest.hashes.lookupConceptRedirectRuntime,
+      ambiguityRegistry: args.manifest.hashes.ambiguityRegistry,
+      nlMappings: args.manifest.hashes.nlMappings,
+      activeLtrModels: hashStableJson([]),
+    },
+  };
 }
 
 function buildEntityRowsJson(
@@ -709,9 +1077,17 @@ function buildEntitySnapshotRowsJson(
   })));
 }
 
+function resolveAliasPhoneticKeys(alias: AliasSnapshotRecord): readonly string[] {
+  if (alias.phoneticKeys != null && alias.phoneticKeys.length > 0) {
+    return alias.phoneticKeys;
+  }
+  return computeAliasPhoneticKeys(alias.normalizedValue);
+}
+
 function buildAliasRowsJson(
   aliases: readonly AliasSnapshotRecord[],
   searchSnapshotId: string,
+  options: { readonly materializePhoneticKeys: boolean },
 ): string {
   return JSON.stringify(aliases.map((alias) => ({
     alias_id: alias.aliasId,
@@ -724,6 +1100,9 @@ function buildAliasRowsJson(
     source: alias.source,
     source_trust: alias.sourceTrust,
     confidence: alias.confidencePrior,
+    ...(options.materializePhoneticKeys
+      ? { phonetic_keys: resolveAliasPhoneticKeys(alias) }
+      : {}),
   })));
 }
 
@@ -759,7 +1138,10 @@ function buildActiveLtrModelHash(rows: readonly {
 
 export async function publishRuntimeSubstrates(args: Args): Promise<SearchSnapshotRuntimeState> {
   const manifest = await loadManifest(args.manifestPath);
+  const phases = createRuntimeSubstratePublishStateMachine();
   await assertSnapshotArtifactLearnedFacetCoverage(manifest);
+  await assertLookupRuntimeArtifactsReady(manifest);
+  phases.advance('pg_stage');
   const config = loadConfig();
   if (!shouldUsePgPool(config.pg)) {
     throw new Error('Postgres configuration is required to publish runtime substrates');
@@ -789,7 +1171,10 @@ export async function publishRuntimeSubstrates(args: Args): Promise<SearchSnapsh
   try {
     const client = await pool.connect();
     let committed = false;
+    let activeLtrModels = 0;
+    let activeLtrHash = '';
     try {
+      await acquireRuntimeSubstratePublishAdvisoryLock(client);
       await client.query('BEGIN');
       await stageSnapshotRuntimeRowsInPg({
         client,
@@ -799,6 +1184,8 @@ export async function publishRuntimeSubstrates(args: Args): Promise<SearchSnapsh
         ambiguityRows,
         allowExistingActiveSnapshot: args.refreshActiveRuntimeSubstrates,
       });
+      phases.advance('graph_sync');
+      phases.advance('pg_verify');
 
       const ltrFeatureSchemaHashSupported = await pgTableHasColumn(
         client,
@@ -839,8 +1226,8 @@ export async function publishRuntimeSubstrates(args: Args): Promise<SearchSnapsh
              ORDER BY query_class ASC, model_version ASC`,
         [manifest.snapshotId],
       );
-      const activeLtrModels = Number(ltrActiveResult.rows[0]?.count ?? '0');
-      const activeLtrHash = buildActiveLtrModelHash(
+      activeLtrModels = Number(ltrActiveResult.rows[0]?.count ?? '0');
+      activeLtrHash = buildActiveLtrModelHash(
         ltrActiveResult.rows.map((row) => ({
           query_class: row.query_class,
           model_version: row.model_version,
@@ -850,7 +1237,20 @@ export async function publishRuntimeSubstrates(args: Args): Promise<SearchSnapsh
           bias: row.bias,
         })),
       );
+      await client.query('COMMIT');
+      committed = true;
+    } catch (error) {
+      if (!committed) {
+        await client.query('ROLLBACK');
+      }
+      throw error;
+    } finally {
+      await releaseRuntimeSubstratePublishAdvisoryLock(client).catch(() => undefined);
+      client.release();
+    }
 
+    try {
+      phases.advance('runtime_state_stage');
       await atomicWriteFile(runtimeNlMappingsPath, nlMappingsRaw);
       const runtimeNlMappingsCount = await loadNlMappingsCount(runtimeNlMappingsPath);
       const state: SearchSnapshotRuntimeState = {
@@ -860,39 +1260,89 @@ export async function publishRuntimeSubstrates(args: Args): Promise<SearchSnapsh
         publishedAt: new Date().toISOString(),
         manifestPath: args.manifestPath,
         nlMappingsRuntimePath: runtimeNlMappingsPath,
+        lookupAliasRuntimePath: manifest.artifacts.lookupAliasRuntimeJson,
+        ...(manifest.artifacts.lookupAliasBroadRecallRuntimeJson !== undefined
+          ? { lookupAliasBroadRecallRuntimePath: manifest.artifacts.lookupAliasBroadRecallRuntimeJson }
+          : {}),
+        lookupExactSafeRuntimePath: manifest.artifacts.lookupExactSafeRuntimeJson,
+        lookupResolverProjectionPath: manifest.artifacts.lookupResolverProjectionJson,
+        lookupEntityProjectionPath: manifest.artifacts.lookupEntityProjectionJson,
+        lookupSemanticScopeRuntimePath: manifest.artifacts.lookupSemanticScopeRuntimeJson,
+        lookupReviewedFamilyRecallRuntimePath: manifest.artifacts.lookupReviewedFamilyRecallRuntimeJson,
+        lookupScopeGraphRuntimePath: manifest.artifacts.lookupScopeGraphRuntimeJson,
+        lookupAmbiguityRuntimePath: manifest.artifacts.lookupAmbiguityRuntimeJson,
+        lookupConceptRedirectRuntimePath: manifest.artifacts.lookupConceptRedirectRuntimeJson,
         quality: manifest.quality,
         fieldAvailability: manifest.fieldAvailability,
         counts: {
           entities: entities.length,
           aliases: aliases.length,
+          lookupAliasRuntimeAliases: manifest.counts.lookupAliasRuntimeAliases,
+          ...(manifest.counts.lookupAliasBroadRecallRuntimeEntries !== undefined
+            ? { lookupAliasBroadRecallRuntimeEntries: manifest.counts.lookupAliasBroadRecallRuntimeEntries }
+            : {}),
+          lookupExactSafeRuntimeEntries: manifest.counts.lookupExactSafeRuntimeEntries,
+          lookupResolverProjectionDocuments: manifest.counts.lookupResolverProjectionDocuments,
+          lookupEntityProjectionDocuments: manifest.counts.lookupEntityProjectionDocuments,
+          lookupSemanticScopeRuntimeEntries: manifest.counts.lookupSemanticScopeRuntimeEntries,
+          lookupReviewedFamilyRecallRuntimeEntries: manifest.counts.lookupReviewedFamilyRecallRuntimeEntries,
+          lookupScopeGraphRuntimeEdges: manifest.counts.lookupScopeGraphRuntimeEdges,
+          lookupAmbiguityRuntimeEntries: manifest.counts.lookupAmbiguityRuntimeEntries,
+          lookupConceptRedirectRuntimeEntries: manifest.counts.lookupConceptRedirectRuntimeEntries,
           ambiguityRegistry: ambiguityRows.length,
           nlMappings: runtimeNlMappingsCount,
           activeLtrModels,
         },
         hashes: {
-          entities: hashStableJson(canonicalizeEntitySnapshotRecords(entities)),
-          aliases: hashStableJson(canonicalizeAliasSnapshotRecords(aliases)),
-          ambiguityRegistry: hashStableJson(canonicalizeAmbiguitySnapshotRows(ambiguityRows)),
+          entities: manifest.hashes.entities,
+          aliases: manifest.hashes.aliases,
+          lookupAliasRuntime: manifest.hashes.lookupAliasRuntime,
+          ...(manifest.hashes.lookupAliasBroadRecallRuntime !== undefined
+            ? { lookupAliasBroadRecallRuntime: manifest.hashes.lookupAliasBroadRecallRuntime }
+            : {}),
+          lookupExactSafeRuntime: manifest.hashes.lookupExactSafeRuntime,
+          lookupResolverProjection: manifest.hashes.lookupResolverProjection,
+          lookupEntityProjection: manifest.hashes.lookupEntityProjection,
+          lookupSemanticScopeRuntime: manifest.hashes.lookupSemanticScopeRuntime,
+          lookupReviewedFamilyRecallRuntime: manifest.hashes.lookupReviewedFamilyRecallRuntime,
+          lookupScopeGraphRuntime: manifest.hashes.lookupScopeGraphRuntime,
+          lookupAmbiguityRuntime: manifest.hashes.lookupAmbiguityRuntime,
+          lookupConceptRedirectRuntime: manifest.hashes.lookupConceptRedirectRuntime,
+          ambiguityRegistry: manifest.hashes.ambiguityRegistry,
           nlMappings: manifest.hashes.nlMappings,
           activeLtrModels: activeLtrHash,
         },
       };
       await atomicWriteFile(args.runtimeStatePath, `${JSON.stringify(state, null, 2)}\n`);
-      await client.query('COMMIT');
-      committed = true;
       return state;
     } catch (error) {
-      if (!committed) {
-        await client.query('ROLLBACK');
-        await restoreRuntimeNlMappings(runtimeNlMappingsPath, previousRuntimeNlMappings);
-      }
+      await restoreRuntimeNlMappings(runtimeNlMappingsPath, previousRuntimeNlMappings);
       throw error;
-    } finally {
-      client.release();
     }
   } finally {
     await pool.end();
   }
+}
+
+export async function publishRuntimeSubstratesArtifactOnly(
+  args: Pick<Args, 'manifestPath' | 'runtimeStatePath' | 'runtimeNlMappingsPath'>,
+): Promise<SearchSnapshotRuntimeState> {
+  const manifest = await loadManifest(args.manifestPath);
+  await assertSnapshotArtifactLearnedFacetCoverage(manifest);
+  await assertLookupRuntimeArtifactsReady(manifest);
+  loadConfig();
+
+  const nlMappingsRaw = await fs.readFile(manifest.artifacts.nlMappingsJson, 'utf8');
+  await atomicWriteFile(args.runtimeNlMappingsPath, nlMappingsRaw);
+  const runtimeNlMappingsCount = await loadNlMappingsCount(args.runtimeNlMappingsPath);
+  const state = buildArtifactOnlyRuntimeState({
+    manifest,
+    manifestPath: args.manifestPath,
+    runtimeNlMappingsPath: args.runtimeNlMappingsPath,
+    runtimeNlMappingsCount,
+  });
+  await atomicWriteFile(args.runtimeStatePath, `${JSON.stringify(state, null, 2)}\n`);
+  return state;
 }
 
 async function run(): Promise<void> {
@@ -900,18 +1350,78 @@ async function run(): Promise<void> {
   const previousRuntimeStateContents = await readOptionalFile(args.runtimeStatePath);
   const previousRuntimeNlMappingsContents = await readOptionalFile(args.runtimeNlMappingsPath);
   const manifest = await loadManifest(args.manifestPath);
+  const phases = createRuntimeSubstratePublishStateMachine();
   const cutoverPaths = resolveRuntimeSubstrateCutoverPaths({
     snapshotId: manifest.snapshotId,
     runtimeStatePath: args.runtimeStatePath,
     runtimeNlMappingsPath: args.runtimeNlMappingsPath,
   });
-  await publishRuntimeSubstrates({
-    ...args,
-    runtimeStatePath: cutoverPaths.stagedRuntimeStatePath,
-    runtimeNlMappingsPath: args.runtimeNlMappingsPath,
-  });
+  if (args.artifactOnlyPromote) {
+    await publishRuntimeSubstratesArtifactOnly({
+      manifestPath: args.manifestPath,
+      runtimeStatePath: cutoverPaths.stagedRuntimeStatePath,
+      runtimeNlMappingsPath: cutoverPaths.stagedRuntimeNlMappingsPath,
+    });
+  } else {
+    await publishRuntimeSubstrates({
+      ...args,
+      runtimeStatePath: cutoverPaths.stagedRuntimeStatePath,
+      runtimeNlMappingsPath: args.runtimeNlMappingsPath,
+    });
+  }
   try {
+    phases.advance('pg_stage');
+    phases.advance('graph_sync');
+    phases.advance('pg_verify');
+    phases.advance('runtime_state_stage');
+    phases.advance('promote');
     const promotedState = await promoteRuntimeSubstrateArtifacts(cutoverPaths);
+    phases.advance('post_promote_verify');
+    const verifiedState = await loadSearchSnapshotRuntimeState(args.runtimeStatePath);
+    if (verifiedState.snapshotId !== manifest.snapshotId) {
+      throw new Error(
+        `post-promote verify failed: runtime snapshot mismatch ${verifiedState.snapshotId} != ${manifest.snapshotId}`,
+      );
+    }
+    if (verifiedState.hashes.lookupAliasRuntime !== manifest.hashes.lookupAliasRuntime) {
+      throw new Error('post-promote verify failed: lookupAliasRuntime hash mismatch');
+    }
+    if (verifiedState.hashes.lookupResolverProjection !== manifest.hashes.lookupResolverProjection) {
+      throw new Error('post-promote verify failed: lookupResolverProjection hash mismatch');
+    }
+    if (verifiedState.hashes.lookupEntityProjection !== manifest.hashes.lookupEntityProjection) {
+      throw new Error('post-promote verify failed: lookupEntityProjection hash mismatch');
+    }
+    if (verifiedState.hashes.lookupSemanticScopeRuntime !== manifest.hashes.lookupSemanticScopeRuntime) {
+      throw new Error('post-promote verify failed: lookupSemanticScopeRuntime hash mismatch');
+    }
+    if (verifiedState.hashes.lookupReviewedFamilyRecallRuntime !== manifest.hashes.lookupReviewedFamilyRecallRuntime) {
+      throw new Error('post-promote verify failed: lookupReviewedFamilyRecallRuntime hash mismatch');
+    }
+    if (verifiedState.hashes.lookupScopeGraphRuntime !== manifest.hashes.lookupScopeGraphRuntime) {
+      throw new Error('post-promote verify failed: lookupScopeGraphRuntime hash mismatch');
+    }
+    if (verifiedState.hashes.lookupAmbiguityRuntime !== manifest.hashes.lookupAmbiguityRuntime) {
+      throw new Error('post-promote verify failed: lookupAmbiguityRuntime hash mismatch');
+    }
+    if (verifiedState.hashes.lookupConceptRedirectRuntime !== manifest.hashes.lookupConceptRedirectRuntime) {
+      throw new Error('post-promote verify failed: lookupConceptRedirectRuntime hash mismatch');
+    }
+    if (verifiedState.counts.entities !== manifest.counts.entities) {
+      throw new Error('post-promote verify failed: entity count mismatch');
+    }
+    if (verifiedState.counts.lookupConceptRedirectRuntimeEntries !== manifest.counts.lookupConceptRedirectRuntimeEntries) {
+      throw new Error('post-promote verify failed: lookupConceptRedirectRuntime entry count mismatch');
+    }
+    if (verifiedState.counts.lookupSemanticScopeRuntimeEntries !== manifest.counts.lookupSemanticScopeRuntimeEntries) {
+      throw new Error('post-promote verify failed: lookupSemanticScopeRuntime entry count mismatch');
+    }
+    if (verifiedState.counts.lookupReviewedFamilyRecallRuntimeEntries !== manifest.counts.lookupReviewedFamilyRecallRuntimeEntries) {
+      throw new Error('post-promote verify failed: lookupReviewedFamilyRecallRuntime entry count mismatch');
+    }
+    if (verifiedState.counts.lookupScopeGraphRuntimeEdges !== manifest.counts.lookupScopeGraphRuntimeEdges) {
+      throw new Error('post-promote verify failed: lookupScopeGraphRuntime edge count mismatch');
+    }
     console.log(`Published runtime substrates for ${promotedState.snapshotId}`);
     console.log(`runtime_state=${args.runtimeStatePath}`);
     console.log(`runtime_nl_mappings=${args.runtimeNlMappingsPath}`);

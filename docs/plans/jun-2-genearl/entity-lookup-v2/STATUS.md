@@ -1,8 +1,12 @@
-# Entity Lookup V2 — Build Status (2026-06-02, overnight autonomous run)
+# Entity Lookup V2 — Build Status (Historical Snapshot)
 
 > Branch: **`feat/entity-lookup-v2`** (off `535c9439`). Isolated from the
 > concurrent commit loop on `deploy/aws-ec2-pipeline` / `main`. All work is
 > committed (HEAD-durable); nothing depends on the working tree surviving.
+>
+> Historical build log only.
+> Current authority truth moved to `docs/bench/STATUS.md` and
+> `tools/feature-catalog/features/retrieval/entity-lookup-v2.yaml`.
 
 ## TL;DR
 
@@ -13,6 +17,23 @@ typecheck + lint + 64개 V2 단위 테스트). 나머지(#2 alias-registry 심�
 
 **짜치는 코딩 금지 원칙 준수**: 통합·테스트되지 않는 코드는 머지하지 않음. 미완 영역은
 "다 된 척"하지 않고 maturity 3 + next_steps로 정직하게 표기.
+
+## Current Truth (2026-06-03)
+
+- Full authority eval (`run-entity-resolution-validation.ts`, 215 rows,
+  fingerprint `bd8abea5871dcede17272c3cc0bd1dcebcf93ea658d2d4b2ab930e5ba4f26cae`)
+  result: `V1 46.5%, wrong=0, miss=115` vs `V2 100.0%, wrong=0, miss=0`.
+- Cutover verdict is now **PASS**.
+- 15-row hotset smoke still passes (`V2 wrong+=0`), but it is **not** the
+  cutover authority.
+- Public `/v1/lookup/wine`, local CLI `lookupWine`, and agent `lookup_wine`
+  are now compatibility-backed V2 authority surfaces.
+- Public `/v1/lookup/wine` and local CLI `lookupWine` no longer carry a
+  generic `SearchUseCase` fallback; a regression rail locks that authority
+  seam and requires explicit `legacy_core` opt-in for compare lanes.
+- Bench/doc SSOT for executable lanes moved to `docs/bench/STATUS.md`.
+- Older `V1 93.5%` comparison numbers are historical only; the current explicit
+  `legacy_core` rerun is `V1 46.5%`.
 
 ## 커밋 (feat/entity-lookup-v2)
 
@@ -65,7 +86,9 @@ V2는 V1 wrapper가 아님: 전용 contract + admission(resolve 이전) + 4-stat
 - **T-ELV2-04 real**: 독립 timed multi-channel retrieval runtime(`LookupCandidateRetrievalPort` 구현). 현재는 anchor recall 재투영 + `latencyMs:0`. 필요: `AliasRepository`(현재 container 미노출, live는 `adapters.aliasMatcher`) 또는 Vespa 채널을 V2에 노출 → per-channel 실측 score/latency.
 - **T-ELV2-05 real**: learned reranker(LTR) — `LookupRerankDecisionPort` + feature pipeline + 모델. 현재는 calibrated-abstain만.
 - **T-ELV2-03 deepen**: curation WRITE plane은 완료(migration 030: `alias_proposals` lifecycle 확장 + `ambiguity_proposals`/`suppression_proposals` staging; proposal→review→publish; X-Ops-Write-Key). 남은 것은 **dedicated alias-registry-v2 심층 schema**와 `published` proposal을 runtime으로 반영하는 **ETL publish 소비 경로**.
-- **T-ELV2-06 deepen**: persisted family/ambiguity substrate(ETL) + `kind`/`ambiguity_types` wire 노출 여부 contract 확정. 현재 in-process label-graph.
+- **T-ELV2-06 deepen**: ✅ persisted **family graph** 빌드 완료 — migration 031 `entity_family` + `PgFamilyGraph` + 엔진 `family_graph` 채널(reserved sibling budget) + REAL-producer-only builder/publisher(`pnpm run etl:family-graph:publish`, 휴리스틱 0) + `familyGraphProximity` real read-through. ambiguity cluster-membership feature도 un-hardcode(Half A). entity_family population만 operator 실행(live-PG, infra-gated). (커밋 3efd51dc·b0a2a7e3)
+  
+  추가 보완(2026-06-02): T-05 LTR 구조적 언게이팅(flag OFF, OOD 차단), T-04 honest provenance, T-08 non-degeneracy gate + vintage-mismatch 가드, T-03 alias-registry-v2 version-identity stamp(meta.alias_registry). 자세히는 feature-catalog YAML known_limitations 참조.
 
 ## 남은 작업 (이어받기)
 

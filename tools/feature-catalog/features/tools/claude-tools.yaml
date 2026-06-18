@@ -21,10 +21,12 @@ surfaces:
 
 key_files:
   - src/interface/http/routes/http-route-contract-catalog.ts
-  - src/interface/http/routes/__tests__/http-route-contract-openapi.test.ts
-  - src/interface/http/routes/__tests__/http-contract-openapi-bridge.test.ts
+  - src/interface/http/routes/register-contract-route.ts
 
-tests: {}
+tests:
+  regression:
+    - test/regression/http-contract-catalog-properties.regression.test.ts
+    - test/regression/http-route-catalog-server-parity.regression.test.ts
 
 depends_on:
   - tools.search-wines

@@ -13,6 +13,7 @@ import {
   getSearchDecisionStatus,
   getSearchEntityIds,
   getSearchMeta,
+  parseEntityLookupResponse,
   parseSearchResponse,
   postJson,
 } from './helpers/http-transport.js';
@@ -33,59 +34,66 @@ async function search(body: unknown) {
   return parseSearchResponse(response);
 }
 
+async function lookup(query: string) {
+  const response = await postJson(server.app, '/v2/entity-lookup', { query });
+  expect(response.statusCode).toBe(200);
+  return parseEntityLookupResponse(response);
+}
+
 describe('Realistic Scenarios — alias normalization', () => {
-  const cases = [
+  const identitySafeCases = [
     ['오퍼스 원', 'opus-one-2018'],
     ['opusone', 'opus-one-2018'],
     ['romanee conti', 'romanee-conti-2019'],
-    ['grange', 'penfolds-grange-2017'],
   ] as const;
 
-  for (const [query, expectedEntityId] of cases) {
-    it(`'${query}' stays non-failed in entity mode and keeps '${expectedEntityId}' in the hybrid top-5`, async () => {
-      const entity = await search({
-        query,
-        options: { mode: 'entity', explain: false, clarification: false },
-      });
+  for (const [query, expectedEntityId] of identitySafeCases) {
+    it(`'${query}' stays non-failed in lookup and keeps '${expectedEntityId}' in the hybrid top-5`, async () => {
+      const entity = await lookup(query);
       const hybrid = await search({
         query,
-        options: { mode: 'hybrid', explain: false, clarification: false },
+        options: { explain: false, clarification: false },
       });
 
-      expect(getSearchDecisionStatus(entity)).toMatch(/^(resolved|ambiguous)$/);
+      expect(entity.status).toMatch(/^(resolved|ambiguous)$/);
       expect(getSearchEntityIds(hybrid).slice(0, 5)).toContain(expectedEntityId);
     });
   }
 
-  it('accented and accent-stripped Margaux queries do not fail', async () => {
-    const accented = await search({
-      query: 'Château Margaux',
-      options: { mode: 'entity', explain: false, clarification: false },
-    });
-    const stripped = await search({
-      query: 'Chateau Margaux',
-      options: { mode: 'hybrid', explain: false, clarification: false },
+  it("'grange' stays retrieval-visible in hybrid top-5 while lookup fails closed", async () => {
+    const entity = await lookup('grange');
+    const hybrid = await search({
+      query: 'grange',
+      options: { explain: false, clarification: false },
     });
 
-    expect(getSearchDecisionStatus(accented)).toMatch(/^(resolved|ambiguous)$/);
+    expect(entity.status).toMatch(/^(failed|redirect_discovery)$/);
+    expect(entity.top_candidate).toBeNull();
+    expect(getSearchEntityIds(hybrid).slice(0, 5)).toContain('penfolds-grange-2017');
+  });
+
+  it('accented and accent-stripped Margaux queries do not fail', async () => {
+    const accented = await lookup('Château Margaux');
+    const stripped = await search({
+      query: 'Chateau Margaux',
+      options: { explain: false, clarification: false },
+    });
+
+    expect(accented.status).toMatch(/^(resolved|ambiguous)$/);
     expect(getSearchEntityIds(stripped).slice(0, 5)).toContain('chateau-margaux-2015');
   });
 });
 
 describe('Realistic Scenarios — vintage and specificity', () => {
   it("'Opus One' without a vintage resolves or abstains safely", async () => {
-    const body = await search({
-      query: 'Opus One',
-      options: { mode: 'entity', explain: false, clarification: false },
-    });
-
-    expect(getSearchDecisionStatus(body)).toMatch(/^(resolved|ambiguous)$/);
+    const body = await lookup('Opus One');
+    expect(body.status).toMatch(/^(resolved|ambiguous)$/);
   });
 
   it("'Sassicaia 2018' stays retrievable in hybrid top-5", async () => {
     const body = await search({
       query: 'Sassicaia 2018',
-      options: { mode: 'hybrid', explain: false, clarification: false },
+      options: { explain: false, clarification: false },
     });
 
     expect(getSearchEntityIds(body).slice(0, 5)).toContain('sassicaia-2018');
@@ -95,7 +103,7 @@ describe('Realistic Scenarios — vintage and specificity', () => {
     const cabernetIds = new Set(['opus-one-2018', 'chateau-margaux-2015', 'sassicaia-2018']);
     const body = await search({
       query: '2018 Cabernet',
-      options: { mode: 'hybrid', explain: false, clarification: false },
+      options: { explain: false, clarification: false },
     });
 
     const topFive = getSearchEntityIds(body).slice(0, 5);
@@ -112,17 +120,17 @@ describe('Realistic Scenarios — semantic and multilingual smoke', () => {
   ])("'%s' keeps a representative candidate in the top-5", async (query, expectedIds) => {
     const body = await search({
       query,
-      options: { mode: 'hybrid', explain: false, clarification: false },
+      options: { explain: false, clarification: false },
     });
 
     const topFive = getSearchEntityIds(body).slice(0, 5);
     expect(topFive.some((entityId) => expectedIds.has(entityId))).toBe(true);
   });
 
-  it("'아마로네 강한' returns non-empty results in auto mode", async () => {
+  it("'아마로네 강한' returns non-empty results", async () => {
     const body = await search({
       query: '아마로네 강한',
-      options: { mode: 'auto', explain: false, clarification: false },
+      options: { explain: false, clarification: false },
     });
 
     expect(body.results.length).toBeGreaterThan(0);
@@ -132,7 +140,7 @@ describe('Realistic Scenarios — semantic and multilingual smoke', () => {
   it("'호주 쉬라즈 풀바디' resolves Penfolds Grange at top-1", async () => {
     const body = await search({
       query: '호주 쉬라즈 풀바디',
-      options: { mode: 'hybrid', explain: false, clarification: false },
+      options: { explain: false, clarification: false },
     });
 
     expect(getSearchDecisionStatus(body)).toBe('resolved');
@@ -142,7 +150,7 @@ describe('Realistic Scenarios — semantic and multilingual smoke', () => {
   it("'상큼한 화이트 와인' resolves Cloudy Bay at top-1", async () => {
     const body = await search({
       query: '상큼한 화이트 와인',
-      options: { mode: 'hybrid', explain: false, clarification: false },
+      options: { explain: false, clarification: false },
     });
 
     expect(getSearchDecisionStatus(body)).toBe('resolved');
@@ -152,7 +160,7 @@ describe('Realistic Scenarios — semantic and multilingual smoke', () => {
   it("'풀바디 레드 와인' resolves as a list-shaped exploratory query", async () => {
     const body = await search({
       query: '풀바디 레드 와인',
-      options: { mode: 'hybrid', explain: false, clarification: false },
+      options: { explain: false, clarification: false },
     });
 
     expect(getSearchDecisionStatus(body)).toBe('resolved');
@@ -166,7 +174,7 @@ describe('Benchmark #88 regression', () => {
   it('returns a concrete recommendation path without clarification', async () => {
     const body = await search({
       query,
-      options: { mode: 'auto', explain: false, clarification: false },
+      options: { explain: false, clarification: false },
     });
 
     expect(getSearchDecisionStatus(body)).toBe('resolved');
@@ -178,38 +186,34 @@ describe('Benchmark #88 regression', () => {
 
 describe('Realistic Scenarios — graceful degradation', () => {
   it("'Petrus 2000' stays ambiguous or failed instead of crashing", async () => {
-    const body = await search({
-      query: 'Petrus 2000',
-      options: { mode: 'entity', explain: false, clarification: false },
-    });
-
-    expect(getSearchDecisionStatus(body)).toMatch(/^(ambiguous|failed)$/);
+    const body = await lookup('Petrus 2000');
+    expect(body.status).toMatch(/^(ambiguous|failed)$/);
   });
 });
 
-describe('Realistic Scenarios — mode routing', () => {
-  it("auto mode routes '오푸스원' through a supported fast-path", async () => {
+describe('Realistic Scenarios — route behavior', () => {
+  it("query-driven routing keeps '오푸스원' on a supported fast-path", async () => {
     const body = await search({
       query: '오푸스원',
-      options: { mode: 'auto', explain: false, clarification: false },
+      options: { explain: false, clarification: false },
     });
 
     expect(getSearchMeta(body).route).toMatch(/^(entity|hybrid|mixed)$/);
   });
 
-  it("auto mode routes '풀바디 레드 추천' to a retrieval path", async () => {
+  it("query-driven routing sends '풀바디 레드 추천' to a retrieval path", async () => {
     const body = await search({
       query: '풀바디 레드 추천',
-      options: { mode: 'auto', explain: false, clarification: false },
+      options: { explain: false, clarification: false },
     });
 
     expect(getSearchMeta(body).route).toMatch(/^(hybrid|mixed)$/);
   });
 
-  it("forcing hybrid mode on '오푸스원' keeps the seed entity in the top-5", async () => {
+  it("hybrid route keeps '오푸스원' in the top-5", async () => {
     const body = await search({
       query: '오푸스원',
-      options: { mode: 'hybrid', explain: false, clarification: false },
+      options: { explain: false, clarification: false },
     });
 
     expect(getSearchEntityIds(body).slice(0, 5)).toContain('opus-one-2018');

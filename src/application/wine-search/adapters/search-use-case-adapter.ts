@@ -44,7 +44,7 @@ function shouldBypassPlanner(
 function shouldBypassPublicQueryEntrySecurityForInternalPrimitive(
   input: SearchUseCaseInput,
 ): boolean {
-  return input.primitiveRoute === 'lookup_wine' || input.anchorEntityId !== undefined;
+  return input.anchorEntityId !== undefined;
 }
 
 /** Thrown when the underlying `SearchUseCase` returns a comparison response
@@ -60,7 +60,9 @@ export class UnexpectedSearchAdapterResponseError extends DomainError {
 }
 
 export class SearchUseCaseAdapter implements SearchUseCasePort {
-  constructor(private readonly useCase: SearchUseCase) {}
+  constructor(
+    private readonly useCase: SearchUseCase,
+  ) {}
 
   async execute(
     input: SearchUseCaseInput,
@@ -95,14 +97,6 @@ export class SearchUseCaseAdapter implements SearchUseCasePort {
 export function mapSearchUseCaseInputToSearchRequest(
   input: SearchUseCaseInput,
 ): SearchRequest {
-  if (input.primitiveRoute === 'lookup_wine') {
-    return {
-      query: input.query,
-      primitiveRoute: 'lookup_wine',
-      ...(input.limit !== undefined ? { limit: input.limit } : {}),
-    };
-  }
-
   // RFC-021 T-PSA-02: reference-similarity is path-authoritative. When the
   // dispatcher supplied a resolved anchor entity, emit the internal
   // `similar_to_entity` primitive route + anchor — NOT a callerInterpretation.

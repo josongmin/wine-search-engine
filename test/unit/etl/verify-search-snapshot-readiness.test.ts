@@ -12,6 +12,7 @@ import {
   canonicalizeEntitySnapshotRecords,
 } from '../../../src/domain/shared/utils/search-snapshot-canonicalization.js';
 import { hashStableJson } from '../../../src/domain/shared/utils/stable-json.js';
+import { buildMinimalLookupRuntimeStatePlane } from '../../helpers/minimal-search-snapshot-runtime-state.js';
 
 const {
   mockVerifySearchSnapshotRuntimeStateLive,
@@ -102,6 +103,12 @@ async function writeFixtureFiles(args?: {
   const entityHash = hashStableJson(canonicalizeEntitySnapshotRecords(entities));
   const aliasHash = hashStableJson(canonicalizeAliasSnapshotRecords(aliases));
   const ambiguityHash = hashStableJson(canonicalizeAmbiguitySnapshotRows(ambiguityRows));
+  const {
+    lookupRuntimeCounts,
+    lookupRuntimeHashes,
+    lookupManifestArtifacts,
+    ...lookupPaths
+  } = buildMinimalLookupRuntimeStatePlane(dir);
 
   await fs.writeFile(nlMappingsPath, JSON.stringify({ mappings: [{ key: 'full-bodied', canonical: 'full_bodied' }] }));
   await fs.writeFile(entitiesPath, `${entities.map((row) => JSON.stringify(row)).join('\n')}\n`);
@@ -123,6 +130,7 @@ async function writeFixtureFiles(args?: {
         vespaFeedNdjson: vespaFeedPath,
         entitiesNdjson: entitiesPath,
         aliasesNdjson: aliasesPath,
+        ...lookupManifestArtifacts,
         ambiguityRegistryNdjson: ambiguityPath,
         nlMappingsJson: nlMappingsPath,
         metadataJson: metadataPath,
@@ -132,6 +140,7 @@ async function writeFixtureFiles(args?: {
         vespaFeed: 10,
         entities: args?.manifestEntities ?? 10,
         aliases: 10,
+        ...lookupRuntimeCounts,
         ambiguityRegistry: 0,
         nlMappings: 1,
       },
@@ -140,6 +149,7 @@ async function writeFixtureFiles(args?: {
         vespaFeed: 'vespa-feed-hash',
         entities: entityHash,
         aliases: aliasHash,
+        ...lookupRuntimeHashes,
         ambiguityRegistry: ambiguityHash,
         nlMappings: 'nl-hash',
       },
@@ -188,9 +198,11 @@ async function writeFixtureFiles(args?: {
       publishedAt: '2026-04-14T00:00:00.000Z',
       manifestPath,
       nlMappingsRuntimePath: nlMappingsPath,
+      ...lookupPaths,
       counts: {
         entities: args?.runtimeEntities ?? 10,
         aliases: 10,
+        ...lookupRuntimeCounts,
         ambiguityRegistry: 0,
         nlMappings: 1,
         activeLtrModels: args?.activeLtrModels ?? 1,
@@ -198,6 +210,7 @@ async function writeFixtureFiles(args?: {
       hashes: {
         entities: entityHash,
         aliases: aliasHash,
+        ...lookupRuntimeHashes,
         ambiguityRegistry: ambiguityHash,
         nlMappings: 'nl-hash',
         activeLtrModels: 'ltr-hash',

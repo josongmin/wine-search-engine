@@ -34,24 +34,16 @@ export type SubContainerId =
 
 /** Ports surfaced on the root `Container` type. Keep alphabetised. */
 export type ContainerPortId =
-  | 'autocompleteUseCase'
-  | 'batchSearchUseCase'
   | 'calibrationStore'
   | 'candidatePool'
   | 'chatLlm'
   | 'decisionEngine'
-  | 'decomposedSearchUseCase'
   | 'drinkingWindowPredictor'
-  | 'drinkingWindowUseCase'
-  | 'entityLookup'
-  | 'entityResolver'
+  | 'entityLookupV2UseCase'
   | 'evalRunner'
-  | 'hybridUseCase'
-  | 'interpretUseCase'
   | 'mixedSolver'
   | 'queryPlanner'
   | 'ranker'
-  | 'resolveUseCase'
   | 'responseBuilder'
   | 'runtimeReadiness'
   | 'searchUseCase';
@@ -81,8 +73,6 @@ export const WIRING_MANIFEST: readonly SubContainerSpec[] = [
     dependsOn: ['adapters', 'runtime-support', 'core-builders', 'stubs'],
     produces: [
       'queryPlanner',
-      'entityResolver',
-      'entityLookup',
       'candidatePool',
       'ranker',
       'decisionEngine',
@@ -101,13 +91,6 @@ export const WIRING_MANIFEST: readonly SubContainerSpec[] = [
     dependsOn: ['core'],
     produces: [
       'searchUseCase',
-      'interpretUseCase',
-      'resolveUseCase',
-      'autocompleteUseCase',
-      'hybridUseCase',
-      'decomposedSearchUseCase',
-      'drinkingWindowUseCase',
-      'batchSearchUseCase',
     ],
   },
 
@@ -122,7 +105,7 @@ export const WIRING_MANIFEST: readonly SubContainerSpec[] = [
   {
     id: 'features',
     dependsOn: ['core', 'usecases', 'aux-features'],
-    produces: [],
+    produces: ['entityLookupV2UseCase'],
   },
   // Root composition.
   {

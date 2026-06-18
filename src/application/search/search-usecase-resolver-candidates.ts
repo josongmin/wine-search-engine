@@ -3,7 +3,10 @@ import type { ResolverCandidate } from '../../domain/resolver/model/resolved-can
 import type { MatchSignalSet } from '../../domain/resolver/model/match-signal-set.js';
 import type { CanonicalEntityId } from '../../domain/shared/types/index.js';
 import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
-import type { EntityDocumentLookupPort } from './port/search-pipeline-deps.port.js';
+import type {
+  LookupResolverProjection,
+  LookupResolverProjectionPort,
+} from './port/search-pipeline-deps.port.js';
 import { DomainError } from '../../domain/shared/error/domain-error.js';
 import type {
   EntityCandidateGeneratorInput,
@@ -11,6 +14,8 @@ import type {
 } from '../../domain/resolver/model/entity-candidate-generator-input.js';
 import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
 import { SHORT_QUERY_AMBIGUOUS_ANCHOR_CONFIDENCE_THRESHOLD } from '../../domain/query/service/planner.js';
+import { compactForLookup } from '../../domain/query/service/phonetic-skeleton.js';
+import { normalizeForMatch } from '../../domain/alias/service/normalize.js';
 import {
   hasExactLikeLookupStrategy,
   hasPhoneticLookupStrategy,
@@ -18,6 +23,53 @@ import {
   isPhoneticLookupStrategy,
 } from '../../domain/query/service/lookup-strategy-taxonomy.js';
 import { buildResolverCandidateAttributeHints } from './search-usecase-entity-attribute-projection.js';
+import { FUZZY_EDIT_DISTANCE_CONFIDENCE_FACTOR } from '../../domain/resolver/model/fuzzy-match-confidence.js';
+
+type ResolverProjectionLike =
+  Pick<LookupResolverProjection, 'entityId' | 'entityType' | 'canonicalLabel' | 'aliasesIdentitySafe'>
+  & {
+    readonly identitySafeKeys?: readonly string[] | undefined;
+    readonly identityCertificates?: LookupResolverProjection['identityCertificates'];
+    readonly producer?: string | undefined;
+    readonly attributeHints?: Readonly<Record<string, unknown>> | undefined;
+    readonly sourceRecordRefs?: RetrievalDocument['sourceRecordRefs'];
+  };
+
+function adaptRetrievalDocumentToResolverProjection(
+  doc: RetrievalDocument,
+): ResolverProjectionLike {
+  const attributeHints = buildResolverCandidateAttributeHints(doc);
+  return {
+    entityId: doc.entityId,
+    entityType: doc.entityType,
+    canonicalLabel: doc.canonicalLabel,
+    aliasesIdentitySafe: doc.aliasesIdentitySafe,
+    producer: doc.producer,
+    ...(attributeHints !== undefined ? { attributeHints } : {}),
+    ...(doc.sourceRecordRefs !== undefined && doc.sourceRecordRefs.length > 0
+      ? { sourceRecordRefs: doc.sourceRecordRefs }
+      : {}),
+  };
+}
+
+function mergeResolverProjectionLike(
+  base: ResolverProjectionLike | undefined,
+  overlay: ResolverProjectionLike,
+): ResolverProjectionLike {
+  if (base === undefined) {
+    return overlay;
+  }
+  return {
+    ...base,
+    ...overlay,
+    aliasesIdentitySafe: overlay.aliasesIdentitySafe,
+    identitySafeKeys: overlay.identitySafeKeys ?? base.identitySafeKeys,
+    identityCertificates: overlay.identityCertificates ?? base.identityCertificates,
+    producer: overlay.producer ?? base.producer,
+    attributeHints: overlay.attributeHints ?? base.attributeHints,
+    sourceRecordRefs: overlay.sourceRecordRefs ?? base.sourceRecordRefs,
+  };
+}
 
 const ZERO_SIGNALS: MatchSignalSet = {
   canonicalExactMatch: 0,
@@ -33,12 +85,6 @@ const ZERO_SIGNALS: MatchSignalSet = {
   editDistanceScore: 0,
   ambiguityPenalty: 0,
 };
-
-/** Down-weights fuzzy edit-distance matches by 20% relative to exact alias
- *  confidence. Rationale: edit-distance matches have higher false-positive
- *  rate (e.g. "Barolo" vs "Barossa"), so the confidence discount reflects
- *  the additional ambiguity inherent in fuzzy matching. */
-const FUZZY_EDIT_DISTANCE_CONFIDENCE_FACTOR = 0.8;
 
 function normalizeIdentitySurface(value: string): string {
   return value
@@ -103,7 +149,7 @@ function removeAllOccurrences(value: string, needle: string): string {
 }
 
 function isProducerOnlyAliasForDistinctWine(
-  doc: RetrievalDocument,
+  doc: ResolverProjectionLike,
   identitySurface: string,
 ): boolean {
   if (doc.entityType !== 'wine' || typeof doc.producer !== 'string' || doc.producer.trim().length === 0) {
@@ -120,7 +166,14 @@ function isProducerOnlyAliasForDistinctWine(
   return removeAllOccurrences(canonicalKey, producerKey).length > 0;
 }
 
-function collectIdentitySafeKeys(doc: RetrievalDocument): ReadonlySet<string> {
+function collectIdentitySafeKeys(doc: ResolverProjectionLike): ReadonlySet<string> {
+  if (Array.isArray(doc.identitySafeKeys)) {
+    const precomputedKeys = doc.identitySafeKeys ?? [];
+    return new Set(
+      precomputedKeys.filter((key): key is string => typeof key === 'string' && key.length > 0),
+    );
+  }
+
   const keys = new Set<string>();
   const rawAliases = doc.aliasesIdentitySafe;
   // Only build identity surfaces when the document actually carries the alias
@@ -173,6 +226,62 @@ function collectQueryIdentityKeys(
   return keys;
 }
 
+function collectCertificateNormalizedKeys(
+  rawQuery: string,
+  normalizedQuery: string,
+): ReadonlySet<string> {
+  const views = buildNormalizedQueryViews(rawQuery);
+  const surfaces = [
+    rawQuery,
+    normalizedQuery,
+    views.strict,
+    views.accentless,
+    views.collapsedWhitespace,
+    views.punctuationStripped,
+    views.compact,
+    views.vintageCanonicalized,
+    views.vintageStripped,
+    views.transliterated,
+    ...views.lookupVariants,
+  ];
+  const keys = new Set<string>();
+  for (const surface of surfaces) {
+    if (typeof surface !== 'string' || surface.length === 0) {
+      continue;
+    }
+    const normalized = normalizeForMatch(surface);
+    if (normalized.length > 0) {
+      keys.add(normalized);
+    }
+  }
+  return keys;
+}
+
+function matchIdentityCertificates(
+  rawQuery: string,
+  normalizedQuery: string,
+  doc: ResolverProjectionLike,
+): ResolverCandidate['identityCertificates'] {
+  if (doc.identityCertificates === undefined || doc.identityCertificates.length === 0) {
+    return undefined;
+  }
+
+  const queryIdentityKeys = collectQueryIdentityKeys(rawQuery, normalizedQuery);
+  const queryCertificateKeys = collectCertificateNormalizedKeys(rawQuery, normalizedQuery);
+  const compactQuery = compactForLookup(normalizedQuery);
+  const matched = doc.identityCertificates.filter((certificate) =>
+    queryIdentityKeys.has(certificate.normalizedSurface)
+    || queryCertificateKeys.has(certificate.normalizedSurface)
+    || (
+      certificate.compactSurface !== undefined
+      && compactQuery.length > 0
+      && certificate.compactSurface === compactQuery
+    ),
+  );
+
+  return matched.length > 0 ? matched : undefined;
+}
+
 function shouldProjectAnchorIdentityKeys(
   rawQuery: string,
   anchor: AnchorCandidate,
@@ -217,7 +326,7 @@ function anchorMatchesIdentitySafeProjection(
   rawQuery: string,
   normalizedQuery: string,
   anchor: AnchorCandidate,
-  doc: RetrievalDocument,
+  doc: ResolverProjectionLike,
 ): boolean | undefined {
   const identityKeys = collectIdentitySafeKeys(doc);
   if (identityKeys.size === 0) {
@@ -237,6 +346,14 @@ function anchorMatchesIdentitySafeProjection(
   }
 
   return false;
+}
+
+function anchorMatchesExactSafeCertificate(
+  rawQuery: string,
+  normalizedQuery: string,
+  doc: ResolverProjectionLike,
+): boolean {
+  return (matchIdentityCertificates(rawQuery, normalizedQuery, doc)?.length ?? 0) > 0;
 }
 
 /**
@@ -298,7 +415,7 @@ function buildSignals(
   rawQuery: string,
   normalizedQuery: string,
   anchor: AnchorCandidate,
-  doc: RetrievalDocument,
+  doc: ResolverProjectionLike,
 ): MatchSignalSet {
   const strategies = new Set(anchor.lookupStrategies ?? []);
   const phoneticOnly = isPhoneticOnlyStrategySet(strategies);
@@ -339,11 +456,30 @@ function buildSignals(
     anchor.confidence >= SHORT_QUERY_AMBIGUOUS_ANCHOR_CONFIDENCE_THRESHOLD &&
     !isStrictPrefixOfAnchorSurface(normalizedQuery, anchor.normalizedForm);
 
-  const identitySafeMatch = exactLike && !isTrustedPrefixSingleEntityAnchor
+  const identitySafeProjectionMatch = exactLike && !isTrustedPrefixSingleEntityAnchor
     ? anchorMatchesIdentitySafeProjection(rawQuery, normalizedQuery, anchor, doc)
     : undefined;
+  const identitySafeCertificateMatch = exactLike && !isTrustedPrefixSingleEntityAnchor
+    ? anchorMatchesExactSafeCertificate(rawQuery, normalizedQuery, doc)
+    : false;
+  const identitySafeMatch = identitySafeProjectionMatch === true || identitySafeCertificateMatch
+    ? true
+    : identitySafeProjectionMatch;
   const exactSignalAllowed = identitySafeMatch !== false;
-  const identityNormalizedMatch = identitySafeMatch === false || phoneticOnly ? 0 : anchor.confidence;
+  // `canonicalNormalizedMatch` is the IDENTITY-normalized lane (scorer weight
+  // 0.9, second only to canonicalExactMatch). It must carry confidence ONLY for
+  // an identity-bearing (exactLike) strategy that cleared the identity-key gate.
+  // The prior `… ? 0 : anchor.confidence` default leaked full confidence into
+  // this lane for NON-exactLike matches: a fuzzy/substring hit has
+  // identitySafeMatch === undefined (the gate never runs for non-exactLike), so
+  // neither `=== false` nor `phoneticOnly` fired and the lane defaulted to
+  // anchor.confidence. That let a single fuzzy alias hit (e.g. the generic
+  // "Viña"→"Vinas" token) populate the identity lane at 0.9 and resolve a wholly
+  // different wine. Fuzzy evidence already flows through aliasFuzzyMatch +
+  // editDistanceScore; the identity lane is 0 for it by definition.
+  // `exactLike` already implies `!phoneticOnly` (exactLike = !phoneticOnly && …),
+  // so testing exactLike is sufficient to exclude both fuzzy and phonetic.
+  const identityNormalizedMatch = exactLike && exactSignalAllowed ? anchor.confidence : 0;
 
   return {
     ...ZERO_SIGNALS,
@@ -406,20 +542,14 @@ function describeEntityIds(ids: readonly CanonicalEntityId[]): string {
  * The scorer's attribute-hint pathway populates their effective score.
  *
  * @param input  Shared generator contract
- * @param entityLookup  Port for fetching entity documents by ID
+ * @param resolverProjectionLookup  Batch resolver projection hydration port
  */
 export async function buildResolverCandidatesFromGenerator(
   input: EntityCandidateGeneratorInput,
-  entityLookup: EntityDocumentLookupPort | undefined,
+  resolverProjectionLookup: LookupResolverProjectionPort,
 ): Promise<readonly ResolverCandidate[]> {
   if (input.anchors.length === 0 && (input.blockerOnlyIds == null || input.blockerOnlyIds.length === 0)) {
     return [];
-  }
-  if (entityLookup === undefined) {
-    throw new DomainError(
-      'INTERNAL_INCONSISTENCY',
-      'Entity candidate generation requires entityLookup when anchors or blocker seeds are present.',
-    );
   }
 
   // Collect all unique entity IDs: from anchors + blocker-only additions
@@ -434,8 +564,8 @@ export async function buildResolverCandidatesFromGenerator(
     allEntityIds.add(id);
   }
 
-  // Resolve documents: use preloaded cache first, then fetch missing IDs.
-  const docMap = new Map<CanonicalEntityId, RetrievalDocument>();
+  // Resolve projection documents: use preloaded cache first, then fetch missing IDs.
+  const docMap = new Map<CanonicalEntityId, ResolverProjectionLike>();
 
   // Populate from upstream prefetch cache
   if (input.preloadedDocs != null) {
@@ -443,7 +573,7 @@ export async function buildResolverCandidatesFromGenerator(
       // preloadedDocs keys are string-coerced EntityIds; match by stringified form
       for (const id of allEntityIds) {
         if (String(id) === key) {
-          docMap.set(id, doc);
+          docMap.set(id, adaptRetrievalDocumentToResolverProjection(doc));
         }
       }
     }
@@ -454,19 +584,38 @@ export async function buildResolverCandidatesFromGenerator(
   // Single-fetch supplement has been removed (T-E4-01): getDocuments() is the
   // only production hydration path. Partial resolution is forbidden -- any
   // unresolved IDs are a loud error.
+  const projectionOverlayIds = [...allEntityIds].filter(
+    (id) => docMap.get(id)?.identityCertificates === undefined,
+  );
+
+  if (projectionOverlayIds.length > 0) {
+    try {
+      const docs = await resolverProjectionLookup.getResolverProjections(projectionOverlayIds);
+      for (const [id, doc] of docs) {
+        docMap.set(id, mergeResolverProjectionLike(docMap.get(id), doc));
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new DomainError(
+        'INTERNAL_INCONSISTENCY',
+        `resolver_projection_overlay_failed: resolver projection lookup threw for ${projectionOverlayIds.length} ids | ${message}`,
+      );
+    }
+  }
+
   const missingIds = [...allEntityIds].filter((id) => !docMap.has(id));
   if (missingIds.length > 0) {
     try {
-      const docs = await entityLookup.getDocuments(missingIds);
+      const docs = await resolverProjectionLookup.getResolverProjections(missingIds);
       for (const [id, doc] of docs) {
-        docMap.set(id, doc);
+        docMap.set(id, mergeResolverProjectionLike(docMap.get(id), doc));
       }
     } catch (error: unknown) {
       // Failure taxonomy: batch_lookup_failed -- the entire batch fetch errored.
       const message = error instanceof Error ? error.message : String(error);
       throw new DomainError(
         'INTERNAL_INCONSISTENCY',
-        `batch_lookup_failed: getDocuments() threw for ${missingIds.length} ids | ${message}`,
+        `batch_lookup_failed: resolver projection lookup threw for ${missingIds.length} ids | ${message}`,
       );
     }
 
@@ -496,7 +645,7 @@ export async function buildResolverCandidatesFromGenerator(
       if (doc == null) {
         continue;
       }
-      const attributeHints = buildResolverCandidateAttributeHints(doc);
+      const attributeHints = doc.attributeHints;
       const key = String(entityId);
       const incomingAliasMatch = {
         aliasValue: anchor.surfaceForm,
@@ -504,6 +653,11 @@ export async function buildResolverCandidatesFromGenerator(
         matchScore: anchor.confidence,
       } as const;
       const incomingSignals = buildSignals(input.rawQuery, input.normalizedQuery, anchor, doc);
+      const matchedIdentityCertificates = matchIdentityCertificates(
+        input.rawQuery,
+        input.normalizedQuery,
+        doc,
+      );
       const existing = candidatesById.get(key);
       if (existing === undefined) {
         candidatesById.set(key, {
@@ -511,6 +665,9 @@ export async function buildResolverCandidatesFromGenerator(
           entityType: doc.entityType,
           canonicalLabel: doc.canonicalLabel,
           aliasMatches: [incomingAliasMatch],
+          ...(matchedIdentityCertificates !== undefined
+            ? { identityCertificates: matchedIdentityCertificates }
+            : {}),
           ...(attributeHints !== undefined ? { attributeHints } : {}),
           ...(doc.sourceRecordRefs !== undefined && doc.sourceRecordRefs.length > 0
             ? { sourceRecordRefs: doc.sourceRecordRefs }
@@ -536,6 +693,19 @@ export async function buildResolverCandidatesFromGenerator(
       candidatesById.set(key, {
         ...existing,
         aliasMatches,
+        ...(matchedIdentityCertificates !== undefined
+          ? {
+              identityCertificates: [
+                ...(existing.identityCertificates ?? []),
+                ...matchedIdentityCertificates,
+              ].filter((certificate, index, all) => all.findIndex((candidate) =>
+                candidate.kind === certificate.kind
+                && candidate.normalizedSurface === certificate.normalizedSurface
+                && candidate.compactSurface === certificate.compactSurface
+                && candidate.sourceTier === certificate.sourceTier,
+              ) === index),
+            }
+          : {}),
         sourceSignals: mergeSignals(existing.sourceSignals, incomingSignals),
         ...(mergedSources !== undefined ? { sources: mergedSources } : {}),
         ...(mergedSources !== undefined && mergedSources.length === 1
@@ -555,12 +725,15 @@ export async function buildResolverCandidatesFromGenerator(
     if (doc == null) {
       continue;
     }
-    const attributeHints = buildResolverCandidateAttributeHints(doc);
+    const attributeHints = doc.attributeHints;
     candidatesById.set(key, {
       entityId,
       entityType: doc.entityType,
       canonicalLabel: doc.canonicalLabel,
       aliasMatches: [],
+      ...(matchIdentityCertificates(input.rawQuery, input.normalizedQuery, doc) !== undefined
+        ? { identityCertificates: matchIdentityCertificates(input.rawQuery, input.normalizedQuery, doc) }
+        : {}),
       ...(attributeHints !== undefined ? { attributeHints } : {}),
       ...(doc.sourceRecordRefs !== undefined && doc.sourceRecordRefs.length > 0
         ? { sourceRecordRefs: doc.sourceRecordRefs }

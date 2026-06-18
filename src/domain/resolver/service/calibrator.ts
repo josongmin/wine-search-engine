@@ -1,4 +1,5 @@
 import type { QueryClass } from '../../shared/types/index.js';
+import { globalCalibrationHealthRegistry } from '../../observability/calibration-health-registry.js';
 import { plattScaling } from '../../shared/utils/calibration.js';
 import { clamp01 } from '../../shared/utils/clamp.js';
 import type { CalibratedResolutionScore } from '../model/calibrated-score.js';
@@ -181,6 +182,21 @@ export class Calibrator {
           ? { trusted: true, params: stored }
           : { trusted: false, reason: 'missing', params: null };
     }
+
+    // Observability (fire-and-forget; never affects the functional path):
+    // record the trust outcome so ops can see, per query class, whether fresh
+    // trusted calibration exists. A class silently losing calibration (e.g. a
+    // key mismatch) otherwise craters recall with no signal.
+    globalCalibrationHealthRegistry.recordParamLoad(
+      queryClass,
+      outcome.trusted
+        ? { trusted: true, method: outcome.params.method }
+        : {
+            trusted: false,
+            reason: outcome.reason,
+            ...(outcome.params !== null ? { method: outcome.params.method } : {}),
+          },
+    );
 
     if (outcome.trusted) {
       return { params: outcome.params, trusted: true };

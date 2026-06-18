@@ -90,6 +90,16 @@ export interface ResolverDecisionTrace {
   readonly decisionConfidenceC: number;
 
   /**
+   * Raw (pre-calibration) top-1 resolver score — the value fed to
+   * {@link Calibrator.calibrate} as `rawScores.top1`. Carried through the
+   * decision/response layers so the eval harness can persist it as
+   * `eval_results.top1_raw_score`; the nightly calibration trainer consumes
+   * (top1RawScore, isCorrectResolve) pairs. Undefined when no candidate was
+   * scored (empty/failed trace). MUST NOT be treated as a probability.
+   */
+  readonly top1RawScore?: number | undefined;
+
+  /**
    * Whether `decisionConfidenceC` was produced from trained calibration
    * parameters that were fresh enough to trust (P0.1 nightly auto-pipeline
    * TTL gate), or from the identity-fallback / stale-params path. Decision-layer

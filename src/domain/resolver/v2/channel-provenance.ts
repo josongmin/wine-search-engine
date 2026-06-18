@@ -18,6 +18,22 @@ import type { AnchorCandidate } from '../../query/model/anchor-candidate.js';
 import { clamp01 } from '../../shared/utils/clamp.js';
 import type { LookupChannelHit, LookupRetrievalChannel } from './lookup-v2-types.js';
 
+export const LOOKUP_IDENTITY_GRADE_CHANNELS: ReadonlySet<LookupRetrievalChannel> = new Set([
+  'exact_alias',
+  'compact_exact',
+  'transliteration_exact',
+]);
+
+const LOOKUP_SUPPORTIVE_ONLY_CHANNELS: ReadonlySet<LookupRetrievalChannel> = new Set([
+  'jamo_phonetic',
+]);
+
+export type LookupResolveEvidenceGrade =
+  | 'identity_grade'
+  | 'supportive_only'
+  | 'recall_only'
+  | 'none';
+
 /**
  * Map a free-form anchor lookup-strategy string to a declared V2 channel.
  * Order matters: more specific prefixes (compact/translit/fuzzy) are tested
@@ -27,7 +43,16 @@ import type { LookupChannelHit, LookupRetrievalChannel } from './lookup-v2-types
 export function mapLookupStrategyToChannel(strategy: string): LookupRetrievalChannel | undefined {
   const s = strategy.toLowerCase();
   if (s.includes('compact')) return 'compact_exact';
-  if (s.includes('translit')) return 'transliteration_exact';
+  // Only WHOLE-string transliterated_exact is identity-grade. Recall/expansion
+  // translit variants emitted LIVE by the wired matchers — transliterated_fuzzy
+  // AND transliterated_prefix (search-index-alias-matcher.ts / search-snapshot-
+  // alias-matcher.ts) — must NOT be forged as exact; they fall through to
+  // fuzzy_alias. The exclusion mirrors the recall vocabulary of the fuzzy branch
+  // below (fuzzy/inexact/prefix/lexical). (T-04 audit + self-review C1.)
+  if (s.includes('translit') && !/fuzzy|inexact|prefix|lexical/u.test(s)) return 'transliteration_exact';
+  // NOTE: jamo_phonetic is a NEAR-exact (not identity-grade) channel, so a
+  // phonetic_fuzzy hit stays here rather than routing to fuzzy_alias — unlike
+  // transliteration_exact, which IS identity-grade and must exclude fuzzy.
   if (s.includes('jamo') || s.includes('phonetic')) return 'jamo_phonetic';
   // Recall / expansion strategies — fuzzy, n-gram, edit-distance, AND the
   // partial-token expansions (lexical_exact, prefix_exact, inexact_*). These
@@ -38,6 +63,8 @@ export function mapLookupStrategyToChannel(strategy: string): LookupRetrievalCha
     s.includes('fuzzy') || s.includes('ngram') || s.includes('trigram') || s.includes('edit') ||
     s.includes('inexact') || s.includes('lexical') || s.includes('prefix')
   ) return 'fuzzy_alias';
+  if (s.includes('vintage')) return 'vintage_graph';
+  if (s.includes('line')) return 'line_graph';
   if (s.includes('family')) return 'family_graph';
   if (s.includes('semantic') || s.includes('dense')) return 'dense';
   if (s.includes('exact') || s.includes('canonical') || s.includes('alias')) return 'exact_alias';
@@ -113,6 +140,42 @@ export function anchorsHaveExactIdentityEvidence(
     }
     return strategies.some((s) => STRICT_EXACT_IDENTITY_STRATEGIES.has(s));
   });
+}
+
+/**
+ * Classify the strongest resolve-certifying evidence a candidate carries from
+ * its per-channel provenance.
+ *
+ * Resolve certificate hierarchy:
+ * - identity_grade: exact/compact/transliteration exact channels
+ * - supportive_only: phonetic/jamo-only evidence
+ * - recall_only: fuzzy/family/dense recall lanes
+ * - none: no provenance at all
+ */
+export function classifyResolveEvidenceGrade(
+  channelHits: readonly Pick<LookupChannelHit, 'channel'>[],
+): LookupResolveEvidenceGrade {
+  let hasSupportiveOnly = false;
+  let hasRecallOnly = false;
+
+  for (const hit of channelHits) {
+    if (LOOKUP_IDENTITY_GRADE_CHANNELS.has(hit.channel)) {
+      return 'identity_grade';
+    }
+    if (LOOKUP_SUPPORTIVE_ONLY_CHANNELS.has(hit.channel)) {
+      hasSupportiveOnly = true;
+      continue;
+    }
+    hasRecallOnly = true;
+  }
+
+  if (hasSupportiveOnly) {
+    return 'supportive_only';
+  }
+  if (hasRecallOnly) {
+    return 'recall_only';
+  }
+  return 'none';
 }
 
 /**

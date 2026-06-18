@@ -1,0 +1,1610 @@
+{
+  "byClass": {
+    "ambiguous_short_form": {
+      "v1": {
+        "correct": 20,
+        "wrong": 5,
+        "miss": 0,
+        "total": 25
+      },
+      "v2": {
+        "correct": 25,
+        "wrong": 0,
+        "miss": 0,
+        "total": 25
+      }
+    },
+    "exact_entity": {
+      "v1": {
+        "correct": 17,
+        "wrong": 0,
+        "miss": 8,
+        "total": 25
+      },
+      "v2": {
+        "correct": 9,
+        "wrong": 0,
+        "miss": 16,
+        "total": 25
+      }
+    },
+    "noisy_recall": {
+      "v1": {
+        "correct": 16,
+        "wrong": 0,
+        "miss": 9,
+        "total": 25
+      },
+      "v2": {
+        "correct": 13,
+        "wrong": 0,
+        "miss": 12,
+        "total": 25
+      }
+    },
+    "no_match": {
+      "v1": {
+        "correct": 25,
+        "wrong": 0,
+        "miss": 0,
+        "total": 25
+      },
+      "v2": {
+        "correct": 25,
+        "wrong": 0,
+        "miss": 0,
+        "total": 25
+      }
+    }
+  },
+  "overall": {
+    "v1": {
+      "correct": 78,
+      "wrong": 5,
+      "miss": 17,
+      "total": 100
+    },
+    "v2": {
+      "correct": 72,
+      "wrong": 0,
+      "miss": 28,
+      "total": 100
+    }
+  },
+  "perClass": [
+    {
+      "queryClass": "ambiguous_short_form",
+      "shouldResolve": false,
+      "v1": {
+        "correct": 20,
+        "wrong": 5,
+        "miss": 0,
+        "total": 25
+      },
+      "v2": {
+        "correct": 25,
+        "wrong": 0,
+        "miss": 0,
+        "total": 25
+      }
+    },
+    {
+      "queryClass": "exact_entity",
+      "shouldResolve": true,
+      "v1": {
+        "correct": 17,
+        "wrong": 0,
+        "miss": 8,
+        "total": 25
+      },
+      "v2": {
+        "correct": 9,
+        "wrong": 0,
+        "miss": 16,
+        "total": 25
+      }
+    },
+    {
+      "queryClass": "no_match",
+      "shouldResolve": false,
+      "v1": {
+        "correct": 25,
+        "wrong": 0,
+        "miss": 0,
+        "total": 25
+      },
+      "v2": {
+        "correct": 25,
+        "wrong": 0,
+        "miss": 0,
+        "total": 25
+      }
+    },
+    {
+      "queryClass": "noisy_recall",
+      "shouldResolve": true,
+      "v1": {
+        "correct": 16,
+        "wrong": 0,
+        "miss": 9,
+        "total": 25
+      },
+      "v2": {
+        "correct": 13,
+        "wrong": 0,
+        "miss": 12,
+        "total": 25
+      }
+    }
+  ],
+  "gate": {
+    "pass": false,
+    "reasons": [
+      "class exact_entity V2 correct-rate 36.0% below V1 68.0% × 0.98 tolerance",
+      "class noisy_recall V2 correct-rate 52.0% below V1 64.0% × 0.98 tolerance"
+    ]
+  },
+  "evalCasesFingerprint": "bdad1bf136439527016b757cbcfc9bfd63f133036bc42d3d5b4caad9ed9bf0ad",
+  "detail": [
+    {
+      "query": "Giacomo Fenocchio",
+      "queryClass": "ambiguous_short_form",
+      "expectedStatus": "ambiguous",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Castell d'Encus",
+      "queryClass": "ambiguous_short_form",
+      "expectedStatus": "ambiguous",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Miguel Merino",
+      "queryClass": "ambiguous_short_form",
+      "expectedStatus": "ambiguous",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Weingut Fromm",
+      "queryClass": "ambiguous_short_form",
+      "expectedStatus": "ambiguous",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-03789a17d0aa2cc7f0a21efa63c7f116c5a004cf48a999c27cf30ebb01d9cbbf"
+      },
+      "v1Verdict": "wrong",
+      "v2": {
+        "status": "failed"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Emmanuel Rouget",
+      "queryClass": "ambiguous_short_form",
+      "expectedStatus": "ambiguous",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Arceno",
+      "queryClass": "ambiguous_short_form",
+      "expectedStatus": "ambiguous",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Racines",
+      "queryClass": "ambiguous_short_form",
+      "expectedStatus": "ambiguous",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "GoGi",
+      "queryClass": "ambiguous_short_form",
+      "expectedStatus": "ambiguous",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Wachter-Wiesler",
+      "queryClass": "ambiguous_short_form",
+      "expectedStatus": "ambiguous",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Domaine Saint Préfert",
+      "queryClass": "ambiguous_short_form",
+      "expectedStatus": "ambiguous",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Sono Montenidoli",
+      "queryClass": "ambiguous_short_form",
+      "expectedStatus": "ambiguous",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-98d768e13aed34f148afbaecf9a168c07eeca2c86e9b95e0a22f853e1e343696"
+      },
+      "v1Verdict": "wrong",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Monte Xanic",
+      "queryClass": "ambiguous_short_form",
+      "expectedStatus": "ambiguous",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Vincent Dauvissat",
+      "queryClass": "ambiguous_short_form",
+      "expectedStatus": "ambiguous",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-af0699178099d1013a0a226ad0d1787a4f2c29f446b24be2dda2d1a81e7073ff"
+      },
+      "v1Verdict": "wrong",
+      "v2": {
+        "status": "failed"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Weingut Bründlmayer",
+      "queryClass": "ambiguous_short_form",
+      "expectedStatus": "ambiguous",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-62f5263f30340ab74a3e4ca352aa740a7e4163ba5795a1b22c7b8176d6839a90"
+      },
+      "v1Verdict": "wrong",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Felton Road",
+      "queryClass": "ambiguous_short_form",
+      "expectedStatus": "ambiguous",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Domaine Sylvain Cathiard",
+      "queryClass": "ambiguous_short_form",
+      "expectedStatus": "ambiguous",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Barons de Rothschild (Lafite)",
+      "queryClass": "ambiguous_short_form",
+      "expectedStatus": "ambiguous",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Tenuta San Giorgio",
+      "queryClass": "ambiguous_short_form",
+      "expectedStatus": "ambiguous",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Méo-Camuzet",
+      "queryClass": "ambiguous_short_form",
+      "expectedStatus": "ambiguous",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "La Maison Carrée",
+      "queryClass": "ambiguous_short_form",
+      "expectedStatus": "ambiguous",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-f8766031a90d4e33cdb443166cc368777296190ea837c2d5ec7a39ddaa736af8"
+      },
+      "v1Verdict": "wrong",
+      "v2": {
+        "status": "failed"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Saxum",
+      "queryClass": "ambiguous_short_form",
+      "expectedStatus": "ambiguous",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Seghesio",
+      "queryClass": "ambiguous_short_form",
+      "expectedStatus": "ambiguous",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "La Spinetta",
+      "queryClass": "ambiguous_short_form",
+      "expectedStatus": "ambiguous",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Château Langoa Barton",
+      "queryClass": "ambiguous_short_form",
+      "expectedStatus": "ambiguous",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Zuccardi",
+      "queryClass": "ambiguous_short_form",
+      "expectedStatus": "ambiguous",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "2020 La Maison Carrée Auvernier Pinot Noir",
+      "queryClass": "exact_entity",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-f8766031a90d4e33cdb443166cc368777296190ea837c2d5ec7a39ddaa736af8",
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-f8766031a90d4e33cdb443166cc368777296190ea837c2d5ec7a39ddaa736af8"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "resolved",
+        "entityId": "wine-ce-f8766031a90d4e33cdb443166cc368777296190ea837c2d5ec7a39ddaa736af8"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "2016 Castell d'Encus Saktih",
+      "queryClass": "exact_entity",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-ca578f21a20d16e8377546b853c37893c81b798e32d2afaf41bdfdc58ecee9a5",
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "miss",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "miss"
+    },
+    {
+      "query": "2010 Méo-Camuzet Marsannay",
+      "queryClass": "exact_entity",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-fcb9270f9fcdce052038eacbfe857ef5a11e2a8f1aa0b6f0cf16d7a6e32e4d3d",
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-fcb9270f9fcdce052038eacbfe857ef5a11e2a8f1aa0b6f0cf16d7a6e32e4d3d"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "miss"
+    },
+    {
+      "query": "2018 Orin Swift Papillon",
+      "queryClass": "exact_entity",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-3640d487c425a829252fd1937b46c7e7dbee50e5e177b25940d35ca3d29c6ea5",
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-3640d487c425a829252fd1937b46c7e7dbee50e5e177b25940d35ca3d29c6ea5"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "miss"
+    },
+    {
+      "query": "2001 Paolo Scavino Barolo Carobric",
+      "queryClass": "exact_entity",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-d8c7c98c7c83d68a70688ddf16a288e1f45ab87423c32c806a1e3a5b63af329b",
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "miss",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "miss"
+    },
+    {
+      "query": "2019 Miguel Merino Gran Reserva",
+      "queryClass": "exact_entity",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-7ea24b83c4b003517fd265b195b6042c1cc7edf7b654f9f06946235ea25d2d50",
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-7ea24b83c4b003517fd265b195b6042c1cc7edf7b654f9f06946235ea25d2d50"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "resolved",
+        "entityId": "wine-ce-7ea24b83c4b003517fd265b195b6042c1cc7edf7b654f9f06946235ea25d2d50"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "2017 Bindi Sergardi Mocenni Numero 89 Gran Selezione Chianti Classico",
+      "queryClass": "exact_entity",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-bfdc967caed3e5b0a6c71c945566b9af9cbebdd1314bba2d820667625da7320d",
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-bfdc967caed3e5b0a6c71c945566b9af9cbebdd1314bba2d820667625da7320d"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "resolved",
+        "entityId": "wine-ce-bfdc967caed3e5b0a6c71c945566b9af9cbebdd1314bba2d820667625da7320d"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "2018 Saxum G2 Vineyard",
+      "queryClass": "exact_entity",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-1b14d33c163e5bf07db65d325f3e98b9ba9c0a38dea43aa97361574afb35c030",
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "miss",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "miss"
+    },
+    {
+      "query": "2020 La Spinetta Vigneto Garretti Barolo",
+      "queryClass": "exact_entity",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-e1efd7014cecaea6ce77b513076db35be6eb66591963f34780cb0759d249e5ff",
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-e1efd7014cecaea6ce77b513076db35be6eb66591963f34780cb0759d249e5ff"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "miss"
+    },
+    {
+      "query": "2022 Seghesio Rockpile Zinfandel",
+      "queryClass": "exact_entity",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-3fd050c38e57d0e30d4e154463712262ac73d7b317f7efde3a9930d0796ea657",
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "miss",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "miss"
+    },
+    {
+      "query": "2017 Chimney Rock Cabernet Sauvignon Arete Vineyard",
+      "queryClass": "exact_entity",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-ee4d6677f2461c983da63adb946dee9d355de6fa57bf1b4c37b8e262ae80e61d",
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-ee4d6677f2461c983da63adb946dee9d355de6fa57bf1b4c37b8e262ae80e61d"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "miss"
+    },
+    {
+      "query": "2017 Zena Crown Vista",
+      "queryClass": "exact_entity",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-fad68dec51ab4d771d66c0b1c2752e1ab9f6e8a6a77b18b9b547191398d4bbb4",
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-fad68dec51ab4d771d66c0b1c2752e1ab9f6e8a6a77b18b9b547191398d4bbb4"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "resolved",
+        "entityId": "wine-ce-fad68dec51ab4d771d66c0b1c2752e1ab9f6e8a6a77b18b9b547191398d4bbb4"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "2011 Hall Bergfeld Cabernet Sauvignon",
+      "queryClass": "exact_entity",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-f036366229800fdf620e474c2014b6bd5f3c39fc58ceac77dfde93b0444a7e2c",
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "miss",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "miss"
+    },
+    {
+      "query": "2017 Camerano Barolo Terlo",
+      "queryClass": "exact_entity",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-0739d058af254d056012b9e8987aeaafff5498064b8cf5837fb6a95fbad294f9",
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-0739d058af254d056012b9e8987aeaafff5498064b8cf5837fb6a95fbad294f9"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "resolved",
+        "entityId": "wine-ce-0739d058af254d056012b9e8987aeaafff5498064b8cf5837fb6a95fbad294f9"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "2018 Marnet Campbell Ranch Vineyard Pinot Noir",
+      "queryClass": "exact_entity",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-2883e791874c809b72f9be3e608c5c982479bc5d28439de45435ef3ce440c249",
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-2883e791874c809b72f9be3e608c5c982479bc5d28439de45435ef3ce440c249"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "resolved",
+        "entityId": "wine-ce-2883e791874c809b72f9be3e608c5c982479bc5d28439de45435ef3ce440c249"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "2022 Textbook Page-Turner",
+      "queryClass": "exact_entity",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-fb3889a6e77101c4c95111e00ece7a1321be16f8fca116f09f8807bf93bb06b1",
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-fb3889a6e77101c4c95111e00ece7a1321be16f8fca116f09f8807bf93bb06b1"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "resolved",
+        "entityId": "wine-ce-fb3889a6e77101c4c95111e00ece7a1321be16f8fca116f09f8807bf93bb06b1"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "2017 Tenuta del Nicchio Lodovico",
+      "queryClass": "exact_entity",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-d94458095fa42eea65fe14c8dea85dd6bf694696cd58d50305b22ee631b1fb3d",
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-d94458095fa42eea65fe14c8dea85dd6bf694696cd58d50305b22ee631b1fb3d"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "resolved",
+        "entityId": "wine-ce-d94458095fa42eea65fe14c8dea85dd6bf694696cd58d50305b22ee631b1fb3d"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "2023 Giovanni Canonica Langhe Nebbiolo",
+      "queryClass": "exact_entity",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-89813bcdfe07f370cd176b4da6d66201131126b642cbbc50dc32b3ec13ef15da",
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-89813bcdfe07f370cd176b4da6d66201131126b642cbbc50dc32b3ec13ef15da"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "miss"
+    },
+    {
+      "query": "2004 Kilikanoon Shiraz Green's Vineyard",
+      "queryClass": "exact_entity",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-6670ebdb9908fcdce2fb6306fb3102b724fe401f7a16de540ddbad56671aef55",
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "miss",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "miss"
+    },
+    {
+      "query": "2016 Clos de la Chapelle Vieilles Vignes Pommard 1er Cru 'Les Chanlins'",
+      "queryClass": "exact_entity",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-7d5bda2bf854697ef13d68a595de3690edc2e062fa6c8cd450fbfa94c6f27549",
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "miss",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "miss"
+    },
+    {
+      "query": "2022 Bertrand Machard de Gramont Nuits-Saint-Georges 1er Cru 'Les Vallerots'",
+      "queryClass": "exact_entity",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-9f9176f087639c7ef051b61fcc036b70704b8939130800446ff30c63f5b9297f",
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-9f9176f087639c7ef051b61fcc036b70704b8939130800446ff30c63f5b9297f"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "miss"
+    },
+    {
+      "query": "2015 Tezza Brolo delle Giare Riserva Amarone della Valpolicella Valpantena",
+      "queryClass": "exact_entity",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-5fab87a118d91c22a4c97c43ef83a0367a83c48796587c110a391da4cf1c684b",
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-5fab87a118d91c22a4c97c43ef83a0367a83c48796587c110a391da4cf1c684b"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "resolved",
+        "entityId": "wine-ce-5fab87a118d91c22a4c97c43ef83a0367a83c48796587c110a391da4cf1c684b"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "2013 Vineyard 29 Estate Cabernet Sauvignon",
+      "queryClass": "exact_entity",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-c6ba89533fef657b3c43cf13434e62347d515ebe6208dfccd9d5b0b91c36d02f",
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-c6ba89533fef657b3c43cf13434e62347d515ebe6208dfccd9d5b0b91c36d02f"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "miss"
+    },
+    {
+      "query": "2017 Telmo Rodriguez Pegaso Granito",
+      "queryClass": "exact_entity",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-43677e93c8e3e8a996d8374859a116acd87329ec9afd35ac2513bd0c1aeaad5d",
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "miss",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "miss"
+    },
+    {
+      "query": "2017 Racines Rinconada Vineyard Pinot Noir",
+      "queryClass": "exact_entity",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-ef8d06445f17f912417fb3e9643469219975bfc04e67207e4bd69e5f8e07e8a6",
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-ef8d06445f17f912417fb3e9643469219975bfc04e67207e4bd69e5f8e07e8a6"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "miss"
+    },
+    {
+      "query": "2022 bertrand machard de gramont nuits-saint-georges 1er cru 'les vallerots' 22",
+      "queryClass": "noisy_recall",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-9f9176f087639c7ef051b61fcc036b70704b8939130800446ff30c63f5b9297f",
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-9f9176f087639c7ef051b61fcc036b70704b8939130800446ff30c63f5b9297f"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "resolved",
+        "entityId": "wine-ce-9f9176f087639c7ef051b61fcc036b70704b8939130800446ff30c63f5b9297f"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "2013 vineyard 29 estate cabernet sauvignon 13",
+      "queryClass": "noisy_recall",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-c6ba89533fef657b3c43cf13434e62347d515ebe6208dfccd9d5b0b91c36d02f",
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "miss",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "miss"
+    },
+    {
+      "query": "2017 telmo rodriguez pegaso granito 17",
+      "queryClass": "noisy_recall",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-43677e93c8e3e8a996d8374859a116acd87329ec9afd35ac2513bd0c1aeaad5d",
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "miss",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "miss"
+    },
+    {
+      "query": "2017 racines rinconada vineyard pinot noir 17",
+      "queryClass": "noisy_recall",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-ef8d06445f17f912417fb3e9643469219975bfc04e67207e4bd69e5f8e07e8a6",
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-ef8d06445f17f912417fb3e9643469219975bfc04e67207e4bd69e5f8e07e8a6"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "resolved",
+        "entityId": "wine-ce-ef8d06445f17f912417fb3e9643469219975bfc04e67207e4bd69e5f8e07e8a6"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "2002 core alta mesa vineyard elevation sensation 02",
+      "queryClass": "noisy_recall",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-903173f0c55e19001938c797cce3bc5725c4904c2870e7db1c47e32d6c0fa74c",
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-903173f0c55e19001938c797cce3bc5725c4904c2870e7db1c47e32d6c0fa74c"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "resolved",
+        "entityId": "wine-ce-903173f0c55e19001938c797cce3bc5725c4904c2870e7db1c47e32d6c0fa74c"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "2017 delas le clos rouge crozes-hermitage 17",
+      "queryClass": "noisy_recall",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-9095541411f6dd7238e2d4a9c190237d55236c32ce5b984271b52d75756a07a1",
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "miss",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "miss"
+    },
+    {
+      "query": "2001 arzuaga ribera del duero crianza 01",
+      "queryClass": "noisy_recall",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-a8ef1352d122489e499bf71753175073de5cd59b173a2dcb158500015dae9477",
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "miss",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "miss"
+    },
+    {
+      "query": "2022 weingut fromm selvenen pinot noir 22",
+      "queryClass": "noisy_recall",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-03789a17d0aa2cc7f0a21efa63c7f116c5a004cf48a999c27cf30ebb01d9cbbf",
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-03789a17d0aa2cc7f0a21efa63c7f116c5a004cf48a999c27cf30ebb01d9cbbf"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "resolved",
+        "entityId": "wine-ce-03789a17d0aa2cc7f0a21efa63c7f116c5a004cf48a999c27cf30ebb01d9cbbf"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "2009 emmanuel rouget vosne-romanee 1er cru les beaumonts 09",
+      "queryClass": "noisy_recall",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-35eb1bcc54963bebb501754ba0b5e1f9a9478c7fc14ef8ae1cca560153047ed3",
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-35eb1bcc54963bebb501754ba0b5e1f9a9478c7fc14ef8ae1cca560153047ed3"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "resolved",
+        "entityId": "wine-ce-35eb1bcc54963bebb501754ba0b5e1f9a9478c7fc14ef8ae1cca560153047ed3"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "2020 domaine sylvain cathiard bourgogne 20",
+      "queryClass": "noisy_recall",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-7506f145731190d6ce36ac6e36a0c068e68a3145be464416a986585fe7efc32a",
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "miss",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "miss"
+    },
+    {
+      "query": "2022 vincent dauvissat chablis 22",
+      "queryClass": "noisy_recall",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-af0699178099d1013a0a226ad0d1787a4f2c29f446b24be2dda2d1a81e7073ff",
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-af0699178099d1013a0a226ad0d1787a4f2c29f446b24be2dda2d1a81e7073ff"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "resolved",
+        "entityId": "wine-ce-af0699178099d1013a0a226ad0d1787a4f2c29f446b24be2dda2d1a81e7073ff"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "2020 weingut brundlmayer pinot noir reserve 20",
+      "queryClass": "noisy_recall",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-62f5263f30340ab74a3e4ca352aa740a7e4163ba5795a1b22c7b8176d6839a90",
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-62f5263f30340ab74a3e4ca352aa740a7e4163ba5795a1b22c7b8176d6839a90"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "resolved",
+        "entityId": "wine-ce-62f5263f30340ab74a3e4ca352aa740a7e4163ba5795a1b22c7b8176d6839a90"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "2022 textbook page-turner 22",
+      "queryClass": "noisy_recall",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-fb3889a6e77101c4c95111e00ece7a1321be16f8fca116f09f8807bf93bb06b1",
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-fb3889a6e77101c4c95111e00ece7a1321be16f8fca116f09f8807bf93bb06b1"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "resolved",
+        "entityId": "wine-ce-fb3889a6e77101c4c95111e00ece7a1321be16f8fca116f09f8807bf93bb06b1"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "2004 kilikanoon shiraz green's vineyard 04",
+      "queryClass": "noisy_recall",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-6670ebdb9908fcdce2fb6306fb3102b724fe401f7a16de540ddbad56671aef55",
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "miss",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "miss"
+    },
+    {
+      "query": "2011 hall bergfeld cabernet sauvignon 11",
+      "queryClass": "noisy_recall",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-f036366229800fdf620e474c2014b6bd5f3c39fc58ceac77dfde93b0444a7e2c",
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "miss",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "miss"
+    },
+    {
+      "query": "2017 zena crown vista 17",
+      "queryClass": "noisy_recall",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-fad68dec51ab4d771d66c0b1c2752e1ab9f6e8a6a77b18b9b547191398d4bbb4",
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-fad68dec51ab4d771d66c0b1c2752e1ab9f6e8a6a77b18b9b547191398d4bbb4"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "resolved",
+        "entityId": "wine-ce-fad68dec51ab4d771d66c0b1c2752e1ab9f6e8a6a77b18b9b547191398d4bbb4"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "2020 la spinetta vigneto garretti barolo 20",
+      "queryClass": "noisy_recall",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-e1efd7014cecaea6ce77b513076db35be6eb66591963f34780cb0759d249e5ff",
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-e1efd7014cecaea6ce77b513076db35be6eb66591963f34780cb0759d249e5ff"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "miss"
+    },
+    {
+      "query": "2022 seghesio rockpile zinfandel 22",
+      "queryClass": "noisy_recall",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-3fd050c38e57d0e30d4e154463712262ac73d7b317f7efde3a9930d0796ea657",
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "miss",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "miss"
+    },
+    {
+      "query": "2018 saxum g2 vineyard 18",
+      "queryClass": "noisy_recall",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-1b14d33c163e5bf07db65d325f3e98b9ba9c0a38dea43aa97361574afb35c030",
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "miss",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "miss"
+    },
+    {
+      "query": "2017 bindi sergardi mocenni numero 89 gran selezione chianti classico 17",
+      "queryClass": "noisy_recall",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-bfdc967caed3e5b0a6c71c945566b9af9cbebdd1314bba2d820667625da7320d",
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-bfdc967caed3e5b0a6c71c945566b9af9cbebdd1314bba2d820667625da7320d"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "miss"
+    },
+    {
+      "query": "2018 orin swift papillon 18",
+      "queryClass": "noisy_recall",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-3640d487c425a829252fd1937b46c7e7dbee50e5e177b25940d35ca3d29c6ea5",
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-3640d487c425a829252fd1937b46c7e7dbee50e5e177b25940d35ca3d29c6ea5"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "miss"
+    },
+    {
+      "query": "2019 miguel merino gran reserva 19",
+      "queryClass": "noisy_recall",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-7ea24b83c4b003517fd265b195b6042c1cc7edf7b654f9f06946235ea25d2d50",
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-7ea24b83c4b003517fd265b195b6042c1cc7edf7b654f9f06946235ea25d2d50"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "resolved",
+        "entityId": "wine-ce-7ea24b83c4b003517fd265b195b6042c1cc7edf7b654f9f06946235ea25d2d50"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "2023 giovanni canonica langhe nebbiolo 23",
+      "queryClass": "noisy_recall",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-89813bcdfe07f370cd176b4da6d66201131126b642cbbc50dc32b3ec13ef15da",
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-89813bcdfe07f370cd176b4da6d66201131126b642cbbc50dc32b3ec13ef15da"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "resolved",
+        "entityId": "wine-ce-89813bcdfe07f370cd176b4da6d66201131126b642cbbc50dc32b3ec13ef15da"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "2017 tenuta del nicchio lodovico 17",
+      "queryClass": "noisy_recall",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-d94458095fa42eea65fe14c8dea85dd6bf694696cd58d50305b22ee631b1fb3d",
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-d94458095fa42eea65fe14c8dea85dd6bf694696cd58d50305b22ee631b1fb3d"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "resolved",
+        "entityId": "wine-ce-d94458095fa42eea65fe14c8dea85dd6bf694696cd58d50305b22ee631b1fb3d"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "2018 marnet campbell ranch vineyard pinot noir 18",
+      "queryClass": "noisy_recall",
+      "expectedStatus": "resolved",
+      "expectedEntityId": "wine-ce-2883e791874c809b72f9be3e608c5c982479bc5d28439de45435ef3ce440c249",
+      "v1": {
+        "status": "resolved",
+        "entityId": "wine-ce-2883e791874c809b72f9be3e608c5c982479bc5d28439de45435ef3ce440c249"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "resolved",
+        "entityId": "wine-ce-2883e791874c809b72f9be3e608c5c982479bc5d28439de45435ef3ce440c249"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Cloudy Dreams Marlborough Sauvignon Blanc",
+      "queryClass": "no_match",
+      "expectedStatus": "failed",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "failed"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "ㄱㄴㄷ 와이너리 스페셜",
+      "queryClass": "no_match",
+      "expectedStatus": "failed",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "failed"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Quinta da Miragem Douro Red",
+      "queryClass": "no_match",
+      "expectedStatus": "failed",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "failed"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Tenuta Arcobaleno Etna Rosso",
+      "queryClass": "no_match",
+      "expectedStatus": "failed",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "failed"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "failed"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Domaine Invisible Grand Cru",
+      "queryClass": "no_match",
+      "expectedStatus": "failed",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Château Fantaisie 2025",
+      "queryClass": "no_match",
+      "expectedStatus": "failed",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "failed"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Silver Phoenix Napa Reserve 2022",
+      "queryClass": "no_match",
+      "expectedStatus": "failed",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "failed"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "failed"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Bodega Fantasma Rioja Especial",
+      "queryClass": "no_match",
+      "expectedStatus": "failed",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "failed"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "failed"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Weingut Traumberg Spätlese 2023",
+      "queryClass": "no_match",
+      "expectedStatus": "failed",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "failed"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "환상의 와이너리 그랑크뤼",
+      "queryClass": "no_match",
+      "expectedStatus": "failed",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "failed"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Fictitious Estates Merlot Premium NV",
+      "queryClass": "no_match",
+      "expectedStatus": "failed",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "failed"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Vignoble Mirage Saint-Émilion 2020",
+      "queryClass": "no_match",
+      "expectedStatus": "failed",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "failed"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Tenuta Ombra Barolo Riserva 2019",
+      "queryClass": "no_match",
+      "expectedStatus": "failed",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "asdfgh winery zxcvbn 2024",
+      "queryClass": "no_match",
+      "expectedStatus": "failed",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "failed"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Domaine du Vent Imaginaire Côtes du Rhône",
+      "queryClass": "no_match",
+      "expectedStatus": "failed",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "failed"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Quantum Valley Vineyards Shiraz 2021",
+      "queryClass": "no_match",
+      "expectedStatus": "failed",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "failed"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Château du Rêve Pauillac 2018",
+      "queryClass": "no_match",
+      "expectedStatus": "failed",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Monte Segreto Brunello di Montalcino",
+      "queryClass": "no_match",
+      "expectedStatus": "failed",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Clos de la Lune Champagne Rosé NV",
+      "queryClass": "no_match",
+      "expectedStatus": "failed",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Villa Miraggio Amarone della Valpolicella",
+      "queryClass": "no_match",
+      "expectedStatus": "failed",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Hacienda Espejismo Tempranillo Reserva",
+      "queryClass": "no_match",
+      "expectedStatus": "failed",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "failed"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Schloss Geistreich Riesling Auslese",
+      "queryClass": "no_match",
+      "expectedStatus": "failed",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Bodegas Silencio Ribera del Duero",
+      "queryClass": "no_match",
+      "expectedStatus": "failed",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "ambiguous"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "꿈의 보르도 프리미엄 레드",
+      "queryClass": "no_match",
+      "expectedStatus": "failed",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "failed"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "failed"
+      },
+      "v2Verdict": "correct"
+    },
+    {
+      "query": "Cape Phantom Stellenbosch Pinotage",
+      "queryClass": "no_match",
+      "expectedStatus": "failed",
+      "expectedEntityId": null,
+      "v1": {
+        "status": "failed"
+      },
+      "v1Verdict": "correct",
+      "v2": {
+        "status": "failed"
+      },
+      "v2Verdict": "correct"
+    }
+  ]
+}

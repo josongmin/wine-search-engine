@@ -25,6 +25,7 @@
  */
 
 import type { GroundingFacts } from './synthesis-grounding-verify.js';
+import type { DegradedReason } from './synthesis-schemas.js';
 
 /**
  * Layer 3 grounding-preview slice cap: max characters of the last grounding
@@ -116,6 +117,29 @@ export const FALLBACK_TEMPLATES = {
     korean: '요청하신 와인 정보를 현재 처리하지 못했습니다. 검색어를 바꿔서 다시 시도해주세요.',
     english: 'We could not process your wine query. Please try rephrasing or simplifying your search.',
   },
+  /**
+   * LLM provider unavailable (auth / credit-exhausted / circuit-open /
+   * timeout). The synthesizer could not run AT ALL, so we DO NOT fabricate a
+   * grounded one-line answer (Layer 2) that would misrepresent an arbitrary
+   * wine as the answer. Instead we say so honestly and point the user at the
+   * raw retrieved results, which are returned alongside this answer. Keep the
+   * copy free of any specific wine/region/price — those would be fabrication.
+   */
+  llmUnavailable: {
+    korean: '지금은 답변을 생성할 수 없어요 (요약 엔진이 일시적으로 사용 불가합니다). 아래 검색 결과를 직접 확인해 주세요.',
+    english: 'We could not generate an answer right now (the summarization engine is temporarily unavailable). Please review the search results below.',
+  },
+  /**
+   * Move 2: the query produced no deterministic signal AND the analyzer's LLM
+   * fallback was attempted and FAILED. The cause is an AI-analysis outage, not
+   * an out-of-scope query — so we say so honestly instead of asking the user to
+   * rephrase / supply a wine name (the `unsupportedIntent` copy). Free of any
+   * "your query is unsupported" framing.
+   */
+  analysisUnavailable: {
+    korean: '지금은 검색어를 분석하지 못했어요 (AI 분석 엔진이 일시적으로 사용 불가합니다). 잠시 후 다시 시도해 주세요.',
+    english: 'We could not analyze your query right now (the AI analysis engine is temporarily unavailable). Please try again shortly.',
+  },
   referenceSimilarity: {
     korean: (
       anchorLabel: string | undefined,
@@ -203,6 +227,44 @@ export const FALLBACK_TEMPLATES = {
     english: 'We could not find that wine in our catalogue. Would you like us to recommend a similar wine instead? Share details like region, price range, or food pairing and we can help.',
   },
 } as const;
+
+/**
+ * Cause-specific Layer 4 (last-resort) answer.
+ *
+ * The deterministic fallback MUST tell the user WHY no answer was produced
+ * rather than reflexively blaming their query. The legacy `layer4` copy
+ * ("검색어를 바꿔서 다시 시도해주세요") implies the user mis-typed even when the
+ * real cause is internal (retrieval returned nothing / the LLM produced
+ * unusable output / an internal error). This selector returns an honest,
+ * cause-appropriate message and falls back to the generic copy only for reasons
+ * without a dedicated one.
+ *
+ * Note: `llm_unavailable` / `timeout` / `circuit_open` never reach Layer 4 — the
+ * runner short-circuits those to {@link FALLBACK_TEMPLATES.llmUnavailable}
+ * earlier — so they are intentionally absent here.
+ */
+export function layer4MessageFor(reason: DegradedReason | undefined, hangul: boolean): string {
+  switch (reason) {
+    case 'no_results':
+      return hangul
+        ? '조건에 맞는 와인을 찾지 못했어요. 조건을 조금 넓혀 다시 시도해 주세요.'
+        : 'We could not find any wine matching your request. Please try broadening the criteria.';
+    case 'ungrounded_claim':
+      return hangul
+        ? '검색 결과를 신뢰도 있게 확정하지 못했어요. 잠시 후 다시 시도해 주세요.'
+        : 'We could not confirm the results with enough confidence. Please try again shortly.';
+    case 'malformed_llm_output':
+      return hangul
+        ? '결과를 정리하는 중 문제가 생겨 답변을 완성하지 못했어요. 잠시 후 다시 시도해 주세요.'
+        : 'We hit a problem while composing the answer. Please try again shortly.';
+    case 'unexpected_error':
+      return hangul
+        ? '처리 중 내부 오류가 발생했어요. 잠시 후 다시 시도해 주세요.'
+        : 'An internal error occurred while processing your request. Please try again shortly.';
+    default:
+      return hangul ? FALLBACK_TEMPLATES.layer4.korean : FALLBACK_TEMPLATES.layer4.english;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // S3 grounding-verify: re-synth directive template (moved from

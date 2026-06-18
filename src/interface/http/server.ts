@@ -18,7 +18,6 @@ import { deepKeysToSnake } from './middleware/snake-case-hook.js';
 import {
   registerHybridSearchRoute,
   registerLexicalSearchRoute,
-  registerLookupWineRoute,
   registerSemanticSearchRoute,
 } from './routes/primitive-search.route.js';
 import { registerEntityLookupV2OpsRoute, registerEntityLookupV2Route } from './routes/entity-lookup-v2.route.js';
@@ -377,21 +376,21 @@ export async function createServer(
   registerHybridSearchRoute(app, deps);
   registerSemanticSearchRoute(app, deps);
   registerLexicalSearchRoute(app, deps);
-  registerLookupWineRoute(app, deps);
-  // T-ELV2-01: dedicated entity-lookup V2 surface. Always present in production
-  // (the container always constructs the use case); guarded so lightweight
-  // server-construction tests can omit it.
-  if (deps.entityLookupV2UseCase !== undefined) {
-    const elv2Deps = { entityLookupV2UseCase: deps.entityLookupV2UseCase };
-    registerEntityLookupV2Route(app, elv2Deps);
-    // Trusted operator read plane — X-Debug-Key gated at the handler (T-ELV2-07).
-    registerEntityLookupV2OpsRoute(app, elv2Deps);
-  }
+  // BREAKING (V2-only cutover): POST /v1/lookup/wine is removed. The sole public
+  // lookup surface is POST /v2/entity-lookup (4-state V2-native contract).
+  // T-ELV2-01: dedicated entity-lookup V2 surface (sole public lookup authority).
+  const elv2Deps = { entityLookupV2UseCase: deps.entityLookupV2UseCase };
+  registerEntityLookupV2Route(app, elv2Deps);
+  // Trusted operator read plane — X-Debug-Key gated at the handler (T-ELV2-07).
+  registerEntityLookupV2OpsRoute(app, elv2Deps);
   // T-ELV2-07: operator curation plane (alias-audit/coverage-health/proposals).
   // Reads X-Debug-Key gated, writes X-Ops-Write-Key gated — registered when the
   // curation use case is wired (requires a PG pool).
   if (deps.curationUseCase !== undefined) {
-    registerEntityLookupV2OpsCurationRoutes(app, { curationUseCase: deps.curationUseCase });
+    registerEntityLookupV2OpsCurationRoutes(app, {
+      curationUseCase: deps.curationUseCase,
+      ...(deps.lookupOpsRuntime !== undefined ? { lookupOpsRuntime: deps.lookupOpsRuntime } : {}),
+    });
   }
   if (deps.wineSearch !== undefined) {
     // Canonical agent surface — `POST /v1/agent` for caller-managed history,

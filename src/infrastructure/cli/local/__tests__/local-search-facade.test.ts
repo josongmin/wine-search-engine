@@ -30,27 +30,4 @@ describe('LocalSearchFacade', () => {
     });
   });
 
-  it('lookupWine injects entity retrieval semantics into the local use case input', async () => {
-    const seen: unknown[] = [];
-    const facade = new LocalSearchFacade({
-      withContainer: async (work) =>
-        await work({
-          searchUseCase: {
-            execute: async (input: unknown) => {
-              seen.push(input);
-              return { queryType: 'search', results: [] };
-            },
-          },
-        } as never),
-    });
-
-    await facade.lookupWine({ query: 'opus one 2018' }, { requestId: 'req-2' });
-
-    expect(seen[0]).toEqual({
-      query: 'opus one 2018',
-      options: { mode: 'auto', explain: false, clarification: false },
-      primitiveRoute: 'lookup_wine',
-      retrieval_mode: 'entity',
-    });
-  });
 });

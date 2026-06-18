@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   buildChannelHitsForEntity,
+  classifyResolveEvidenceGrade,
   mapLookupStrategyToChannel,
 } from '../../../src/domain/resolver/v2/channel-provenance.js';
 import { ConceptAdmissionGate } from '../../../src/domain/resolver/v2/concept-admission-gate.js';
@@ -28,6 +29,17 @@ describe('mapLookupStrategyToChannel', () => {
     ['exact', 'exact_alias'],
     ['compact_exact', 'compact_exact'],
     ['transliterated_exact', 'transliteration_exact'],
+    // T-04 regression: transliterated_fuzzy must NOT be forged as the
+    // identity-grade transliteration_exact (the bare `translit` branch used to
+    // fire first). It is a recall strategy → fuzzy_alias.
+    ['transliterated_fuzzy', 'fuzzy_alias'],
+    ['index_transliterated_fuzzy', 'fuzzy_alias'],
+    // transliterated_prefix is emitted LIVE by both wired matchers — it is a
+    // recall variant, not identity-grade, so it must NOT map to transliteration_exact
+    // (self-review C1 found the original guard let it through).
+    ['transliterated_prefix', 'fuzzy_alias'],
+    ['index_transliterated_prefix', 'fuzzy_alias'],
+    ['lexical_exact', 'fuzzy_alias'],
     ['phonetic_fuzzy', 'jamo_phonetic'],
     ['fuzzy_char_ngram', 'fuzzy_alias'],
     ['semantic_hybrid', 'dense'],
@@ -66,6 +78,32 @@ describe('buildChannelHitsForEntity', () => {
   });
 });
 
+describe('classifyResolveEvidenceGrade', () => {
+  it('treats exact/compact/transliteration channels as identity-grade', () => {
+    expect(classifyResolveEvidenceGrade([{ channel: 'exact_alias' }])).toBe('identity_grade');
+    expect(classifyResolveEvidenceGrade([{ channel: 'compact_exact' }])).toBe('identity_grade');
+    expect(classifyResolveEvidenceGrade([{ channel: 'transliteration_exact' }])).toBe('identity_grade');
+  });
+
+  it('treats jamo/phonetic-only evidence as supportive_only', () => {
+    expect(classifyResolveEvidenceGrade([{ channel: 'jamo_phonetic' }])).toBe('supportive_only');
+  });
+
+  it('treats fuzzy/family/dense-only evidence as recall_only', () => {
+    expect(classifyResolveEvidenceGrade([{ channel: 'fuzzy_alias' }])).toBe('recall_only');
+    expect(classifyResolveEvidenceGrade([{ channel: 'family_graph' }])).toBe('recall_only');
+    expect(classifyResolveEvidenceGrade([{ channel: 'dense' }])).toBe('recall_only');
+  });
+
+  it('prefers identity-grade when mixed with supportive or recall channels', () => {
+    expect(classifyResolveEvidenceGrade([
+      { channel: 'fuzzy_alias' },
+      { channel: 'jamo_phonetic' },
+      { channel: 'compact_exact' },
+    ])).toBe('identity_grade');
+  });
+});
+
 describe('EntityLookupV2UseCase — channel provenance surfaced end-to-end', () => {
   it('populates channel_hits, channel_agreement, and coverage from anchors', async () => {
     const eid = createEntityId('opus-one-2018');
@@ -99,11 +137,15 @@ describe('EntityLookupV2UseCase — channel provenance surfaced end-to-end', () 
     const doc = { entityId: eid, entityType: 'wine' as const, canonicalLabel: 'Opus One 2018' };
     const useCase = new EntityLookupV2UseCase({
       admissionGate: new ConceptAdmissionGate(),
-      queryPlanner,
+      lookupPlanner: queryPlanner,
       entityResolver: resolver,
-      entityLookup: {
-        getDocument: vi.fn().mockResolvedValue(doc),
-        getDocuments: vi.fn().mockResolvedValue(new Map([[eid, doc]])),
+      resolverProjectionLookup: {
+        getResolverProjections: vi.fn().mockResolvedValue(new Map([[eid, {
+          entityId: eid,
+          entityType: 'wine',
+          canonicalLabel: 'Opus One 2018',
+          aliasesIdentitySafe: [],
+        }]])),
       },
       querySanitizer: { sanitize: vi.fn((q: string) => ({ safe: true, sanitizedQuery: q })) } as never,
     });
@@ -159,10 +201,17 @@ describe('EntityLookupV2UseCase — channel provenance surfaced end-to-end', () 
     };
     const useCase = new EntityLookupV2UseCase({
       admissionGate: new ConceptAdmissionGate(),
-      queryPlanner,
+      lookupPlanner: queryPlanner,
       entityResolver: resolver,
       candidateRetrieval,
-      entityLookup: { getDocument: vi.fn().mockResolvedValue(doc), getDocuments: vi.fn().mockResolvedValue(new Map([[eid, doc]])) },
+      resolverProjectionLookup: {
+        getResolverProjections: vi.fn().mockResolvedValue(new Map([[eid, {
+          entityId: eid,
+          entityType: 'wine',
+          canonicalLabel: 'Opus One 2018',
+          aliasesIdentitySafe: [],
+        }]])),
+      },
       querySanitizer: { sanitize: vi.fn((q: string) => ({ safe: true, sanitizedQuery: q })) } as never,
     });
 

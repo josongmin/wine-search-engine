@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import type { EntitySnapshotRecord } from '../../../scripts/etl/search-snapshot-schema.js';
 import { serializeNdjson } from '../../../scripts/etl/search-snapshot-schema.js';
 import {
+  acquireRuntimeSubstratePublishAdvisoryLock,
   assertLearnedFacetCoverageForPublish,
   assertEntityIdentitySignatureConsistency,
   assertSnapshotArtifactLearnedFacetCoverage,
@@ -208,5 +209,17 @@ describe('ensureSnapshotScopedAmbiguityRegistryIndexes', () => {
 
     expect(calls.some((sql) => sql.includes('DROP INDEX IF EXISTS idx_ambiguity_normalized'))).toBe(false);
     expect(calls.some((sql) => sql.includes('idx_ambiguity_snapshot_normalized'))).toBe(true);
+  });
+});
+
+describe('runtime substrate publish advisory lock', () => {
+  it('fails closed when another publisher already holds the advisory lock', async () => {
+    const client = {
+      query: async () => ({ rows: [{ locked: false }] }),
+    };
+
+    await expect(
+      acquireRuntimeSubstratePublishAdvisoryLock(client as never),
+    ).rejects.toThrow(/already held/);
   });
 });

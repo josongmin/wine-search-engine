@@ -1,6 +1,7 @@
 import type { EvalResult } from '../model/eval-result.js';
 import type { EvalCase } from '../model/eval-case.js';
 import type { EvalMetrics, SliceMetrics } from '../model/eval-metrics.js';
+import type { QueryClass } from '../../shared/types/query-class.js';
 import type { UtilityScorer } from './utility-scorer.js';
 import type { SelectivePredictor } from './selective-predictor.js';
 import type { CalibrationEvaluator } from './calibration-evaluator.js';
@@ -17,6 +18,14 @@ const SLICE_ECE_DELTA_THRESHOLD = 0.05;
 const LATENCY_PERCENTILE_P50 = 0.5;
 /** Latency percentile for tail (SLO-style). */
 const LATENCY_PERCENTILE_P95 = 0.95;
+/**
+ * Fallback bucket key for the per-class mismatch breakdown when a result has
+ * no recorded runtime query class. Mirrors the `COALESCE(runtime_query_class,
+ * gold_query_class)` stratification in `extract-calibration-trace.ts`; here the
+ * gold class is not carried on `EvalResult`, so unclassified results aggregate
+ * under the canonical `'unknown'` QueryClass member.
+ */
+const MISMATCH_FALLBACK_QUERY_CLASS: QueryClass = 'unknown';
 
 /**
  * A flagged slice where metrics are significantly below the overall average.
@@ -180,6 +189,9 @@ export class SliceEvaluator {
     const admissionViolations = results.filter((r) => r.isAdmissionViolation === true).length;
     const latencies = results.map((r) => r.latencyMs).sort((a, b) => a - b);
 
+    const mismatches = results.filter((r) => r.goldRuntimeQueryClassMismatch === true).length;
+    const goldRuntimeQueryClassMismatchRate = mismatches / count;
+
     return {
       decisionUtility: this.utilityScorer.aggregateUtility(results),
       correctResolveRate: correctResolves / count,
@@ -198,7 +210,40 @@ export class SliceEvaluator {
       admissionViolationRate: admissionViolations / count,
       p50LatencyMs: this.percentile(latencies, LATENCY_PERCENTILE_P50),
       p95LatencyMs: this.percentile(latencies, LATENCY_PERCENTILE_P95),
+      goldRuntimeQueryClassMismatchRate,
+      mismatchRateByClass: this.computeMismatchRateByClass(results),
     };
+  }
+
+  /**
+   * Computes the per-class mismatch rate, stratified by the RUNTIME query class
+   * (the class calibration is actually keyed by). Results with no recorded
+   * runtime class aggregate under {@link MISMATCH_FALLBACK_QUERY_CLASS}.
+   *
+   * Returns an empty map for an empty input (never NaN). Each entry's value is
+   * `mismatchesInClass / totalInClass`, divide-by-zero impossible because a
+   * class key only exists when at least one result mapped to it.
+   */
+  private computeMismatchRateByClass(
+    results: readonly EvalResult[],
+  ): ReadonlyMap<QueryClass, number> {
+    const totalByClass = new Map<QueryClass, number>();
+    const mismatchByClass = new Map<QueryClass, number>();
+
+    for (const result of results) {
+      const cls = result.runtimeQueryClass ?? MISMATCH_FALLBACK_QUERY_CLASS;
+      totalByClass.set(cls, (totalByClass.get(cls) ?? 0) + 1);
+      if (result.goldRuntimeQueryClassMismatch === true) {
+        mismatchByClass.set(cls, (mismatchByClass.get(cls) ?? 0) + 1);
+      }
+    }
+
+    const rateByClass = new Map<QueryClass, number>();
+    for (const [cls, total] of totalByClass) {
+      // total >= 1 by construction (a key exists only when seen), so no NaN.
+      rateByClass.set(cls, (mismatchByClass.get(cls) ?? 0) / total);
+    }
+    return rateByClass;
   }
 
   /**
@@ -292,6 +337,8 @@ export class SliceEvaluator {
       admissionViolationRate: 0,
       p50LatencyMs: 0,
       p95LatencyMs: 0,
+      goldRuntimeQueryClassMismatchRate: 0,
+      mismatchRateByClass: new Map(),
     };
   }
 

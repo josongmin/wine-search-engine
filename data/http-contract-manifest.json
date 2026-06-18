@@ -8,12 +8,15 @@
       "hasBody": false,
       "hasParams": false,
       "responseStatusCodes": [
-        200
+        200,
+        503
       ],
       "successStatusCodes": [
         200
       ],
-      "errorStatusCodes": []
+      "errorStatusCodes": [
+        503
+      ]
     },
     {
       "method": "GET",
@@ -34,100 +37,81 @@
     },
     {
       "method": "POST",
-      "url": "/v1/batch-search",
-      "operationId": "search.batch",
-      "hasBody": true,
-      "hasParams": false,
-      "responseStatusCodes": [
-        207,
-        400,
-        429,
-        500
-      ],
-      "successStatusCodes": [
-        207
-      ],
-      "errorStatusCodes": [
-        400,
-        429,
-        500
-      ]
-    },
-    {
-      "method": "GET",
-      "url": "/v1/claude-tools",
-      "operationId": "tools.list",
-      "hasBody": false,
-      "hasParams": false,
-      "responseStatusCodes": [
-        200
-      ],
-      "successStatusCodes": [
-        200
-      ],
-      "errorStatusCodes": []
-    },
-    {
-      "method": "POST",
-      "url": "/v1/claude-tools",
-      "operationId": "tools.execute",
-      "hasBody": true,
-      "hasParams": false,
-      "responseStatusCodes": [
-        200,
-        400
-      ],
-      "successStatusCodes": [
-        200
-      ],
-      "errorStatusCodes": [
-        400
-      ]
-    },
-    {
-      "method": "POST",
-      "url": "/v1/entity/resolve",
-      "operationId": "entity.resolve",
+      "url": "/v1/agent",
+      "operationId": "agent.run",
       "hasBody": true,
       "hasParams": false,
       "responseStatusCodes": [
         200,
         400,
-        403,
+        408,
         429,
-        500
+        500,
+        503
       ],
       "successStatusCodes": [
         200
       ],
       "errorStatusCodes": [
         400,
-        403,
+        408,
         429,
-        500
+        500,
+        503
       ]
     },
     {
       "method": "POST",
-      "url": "/v1/search",
-      "operationId": "search.execute",
+      "url": "/v1/agent/sessions",
+      "operationId": "agent.session.create",
       "hasBody": true,
       "hasParams": false,
       "responseStatusCodes": [
         200,
+        201,
         400,
-        403,
-        429,
-        500
+        500,
+        503
       ],
       "successStatusCodes": [
-        200
+        200,
+        201
       ],
       "errorStatusCodes": [
         400,
-        403,
+        500,
+        503
+      ]
+    },
+    {
+      "method": "POST",
+      "url": "/v1/agent/sessions/:sessionId/turns",
+      "operationId": "agent.session.turn",
+      "hasBody": true,
+      "hasParams": true,
+      "responseStatusCodes": [
+        200,
+        201,
+        400,
+        404,
+        408,
+        409,
         429,
-        500
+        500,
+        503
+      ],
+      "successStatusCodes": [
+        200,
+        201
+      ],
+      "errorStatusCodes": [
+        400,
+        404,
+        408,
+        409,
+        429,
+        500,
+        503
       ]
     },
     {
@@ -140,8 +124,10 @@
         200,
         400,
         403,
+        408,
         429,
-        500
+        500,
+        503
       ],
       "successStatusCodes": [
         200
@@ -149,22 +135,26 @@
       "errorStatusCodes": [
         400,
         403,
+        408,
         429,
-        500
+        500,
+        503
       ]
     },
     {
       "method": "POST",
-      "url": "/v1/search/interpret",
-      "operationId": "search.interpret",
+      "url": "/v1/search/lexical",
+      "operationId": "search.lexical",
       "hasBody": true,
       "hasParams": false,
       "responseStatusCodes": [
         200,
         400,
         403,
+        408,
         429,
-        500
+        500,
+        503
       ],
       "successStatusCodes": [
         200
@@ -172,113 +162,237 @@
       "errorStatusCodes": [
         400,
         403,
+        408,
         429,
-        500
+        500,
+        503
       ]
     },
     {
       "method": "POST",
-      "url": "/v1/search/replay",
-      "operationId": "search.replay",
+      "url": "/v1/search/semantic",
+      "operationId": "search.semantic",
       "hasBody": true,
       "hasParams": false,
       "responseStatusCodes": [
         200,
         400,
+        403,
+        408,
+        429,
+        500,
+        503
+      ],
+      "successStatusCodes": [
+        200
+      ],
+      "errorStatusCodes": [
+        400,
+        403,
+        408,
+        429,
+        500,
+        503
+      ]
+    },
+    {
+      "method": "POST",
+      "url": "/v2/entity-lookup",
+      "operationId": "entity.lookup.v2",
+      "hasBody": true,
+      "hasParams": false,
+      "responseStatusCodes": [
+        200,
+        400,
+        403,
+        408,
+        429,
+        500,
+        503
+      ],
+      "successStatusCodes": [
+        200
+      ],
+      "errorStatusCodes": [
+        400,
+        403,
+        408,
+        429,
+        500,
+        503
+      ]
+    },
+    {
+      "method": "POST",
+      "url": "/v2/entity-lookup/ops/alias-audit",
+      "operationId": "entity.lookup.v2.ops.alias_audit",
+      "hasBody": true,
+      "hasParams": false,
+      "responseStatusCodes": [
+        200,
+        400,
+        403,
+        500,
+        503
+      ],
+      "successStatusCodes": [
+        200
+      ],
+      "errorStatusCodes": [
+        400,
+        403,
+        500,
+        503
+      ]
+    },
+    {
+      "method": "POST",
+      "url": "/v2/entity-lookup/ops/coverage-health",
+      "operationId": "entity.lookup.v2.ops.coverage_health",
+      "hasBody": true,
+      "hasParams": false,
+      "responseStatusCodes": [
+        200,
+        400,
+        403,
+        500,
+        503
+      ],
+      "successStatusCodes": [
+        200
+      ],
+      "errorStatusCodes": [
+        400,
+        403,
+        500,
+        503
+      ]
+    },
+    {
+      "method": "POST",
+      "url": "/v2/entity-lookup/ops/inspect",
+      "operationId": "entity.lookup.v2.ops.inspect",
+      "hasBody": true,
+      "hasParams": false,
+      "responseStatusCodes": [
+        200,
+        400,
+        403,
+        408,
+        429,
+        500,
+        503
+      ],
+      "successStatusCodes": [
+        200
+      ],
+      "errorStatusCodes": [
+        400,
+        403,
+        408,
+        429,
+        500,
+        503
+      ]
+    },
+    {
+      "method": "POST",
+      "url": "/v2/entity-lookup/ops/proposals",
+      "operationId": "entity.lookup.v2.ops.proposals.list",
+      "hasBody": true,
+      "hasParams": false,
+      "responseStatusCodes": [
+        200,
+        400,
+        403,
+        500,
+        503
+      ],
+      "successStatusCodes": [
+        200
+      ],
+      "errorStatusCodes": [
+        400,
+        403,
+        500,
+        503
+      ]
+    },
+    {
+      "method": "POST",
+      "url": "/v2/entity-lookup/ops/proposals/publish",
+      "operationId": "entity.lookup.v2.ops.proposals.publish",
+      "hasBody": true,
+      "hasParams": false,
+      "responseStatusCodes": [
+        200,
+        400,
+        403,
+        404,
         409,
-        429,
-        500
+        500,
+        503
       ],
       "successStatusCodes": [
         200
       ],
       "errorStatusCodes": [
         400,
+        403,
+        404,
         409,
-        429,
-        500
+        500,
+        503
       ]
     },
     {
       "method": "POST",
-      "url": "/v1/watchlist",
-      "operationId": "watchlist.create",
+      "url": "/v2/entity-lookup/ops/proposals/review",
+      "operationId": "entity.lookup.v2.ops.proposals.review",
       "hasBody": true,
       "hasParams": false,
       "responseStatusCodes": [
-        201,
-        400,
-        500
-      ],
-      "successStatusCodes": [
-        201
-      ],
-      "errorStatusCodes": [
-        400,
-        500
-      ]
-    },
-    {
-      "method": "DELETE",
-      "url": "/v1/watchlist/:id",
-      "operationId": "watchlist.delete",
-      "hasBody": false,
-      "hasParams": true,
-      "responseStatusCodes": [
-        204,
-        400,
-        404,
-        500
-      ],
-      "successStatusCodes": [
-        204
-      ],
-      "errorStatusCodes": [
-        400,
-        404,
-        500
-      ]
-    },
-    {
-      "method": "GET",
-      "url": "/v1/watchlist/:id",
-      "operationId": "watchlist.get",
-      "hasBody": false,
-      "hasParams": true,
-      "responseStatusCodes": [
         200,
         400,
+        403,
         404,
-        500
+        409,
+        500,
+        503
       ],
       "successStatusCodes": [
         200
       ],
       "errorStatusCodes": [
         400,
+        403,
         404,
-        500
+        409,
+        500,
+        503
       ]
     },
     {
-      "method": "GET",
-      "url": "/v1/watchlist/:id/deliveries",
-      "operationId": "watchlist.listDeliveries",
-      "hasBody": false,
-      "hasParams": true,
+      "method": "POST",
+      "url": "/v2/entity-lookup/ops/proposals/submit",
+      "operationId": "entity.lookup.v2.ops.proposals.submit",
+      "hasBody": true,
+      "hasParams": false,
       "responseStatusCodes": [
         200,
         400,
-        404,
-        500
+        403,
+        500,
+        503
       ],
       "successStatusCodes": [
         200
       ],
       "errorStatusCodes": [
         400,
-        404,
-        500
+        403,
+        500,
+        503
       ]
     }
   ]

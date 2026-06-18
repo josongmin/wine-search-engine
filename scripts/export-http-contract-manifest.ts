@@ -3,7 +3,8 @@ import path from 'node:path';
 import { buildDeclaredHttpRouteContractManifest } from '../src/interface/http/routes/http-route-contract-catalog.js';
 
 async function main(): Promise<void> {
-  const outputPath = process.argv[2];
+  const args = process.argv.slice(2).filter((arg) => arg !== '--');
+  const outputPath = args[0];
   const manifest = buildDeclaredHttpRouteContractManifest();
   const serialized = `${JSON.stringify(manifest, null, 2)}\n`;
 

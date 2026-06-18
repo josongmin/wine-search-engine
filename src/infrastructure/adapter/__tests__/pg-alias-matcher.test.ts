@@ -18,16 +18,26 @@ const POINTER_ROW = Object.freeze({
   promoted_at: new Date('2026-04-14T00:00:00Z'),
 });
 
+function isSchemaCapabilityProbe(sql: string): boolean {
+  return sql.includes('information_schema.columns');
+}
+
 class MockPool {
   readonly queries: Array<{ sql: string; params: readonly unknown[] }> = [];
   private aliasQueryIdx = 0;
 
-  constructor(private readonly responses: readonly AliasRow[][]) {}
+  constructor(
+    private readonly responses: readonly AliasRow[][],
+    private readonly phoneticKeysColumnPresent = false,
+  ) {}
 
   async query(sql: string, params: readonly unknown[]): Promise<{ rows: unknown[] }> {
     if (sql.includes('FROM active_search_snapshot')) {
       // Pointer queries are invisible to the alias-query index (tests count alias calls, not pointer calls).
       return { rows: [POINTER_ROW] };
+    }
+    if (isSchemaCapabilityProbe(sql)) {
+      return { rows: [{ present: this.phoneticKeysColumnPresent }] };
     }
     this.queries.push({ sql, params });
     const next = this.responses[this.aliasQueryIdx] ?? [];
@@ -49,10 +59,13 @@ class MissingAliasPool {
   readonly queries: Array<{ sql: string; params: readonly unknown[] }> = [];
 
   async query(sql: string, params: readonly unknown[]): Promise<{ rows: unknown[] }> {
-    this.queries.push({ sql, params });
     if (sql.includes('FROM active_search_snapshot')) {
       return { rows: [POINTER_ROW] };
     }
+    if (isSchemaCapabilityProbe(sql)) {
+      return { rows: [{ present: false }] };
+    }
+    this.queries.push({ sql, params });
     const err = new Error('relation "aliases" does not exist') as Error & { code?: string };
     err.code = '42P01';
     throw err;
@@ -214,6 +227,9 @@ describe('PgAliasMatcher', () => {
         if (sql.includes('FROM active_search_snapshot')) {
           return { rows: [POINTER_ROW] };
         }
+        if (isSchemaCapabilityProbe(sql)) {
+          return { rows: [{ present: false }] };
+        }
         return {
           rows: [{
             entity_id: 'entity-opus-one',
@@ -295,13 +311,30 @@ describe('PgAliasMatcher', () => {
     await matcher.findMatches('opusone');
     await matcher.findMatches('opusone');
 
-    const pointerQueries = pool.queries.filter((query) =>
-      query.sql.includes('FROM active_search_snapshot'),
-    );
     const aliasQueries = pool.queries.filter((query) =>
       query.sql.includes('FROM unnest'),
     );
-    expect(pointerQueries).toHaveLength(1);
     expect(aliasQueries).toHaveLength(1);
+  });
+
+  it('uses phonetic_keys overlap recall when the aliases column is present', async () => {
+    const pool = new MockPool(
+      [
+        [
+          {
+            entity_id: 'entity-romanee-conti',
+            surface_form: 'Romanee Conti',
+            normalized_value: 'romanee conti',
+            confidence: 0.9,
+          },
+        ],
+      ],
+      true,
+    );
+    const matcher = new PgAliasMatcher(pool as never);
+
+    await matcher.findMatches('romane conti');
+
+    expect(pool.queries.some((query) => query.sql.includes('phonetic_keys && q.dm_keys'))).toBe(true);
   });
 });

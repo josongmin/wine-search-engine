@@ -9,6 +9,9 @@
  * Each function below has different semantics:
  *   - VINTAGE_YEAR_RAW: bare regex source for composing into larger patterns
  *   - extractVintageYear: returns the first 4-digit vintage year as a number, or null
+ *   - extractQueryVintageYear: query-oriented extractor that also accepts a
+ *     single standalone 2-digit shorthand when at least one non-numeric token
+ *     is present ("오퍼스 원 18" -> 2018)
  *   - stripVintageYears: removes all 4-digit vintage years from a string (label cleanup)
  *   - isVintageYearToken: 4-digit token-level guard (e.g., for stopword filtering)
  *   - isTwoDigitVintageToken: 2-digit shorthand guard (e.g., "18", "21")
@@ -77,6 +80,13 @@ const VINTAGE_TOKEN_RE = /^(?:19|20)\d{2}$/;
 const TWO_DIGIT_VINTAGE_TOKEN_RE = /^\d{2}$/;
 
 /**
+ * Extract-mode regex for standalone 2-digit shorthand years in free-form query
+ * text. Boundaries prevent matches inside longer numerals or alphanumeric IDs.
+ */
+const TWO_DIGIT_VINTAGE_EXTRACT_RE =
+  /(?<![\p{L}\p{N}])(\d{2})(?:년산?|년대)?(?![\p{L}\p{N}])/gu;
+
+/**
  * Returns the first vintage year found in the text, or null.
  * Uses Unicode word boundaries to avoid matching numbers embedded in words
  * (e.g., "12015" should NOT yield 2015).
@@ -86,6 +96,39 @@ export function extractVintageYear(text: string): number | null {
   if (match?.[1] === undefined) return null;
   const year = Number.parseInt(match[1], 10);
   return Number.isFinite(year) ? year : null;
+}
+
+/**
+ * Query-oriented vintage extractor.
+ *
+ * 1. Prefer a real 4-digit vintage token when present.
+ * 2. Otherwise accept exactly one standalone 2-digit shorthand token only when
+ *    the query still contains at least one letter token. This blocks bare
+ *    numeric queries like "18" from being treated as semantic vintage scopes.
+ *
+ * Intended for lookup/query parsing, not label ETL.
+ */
+export function extractQueryVintageYear(text: string, referenceYear?: number): number | null {
+  const fourDigitYear = extractVintageYear(text);
+  if (fourDigitYear !== null) {
+    return fourDigitYear;
+  }
+  if (!/\p{L}/u.test(text)) {
+    return null;
+  }
+  const shorthandMatches = [...text.matchAll(TWO_DIGIT_VINTAGE_EXTRACT_RE)]
+    .map((match) => match[1])
+    .filter((token): token is string => token !== undefined);
+  if (shorthandMatches.length !== 1) {
+    return null;
+  }
+  const shorthandToken = shorthandMatches[0];
+  if (shorthandToken === undefined) {
+    return null;
+  }
+  const canonicalYear = canonicalizeVintageToken(shorthandToken, referenceYear);
+  const numericYear = Number.parseInt(canonicalYear, 10);
+  return Number.isFinite(numericYear) ? numericYear : null;
 }
 
 /**

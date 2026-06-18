@@ -192,6 +192,21 @@ describe('T-010 publish-search-snapshot pointer promote wiring', () => {
     expect(src).toContain('requirePointerParity: true');
   });
 
+  it('publish run() reaps stale snapshot rows after final readiness verify', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const src = readFileSync(
+      fileURLToPath(new URL('../../scripts/etl/publish-search-snapshot.ts', import.meta.url)),
+      'utf-8',
+    );
+    const liveVerifyIdx = src.indexOf("console.log('✅ Verifying readiness after runtime substrate promotion')");
+    const reapIdx = src.indexOf('reapStaleSnapshotsAfterPublish(reapPool)');
+    expect(liveVerifyIdx).toBeGreaterThan(0);
+    expect(reapIdx).toBeGreaterThan(liveVerifyIdx);
+    expect(src).toContain('createReapSnapshotsPool(config.pg)');
+    expect(src).toContain('Snapshot reap failed (publish succeeded)');
+  });
+
   it('rollback path calls rollbackActiveSearchSnapshotPointer first', async () => {
     const { readFileSync } = await import('node:fs');
     const { fileURLToPath } = await import('node:url');

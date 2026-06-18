@@ -93,6 +93,11 @@ export function buildRankedRouteResolveResult(
     decisionTrace: {
       queryClass: plan.queryClass,
       top1CalibratedScore: top1Score,
+      // Raw (pre-calibration) top-1 ranker score for calibration training.
+      // Ranked-route decisionConfidenceC lifts the clamped finalScore; the
+      // UNCLAMPED finalScore is the raw signal the trainer fits against
+      // isCorrectResolve. Omitted when there is no top result.
+      ...(topResult !== undefined ? { top1RawScore: topResult.finalScore } : {}),
       top2CalibratedScore: top2Score,
       calibratedGap,
       decisionConfidenceC,

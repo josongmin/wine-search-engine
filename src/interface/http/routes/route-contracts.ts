@@ -2,13 +2,11 @@ import { z } from 'zod';
 import {
   HybridSearchRequestSchema,
   LexicalSearchRequestSchema,
-  LookupWineRequestSchema,
   SemanticSearchRequestSchema,
 } from '../schemas/primitive-search.schema.js';
 import {
   ComparisonSearchResponseSchema,
   ErrorResponseSchema,
-  ResolveResponseSchema,
   SearchResponseSchema,
 } from '../schemas/search-response.schema.js';
 import {
@@ -131,21 +129,6 @@ export const ReadyRouteContract = defineRouteContract({
   },
 });
 
-export const ResolveRouteContract = defineRouteContract({
-  operationId: 'entity.resolve',
-  body: LookupWineRequestSchema,
-  capabilities: ['security', 'planner', 'resolver_only'],
-  responses: {
-    [HTTP_STATUS_OK]: ResolveResponseSchema,
-    [HTTP_STATUS_BAD_REQUEST]: ErrorResponseSchema,
-    [HTTP_STATUS_FORBIDDEN]: ErrorResponseSchema,
-    [HTTP_STATUS_REQUEST_TIMEOUT]: ErrorResponseSchema,
-    [HTTP_STATUS_TOO_MANY_REQUESTS]: ErrorResponseSchema,
-    [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
-    [HTTP_STATUS_SERVICE_UNAVAILABLE]: ErrorResponseSchema,
-  },
-});
-
 // ---------------------------------------------------------------------------
 // T-ELV2-01 — dedicated entity-lookup V2 surface (`POST /v2/entity-lookup`).
 // NOT part of the primitive-search family: lookup is an entity-resolution task
@@ -265,9 +248,9 @@ export const EntityLookupV2OpsPublishProposalRouteContract = defineRouteContract
 });
 
 // ---------------------------------------------------------------------------
-// T-IR-01 primitive surface — `/v1/search/{hybrid,semantic,lexical}` and
-// `/v1/lookup/wine`. The body shape is identical across all four; the URL
-// is the authority on which retrieval lane runs (architecture-decision §2.2).
+// T-IR-01 primitive search surface — `/v1/search/{hybrid,semantic,lexical}`.
+// The body shape is identical across the three search routes; the URL is the
+// authority on which retrieval lane runs (architecture-decision §2.2).
 // ---------------------------------------------------------------------------
 
 const PrimitiveSearchResponseSchema = z.union([SearchResponseSchema, ComparisonSearchResponseSchema]);
@@ -310,25 +293,4 @@ export const LexicalSearchRouteContract = defineRouteContract({
   body: LexicalSearchRequestSchema,
   capabilities: PRIMITIVE_SEARCH_CAPABILITIES,
   responses: PRIMITIVE_SEARCH_RESPONSES,
-});
-
-export const LookupWineRouteContract = defineRouteContract({
-  operationId: 'lookup.wine',
-  body: LookupWineRequestSchema,
-  capabilities: [
-    'security',
-    'planner',
-    'SAT',
-    'cache',
-    'resolver_only',
-  ],
-  responses: {
-    [HTTP_STATUS_OK]: SearchResponseSchema,
-    [HTTP_STATUS_BAD_REQUEST]: ErrorResponseSchema,
-    [HTTP_STATUS_FORBIDDEN]: ErrorResponseSchema,
-    [HTTP_STATUS_REQUEST_TIMEOUT]: ErrorResponseSchema,
-    [HTTP_STATUS_TOO_MANY_REQUESTS]: ErrorResponseSchema,
-    [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
-    [HTTP_STATUS_SERVICE_UNAVAILABLE]: ErrorResponseSchema,
-  },
 });

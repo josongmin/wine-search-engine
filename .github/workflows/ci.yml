@@ -17,6 +17,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - name: Cache ESLint
         uses: actions/cache@v4
@@ -30,6 +31,7 @@ jobs:
   deadcode:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - name: Dead-code ratchet (knip count must not exceed frozen baseline)
         run: pnpm run deadcode:ratchet
@@ -37,6 +39,7 @@ jobs:
   typecheck:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - name: Cache TypeScript incremental (noEmit)
         uses: actions/cache@v4
@@ -46,12 +49,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-tsc-noemit-
       - run: pnpm run typecheck
+      - name: Entity lookup ops-web typecheck
+        run: pnpm --dir app/entity-lookup-ops-web run typecheck
 
   test-unit:
     runs-on: ubuntu-latest
     env:
       VITEST_MAX_THREADS: 4
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - run: pnpm run test:coverage
 
@@ -61,6 +67,7 @@ jobs:
       VITEST_MAX_THREADS: 4
       FIXTURE_REPO_PATH: ${{ github.workspace }}/wine-engine-fixture
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - name: Checkout fixture repo
         uses: actions/checkout@v4
@@ -83,6 +90,7 @@ jobs:
     env:
       VITEST_MAX_FORKS: 4
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - run: pnpm run test:e2e:contract
 
@@ -91,12 +99,14 @@ jobs:
     env:
       VITEST_MAX_FORKS: 4
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - run: pnpm run test:e2e:runtime
 
   test-ingest-contract:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - run: pnpm run test:ingest:contract
 
@@ -104,6 +114,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - uses: actions/setup-python@v5
         with:
@@ -119,9 +130,16 @@ jobs:
     timeout-minutes: 12
     needs: [typecheck, test-e2e-contract, test-e2e-runtime, test-ingest-contract]
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - name: Noisy entity gate + baseline (no duplicate typecheck/e2e)
         run: pnpm run test:verification:noisy
+      - name: Meta / contract parity lane
+        run: pnpm run test:meta
+      - name: HTTP contract manifest parity
+        run: pnpm run verify:http-contracts
+      - name: Lookup-v2 active-pointer contract gate
+        run: pnpm run eval:lookup-v2:active-pointer:proof:contract
       - name: CI summary
         run: |
           {
@@ -135,6 +153,7 @@ jobs:
   verify-splits:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - name: Verify eval splits
         run: npx tsx scripts/eval/verify-splits.ts
@@ -143,6 +162,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - run: pnpm run test:quality
 
@@ -150,6 +170,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - run: pnpm run eval:offline:smoke:assert-baseline
 
@@ -157,6 +178,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [lint, deadcode, typecheck, test-unit, test-integration, test-e2e-contract, test-e2e-runtime, test-ingest-contract, security-semgrep, verification-core, verify-splits, quality, offline-eval-regression]
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node-ci
       - name: Cache TypeScript build incremental
         uses: actions/cache@v4

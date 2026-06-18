@@ -19,6 +19,7 @@ import { z } from 'zod';
 import {
   StructuredLlmCircuitOpenError,
   StructuredLlmPartialOutputError,
+  StructuredLlmProviderError,
   StructuredLlmRefusalError,
   StructuredLlmTimeoutError,
   StructuredLlmValidationError,
@@ -1245,6 +1246,42 @@ describe('ClaudeStructuredLlmAdapter', () => {
           model: TEST_MODEL,
         }),
       ).rejects.toBeInstanceOf(StructuredLlmCircuitOpenError);
+    });
+  });
+
+  // ---------------------- provider HTTP errors (Move 1) ----------------------
+
+  describe('provider HTTP rejection vs output validation', () => {
+    it('HTTP 400 credit-balance → StructuredLlmProviderError (NOT a ValidationError)', async () => {
+      // The provider rejected the request at the transport layer — the model
+      // never produced output. This MUST NOT be conflated with a
+      // ValidationError (which means "200 OK but the model output failed our
+      // schema"). Historically HTTP 400 "credit balance too low" was mapped to
+      // ValidationError, masquerading a provider outage as malformed output.
+      const creditBody = JSON.stringify({
+        type: 'error',
+        error: {
+          type: 'invalid_request_error',
+          message: 'Your credit balance is too low to access the Anthropic API.',
+        },
+      });
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(creditBody, { status: 400 })));
+      let caught: unknown = null;
+      try {
+        await adapter().analyze({
+          query: 'q',
+          schema: z.object({ x: z.number() }),
+          systemPrompt: 'sys',
+          maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+          perStepTimeoutMs: DEFAULT_PER_STEP_TIMEOUT_MS,
+          model: TEST_MODEL,
+        });
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(StructuredLlmProviderError);
+      expect(caught).not.toBeInstanceOf(StructuredLlmValidationError);
+      expect((caught as StructuredLlmProviderError).httpStatus).toBe(400);
     });
   });
 });

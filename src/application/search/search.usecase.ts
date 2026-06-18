@@ -12,7 +12,6 @@ import type { InjectionJudgePort } from '../../domain/security/port/injection-ju
 import type { SearchResponseCachePort } from '../../domain/performance/port/search-response-cache.port.js';
 import type { QueryClassWeights } from '../../domain/ranking/index.js';
 import type { ComparisonSearchResponse } from '../../domain/response/model/comparison-response.js';
-import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
 import type { QueryEntrySecurityObserver } from '../../domain/security/port/security-observer.port.js';
 import { pipelineDebug, sanitizeQueryForDebug } from '../../domain/observability/request-pipeline-debug.js';
 import { PipelineDebugStep } from '../../domain/observability/pipeline-debug-steps.js';
@@ -31,17 +30,18 @@ import type {
   SearchExecutionOptions,
   SearchExecutorEvaluationResult,
 } from './port/search-executor.port.js';
-import type { DecomposedSearchUseCasePort } from './port/search-route-usecases.port.js';
+import type {
+  DecomposedSearchUseCasePort,
+  EntityLookupV2UseCasePort,
+} from './port/search-route-usecases.port.js';
+import { executeEntityRouteViaLookupV2 } from './entity-lookup-v2/entity-lookup-v2-search-bridge.js';
 import type { SearchRequest } from './search-request.dto.js';
 import type { CacheLookupRuntimeState } from './search-usecase-cache-lookup.js';
 import type {
-  BlockingUseCasePort,
   BrowseRetrieverPort,
   CandidatePoolPort,
   CompareRetrieverPort,
   DecisionEnginePort,
-  EntityDocumentLookupPort,
-  EntityResolverPort,
   MixedSolverPort,
   QueryPlannerPort,
   RankingPort,
@@ -55,22 +55,10 @@ import {
 import { buildSearchRouteResolutionContext } from './search-usecase-route-resolution.js';
 import { resolveExecutionTopologyFromRequestSurface } from './search-usecase-route-resolution.js';
 import { runSearchPostRoutePhase } from './search-usecase-post-route-phase.js';
-import { buildResolverCandidatesFromGenerator } from './search-usecase-resolver-candidates.js';
-import { shouldSuppressBlockerSeedExpansion } from './search-usecase-blocker-seed-policy.js';
 import {
   executeHybridRouteRankingPipeline,
   resolveEntityRouteForPlan,
 } from './search-usecase-hybrid-ranking-pipeline.js';
-import {
-  shouldTriggerCorrectiveRetry,
-  resolveCorrectiveRetryOutcome,
-  alignRetryResultStatusToOutcome,
-  computeCorrectiveRetryCalibration,
-} from './search-usecase-corrective-retry.js';
-import {
-  buildEntityRouteRankedResults,
-  liftEntityResolveResultToLaneArtifacts,
-} from './search-usecase-entity-ranked-results.js';
 import { MixedRouteDegradationError } from '../../domain/mixed/model/mixed-degradation.js';
 import type { RequestExecutionContext } from '../../domain/shared/request-execution-context.js';
 import {
@@ -119,14 +107,6 @@ export interface SearchUseCaseDeps {
    * plan(). Production wiring must leave this unset.
    */
   readonly allowCompiledFallback?: boolean | undefined;
-  readonly entityResolver: EntityResolverPort;
-  readonly entityLookup?: EntityDocumentLookupPort | undefined;
-  /**
-   * TA2-4: Application-layer blocker for seeding candidates not covered by
-   * anchor alias lookup. Optional — when absent, the entity route falls back
-   * to anchors-only behaviour (pre-TA2 behaviour preserved).
-   */
-  readonly blocker?: BlockingUseCasePort | undefined;
   readonly candidatePool: CandidatePoolPort;
   readonly browseRetriever?: BrowseRetrieverPort | undefined;
   readonly compareRetriever?: CompareRetrieverPort | undefined;
@@ -168,6 +148,11 @@ export interface SearchUseCaseDeps {
    * {@link multiQueryGenerator}.
    */
   readonly hydeGenerator?: HydeGenerator | undefined;
+  /**
+   * Entity Lookup V2 authority — all entity-only and hybrid anchor resolution
+   * delegates here.
+   */
+  readonly entityLookupV2UseCase: EntityLookupV2UseCasePort;
 }
 
 /**
@@ -384,8 +369,8 @@ export class SearchUseCase {
       ...(stageTimer !== undefined ? { stageTimer } : {}),
       // T-IR-01: forward the path-authoritative retrieval lane (set by the
       // `/v1/search/{hybrid,semantic,lexical}` route mappers) into the
-      // retrieval layer. Absent for `/v1/lookup/wine` and non-primitive
-      // internal callers, which run the default channel mix.
+      // retrieval layer. Absent for the dedicated lookup authority and
+      // non-primitive internal callers, which run the default channel mix.
       ...(request.retrievalLane !== undefined ? { retrievalLane: request.retrievalLane } : {}),
       requestId,
       requestStartTimeMs: startTime,
@@ -427,13 +412,12 @@ export class SearchUseCase {
       specializedRouteObservability,
       retrievalFusionTrace,
       hardFilterDropLog,
-      correctiveRetryCalibration,
       criticRewrites,
       criticRetriesExhausted,
     } = await dispatchSearchRouteExecution(
       effectiveRoute,
       {
-        executeEntity: () => this.executeEntityRoute(plan, surfaceCompiled),
+        executeEntity: () => this.executeEntityRoute(plan, surfaceCompiled, routeRequestContext),
         executeHybrid: () => this.executeHybridRoute(
           plan,
           surfaceCompiled,
@@ -508,7 +492,6 @@ export class SearchUseCase {
       ...(hardFilterDropLog !== undefined && hardFilterDropLog.length > 0
         ? { hardFilterDropLog }
         : {}),
-      ...(correctiveRetryCalibration !== undefined ? { correctiveRetryCalibration } : {}),
       ...(criticRewrites !== undefined && criticRewrites.length > 0
         ? { criticRewrites }
         : {}),
@@ -558,332 +541,30 @@ export class SearchUseCase {
   }
 
   /**
-   * Entity-only route: run EntityResolver with TA3 corrective retry loop.
-   *
-   * Implements a maximum-1 corrective exact-recovery retry (TA3-1/TA3-2):
-   *
-   *   Pass 1: Build candidates from plan anchors, resolve.
-   *   If shouldTriggerCorrectiveRetry() → Pass 2: broader blocker recall +
-   *     re-hydrate candidates → re-resolve with expanded candidate set.
-   *   After Pass 2: apply resolveCorrectiveRetryOutcome() exit conditions.
-   *
-   * The retry is NOT a broad search fallback — it is an exact-recovery retry.
-   * Ambiguous misses and 'clarify'/'fail' recommendations skip the retry.
+   * Entity-only route: delegates to Entity Lookup V2 authority.
    */
   private async executeEntityRoute(
     plan: QueryPlanV1,
     compiled: CompiledWineQuery,
+    options?: RequestExecutionContext,
   ): Promise<EntityRouteResult> {
-    // TA2-4: Run blocker to surface entity IDs not covered by alias anchors.
-    // blockerOnlyIds = blocker output minus IDs already in anchor candidateEntityIds.
-    const blockerOnlyIds = this.capBlockerSeedIds(
+    return executeEntityRouteViaLookupV2(
       plan,
-      await this.runBlockerForPlan(plan, false),
       compiled,
+      this.deps.entityLookupV2UseCase,
+      options,
     );
-
-    const candidateEntities = await buildResolverCandidatesFromGenerator(
-      {
-        rawQuery: plan.rawQuery,
-        normalizedQuery: plan.normalizedQuery,
-        anchors: plan.anchors,
-        ...(blockerOnlyIds.length > 0 ? { blockerOnlyIds } : {}),
-      },
-      this.deps.entityLookup,
-    );
-
-    pipelineDebug(
-      {
-        step: PipelineDebugStep.ROUTE_ENTITY_ONLY_START,
-        query_class: plan.queryClass,
-        resolver_candidate_count: candidateEntities.length,
-        blocker_seed_count: blockerOnlyIds.length,
-      },
-      'pipeline entity-only route',
-    );
-
-    // Pass 1 resolve
-    const firstResult = await this.deps.entityResolver.resolve({
-      rawQuery: plan.rawQuery,
-      normalizedQuery: plan.normalizedQuery,
-      ...(plan.normalizedQueryViews !== undefined
-        ? { normalizedQueryViews: plan.normalizedQueryViews }
-        : {}),
-      queryClass: plan.queryClass,
-      policy: plan.policy,
-      anchorCandidates: plan.anchors,
-      uncertainty: plan.uncertainty,
-      candidateEntities,
-      blockingPolicy: 'trust_candidate_pool',
-    });
-
-    // TA3-1: Evaluate corrective retry trigger conditions
-    const triggerRetry = shouldTriggerCorrectiveRetry(plan, firstResult);
-
-    if (!triggerRetry) {
-      const rankedResults = buildEntityRouteRankedResults(plan, firstResult, candidateEntities);
-      const laneArtifacts = {
-        identity: liftEntityResolveResultToLaneArtifacts(plan, firstResult, candidateEntities),
-        general: [],
-        fused: [],
-      };
-      const topRankedResult = rankedResults[0];
-      pipelineDebug(
-        {
-          step: PipelineDebugStep.ROUTE_ENTITY_ONLY_DONE,
-          resolve_status: firstResult.status,
-          candidate_count: firstResult.candidates.length,
-          ranked_count: rankedResults.length,
-          corrective_retry: false,
-          ...(firstResult.decisionTrace.outcomeReasonCodes.length > 0
-            ? { outcome_reason_codes: firstResult.decisionTrace.outcomeReasonCodes }
-            : {}),
-          ...(topRankedResult !== undefined
-            ? {
-                top_hard_constraint_pass: topRankedResult.componentScores.hardConstraintPass,
-                top_matched_constraints: topRankedResult.matchedConstraints,
-                top_unmet_constraints: topRankedResult.unmetConstraints,
-                top_evidence_item_count: topRankedResult.evidenceItems.length,
-              }
-            : {}),
-          has_degradation: firstResult.degradation !== undefined,
-        },
-        'pipeline entity-only route',
-      );
-      return {
-        executionTopology: 'entity_only',
-        executedPlan: plan,
-        executedCompiled: compiled,
-        identityResolveResult: firstResult,
-        fusedResolveResult: firstResult,
-        laneArtifacts,
-        laneTrace: buildSearchExecutionLaneTrace({
-          executionTopology: 'entity_only',
-          identityResolveResult: firstResult,
-          fusedResolveResult: firstResult,
-          laneArtifacts,
-        }),
-        rankedResults,
-        effectiveRetrievalMode: compiled.execution.effectiveRetrievalMode,
-        usedCompiledExecution: true,
-        retrievalKind: 'entity_lookup',
-        sparseExecuted: false,
-        specializedRouteExecuted: null,
-      };
-    }
-
-    // TA3-2: Corrective retry — broader blocker recall + candidate re-hydration.
-    //
-    // Pass 2 uses broader=true to relax the blocker's limit/threshold and surface
-    // additional high-recall candidates that Pass 1 missed. New IDs are merged with
-    // the Pass 1 candidate set so the resolver sees a strictly larger pool.
-    pipelineDebug(
-      {
-        step: PipelineDebugStep.ROUTE_ENTITY_CORRECTIVE_RETRY_START,
-        query_class: plan.queryClass,
-        first_pass_confidence: firstResult.decisionConfidenceC,
-        first_pass_status: firstResult.status,
-        anchor_count: plan.anchors.length,
-        pass1_blocker_seed_count: blockerOnlyIds.length,
-      },
-      'pipeline entity corrective retry',
-    );
-
-    const broaderBlockerIds = await this.runBlockerForPlan(plan, true);
-    // Merge broader IDs with Pass 1 anchor coverage so dedup works correctly.
-    const anchorCoveredIds = new Set(
-      plan.anchors.flatMap((a) => a.candidateEntityIds.map(String)),
-    );
-    const pass1BlockerSet = new Set(blockerOnlyIds.map(String));
-    const additionalIds = this.capCorrectiveRetryAdditionalIds(
-      plan,
-      broaderBlockerIds.filter(
-        (id) => !anchorCoveredIds.has(String(id)) && !pass1BlockerSet.has(String(id)),
-      ),
-      blockerOnlyIds,
-      compiled,
-    );
-
-    // Rebuild candidates only when broader recall surfaced new IDs.
-    const retryCandidateEntities =
-      additionalIds.length > 0
-        ? await buildResolverCandidatesFromGenerator(
-            {
-              rawQuery: plan.rawQuery,
-              normalizedQuery: plan.normalizedQuery,
-              anchors: plan.anchors,
-              blockerOnlyIds: [...blockerOnlyIds, ...additionalIds],
-            },
-            this.deps.entityLookup,
-          )
-        : candidateEntities;
-
-    pipelineDebug(
-      {
-        step: PipelineDebugStep.ROUTE_ENTITY_CORRECTIVE_RETRY_CANDIDATES,
-        pass2_blocker_seed_count: broaderBlockerIds.length,
-        additional_ids_count: additionalIds.length,
-        retry_candidate_count: retryCandidateEntities.length,
-      },
-      'pipeline entity corrective retry candidates',
-    );
-
-    const retryResult = await this.deps.entityResolver.resolve({
-      rawQuery: plan.rawQuery,
-      normalizedQuery: plan.normalizedQuery,
-      ...(plan.normalizedQueryViews !== undefined
-        ? { normalizedQueryViews: plan.normalizedQueryViews }
-        : {}),
-      queryClass: plan.queryClass,
-      policy: plan.policy,
-      anchorCandidates: plan.anchors,
-      uncertainty: plan.uncertainty,
-      candidateEntities: retryCandidateEntities,
-      blockingPolicy: 'trust_candidate_pool',
-    });
-
-    // TA3-2: Apply exit conditions after corrective retry
-    const outcome = resolveCorrectiveRetryOutcome(retryResult);
-
-    // TA5: Compute calibrated posterior confidence for the retry outcome.
-    // Only populated for 'accept' outcomes; undefined for clarify/fail.
-    const retryCalibratedConfidence = computeCorrectiveRetryCalibration(retryResult, outcome);
-
-    // TA3-2 outcome propagation: force retryResult.status alignment with the
-    // corrective retry outcome before downstream consumers see it. See
-    // alignRetryResultStatusToOutcome for rationale.
-    const resolved: EntityResolveResult = alignRetryResultStatusToOutcome(retryResult, outcome);
-    const rankedResults = buildEntityRouteRankedResults(plan, resolved, retryCandidateEntities);
-    const laneArtifacts = {
-      identity: liftEntityResolveResultToLaneArtifacts(plan, resolved, retryCandidateEntities),
-      general: [],
-      fused: [],
-    };
-    const topRankedResult = rankedResults[0];
-
-    pipelineDebug(
-      {
-        step: PipelineDebugStep.ROUTE_ENTITY_ONLY_DONE,
-        resolve_status: resolved.status,
-        candidate_count: resolved.candidates.length,
-        ranked_count: rankedResults.length,
-        corrective_retry: true,
-        corrective_retry_outcome: outcome,
-        ...(retryCalibratedConfidence !== undefined
-          ? { corrective_retry_calibrated_confidence: retryCalibratedConfidence }
-          : {}),
-        ...(resolved.decisionTrace.outcomeReasonCodes.length > 0
-          ? { outcome_reason_codes: resolved.decisionTrace.outcomeReasonCodes }
-          : {}),
-        ...(topRankedResult !== undefined
-          ? {
-              top_hard_constraint_pass: topRankedResult.componentScores.hardConstraintPass,
-              top_matched_constraints: topRankedResult.matchedConstraints,
-              top_unmet_constraints: topRankedResult.unmetConstraints,
-              top_evidence_item_count: topRankedResult.evidenceItems.length,
-            }
-          : {}),
-        has_degradation: resolved.degradation !== undefined,
-      },
-      'pipeline entity-only route',
-    );
-
-    return {
-      executionTopology: 'entity_only',
-      executedPlan: plan,
-      executedCompiled: compiled,
-      identityResolveResult: resolved,
-      fusedResolveResult: resolved,
-      laneArtifacts,
-      laneTrace: buildSearchExecutionLaneTrace({
-        executionTopology: 'entity_only',
-        identityResolveResult: resolved,
-        fusedResolveResult: resolved,
-        laneArtifacts,
-      }),
-      rankedResults,
-      effectiveRetrievalMode: compiled.execution.effectiveRetrievalMode,
-      usedCompiledExecution: true,
-      retrievalKind: 'entity_lookup',
-      sparseExecuted: false,
-      specializedRouteExecuted: null,
-      ...(retryCalibratedConfidence !== undefined ? { correctiveRetryCalibration: retryCalibratedConfidence } : {}),
-    };
   }
 
   /**
-   * TA2-4 / TA3: Run the blocker to produce entity IDs not covered by anchors.
-   *
-   * Returns the diff: blocker output IDs that are NOT already in any anchor's
-   * `candidateEntityIds`. These are the true "blocker-only" seeds.
-   *
-   * @param broader  When true, use a higher-recall invocation for corrective retry (TA3).
-   */
-  private async runBlockerForPlan(
-    plan: QueryPlanV1,
-    broader: boolean,
-  ): Promise<readonly CanonicalEntityId[]> {
-    if (
-      this.deps.blocker === undefined
-      || shouldSuppressBlockerSeedExpansion(plan.anchors)
-    ) {
-      return [];
-    }
-    const allBlockerIds = await this.deps.blocker.block(
-      plan.rawQuery,
-      plan.normalizedQuery,
-      broader ? { broader: true } : undefined,
-    );
-    // Diff: remove IDs already covered by anchor candidateEntityIds
-    const anchorCoveredIds = new Set(
-      plan.anchors.flatMap((a) => a.candidateEntityIds.map(String)),
-    );
-    return allBlockerIds.filter((id) => !anchorCoveredIds.has(String(id)));
-  }
-
-  private capBlockerSeedIds(
-    plan: QueryPlanV1,
-    blockerOnlyIds: readonly CanonicalEntityId[],
-    compiled: CompiledWineQuery,
-  ): readonly CanonicalEntityId[] {
-    const maxCandidates = compiled.execution.budget.maxCandidates;
-
-    const anchorCoveredIds = new Set(
-      plan.anchors.flatMap((anchor) => anchor.candidateEntityIds.map(String)),
-    );
-    const remainingSlots = Math.max(0, maxCandidates - anchorCoveredIds.size);
-    return blockerOnlyIds.slice(0, remainingSlots);
-  }
-
-  private capCorrectiveRetryAdditionalIds(
-    plan: QueryPlanV1,
-    additionalIds: readonly CanonicalEntityId[],
-    pass1BlockerIds: readonly CanonicalEntityId[],
-    compiled: CompiledWineQuery,
-  ): readonly CanonicalEntityId[] {
-    const maxCandidates = compiled.execution.budget.maxCandidates;
-
-    const anchorCoveredIds = new Set(
-      plan.anchors.flatMap((anchor) => anchor.candidateEntityIds.map(String)),
-    );
-    const remainingSlots = Math.max(
-      0,
-      maxCandidates - anchorCoveredIds.size - new Set(pass1BlockerIds.map(String)).size,
-    );
-    return additionalIds.slice(0, remainingSlots);
-  }
-
-  /**
-   * Hybrid route: delegates to the shared pipeline used by HybridUseCase.
+   * Hybrid route: shared ranked-route pipeline for POST /v1/search/hybrid and auto-route hybrid plans.
    *
    * Primitive search callers can force retrieval lane selection at the HTTP
    * edge, while non-primitive/internal callers still arrive here with the
    * planner-selected hybrid topology.
    *
-   * The resolveEntity callback uses resolveEntityRouteForPlan (single-pass, no
-   * TA3 retry loop) because hybrid anchor resolution only needs the pivot
-   * entity for retrieval-side orchestration, not full exact-recovery retry.
-   * TA3 corrective retry remains entity-only.
+   * The resolveEntity callback uses the V2 lookup authority for hybrid anchor
+   * resolution before specialized retrieval can execute.
    */
   private async executeHybridRoute(
     plan: QueryPlanV1,
@@ -891,14 +572,15 @@ export class SearchUseCase {
     requestContext?: RequestExecutionContext,
     anchorEntityId?: CanonicalEntityId,
   ): Promise<SearchRouteExecutionResult> {
+    const entityResolutionDeps = {
+      entityLookupV2UseCase: this.deps.entityLookupV2UseCase,
+    } as const;
     const hybridRouteDeps = {
       candidatePool: this.deps.candidatePool,
       browseRetriever: this.deps.browseRetriever,
       compareRetriever: this.deps.compareRetriever,
-      entityResolver: this.deps.entityResolver,
-      entityLookup: this.deps.entityLookup,
-      blocker: this.deps.blocker,
       ranker: this.deps.ranker,
+      ...entityResolutionDeps,
       ...(this.deps.multiQueryGenerator !== undefined
         ? { multiQueryGenerator: this.deps.multiQueryGenerator }
         : {}),
@@ -924,11 +606,7 @@ export class SearchUseCase {
           hybridRouteDeps,
           (resolverPlan) => resolveEntityRouteForPlan(
             resolverPlan,
-            {
-              entityResolver: this.deps.entityResolver,
-              entityLookup: this.deps.entityLookup,
-              blocker: this.deps.blocker,
-            },
+            entityResolutionDeps,
             compiled,
           ),
           compiled,

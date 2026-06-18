@@ -51,10 +51,9 @@ async function searchPost(body: unknown): Promise<{
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('SearchResponseV1 Schema Contract', () => {
-  it('entity search response matches RFC-014 contract', async () => {
+  it('exact-query search response matches RFC-014 contract', async () => {
     const { statusCode, json } = await searchPost({
       query: 'Opus One 2018',
-      options: { mode: 'entity', explain: false, clarification: false },
     });
 
     expect(statusCode).toBe(200);
@@ -69,7 +68,7 @@ describe('SearchResponseV1 Schema Contract', () => {
   it('hybrid search response matches RFC-014 contract', async () => {
     const { statusCode, json } = await searchPost({
       query: '풀바디 레드 와인',
-      options: { mode: 'hybrid', explain: false, clarification: false },
+      options: { explain: false, clarification: false },
     });
 
     expect(statusCode).toBe(200);
@@ -121,7 +120,7 @@ describe('SearchResponseV1 Schema Contract', () => {
   it('every result has at least one evidenceItem with real (non-synthetic) evidence', async () => {
     const response = await postJson(server.app, '/v1/search/hybrid', {
       query: '풀바디 레드 와인',
-      options: { mode: 'hybrid', explain: false, clarification: false },
+      options: { explain: false, clarification: false },
     });
     expect(response.statusCode).toBe(200);
     const body = parseSearchResponse(response);
@@ -154,7 +153,7 @@ describe('SearchResponseV1 Schema Contract', () => {
   it('confidenceSemantics truthfully reflects calibration trust', async () => {
     const res = await postJson(server.app, '/v1/search/hybrid', {
       query: '풀바디 레드 와인',
-      options: { mode: 'hybrid', explain: false, clarification: false },
+      options: { explain: false, clarification: false },
     });
 
     expect(res.statusCode).toBe(200);

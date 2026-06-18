@@ -46,16 +46,15 @@ import { resolveActiveSnapshot } from '../infrastructure/db/active-snapshot-reso
 import { globalSilentSkipCounter } from '../domain/observability/silent-skip-counters.js';
 import { getRetrievalDegradationCollector } from '../infrastructure/observability/retrieval-degradation-metrics.js';
 import { LazyFuzzyMatcher } from '../infrastructure/adapter/lazy-fuzzy-matcher.js';
+import type { AmbiguityDictionary } from '../domain/query/port/ambiguity-dictionary.port.js';
 import type {
-  BlockingUseCasePort,
   BrowseRetrieverPort,
   CompareRetrieverPort,
 } from '../application/search/port/search-pipeline-deps.port.js';
+import type { BlockingPort } from '../domain/resolver/port/blocking.port.js';
+import type { CalibrationStore } from '../domain/resolver/port/calibration-store.port.js';
+import type { LearnedMatcherPort } from '../domain/resolver/port/learned-matcher.port.js';
 
-/** Default blocking limit for standard queries. */
-const BLOCKER_DEFAULT_LIMIT = 100;
-/** Broader blocking limit for corrective retry recall expansion (TA3). */
-const BLOCKER_BROADER_LIMIT = 200;
 
 export function buildSnapshotVersions(config: Config): SnapshotVersions {
   return {
@@ -82,6 +81,15 @@ export async function buildQueryPlanner(
   llmQueryInterpreterTimeoutMs?: number,
   phraseCache?: PhraseCachePort,
   searchSnapshotId?: string,
+  options: {
+    readonly ambiguityDictionary?: AmbiguityDictionary;
+    readonly forceRuleOnlyNlMapper?: boolean;
+    readonly disableTopologyPlanner?: boolean;
+    readonly disableAmbiguityIntentCompiler?: boolean;
+    readonly skipConstraintParsingOnExactSafeWitness?: boolean;
+    readonly disableConstraintCompilerFuzzyMatcher?: boolean;
+    readonly skipFuzzyFallbackOnKnownAmbiguousSurface?: boolean;
+  } = {},
 ): Promise<Planner> {
   // ADR-018 Wave F3: reject incoherent feature flag combinations BEFORE
   // constructing any planner dependencies. A mis-configured container
@@ -111,9 +119,7 @@ export async function buildQueryPlanner(
       );
       const terms = rows.map((r) => r.surface_form);
       if (terms.length > 0) {
-        const matcher = new LazyFuzzyMatcher(terms);
-        matcher.warm();
-        fuzzyMatcher = matcher;
+        fuzzyMatcher = new LazyFuzzyMatcher(terms);
       }
     } catch (err: unknown) {
       const code = (err as { code?: string } | undefined)?.code;
@@ -140,7 +146,8 @@ export async function buildQueryPlanner(
       'LLM_QUERY_INTERPRETER=true but no ChatLlm was constructed — check OPENAI_API_KEY/OPENAI_API_KEYS, Codex ChatGPT login token, and chatLlm wiring',
     );
   }
-  const nlMapper = llmQueryInterpreter && chatLlm !== undefined
+  const useRuleOnlyNlMapper = options.forceRuleOnlyNlMapper === true;
+  const nlMapper = !useRuleOnlyNlMapper && llmQueryInterpreter && chatLlm !== undefined
     ? new LlmNLMapper(adapters.mappingTable, chatLlm, llmQueryInterpreterTimeoutMs, phraseCache, fuzzyMatcher)
     : new NLMapper(adapters.mappingTable);
 
@@ -155,53 +162,52 @@ export async function buildQueryPlanner(
   //     per-request by re-reading `CONSTRAINT_GRAPH_TOPOLOGY_LLM` on
   //     every `compile()` call.
   const topologyPlanner =
-    chatLlm !== undefined
+    options.disableTopologyPlanner === true
+      ? undefined
+      : chatLlm !== undefined
       ? new ConstraintTopologyPlanner(chatLlm)
       : undefined;
   const ambiguityIntentCompiler =
-    chatLlm !== undefined
+    options.disableAmbiguityIntentCompiler === true
+      ? undefined
+      : chatLlm !== undefined
       ? new AmbiguityIntentCompiler(chatLlm)
       : undefined;
 
   return new Planner(
-    adapters.ambiguityDict,
+    options.ambiguityDictionary ?? adapters.ambiguityDict,
     new AnchorExtractor(adapters.aliasMatcher),
     new ExpansionBuilder(),
     nlMapper,
     fuzzyMatcher,
     topologyPlanner,
     ambiguityIntentCompiler,
+    {
+      skipConstraintParsingOnExactSafeWitness:
+        options.skipConstraintParsingOnExactSafeWitness === true,
+      disableConstraintCompilerFuzzyMatcher:
+        options.disableConstraintCompilerFuzzyMatcher === true,
+      skipFuzzyFallbackOnKnownAmbiguousSurface:
+        options.skipFuzzyFallbackOnKnownAmbiguousSurface === true,
+    },
   );
 }
 
-/**
- * TA2-T5: Adapts the domain-layer Blocker to the application-layer
- * BlockingUseCasePort so that SearchUseCase, HybridUseCase, and
- * ResolveUseCase can all consume the blocker without depending on
- * the domain resolver internals.
- *
- * Maps `options.broader = true` to a higher blocking limit (BLOCKER_BROADER_LIMIT)
- * for corrective retry recall expansion (TA3).
- */
-export function buildBlockingUseCaseAdapter(adapters: CoreAdapterServices): BlockingUseCasePort {
-  const blocker = new Blocker(adapters.blockingPort);
-  return {
-    block: (
-      query: string,
-      normalizedQuery: string,
-      options?: { readonly broader?: boolean },
-    ) => blocker.block(query, normalizedQuery, {
-      limit: options?.broader === true ? BLOCKER_BROADER_LIMIT : BLOCKER_DEFAULT_LIMIT,
-    }),
-  };
+export interface EntityResolverBuilderDeps {
+  readonly blockingPort: BlockingPort;
+  readonly calibrationStore: CalibrationStore;
+  readonly learnedMatcher?: LearnedMatcherPort | undefined;
 }
 
-export function buildEntityResolver(adapters: CoreAdapterServices, config: Config): Resolver {
+export function buildEntityResolver(
+  deps: EntityResolverBuilderDeps,
+  config: Config,
+): Resolver {
   return new Resolver(
-    new Blocker(adapters.blockingPort),
+    new Blocker(deps.blockingPort),
     new CandidateScorer(),
     new AmbiguityClassifier(),
-    new Calibrator(adapters.calibrationStore, {
+    new Calibrator(deps.calibrationStore, {
       // The resolver / decision stack already carries an explicit
       // `calibrationTrusted=false` degradation path for missing or stale
       // params. Hard-failing production requests here turns an untrusted score
@@ -219,7 +225,7 @@ export function buildEntityResolver(adapters: CoreAdapterServices, config: Confi
     // suppress the learned-matcher blend in the Resolver as well. Without this guard,
     // KILL_SWITCH_LEARNING=true disables SPLADE retrieval but the learned-matcher service
     // is still called on every entity resolution — defeating the kill switch's intent.
-    config.killSwitch.learning ? undefined : adapters.learnedMatcher,
+    config.killSwitch.learning ? undefined : deps.learnedMatcher,
   );
 }
 

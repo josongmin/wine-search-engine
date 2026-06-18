@@ -21,10 +21,8 @@ import { PipelineDebugStep } from '../../domain/observability/pipeline-debug-ste
 import { planToObservabilitySlice } from '../../domain/query/model/query-observability-vocab.js';
 import { compileFromLegacyPlan } from './search-usecase-compiled-fallback.js';
 import {
-  buildLookupWinePrimitivePlan,
   buildCallerControlledPrimitivePlan,
   buildSimilarToEntityPrimitivePlan,
-  isLookupWinePrimitiveSearchRequest,
   isCallerControlledPrimitiveSearchRequest,
   isSimilarToEntityPrimitiveSearchRequest,
 } from './search-usecase-caller-controlled-plan.js';
@@ -429,10 +427,7 @@ function shouldBypassPublicQueryEntrySecurity(
     return false;
   }
 
-  return (
-    ctx.request.primitiveRoute === 'lookup_wine'
-    || ctx.request.primitiveRoute === 'similar_to_entity'
-  );
+  return ctx.request.primitiveRoute === 'similar_to_entity';
 }
 
 async function refreshEntityLookupAnchorsIfNeeded(
@@ -482,8 +477,6 @@ export async function runSearchPreRoutePhase(
   ): Promise<SearchPreRoutePhaseResult> => {
     const callerControlledPrimitiveSearch =
       isCallerControlledPrimitiveSearchRequest(ctx.request);
-    const lookupWinePrimitiveSearch =
-      isLookupWinePrimitiveSearchRequest(ctx.request);
     const similarToEntityPrimitiveSearch =
       isSimilarToEntityPrimitiveSearchRequest(ctx.request);
     // Any path-authoritative primitive plan: the planner is bypassed and the
@@ -492,7 +485,6 @@ export async function runSearchPreRoutePhase(
     // to avoid double-application).
     const pathAuthoritativePrimitiveSearch =
       callerControlledPrimitiveSearch
-      || lookupWinePrimitiveSearch
       || similarToEntityPrimitiveSearch;
     if (ctx.decomposedSearch) {
       if (pathAuthoritativePrimitiveSearch) {
@@ -630,12 +622,7 @@ export async function runSearchPreRoutePhase(
 
     let plan: QueryPlanV1;
     let compiled: CompiledWineQuery;
-    if (lookupWinePrimitiveSearch) {
-      ({ plan, compiled } = buildLookupWinePrimitivePlan(
-        ctx.request,
-        sanitizedQuery,
-      ));
-    } else if (similarToEntityPrimitiveSearch) {
+    if (similarToEntityPrimitiveSearch) {
       ({ plan, compiled } = buildSimilarToEntityPrimitivePlan(
         ctx.request,
         sanitizedQuery,

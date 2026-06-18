@@ -6,24 +6,25 @@ summary: |
   primary source로 fallback. key pattern delete 지원. circuit breaker wrapper로
   Redis 장애 cascade 방지.
 
-maturity: 5
-maturity_rationale: |
-  단순하지만 효과적. query/entity cache로 사용, circuit breaker로 Redis 장애 격리됨.
-  silent data loss 사고 없음. unit test (redis-client.circuit-breaker) 보유.
-  property-based regression (fast-check numRuns:100)으로 fallback invariant를 검증:
-  cache miss/infra error → null fallback (no throw), breaker OPEN → backend
-  미접근 fallback, get/set round-trip, 한글 key/value verbatim 보존,
-  delete-by-pattern bounded (non-matching key 미삭제), breaker recovery
-  (injectable fake clock로 OPEN→HALF_OPEN cooldown 경계), idempotent delete.
-  mock Redis 전용 — 실제 Redis 미접속.
+  **Official runtime stack status (2026-06): EXCLUDED.** Deploy env must leave
+  `REDIS_URL` unset until `retrieval.cache-policy` is re-approved and
+  `infra.redis-cache-layer` TTL/eviction policy is signed off. Code remains for
+  CI lanes and future re-enable.
 
-status: active
+maturity: 4
+maturity_rationale: |
+  Client + circuit breaker are production-grade and well-tested, but Redis is
+  temporarily removed from the official deploy surface while cache policy is
+  redesigned. Maturity lowered from 5 → 4: implementation is sound, operational
+  contract is frozen pending policy work.
+
+status: deprecated
 since: 2025-08
-last_reviewed: 2026-05-21
+last_reviewed: 2026-06-10
 owner: core
 
 surfaces:
-  - "Internal (cache layer)"
+  - "Internal (cache layer — disabled in official deploy)"
 
 key_files:
   - src/infrastructure/db/redis-client.ts
@@ -42,11 +43,13 @@ depends_on:
 related_rfcs: []
 
 known_limitations:
+  - "OFFICIAL STACK EXCLUDED (prod/dev/CI) — do not set REDIS_URL until cache policy re-approval"
   - "TTL 관리 정형화 없음"
   - "Redis Cluster 미지원"
 
 next_steps:
-  - "TTL-based eviction"
+  - "Finalize retrieval.cache-policy (eligibility, TTL, invalidation)"
+  - "Re-enable Redis in official stack after infra.redis-cache-layer sign-off"
   - "Redis Cluster"
 
 tags:

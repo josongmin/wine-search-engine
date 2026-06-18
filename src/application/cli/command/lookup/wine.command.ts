@@ -9,7 +9,7 @@ import {
 
 export class LookupWineCommand implements CliCommand<PrimitiveSearchArgs> {
   readonly path = ['lookup', 'wine'] as const;
-  readonly summary = 'Resolve a canonical wine entity via /v1/lookup/wine.';
+  readonly summary = 'Resolve a canonical wine entity via POST /v2/entity-lookup (V2-native 4-state result).';
 
   parseArgs(rawArgs: readonly string[]): PrimitiveSearchArgs {
     return parsePrimitiveSearchArgs(rawArgs, 'lookup wine');
@@ -18,7 +18,7 @@ export class LookupWineCommand implements CliCommand<PrimitiveSearchArgs> {
   async run(ctx: CommandContext, args: PrimitiveSearchArgs): Promise<CommandResult> {
     const input = await resolvePrimitiveSearchInput(ctx, args, 'lookup wine');
     return {
-      data: await ctx.facades.search.lookupWine(input, {
+      data: await ctx.facades.lookup.lookupWine(input, {
         requestId: ctx.requestId,
         abortSignal: ctx.abortSignal,
       }),

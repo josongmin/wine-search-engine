@@ -8,7 +8,7 @@ import { deepKeysToSnake } from '../../../interface/http/middleware/snake-case-h
 import type { SearchRequest } from '../../../application/search/search-request.dto.js';
 import { LocalContainerRuntime } from './local-container-runtime.js';
 
-type PrimitiveKind = 'hybrid' | 'semantic' | 'lexical' | 'lookupWine';
+type PrimitiveKind = 'hybrid' | 'semantic' | 'lexical';
 
 function toSearchRequest(input: PrimitiveSearchInput, kind: PrimitiveKind): SearchRequest {
   return {
@@ -27,13 +27,6 @@ function toSearchRequest(input: PrimitiveSearchInput, kind: PrimitiveKind): Sear
     ...(kind === 'lexical'
       ? { retrieval_mode: 'hybrid' as const, retrievalLane: 'lexical_only' as const }
       : {}),
-    ...(kind === 'lookupWine'
-      ? {
-          primitiveRoute: 'lookup_wine' as const,
-          retrieval_mode: 'entity' as const,
-          options: { mode: 'auto' as const, explain: false, clarification: false },
-        }
-      : {}),
   };
 }
 
@@ -47,14 +40,14 @@ export class LocalSearchFacade implements SearchFacadePort {
     input: PrimitiveSearchInput,
     options: CliFacadeRequestOptions,
   ): Promise<PrimitiveSearchResult> {
-    return await this.runtime.withContainer(async (container) =>
-      deepKeysToSnake(
+    return await this.runtime.withContainer(async (container) => {
+      return deepKeysToSnake(
         await container.searchUseCase.execute(toSearchRequest(input, kind), options.requestId, {
           requestId: options.requestId,
           abortSignal: options.abortSignal,
         }),
-      ),
-    );
+      );
+    });
   }
 
   async hybrid(input: PrimitiveSearchInput, options: CliFacadeRequestOptions): Promise<PrimitiveSearchResult> {
@@ -67,9 +60,5 @@ export class LocalSearchFacade implements SearchFacadePort {
 
   async lexical(input: PrimitiveSearchInput, options: CliFacadeRequestOptions): Promise<PrimitiveSearchResult> {
     return await this.execute('lexical', input, options);
-  }
-
-  async lookupWine(input: PrimitiveSearchInput, options: CliFacadeRequestOptions): Promise<PrimitiveSearchResult> {
-    return await this.execute('lookupWine', input, options);
   }
 }

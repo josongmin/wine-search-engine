@@ -557,6 +557,13 @@ export interface IndexableWineRecord {
   readonly sweetness?: number | undefined;
   /** Critic score normalised to [0, 1] (feature copy). */
   readonly criticScoreNormalized?: number | undefined;
+  /**
+   * Confidence-derived rerank weight in [0, 1] for the synthetic critic proxy.
+   * Maps Track-C `criticProxy.confidence` (high/medium/low) to a multiplier so
+   * the `wine_aware` second-phase down-weights low-confidence synthetic critic
+   * scores. Absent for rating-fallback docs (ranker defaults to 1.0).
+   */
+  readonly criticConfidenceWeight?: number | undefined;
   /** Encoded grape primary (LTR feature). */
   readonly grapePrimaryEnc?: number | undefined;
   /** Encoded region (LTR feature). */

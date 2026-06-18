@@ -30,9 +30,7 @@ import { KNOWN_AGENT_TOOL_NAMES } from '@domain/agent/model/agent-tool-attempt-s
 import { AGENT_DIRECTIVE_COPY } from '@domain/agent/copy/directive-copy.js';
 import type { SearchUseCasePort } from './execution-runner.js';
 import type { SearchUseCaseInput } from './execution-plan-schemas.js';
-import type { DecomposedSearchUseCasePort } from '../search/port/search-route-usecases.port.js';
-import type { DrinkingWindowUseCasePort } from '../drinking-window/port/drinking-window-usecase.port.js';
-import type { EntityDocumentLookupPort } from '../search/port/search-pipeline-deps.port.js';
+import type { EntityLookupV2UseCasePort } from '../search/port/search-route-usecases.port.js';
 import type { WineSearchAnalysis } from './wine-search-schemas.js';
 
 // ---------------------------------------------------------------------------
@@ -213,9 +211,13 @@ export interface WineAgentLoopStep {
 
 export interface WineAgentLoopToolPorts {
   readonly searchUseCase: SearchUseCasePort;
-  readonly decomposedSearchUseCase?: DecomposedSearchUseCasePort | undefined;
-  readonly drinkingWindowUseCase?: DrinkingWindowUseCasePort | undefined;
-  readonly entityLookup?: EntityDocumentLookupPort | undefined;
+  /**
+   * Dedicated lookup authority (V2). `lookup_wine` dispatches here directly —
+   * NOT through `searchUseCase` — and consumes the V2-native 4-state result
+   * (resolved | ambiguous | failed | redirect_discovery). `searchUseCase` is
+   * reserved for discovery + `similar_to_entity` only.
+   */
+  readonly lookupWine: EntityLookupV2UseCasePort;
 }
 
 // ---------------------------------------------------------------------------

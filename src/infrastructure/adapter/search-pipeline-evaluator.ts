@@ -160,6 +160,9 @@ export class SearchPipelineEvaluator implements SearchPipelinePort {
         ...(decision.calibrationTrusted !== undefined
           ? { decisionConfidenceTrusted: decision.calibrationTrusted }
           : {}),
+        ...(decision.top1RawScore !== undefined
+          ? { top1RawScore: decision.top1RawScore }
+          : {}),
         ...(decision.executionMode !== undefined ? { executionMode: decision.executionMode } : {}),
         ...(decision.blockingEligible !== undefined
           ? { blockingEligible: decision.blockingEligible }

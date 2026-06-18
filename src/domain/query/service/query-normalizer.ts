@@ -1,7 +1,8 @@
 import { normalizeUnicodeWithHomoglyphs, stripAccents } from '../../shared/utils/unicode-normalize.js';
 import {
   canonicalizeVintageToken,
-  isPotentialVintageToken,
+  isTwoDigitVintageToken,
+  isVintageYearToken,
 } from '../../shared/utils/vintage.js';
 import type { NormalizedQueryViews } from '../model/query-views.js';
 import {
@@ -11,6 +12,7 @@ import {
 import { globalSilentSkipCounter } from '../../../domain/observability/silent-skip-counters.js';
 import { correctKoreanWineTypos } from './korean-wine-aliases.js';
 import { expandVintageVariants } from './vintage-normalizer.js';
+import { Transliterator } from '../../alias/service/transliterator.js';
 
 const PUNCTUATION_STRIP_RE = /[^\p{L}\p{N}\s]+/gu;
 const COMPACT_RE = /[^\p{L}\p{N}]+/gu;
@@ -189,18 +191,64 @@ const phoneticCompact = (value: string): string =>
 // Vintage canonicalization and stripping delegate to the vintage SSoT
 // (`@domain/shared/utils/vintage`). Any pivot/format change must happen
 // there so query normalization, ETL, and label parsing stay aligned.
-const canonicalizeVintage = (value: string): string => {
-  const tokens = collapseWhitespace(value).split(' ');
-  return collapseWhitespace(tokens.map((token) => canonicalizeVintageToken(token)).join(' '));
+
+/** A token that carries at least one Unicode letter — i.e. a NAME word, not a
+ *  bare numeral. Used to disambiguate name-internal 2-digit numbers from
+ *  trailing 2-digit vintage shorthand. */
+const NAME_WORD_RE = /\p{L}/u;
+
+/**
+ * Decides whether the 2-digit token at `index` is a vintage SHORTHAND
+ * ("Margaux 15" → 2015) versus a NAME-internal number ("Vineyard 29 Estate",
+ * "Numero 89 Gran Selezione", "Bin 28").
+ *
+ * Structural rule (no threshold): a real wine vintage shorthand sits at the
+ * trailing edge of a reference and is NOT followed by more name words —
+ * "Margaux 15", "… Chianti Classico 17". A number that PRECEDES a name word
+ * ("29 Estate", "89 Gran") is part of the entity name, not a year. So a 2-digit
+ * token counts as a vintage only when the NEXT token is absent or itself
+ * numeric (not a name word). 4-digit (19xx/20xx) tokens are unconditional
+ * vintages and never reach this guard.
+ *
+ * This is intentionally one-directional: it only PRESERVES name-internal
+ * numbers that the old all-2-digit-are-vintages rule destroyed. It never strips
+ * MORE than before, so it cannot create a new wrong-match in the identity-key
+ * overlap gate (a preserved "29" makes the surface stricter, not looser).
+ * Trailing-2-digit behaviour (incl. "Bin 28") is unchanged.
+ */
+const isVintageShorthandAtPosition = (tokens: readonly string[], index: number): boolean => {
+  const token = tokens[index];
+  if (token === undefined || !isTwoDigitVintageToken(token)) return false;
+  const next = tokens[index + 1];
+  if (next === undefined) return true;
+  return !NAME_WORD_RE.test(next);
 };
 
-const stripVintage = (value: string): string =>
-  collapseWhitespace(
-    collapseWhitespace(value)
-      .split(' ')
-      .filter((token) => !isPotentialVintageToken(token))
+const canonicalizeVintage = (value: string): string => {
+  const tokens = collapseWhitespace(value).split(' ');
+  return collapseWhitespace(
+    tokens
+      .map((token, i) => {
+        if (isVintageYearToken(token)) return canonicalizeVintageToken(token);
+        if (isVintageShorthandAtPosition(tokens, i)) return canonicalizeVintageToken(token);
+        return token;
+      })
       .join(' '),
   );
+};
+
+const stripVintage = (value: string): string => {
+  const tokens = collapseWhitespace(value).split(' ');
+  return collapseWhitespace(
+    tokens
+      .filter((token, i) => {
+        if (isVintageYearToken(token)) return false;
+        if (isVintageShorthandAtPosition(tokens, i)) return false;
+        return true;
+      })
+      .join(' '),
+  );
+};
 
 const transliterateExact = (value: string): string | undefined => {
   let result = value;
@@ -235,7 +283,22 @@ const transliterateByComponents = (value: string): string | undefined => {
 };
 
 const buildTransliterationVariants = (value: string): readonly string[] => {
+  // SSoT: curated Korean→Latin exact romanizations come from the SAME
+  // Transliterator the alias-matcher recall path uses (rules 25/30). The local
+  // KOREAN_TRANSLITERATION_* rule tables below are kept ONLY as a compositional
+  // fallback for terms NOT in the curated exception index — they had drifted
+  // and lacked entries like "돔페리뇽"→"dom pérignon", so the query produced no
+  // Latin identity surface and the resolver's identity-key overlap gate zeroed
+  // every identity lane (a recall hole vs V1).
+  //
+  // EXACT-key only (romanizeWineTerm): whole Korean query → whole Latin term,
+  // returns undefined on partials. We deliberately do NOT use
+  // romanizeWineTermPrefix here — it is a recall-phase IME prefix expander
+  // ("오푸"→"opus one") and injecting a complete Latin surface for a bare
+  // prefix into the query identity-key set would bypass the
+  // isStrictPrefixOfAnchorSurface ambiguity downgrade and wrong-resolve.
   const variants = dedupeVariants([
+    Transliterator.romanizeWineTerm(value),
     transliterateExact(value),
     transliterateByComponents(value),
   ].filter((variant): variant is string => variant !== undefined));
@@ -301,6 +364,65 @@ const buildSemanticEmbeddingVariants = (
     ...reorderedVariants,
   ]);
 
+interface QueryNormalizationVariantSet {
+  readonly strict: string;
+  readonly accentless: string;
+  readonly collapsedWhitespace: string;
+  readonly punctuationStripped: string;
+  readonly compact: string;
+  readonly phoneticNormalized?: string | undefined;
+  readonly phoneticCompact?: string | undefined;
+  readonly vintageCanonicalized: string;
+  readonly vintageStripped: string;
+  readonly josaStripped: string;
+  readonly transliterated?: string | undefined;
+  readonly transliteratedVariants: readonly string[];
+  readonly transliteratedCompacts: readonly string[];
+  readonly reordered: readonly string[];
+  readonly phoneticVariants: readonly string[];
+}
+
+function buildQueryNormalizationVariantSet(query: string): QueryNormalizationVariantSet {
+  const strict = collapseWhitespace(normalizeUnicodeWithHomoglyphs(query)).toLowerCase();
+  const accentless = stripAccents(strict);
+  const collapsedWhitespace = collapseWhitespace(accentless);
+  const punctuationStripped = separateAttachedVintageTokens(stripPunctuation(accentless));
+  const compactView = compact(punctuationStripped);
+  const vintageCanonicalized = canonicalizeVintage(punctuationStripped);
+  const vintageStripped = stripVintage(vintageCanonicalized);
+  const josaStripped = collapseWhitespace(stripKoreanJosa(vintageStripped));
+  const transliteratedVariants = buildTransliterationVariants(vintageStripped);
+  const transliterated = transliteratedVariants[0];
+  const transliteratedCompacts = transliteratedVariants.map((value) => compact(value));
+  const phoneticNormalizedView = phoneticNormalized(accentless);
+  const phoneticVariants = dedupeVariants([
+    phoneticCompact(punctuationStripped),
+    phoneticCompact(vintageCanonicalized),
+    phoneticCompact(vintageStripped),
+    ...transliteratedVariants.map((value) => phoneticCompact(value)),
+  ]);
+  const phoneticCompactView = phoneticVariants[0] ?? '';
+  const reorderedVariants = buildReorderedVariants(vintageStripped);
+
+  return {
+    strict,
+    accentless,
+    collapsedWhitespace,
+    punctuationStripped,
+    compact: compactView,
+    ...(phoneticNormalizedView.length > 0 ? { phoneticNormalized: phoneticNormalizedView } : {}),
+    ...(phoneticCompactView.length > 0 ? { phoneticCompact: phoneticCompactView } : {}),
+    vintageCanonicalized,
+    vintageStripped,
+    josaStripped,
+    ...(transliterated !== undefined ? { transliterated } : {}),
+    transliteratedVariants,
+    transliteratedCompacts,
+    reordered: reorderedVariants,
+    phoneticVariants,
+  };
+}
+
 /**
  * Produces a multi-view representation of a query for entity lookup.
  *
@@ -312,72 +434,82 @@ export class QueryNormalizer {
   normalize(query: string): NormalizedQueryViews {
     const raw = query;
     const typoCorrected = correctKoreanWineTypos(query);
-    const strict = collapseWhitespace(normalizeUnicodeWithHomoglyphs(typoCorrected)).toLowerCase();
-    const accentless = stripAccents(strict);
-    const collapsedWhitespace = collapseWhitespace(accentless);
-    const punctuationStripped = separateAttachedVintageTokens(stripPunctuation(accentless));
-    const compactView = compact(punctuationStripped);
-    const vintageCanonicalized = canonicalizeVintage(punctuationStripped);
-    const vintageStripped = stripVintage(vintageCanonicalized);
-    // Korean particle-stripped view: "보르도의 와인" → "보르도 와인",
-    // "샤또 무통 로칠드님" → "샤또 무통 로칠드". Applied AFTER vintage handling
-    // so vintage tokens remain numeric and unaffected. Only meaningful for
-    // Hangul-bearing queries; Latin-only queries are unchanged by the regex.
-    const josaStripped = collapseWhitespace(stripKoreanJosa(vintageStripped));
-    const transliteratedVariants = buildTransliterationVariants(vintageStripped);
-    const transliterated = transliteratedVariants[0];
-    const transliteratedCompacts = transliteratedVariants.map((value) => compact(value));
+    const corrected = buildQueryNormalizationVariantSet(typoCorrected);
+    const uncorrected = typoCorrected === query
+      ? undefined
+      : buildQueryNormalizationVariantSet(query);
 
-    // phoneticNormalized: phonetic rules applied (no vowel removal) — separate from compact
-    const phoneticNormalizedView = phoneticNormalized(accentless);
+    const rawSemanticVariants = uncorrected === undefined
+      ? []
+      : buildSemanticEmbeddingVariants(
+          raw,
+          uncorrected.accentless,
+          uncorrected.punctuationStripped,
+          uncorrected.vintageCanonicalized,
+          uncorrected.vintageStripped,
+          uncorrected.transliteratedVariants,
+          uncorrected.reordered,
+        );
+    const correctedSemanticVariants = buildSemanticEmbeddingVariants(
+      raw,
+      corrected.accentless,
+      corrected.punctuationStripped,
+      corrected.vintageCanonicalized,
+      corrected.vintageStripped,
+      corrected.transliteratedVariants,
+      corrected.reordered,
+    );
 
-    const phoneticVariants = dedupeVariants([
-      phoneticCompact(punctuationStripped),
-      phoneticCompact(vintageCanonicalized),
-      phoneticCompact(vintageStripped),
-      ...transliteratedVariants.map((value) => phoneticCompact(value)),
-    ]);
-    const phoneticCompactView = phoneticVariants[0] ?? '';
-
-    // reordered: alternate token orderings for multi-word queries
-    const reorderedVariants = buildReorderedVariants(vintageStripped);
+    const rawLookupVariants = uncorrected === undefined
+      ? []
+      : [
+          uncorrected.strict,
+          uncorrected.accentless,
+          uncorrected.collapsedWhitespace,
+          uncorrected.punctuationStripped,
+          uncorrected.compact,
+          uncorrected.vintageCanonicalized,
+          uncorrected.vintageStripped,
+          ...(uncorrected.josaStripped !== uncorrected.vintageStripped ? [uncorrected.josaStripped] : []),
+          ...uncorrected.transliteratedVariants,
+          ...uncorrected.transliteratedCompacts,
+          ...(uncorrected.phoneticNormalized !== undefined ? [uncorrected.phoneticNormalized] : []),
+          ...uncorrected.phoneticVariants,
+          ...uncorrected.reordered,
+        ];
 
     return {
       raw,
-      strict,
-      accentless,
-      collapsedWhitespace,
-      punctuationStripped,
-      compact: compactView,
-      ...(phoneticNormalizedView.length > 0 ? { phoneticNormalized: phoneticNormalizedView } : {}),
-      ...(phoneticCompactView.length > 0 ? { phoneticCompact: phoneticCompactView } : {}),
-      vintageCanonicalized,
-      vintageStripped,
-      ...(transliterated !== undefined ? { transliterated } : {}),
-      ...(reorderedVariants.length > 0 ? { reordered: reorderedVariants } : {}),
-      semanticVariants: buildSemanticEmbeddingVariants(
-        raw,
-        accentless,
-        punctuationStripped,
-        vintageCanonicalized,
-        vintageStripped,
-        transliteratedVariants,
-        reorderedVariants,
-      ),
+      strict: corrected.strict,
+      accentless: corrected.accentless,
+      collapsedWhitespace: corrected.collapsedWhitespace,
+      punctuationStripped: corrected.punctuationStripped,
+      compact: corrected.compact,
+      ...(corrected.phoneticNormalized !== undefined ? { phoneticNormalized: corrected.phoneticNormalized } : {}),
+      ...(corrected.phoneticCompact !== undefined ? { phoneticCompact: corrected.phoneticCompact } : {}),
+      vintageCanonicalized: corrected.vintageCanonicalized,
+      vintageStripped: corrected.vintageStripped,
+      ...(corrected.transliterated !== undefined ? { transliterated: corrected.transliterated } : {}),
+      ...(corrected.reordered.length > 0 ? { reordered: corrected.reordered } : {}),
+      semanticVariants: dedupeVariants([
+        ...rawSemanticVariants,
+        ...correctedSemanticVariants,
+      ]),
       lookupVariants: dedupeVariants([
-        strict,
-        accentless,
-        collapsedWhitespace,
-        punctuationStripped,
-        compactView,
-        vintageCanonicalized,
-        vintageStripped,
-        ...(josaStripped !== vintageStripped ? [josaStripped] : []),
-        ...transliteratedVariants,
-        ...transliteratedCompacts,
-        ...(phoneticNormalizedView.length > 0 ? [phoneticNormalizedView] : []),
-        ...phoneticVariants,
-        ...reorderedVariants,
+        ...rawLookupVariants,
+        corrected.strict,
+        corrected.accentless,
+        corrected.collapsedWhitespace,
+        corrected.punctuationStripped,
+        corrected.compact,
+        corrected.vintageCanonicalized,
+        corrected.vintageStripped,
+        ...(corrected.josaStripped !== corrected.vintageStripped ? [corrected.josaStripped] : []),
+        ...corrected.transliteratedVariants,
+        ...corrected.transliteratedCompacts,
+        ...(corrected.phoneticNormalized !== undefined ? [corrected.phoneticNormalized] : []),
+        ...corrected.phoneticVariants,
+        ...corrected.reordered,
         // 2-digit vintage shorthand expansion ("Margaux 15" → "Margaux 2015").
         // Empty list when query already carries a 4-digit year or has no
         // 2-digit token, so this never widens lookupVariants for

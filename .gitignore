@@ -24,8 +24,9 @@ src/**/*.d.ts.map
 test/**/*.d.ts
 test/**/*.d.ts.map
 
-# Ad-hoc throwaway scripts (repro/check/diag). Keep gitignored — these are local-only.
+# Ad-hoc throwaway scripts (repro/check/diag). Keep gitignored — local-only.
 .tmp/
+.tmp-ops/
 
 # Environment & secrets
 .env
@@ -163,6 +164,7 @@ data/silver-quality-report.json
 # Offline / noisy eval machine-local outputs (scripts often write under /tmp; ignore if copied into tree)
 data/noisy-entity-eval-results.json
 data/offline-eval-*.json
+data/lookup-v2/drafts/
 # Generated calibration profiles (keep small fixtures / ndjson samples explicit if needed)
 data/calibration/threshold-profile*.json
 data/calibration/*.ndjson

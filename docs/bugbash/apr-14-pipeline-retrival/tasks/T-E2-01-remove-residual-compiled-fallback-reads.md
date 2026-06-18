@@ -33,7 +33,7 @@ post-route와 hybrid ranking에서 남아 있는 `compiled?.execution... ?? plan
 - [search-usecase-post-route-phase.ts](</Users/songmin/Documents/code-wine/wine-search-engine/src/application/search/search-usecase-post-route-phase.ts:360>)
 - [search-usecase-hybrid-ranking-pipeline.ts](</Users/songmin/Documents/code-wine/wine-search-engine/src/application/search/search-usecase-hybrid-ranking-pipeline.ts:112>)
 - 필요 시: [search.usecase.ts](</Users/songmin/Documents/code-wine/wine-search-engine/src/application/search/search.usecase.ts:416>)
-- 필요 시: [hybrid.usecase.ts](</Users/songmin/Documents/code-wine/wine-search-engine/src/application/search/hybrid.usecase.ts:136>)
+- 필요 시: [search.usecase.ts hybrid route](</Users/songmin/Documents/code-wine/wine-search-engine/src/application/search/search.usecase.ts>)
 - 테스트: [search-usecase-post-route-phase.test.ts](</Users/songmin/Documents/code-wine/wine-search-engine/test/unit/application/search/search-usecase-post-route-phase.test.ts:734>), [search-usecase-hybrid-ranking-pipeline.test.ts](</Users/songmin/Documents/code-wine/wine-search-engine/test/unit/application/search/search-usecase-hybrid-ranking-pipeline.test.ts:98>)
 
 ## 수정 금지 범위

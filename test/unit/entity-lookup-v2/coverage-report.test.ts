@@ -8,8 +8,8 @@ import {
 const rows: CoverageInputRow[] = [
   { qid: '1', query: 'Opus One 2018', expectedStatus: 'resolved', class: 'exact_entity', observedStatus: 'resolved' },
   // Dom Perignon coverage hole — gold says resolve, engine failed → curation candidate (DoD #2)
-  { qid: '2', query: 'Dom Perignon', expectedStatus: 'resolved', class: 'hot_entity_coverage', observedStatus: 'failed' },
-  { qid: '3', query: '돔페리뇽', expectedStatus: 'resolved', class: 'hot_entity_coverage', observedStatus: 'failed' },
+  { qid: '2', query: 'Dom Perignon', expectedStatus: 'resolved', expectedEntityHint: 'dom perignon', class: 'hot_entity_coverage', observedStatus: 'failed' },
+  { qid: '3', query: '돔페리뇽', expectedStatus: 'resolved', expectedEntityId: 'w-dom-perignon-2013', class: 'hot_entity_coverage', observedStatus: 'failed' },
   // concept handled correctly
   { qid: '4', query: '까쇼', expectedStatus: 'redirect_discovery', class: 'concept_grape', observedStatus: 'redirect_discovery' },
   // noisy typo correctly closed
@@ -23,6 +23,8 @@ describe('buildCoverageReport (T-ELV2-03 hot-entity coverage)', () => {
     expect(report.coveredCount).toBe(1);
     expect(report.holes).toHaveLength(2);
     expect(report.holes.map((h) => h.query)).toEqual(['Dom Perignon', '돔페리뇽']);
+    expect(report.holes[0]).toMatchObject({ expectedEntityHint: 'dom perignon' });
+    expect(report.holes[1]).toMatchObject({ expectedEntityId: 'w-dom-perignon-2013' });
     expect(report.coverageRate).toBeCloseTo(1 / 3);
     expect(report.holesByClass.hot_entity_coverage).toBe(2);
   });
@@ -31,6 +33,37 @@ describe('buildCoverageReport (T-ELV2-03 hot-entity coverage)', () => {
     const report = buildCoverageReport(rows);
     expect(report.nonEntityTotal).toBe(2);
     expect(report.nonEntityCorrect).toBe(2);
+  });
+
+  it('treats any accepted abstention status as correct for precision-first typo rows', () => {
+    const report = buildCoverageReport([
+      {
+        qid: 'm1',
+        query: 'opu one',
+        expectedStatus: 'failed',
+        acceptedStatuses: ['failed', 'ambiguous'],
+        class: 'noisy_typo',
+        observedStatus: 'ambiguous',
+      },
+    ]);
+    expect(report.nonEntityTotal).toBe(1);
+    expect(report.nonEntityCorrect).toBe(1);
+  });
+
+  it('does not emit a coverage hole when a hot row explicitly accepts ambiguous as well as resolved', () => {
+    const report = buildCoverageReport([
+      {
+        qid: 'm2',
+        query: 'Margaux',
+        expectedStatus: 'ambiguous',
+        acceptedStatuses: ['ambiguous', 'resolved'],
+        class: 'ambiguity_broad_icon',
+        observedStatus: 'ambiguous',
+      },
+    ]);
+    expect(report.hotEntityCount).toBe(1);
+    expect(report.coveredCount).toBe(1);
+    expect(report.holes).toHaveLength(0);
   });
 
   it('reports zero holes when every hot entity resolves', () => {

@@ -5,10 +5,8 @@ import type { EntityResolveResult } from '../../../domain/resolver/model/resolve
 import type { HybridRetrievalInput } from '../../../domain/retrieval/model/retrieval-input.js';
 import type { HybridCandidate } from '../../../domain/retrieval/model/hybrid-candidate.js';
 import type { RetrievalExecutionResult } from '../../../domain/retrieval/model/retrieval-execution-result.js';
-import type {
-  RetrievalDocument,
-  RetrievalDrinkingWindowProjection,
-} from '../../../domain/retrieval/model/retrieval-document.js';
+import type { SourceRecordRef } from '../../../domain/entity/model/source-record-ref.js';
+import type { LookupIdentityCertificate } from '../../../domain/shared/types/search-snapshot-lookup-runtime.js';
 import type { RrfFusionTrace, CandidateDropRecord } from '../../../domain/retrieval/model/candidate-envelope.js';
 import type { RetrievalDegradationSignal } from '../../../domain/retrieval/port/retrieval-degradation-observer.port.js';
 import type { RetrievalDegradationCode } from '../../../domain/retrieval/port/retrieval-degradation-observer.port.js';
@@ -78,32 +76,22 @@ export interface CandidatePoolPort {
   getLastDegradationCodes?(): readonly RetrievalDegradationCode[];
 }
 
-export interface EntityDocumentLookupPort {
-  /**
-   * @deprecated Test-only escape hatch. Production callers MUST use getDocuments().
-   * Retained so minimal test stubs compile without providing a batch implementation.
-   * Will be removed once all test helpers migrate to getDocuments-first stubs.
-   */
-  getDocument?(entityId: CanonicalEntityId): Promise<RetrievalDocument | null>;
+export interface LookupResolverProjection {
+  readonly entityId: CanonicalEntityId;
+  readonly entityType: string;
+  readonly canonicalLabel: string;
+  readonly aliasesIdentitySafe: readonly string[];
+  readonly identitySafeKeys: readonly string[];
+  readonly identityCertificates?: readonly LookupIdentityCertificate[] | undefined;
+  readonly producer?: string | undefined;
+  readonly attributeHints?: Readonly<Record<string, unknown>> | undefined;
+  readonly sourceRecordRefs?: readonly SourceRecordRef[] | undefined;
+}
 
-  /**
-   * Batch-fetch entity documents by ID. This is the **required production path**.
-   *
-   * Returned map contains only found documents; missing IDs are omitted.
-   * Implementations MUST prefer backend-native batching over N single fetches.
-   *
-   * T-E4-01: Elevated to required -- entity route batch hydration depends on this.
-   */
-  getDocuments(entityIds: readonly CanonicalEntityId[]): Promise<ReadonlyMap<CanonicalEntityId, RetrievalDocument>>;
-
-  /**
-   * Optional narrow projection for exact drinkability metadata lookups.
-   * Production index implementations should provide this so agent
-   * check_drinking_window does not depend on full document hydration.
-   */
-  getDrinkingWindowDocuments?(
+export interface LookupResolverProjectionPort {
+  getResolverProjections(
     entityIds: readonly CanonicalEntityId[],
-  ): Promise<ReadonlyMap<CanonicalEntityId, RetrievalDrinkingWindowProjection>>;
+  ): Promise<ReadonlyMap<CanonicalEntityId, LookupResolverProjection>>;
 }
 
 export interface BrowseRetrieverPort {
@@ -157,29 +145,4 @@ export interface ResponseBuilderPort {
 
 export interface MixedSolverPort {
   solve(queryPlan: QueryPlanV1, compiled: CompiledWineQuery): Promise<MixedQueryResult>;
-}
-
-/**
- * TA2-4: Application-layer blocker port — exposes the Blocker's high-recall
- * candidate retrieval to callers outside the resolver domain (entity route,
- * hybrid anchor resolver).
- *
- * Separate from the domain-level BlockingPort so the application layer does
- * not depend on the domain resolver internals. The broader recall option is
- * used by the corrective retry path (TA3) to expand the candidate set.
- */
-export interface BlockingUseCasePort {
-  /**
-   * Returns candidate entity IDs that pass the blocking filter.
-   *
-   * @param query            Original user query string.
-   * @param normalizedQuery  Lowercased, accent-stripped, whitespace-collapsed form.
-   * @param options.broader  When true, use a higher limit / relaxed threshold for
-   *                         corrective retry recall expansion (TA3).
-   */
-  block(
-    query: string,
-    normalizedQuery: string,
-    options?: { readonly broader?: boolean },
-  ): Promise<readonly CanonicalEntityId[]>;
 }

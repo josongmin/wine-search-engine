@@ -27,6 +27,13 @@ import type {
   LookupScoredCandidate,
 } from './lookup-v2-types.js';
 
+// NOTE (T-ELV2-05 train-serve blocker): these thresholds are calibrated for a
+// LOOKUP-domain-trained model's learned-score range. They are UNVALIDATED for
+// the current search-trained model served through the OOD lookup projection (see
+// `toRankingFeatures` below). They are extracted-as-named-consts (rule 15) so the
+// approximation is auditable rather than silent; their VALUES can only be
+// validated once a lookup-domain model defines the real score distribution. Do
+// NOT tune them to make tests pass against a search-trained model.
 /** Min learned score for the top candidate to be certified `resolved`. */
 export const LTR_RESOLVE_THRESHOLD = 0.5;
 /** Min top1-top2 learned-score gap; below it the result is `ambiguous`. */
@@ -123,28 +130,52 @@ export class LtrRerankDecider implements LookupRerankDecisionPort {
  * Lookup-specific evidence is projected onto the closest ranking features;
  * dimensions with no lookup analogue are 0. `entityOnlyIndicator` is 1 because
  * lookup is, by definition, an entity-only task.
+ *
+ * ⚠️ OUT-OF-DISTRIBUTION WARNING (T-ELV2-05 train-serve blocker): this projects
+ * lookup features onto a schema that the PRODUCTION training extractor populates
+ * differently — most notably the `bm25Score` slot is emitted as constant 0.0 at
+ * training time (search ltr-feature-extractor), but here it receives
+ * `normalizedAliasEvidence`. A SEARCH-trained model has therefore never seen a
+ * non-zero bm25Score and serving it this vector is OOD. This projection is only
+ * safe to SERVE once a model is trained on THIS exact distribution (or with
+ * explicit owner approval). The mapping is intentionally LEFT UNCHANGED this
+ * session — it is gated OFF by `LTR_SERVING_ENABLED` (default false), so the
+ * learned branch is reached only by tests with injected models, never live.
  */
-function toRankingFeatures(f: LookupCandidateFeatures): RankingFeatures {
+export function toRankingFeatures(f: LookupCandidateFeatures): RankingFeatures {
+  const scopeCorroboration = clamp01(
+    Math.max(
+      f.familyGraphProximity,
+      f.lineGraphProximity ?? 0,
+      f.vintageGraphProximity ?? 0,
+    ),
+  );
   return {
-    bm25Score: f.normalizedAliasEvidence,
-    semanticScore: f.transliterationConsistency,
+    bm25Score: Math.max(f.normalizedAliasEvidence, f.scopeQualifierAgreement ?? 0),
+    semanticScore: Math.max(f.transliterationConsistency, f.scopeAxisAgreement ?? 0),
     popularityScore: f.popularityPrior,
-    recencyScore: 0,
-    classMatchScore: clamp01(f.channelAgreement / LOOKUP_CHANNEL_COUNT),
-    attributeMatchScore: f.exactAliasEvidence,
-    diversityScore: 0,
+    recencyScore: f.vintageGraphProximity ?? 0,
+    classMatchScore: clamp01(Math.max(f.channelAgreement / LOOKUP_CHANNEL_COUNT, f.scopeAxisAgreement ?? 0)),
+    attributeMatchScore: Math.max(f.exactAliasEvidence, f.scopeQualifierAgreement ?? 0),
+    // Reuse the (otherwise-unused-in-lookup) diversityScore slot to carry the
+    // persisted ambiguity-cluster membership signal (T-06 Half A) — otherwise it
+    // is computed but DROPPED before scoring. Same OOD-projection caveat as the
+    // whole mapping (a lookup-domain model must be trained on this distribution;
+    // see the train-serve blocker above), consistent with familyGraphProximity →
+    // laneCorroborationScore below.
+    diversityScore: clamp01(f.ambiguityClusterMembership),
     multilingualScore: f.transliterationConsistency,
     entityPosteriorScore: f.editDistanceScore,
     identityExactnessTierScore: Math.max(f.exactAliasEvidence, f.phoneticConsistency),
-    laneCorroborationScore: f.familyGraphProximity,
-    laneDisagreementScore: clamp01(1 - f.scriptLanguageConsistency),
+    laneCorroborationScore: scopeCorroboration,
+    laneDisagreementScore: clamp01(1 - Math.max(f.scriptLanguageConsistency, f.scopeAxisAgreement ?? 0)),
     entityOnlyIndicator: 1,
     generalOnlyIndicator: 0,
   };
 }
 
 /** Declared retrieval-channel count, for normalising channel agreement. */
-const LOOKUP_CHANNEL_COUNT = 7;
+const LOOKUP_CHANNEL_COUNT = 9;
 
 function decision(
   status: LookupDecision['status'],

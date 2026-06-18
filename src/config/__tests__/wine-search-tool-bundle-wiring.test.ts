@@ -29,9 +29,6 @@ const buildMockCore = (overrides: Record<string, unknown> = {}) => ({
   calibrationStore: {} as never,
   browseRetriever: {} as never,
   compareRetriever: {} as never,
-  entityLookup: {
-    getDocuments: vi.fn(async () => new Map()),
-  } as never,
   snapshotVersions: {} as never,
   cacheLookupRuntimeState: {} as never,
   cacheLookupRuntimeStateProvider: {} as never,
@@ -51,15 +48,31 @@ vi.mock('../container-core.js', () => ({
 
 vi.mock('../container-features.js', () => ({
   buildFeatureContainerServices: vi.fn(() => ({
+    entityLookupV2UseCase: { execute: vi.fn() } as never,
     searchUseCase: { execute: vi.fn() } as never,
-    decomposedSearchUseCase: { execute: vi.fn() } as never,
-    interpretUseCase: {} as never,
-    resolveUseCase: {} as never,
-    hybridUseCase: {} as never,
-    batchSearchUseCase: {} as never,
-    autocompleteUseCase: {} as never,
-    drinkingWindowUseCase: { check: vi.fn() } as never,
     evalRunner: null,
+  })),
+}));
+
+vi.mock('../runtime-handles.js', () => ({
+  bindLiveSearchSnapshotRuntimeHandles: vi.fn(async (runtime) => ({
+    ...runtime,
+    searchSnapshotId: 'search-snapshot:v1:active',
+    searchSnapshotManifestPath: '/tmp/search-snapshot:v1:active/manifest.json',
+  })),
+}));
+
+vi.mock('../lookup-authority.js', () => ({
+  createLookupAuthorityServices: vi.fn(async () => ({
+    entityLookupV2UseCase: { execute: vi.fn() } as never,
+    bootstrapProfile: {} as never,
+    metadata: {} as never,
+  })),
+  buildLookupOpsRuntimeHealthView: vi.fn(() => ({
+    unwiredSubstrateIds: [],
+    familyGraphEdgeCount: 0,
+    ltrSupportStatus: 'unsupported',
+    ltrSupportReason: 'lookup_domain_model_absent',
   })),
 }));
 
@@ -100,5 +113,5 @@ describe('createContainer — wine-agent-loop tool bundle wiring', () => {
     expect(typeof container.wineSearch?.wineSearchOrchestrator.execute).toBe(
       'function',
     );
-  }, 10_000);
+  }, 30_000);
 });

@@ -25,6 +25,7 @@
 import {
   StructuredLlmCircuitOpenError,
   StructuredLlmPartialOutputError,
+  StructuredLlmProviderError,
   StructuredLlmRefusalError,
   StructuredLlmTimeoutError,
   StructuredLlmValidationError,
@@ -55,6 +56,7 @@ import {
   FALLBACK_TEMPLATES,
   LAYER3_OBSERVATION_SLICE_CHARS,
   buildResynthDirective,
+  layer4MessageFor,
 } from './synthesis-fallback-templates.js';
 import {
   SynthesisAbortedError,
@@ -212,10 +214,18 @@ function findGroundedTopResult(
     if (typeof result !== 'object' || result === null) continue;
     const record = result as Record<string, unknown>;
     // Accept either { results: [{ entity: { canonicalLabel, producer, region } }] }
-    // (current SearchUseCase shape) or { resultSet: [...] } or a single entity.
+    // (SearchUseCase discovery shape), { resultSet: [...] }, the V2-native
+    // lookup shape { status, topCandidate: { entityId, canonicalLabel } }
+    // (only `resolved` carries a usable topCandidate; ambiguous/failed leave it
+    // null so this falls through and grounds nothing), or a single entity.
+    const v2Top =
+      record['status'] === 'resolved' && typeof record['topCandidate'] === 'object' && record['topCandidate'] !== null
+        ? (record['topCandidate'] as Record<string, unknown>)
+        : undefined;
     const top =
       pickFromArray(record['results']) ??
       pickFromArray(record['resultSet']) ??
+      v2Top ??
       record;
     const entity = pickEntity(top);
     if (entity === undefined) continue;
@@ -428,6 +438,19 @@ const SYNTHESIS_SYSTEM_PROMPT = [
 ].join('\n');
 
 /**
+ * Explicit, deterministic language directive injected as a dedicated synthesis
+ * message. Weak models (OpenAI gpt-*-mini) don't reliably honor the
+ * system-prompt's "respond in Korean if the query is Korean" bullet, so we
+ * decide the language ourselves (containsHangul) and state it as a salient
+ * final instruction rather than leaving it to model judgment.
+ */
+function buildLanguageDirective(queryHasHangul: boolean): string {
+  return queryHasHangul
+    ? 'IMPORTANT: Write the entire `answer` in natural Korean (한국어). Do not answer in English.'
+    : 'IMPORTANT: Write the entire `answer` in English. Do not answer in Korean.';
+}
+
+/**
  * Structured user-message body that the synthesizer LLM sees as
  * `Tool outcomes:`. Built from {@link buildSynthesisGroundingPayload}, which
  * extracts a compact wine-record list and per-outcome metadata. This replaces
@@ -480,7 +503,7 @@ interface SynthesisRunnerDeps {
  * query is wine-domain and well-formed; we simply lack the requested
  * entity in our catalogue). See {@link SynthesisDecisionStatus} below.
  */
-type SynthesisBlockedKind = 'security_block' | 'unsupported_intent';
+type SynthesisBlockedKind = 'security_block' | 'unsupported_intent' | 'analysis_unavailable';
 
 /**
  * Decision-engine outcome signal passed to the synthesizer so it can pick
@@ -533,6 +556,37 @@ interface PrimaryAttemptOutcome {
   readonly usage: TokenUsage;
   readonly attempts: number;
   readonly degradedReason?: DegradedReason;
+}
+
+/**
+ * Degraded reasons that mean the LLM PROVIDER could not run at all (vs. a
+ * working LLM that produced unusable output). For these, the runner must fail
+ * honestly — emitting the {@link FALLBACK_TEMPLATES.llmUnavailable} message and
+ * letting the raw retrieval results stand on their own — rather than fabricating
+ * a Layer 2/3 grounded answer that names an arbitrary wine as if it answered.
+ */
+const PROVIDER_UNAVAILABLE_REASONS: ReadonlySet<DegradedReason> = new Set([
+  'circuit_open',
+  'timeout',
+  'llm_unavailable',
+]);
+
+/**
+ * True when a {@link StructuredLlmValidationError} represents an HTTP TRANSPORT
+ * rejection from the provider (auth / credit-exhausted / 4xx-5xx) rather than a
+ * schema-validation failure of model output. The adapters encode transport
+ * rejections with EMPTY zod `issues` plus a `rawOutput` carrying a numeric
+ * `httpStatus` (see claude-structured-llm-adapter HTTP-error path); genuine
+ * schema failures carry non-empty `issues` and the parsed model output.
+ */
+function isProviderTransportRejection(err: StructuredLlmValidationError): boolean {
+  if (err.issues.length > 0) return false;
+  const raw = err.rawOutput;
+  return (
+    typeof raw === 'object' &&
+    raw !== null &&
+    typeof (raw as { httpStatus?: unknown }).httpStatus === 'number'
+  );
 }
 
 export class SynthesisRunner {
@@ -630,6 +684,30 @@ export class SynthesisRunner {
 
     this.throwIfAborted(input.abortSignal);
 
+    // Branch 2.5 — provider unavailable: the LLM never ran (auth / credit /
+    // circuit-open / timeout). Do NOT fabricate a grounded Layer 2/3 answer
+    // that would present an arbitrary wine as THE answer; fail honestly and let
+    // the raw retrieval results (returned alongside this answer) stand on their
+    // own. Only enumerated provider-unavailable reasons take this path.
+    if (PROVIDER_UNAVAILABLE_REASONS.has(degradedReason)) {
+      const honest = queryHasHangul
+        ? FALLBACK_TEMPLATES.llmUnavailable.korean
+        : FALLBACK_TEMPLATES.llmUnavailable.english;
+      this.logger.error(
+        { requestId: input.requestId, degradedReason },
+        '[synthesis] LLM provider unavailable — returning honest answer, no grounded fabrication',
+      );
+      return this.buildResult({
+        answer: honest,
+        layer: 'layer4',
+        groundedOnToolResults: false,
+        attempts,
+        verificationAttempts,
+        usage,
+        degradedReason,
+      });
+    }
+
     // Branch 3 — Layer 2: deterministic top-result template.
     const top = findGroundedTopResult(input.toolOutcomes);
     if (top !== undefined) {
@@ -686,13 +764,13 @@ export class SynthesisRunner {
 
     this.throwIfAborted(input.abortSignal);
 
-    // Branch 5 — Layer 4: hard-coded Korean/English fallback.
-    const layer4Answer = queryHasHangul
-      ? FALLBACK_TEMPLATES.layer4.korean
-      : FALLBACK_TEMPLATES.layer4.english;
+    // Branch 5 — Layer 4: deterministic last resort. Honest, cause-specific
+    // copy (no_results / malformed / internal) instead of reflexively blaming
+    // the user's query — see layer4MessageFor.
+    const layer4Answer = layer4MessageFor(degradedReason, queryHasHangul);
     this.logger.error(
-      { requestId: input.requestId, query: input.query },
-      'Layer 4 fallback: all synthesis paths exhausted — returning template answer',
+      { requestId: input.requestId, query: input.query, degradedReason },
+      'Layer 4 fallback: all synthesis paths exhausted — returning cause-specific template answer',
     );
     const finalAnswer = this.applySituationalNormalize(
       input.query,
@@ -720,6 +798,7 @@ export class SynthesisRunner {
     const baseMessages: readonly ChatMessage[] = [
       { role: 'user', content: `User query: ${input.query}` },
       { role: 'user', content: `Tool outcomes:\n${grounding}` },
+      { role: 'user', content: buildLanguageDirective(containsHangul(input.query)) },
     ];
 
     let aggregatedUsage = makeZeroTokenUsage();
@@ -763,7 +842,19 @@ export class SynthesisRunner {
           attempts,
           degradedReason: 'circuit_open',
         };
+      } else if (err instanceof StructuredLlmProviderError) {
+        // Move 1: a first-class provider rejection (HTTP non-2xx —
+        // auth/credit/5xx). The model never ran, so fail honestly as
+        // `llm_unavailable` (no grounded Layer 2 fabrication) and do not retry.
+        return { usage: aggregatedUsage, attempts, degradedReason: 'llm_unavailable' };
       } else if (err instanceof StructuredLlmValidationError) {
+        // Legacy compatibility: until every adapter throws ProviderError, an
+        // HTTP transport rejection may still arrive shaped as a ValidationError
+        // (empty issues + rawOutput.httpStatus). Treat that as provider-down
+        // too; a genuine output-schema failure (zod issues) is malformed.
+        if (isProviderTransportRejection(err)) {
+          return { usage: aggregatedUsage, attempts, degradedReason: 'llm_unavailable' };
+        }
         lastDegraded = 'malformed_llm_output';
       } else if (err instanceof StructuredLlmPartialOutputError) {
         lastDegraded = 'malformed_llm_output';
@@ -896,6 +987,10 @@ export class SynthesisRunner {
     queryHasHangul: boolean,
   ): AnswerResult {
     let answer: string;
+    // Move 2: `analysis_unavailable` is an AI-OUTAGE degradation, not a policy
+    // block — it carries `llm_unavailable` so the wire honestly reflects "the
+    // analyzer LLM was down", not "blocked by policy".
+    let degradedReason: DegradedReason = 'policy_blocked';
     switch (kind) {
       case 'security_block':
         answer = queryHasHangul
@@ -907,6 +1002,12 @@ export class SynthesisRunner {
           ? FALLBACK_TEMPLATES.unsupportedIntent.korean
           : FALLBACK_TEMPLATES.unsupportedIntent.english;
         break;
+      case 'analysis_unavailable':
+        answer = queryHasHangul
+          ? FALLBACK_TEMPLATES.analysisUnavailable.korean
+          : FALLBACK_TEMPLATES.analysisUnavailable.english;
+        degradedReason = 'llm_unavailable';
+        break;
     }
     return {
       answer,
@@ -915,7 +1016,7 @@ export class SynthesisRunner {
       synthesisAttempts: 0,
       verificationAttempts: 0,
       tokenUsage: makeZeroTokenUsage(),
-      degradedReason: 'policy_blocked',
+      degradedReason,
     };
   }
 
@@ -1160,6 +1261,9 @@ export class SynthesisRunner {
     const messages: readonly ChatMessage[] = [
       { role: 'user', content: `User query: ${input.query}` },
       { role: 'user', content: `Tool outcomes:\n${grounding}` },
+      // Language directive BEFORE the re-synth directive so the latter stays the
+      // final, most-salient operative instruction (grounding re-anchor).
+      { role: 'user', content: buildLanguageDirective(containsHangul(input.query)) },
       { role: 'user', content: buildResynthDirective(ungroundedClaims, facts) },
     ];
     let usage = makeZeroTokenUsage();

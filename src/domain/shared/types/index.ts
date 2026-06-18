@@ -1,6 +1,7 @@
 export {
   type CanonicalEntityId,
   type EntityId,
+  type SourceRecordId,
   createCanonicalEntityId,
   createEntityId,
   createSourceRecordId,

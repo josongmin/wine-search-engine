@@ -7,7 +7,7 @@
  * Append-only test: never delete this file.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { reapSnapshots } from '../../scripts/ops/reap-snapshots.js';
+import { REAPABLE_TABLES, reapSnapshots } from '../../scripts/ops/reap-snapshots.js';
 
 const PROMOTED_RECENTLY = new Date();
 const PROMOTED_LONG_AGO = new Date(Date.now() - 48 * 60 * 60 * 1000); // 48h ago
@@ -31,6 +31,9 @@ function makePool(
       }
       if (/^DELETE FROM/.test(sql)) {
         return { rows: [], rowCount: rowCountPerTable };
+      }
+      if (/^SET LOCAL statement_timeout/.test(sql)) {
+        return { rows: [], rowCount: 0 };
       }
       return { rows: [], rowCount: 0 };
     }),
@@ -84,20 +87,30 @@ describe('reap-snapshots safety', () => {
     expect(summary.skipReason).toMatch(/active_search_snapshot is empty/);
   });
 
-  it('force + passed grace period + non-null previous DELETEs all 3 tables', async () => {
+  it('force + passed grace period + non-null previous DELETEs all reapable tables', async () => {
     const { pool, queryLog } = makePool(
       { active_snapshot_id: 'a', previous_snapshot_id: 'b', promoted_at: PROMOTED_LONG_AGO },
       7,
     );
     const summary = await reapSnapshots({ force: true, gracePeriodHours: 24 }, pool);
     expect(summary.performed).toBe('force');
-    expect(summary.reports.map((r) => r.table)).toEqual([
-      'entities',
-      'aliases',
-      'ambiguity_registry',
-    ]);
+    expect(summary.reports.map((r) => r.table)).toEqual([...REAPABLE_TABLES]);
     expect(summary.reports.every((r) => r.deletedRowCount === 7)).toBe(true);
     const deletes = queryLog.filter((q) => q.sql.trim().startsWith('DELETE FROM'));
-    expect(deletes.length).toBe(3);
+    expect(deletes.length).toBe(REAPABLE_TABLES.length);
+    const commits = queryLog.filter((q) => q.sql === 'COMMIT');
+    expect(commits.length).toBe(REAPABLE_TABLES.length);
+  });
+
+  it('reaps canonical plane tables after runtime plane (FK-safe order)', () => {
+    const runtimeEnd = REAPABLE_TABLES.indexOf('ambiguity_registry');
+    const canonicalStart = REAPABLE_TABLES.indexOf('canonical_aliases');
+    const entitiesIdx = REAPABLE_TABLES.indexOf('entities');
+    const aliasesIdx = REAPABLE_TABLES.indexOf('aliases');
+    const linksIdx = REAPABLE_TABLES.indexOf('entity_source_links');
+    const canonicalIdx = REAPABLE_TABLES.indexOf('canonical_entities');
+    expect(aliasesIdx).toBeLessThan(entitiesIdx);
+    expect(canonicalStart).toBeGreaterThan(runtimeEnd);
+    expect(linksIdx).toBeLessThan(canonicalIdx);
   });
 });

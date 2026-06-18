@@ -4,6 +4,8 @@ import { parseEnv } from '../env.js';
 const builderCalls = vi.hoisted(() => ({
   core: vi.fn(),
   features: vi.fn(),
+  bind: vi.fn(),
+  authority: vi.fn(),
 }));
 
 const mockCore = {
@@ -14,7 +16,6 @@ const mockCore = {
   decisionEngine: {} as never,
   responseBuilder: {} as never,
   mixedSolver: {} as never,
-  entityLookup: {} as never,
   drinkingWindowPredictor: {} as never,
   calibrationStore: {} as never,
   runtimeReadiness: {} as never,
@@ -30,18 +31,39 @@ vi.mock('../container-core.js', () => ({
 }));
 
 vi.mock('../container-features.js', () => ({
-  buildFeatureContainerServices: vi.fn((_config, _core, runtime) => {
+  buildFeatureContainerServices: vi.fn((_config, _core, _authority, runtime) => {
     builderCalls.features(runtime);
     return {
+      entityLookupV2UseCase: {} as never,
       searchUseCase: {} as never,
-      interpretUseCase: {} as never,
-      resolveUseCase: {} as never,
-      autocompleteUseCase: {} as never,
-      hybridUseCase: {} as never,
-      decomposedSearchUseCase: {} as never,
-      drinkingWindowUseCase: {} as never,
-      batchSearchUseCase: {} as never,
       evalRunner: null,
+    };
+  }),
+}));
+
+vi.mock('../lookup-authority.js', () => ({
+  createLookupAuthorityServices: vi.fn(async (_config, runtime, prebuilt) => {
+    builderCalls.authority(runtime, prebuilt);
+    return {
+      entityLookupV2UseCase: {} as never,
+      bootstrapProfile: {} as never,
+      metadata: {} as never,
+    };
+  }),
+  buildLookupOpsRuntimeHealthView: vi.fn(() => ({
+    lookupRuntimeBundleHash: 'test-hash',
+    lookupRuntimeArtifactCount: 0,
+    lookupRuntimeBundlePath: '/tmp/lookup-runtime',
+  })),
+}));
+
+vi.mock('../runtime-handles.js', () => ({
+  bindLiveSearchSnapshotRuntimeHandles: vi.fn(async (runtime) => {
+    builderCalls.bind(runtime);
+    return {
+      ...runtime,
+      searchSnapshotId: 'search-snapshot:v1:active',
+      searchSnapshotManifestPath: '/tmp/search-snapshot:v1:active/manifest.json',
     };
   }),
 }));
@@ -58,7 +80,27 @@ describe('createContainer runtime normalization', () => {
 
     await createContainer(config, pool);
 
-    expect(builderCalls.core).toHaveBeenCalledWith({ pool });
-    expect(builderCalls.features).toHaveBeenCalledWith({ pool });
+    expect(builderCalls.bind).toHaveBeenCalledWith({ pool });
+    expect(builderCalls.core).toHaveBeenCalledWith({
+      pool,
+      searchSnapshotId: 'search-snapshot:v1:active',
+      searchSnapshotManifestPath: '/tmp/search-snapshot:v1:active/manifest.json',
+    });
+    expect(builderCalls.authority).toHaveBeenCalledWith(
+      {
+        pool,
+        searchSnapshotId: 'search-snapshot:v1:active',
+        searchSnapshotManifestPath: '/tmp/search-snapshot:v1:active/manifest.json',
+      },
+      {
+        calibrationStore: mockCore.calibrationStore,
+        entityResolver: mockCore.entityResolver,
+      },
+    );
+    expect(builderCalls.features).toHaveBeenCalledWith({
+      pool,
+      searchSnapshotId: 'search-snapshot:v1:active',
+      searchSnapshotManifestPath: '/tmp/search-snapshot:v1:active/manifest.json',
+    });
   }, 10_000);
 });

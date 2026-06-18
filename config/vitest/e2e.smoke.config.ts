@@ -12,6 +12,8 @@ export default defineConfig({
       'test/e2e/schema-contract.test.ts',
       'test/e2e/server-protocol.test.ts',
       'test/e2e/cli-process.test.ts',
+      'test/e2e/lookup-v2-write-plane-cli.contract.test.ts',
+      'test/e2e/lookup-v2-runtime-registry-context.contract.test.ts',
     ],
     testTimeout: 30_000,
     hookTimeout: 30_000,

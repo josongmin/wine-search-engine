@@ -43,23 +43,33 @@ describe.skipIf(!HAS_REACHABLE_VESPA)('Vespa E2E — smoke lane', () => {
   });
 
   it('hybrid search returns results through the Vespa-backed HTTP stack', async () => {
+    // Lane is chosen by the URL path; the body carries no `mode` (the monolith
+    // `options.mode` control surface was removed — the strict primitive schema
+    // 400s on it).
     const response = await postJson(server.app, '/v1/search/hybrid', {
       query: '샴페인 와인 추천',
-      options: { mode: 'hybrid', explain: false, clarification: false },
+      options: { explain: false, clarification: false },
     });
 
     expect(response.statusCode).toBe(200);
     const body = parseSearchResponse(response);
     expect(body.meta.route).toBe('hybrid');
     expect(body.results.length).toBeGreaterThan(0);
-    expect(fakeMlService.countRequests('/embeddings')).toBeGreaterThan(0);
-    expect(fakeMlService.countRequests('/rerank')).toBeGreaterThan(0);
+    // Embeddings no longer flow over the HTTP fake-ML service (HttpEmbeddingService
+    // was removed in c4fba804). Assert the dense channel still ran via the
+    // container-level counter. Cross-encoder rerank is intentionally NOT asserted
+    // here: it is gate-controlled (evaluateRerankGate / enablePrecisionRerank) and
+    // legitimately skipped for broad concept queries like this one.
+    expect(server.parts.embeddingInvocations()).toBeGreaterThan(0);
   });
 
   it('entity-mode search stays wired to the learned matcher over HTTP', async () => {
+    // `options.mode` is gone (strict 400); the entity/identity lane runs
+    // automatically on the discovery route (dual-lane topology), so the learned
+    // matcher is still exercised over HTTP.
     const response = await postJson(server.app, '/v1/search/hybrid', {
       query: '오푸스원',
-      options: { mode: 'entity', explain: false, clarification: false },
+      options: { explain: false, clarification: false },
     });
 
     expect(response.statusCode).toBe(200);

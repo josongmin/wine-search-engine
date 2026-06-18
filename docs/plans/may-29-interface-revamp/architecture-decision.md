@@ -1,5 +1,10 @@
 # May 29 Interface Revamp Architecture Decision
 
+> Historical / audit-only document.
+> Current public lookup truth moved to `docs/bench/STATUS.md` and
+> `tools/feature-catalog/features/retrieval/entity-lookup-v2.yaml`.
+> This file preserves the pre-cutover `/v1/lookup/wine` contract framing only.
+
 ## 1. 결정
 
 public product surface는 아래 세 계층으로 고정한다.

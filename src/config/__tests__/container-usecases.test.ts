@@ -4,7 +4,7 @@ import { parseEnv } from '../env.js';
 import { getQueryEntrySecurityMetricsCollector } from '../../infrastructure/observability/query-entry-security-metrics.js';
 
 describe('buildUseCaseContainerServices', () => {
-  it('wires the shared query-entry security policy into all public query entry use cases', () => {
+  it('wires the shared query-entry security policy into SearchUseCase only', () => {
     const config = parseEnv({
       NODE_ENV: 'test',
       INJECTION_JUDGE_FAIL_OPEN: 'true',
@@ -19,7 +19,6 @@ describe('buildUseCaseContainerServices', () => {
     const core = {
       queryPlanner: { plan: vi.fn() },
       entityResolver: { resolve: vi.fn() },
-      entityLookup: { getDocument: vi.fn() },
       candidatePool: { generate: vi.fn() },
       browseRetriever: { retrieve: vi.fn() },
       compareRetriever: { retrieve: vi.fn() },
@@ -43,32 +42,26 @@ describe('buildUseCaseContainerServices', () => {
       },
     };
 
-    const useCases = buildUseCaseContainerServices(core as never, config);
+    const useCases = buildUseCaseContainerServices(core as never, config, {}, {
+      entityLookupV2UseCase: { execute: vi.fn() },
+      resolverProjectionLookup: { getResolverProjections: vi.fn() },
+    });
     const queryEntrySecurityObserver = getQueryEntrySecurityMetricsCollector();
 
-    expect((useCases.searchUseCase as any).deps).toEqual(expect.objectContaining({
+    expect((useCases.searchUseCase as { deps: Record<string, unknown> }).deps).toEqual(expect.objectContaining({
       injectionJudge,
       judgeFailureMode: 'fail_open',
       judgeTimeoutMs: config.queryEntrySecurity.judgeTimeoutMs,
       queryEntrySecurityObserver,
+      entityLookupV2UseCase: { execute: expect.any(Function) },
+      decomposedSearch: expect.any(Object),
+      drinkingWindow: expect.any(Object),
     }));
-    expect((useCases.hybridUseCase as any).deps).toEqual(expect.objectContaining({
-      injectionJudge,
-      judgeFailureMode: 'fail_open',
-      judgeTimeoutMs: config.queryEntrySecurity.judgeTimeoutMs,
-      queryEntrySecurityObserver,
-    }));
-    expect((useCases.interpretUseCase as any).deps).toEqual(expect.objectContaining({
-      injectionJudge,
-      judgeFailureMode: 'fail_open',
-      judgeTimeoutMs: config.queryEntrySecurity.judgeTimeoutMs,
-      queryEntrySecurityObserver,
-    }));
-    expect((useCases.resolveUseCase as any).deps).toEqual(expect.objectContaining({
-      injectionJudge,
-      judgeFailureMode: 'fail_open',
-      judgeTimeoutMs: config.queryEntrySecurity.judgeTimeoutMs,
-      queryEntrySecurityObserver,
-    }));
+    expect(useCases).not.toHaveProperty('entityLookupV2UseCase');
+    expect(useCases).not.toHaveProperty('interpretUseCase');
+    expect(useCases).not.toHaveProperty('hybridUseCase');
+    expect(useCases).not.toHaveProperty('batchSearchUseCase');
+    expect(useCases).not.toHaveProperty('decomposedSearchUseCase');
+    expect(useCases).not.toHaveProperty('drinkingWindowUseCase');
   });
 });

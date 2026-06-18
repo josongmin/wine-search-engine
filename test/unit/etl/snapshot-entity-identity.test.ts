@@ -6,7 +6,9 @@ import {
   buildEntityIdBySourceId,
   goldMatchKey,
   loadGoldCanonicalLookup,
+  loadActiveSourceEntityContinuity,
   loadSourceEntityContinuityFromManifestPath,
+  loadSourceEntityContinuityFromCanonicalGraph,
   resolveWineSnapshotEntity,
   SNAPSHOT_CANONICAL_ENTITY_FALLBACK_PREFIX,
   type WineSnapshotIdentityRow,
@@ -251,5 +253,68 @@ describe('snapshot-entity-identity', () => {
       identitySignature: 'runtime-signature',
       benchmarkEntityId: 'gold-opus-one-2018',
     });
+  });
+
+  it('loads source continuity from canonical graph authority when runtime state is unavailable', async () => {
+    const client = {
+      query: async () => ({
+        rows: [{
+          source_record_id: 'vivino-test-opus',
+          canonical_entity_ids: ['wine-ce-runtime-opus-2018'],
+          identity_signatures: ['runtime-signature'],
+          benchmark_entity_ids: ['gold-opus-one-2018'],
+        }],
+      }),
+    };
+
+    const continuity = await loadSourceEntityContinuityFromCanonicalGraph(
+      client as never,
+    );
+
+    expect(continuity.get('vivino-test-opus')).toEqual({
+      entityId: 'wine-ce-runtime-opus-2018',
+      identitySignature: 'runtime-signature',
+      benchmarkEntityId: 'gold-opus-one-2018',
+    });
+  });
+
+  it('falls back to canonical graph authority when the runtime state file is missing', async () => {
+    const continuity = await loadActiveSourceEntityContinuity(
+      path.join(await makeTempDir(), 'missing-runtime-state.json'),
+      {
+        canonicalGraphClient: {
+          query: async () => ({
+            rows: [{
+              source_record_id: 'vivino-test-opus',
+              canonical_entity_ids: ['wine-ce-runtime-opus-2018'],
+              identity_signatures: ['runtime-signature'],
+              benchmark_entity_ids: [],
+            }],
+          }),
+        } as never,
+      },
+    );
+
+    expect(continuity.get('vivino-test-opus')).toEqual({
+      entityId: 'wine-ce-runtime-opus-2018',
+      identitySignature: 'runtime-signature',
+    });
+  });
+
+  it('fails closed when canonical graph continuity contains source-link drift', async () => {
+    const client = {
+      query: async () => ({
+        rows: [{
+          source_record_id: 'vivino-test-opus',
+          canonical_entity_ids: ['wine-ce-runtime-opus-2018', 'wine-ce-other'],
+          identity_signatures: ['runtime-signature'],
+          benchmark_entity_ids: [],
+        }],
+      }),
+    };
+
+    await expect(
+      loadSourceEntityContinuityFromCanonicalGraph(client as never),
+    ).rejects.toThrow(/multiple canonical_entity_id values/);
   });
 });

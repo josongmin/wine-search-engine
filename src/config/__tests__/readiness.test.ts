@@ -115,26 +115,26 @@ describe('buildHealthRouteOptions', () => {
         runtimeLtrArtifact: {
           configured: false,
           loaded: false,
-          issue: 'disabled',
+          issue: 'unsupported',
         },
         ltrModels: {
           registry: {
             configured: false,
             loaded: false,
-            issue: 'disabled',
+            issue: 'unsupported',
           },
           artifact: {
             configured: false,
             loaded: false,
             selected: false,
-            issue: 'disabled',
+            issue: 'unsupported',
           },
           effective: {
             source: 'none',
             loaded: false,
             required: false,
             modelCount: 0,
-            issue: 'disabled',
+            issue: 'unsupported',
           },
         },
         benchmarkPersistence: {

@@ -26,8 +26,8 @@ import type { NormalizedQueryViews } from '../../src/domain/query/model/query-vi
 import type { EntityResolveResult } from '../../src/domain/resolver/model/resolve-result.js';
 import type {
   EntityResolverPort,
-  QueryPlannerPort,
 } from '../../src/application/search/port/search-pipeline-deps.port.js';
+import type { LookupPlannerPort } from '../../src/application/search/entity-lookup-v2/lookup-planner.port.js';
 
 function makeViews(query: string): NormalizedQueryViews {
   const lower = query.toLowerCase();
@@ -64,14 +64,71 @@ describe('audit HIGH — untrusted calibration never resolves on a raw score', (
   }
 
   it.each([1.0, 1.5, 0.999, 5.0])('abstains for a self-normalized raw top1=%s with no exact evidence', (top1) => {
-    const d = decider.decide(untrustedResolved(top1), 'short_entity', false);
+    const d = decider.decide(untrustedResolved(top1), 'short_entity', 'recall_only');
     expect(d.status).toBe('ambiguous');
     expect(d.reasonCode).toBe('uncalibrated_low_trust');
   });
 
   it('resolves under untrusted calibration only with explicit exact evidence', () => {
-    const d = decider.decide(untrustedResolved(0.6), 'short_entity', true);
+    const d = decider.decide(untrustedResolved(0.6), 'short_entity', 'identity_grade');
     expect(d.status).toBe('resolved');
+  });
+});
+
+describe('audit HIGH — trusted calibration still requires identity-grade evidence', () => {
+  function trustedUseCase(strategy: string): EntityLookupV2UseCase {
+    const eid = createEntityId('vinas-mora');
+    const resolver: EntityResolverPort = {
+      resolve: vi.fn().mockResolvedValue({
+        status: 'resolved',
+        candidates: [{ entityId: eid, canonicalLabel: '2022 Vinas Mora kaamen III', calibratedScore: 1.0, rank: 1, evidenceRefs: [] }],
+        topEntity: { entityId: eid, canonicalLabel: '2022 Vinas Mora kaamen III', calibratedScore: 1.0 },
+        decisionTrace: {
+          queryClass: 'short_entity', top1CalibratedScore: 1.0, top2CalibratedScore: 0.25,
+          calibratedGap: 0.75, decisionConfidenceC: 1.0, calibrationTrusted: true,
+          ambiguityDetected: false, ambiguityTypes: [],
+          appliedThresholds: { resolveThreshold: 0.5, gapThreshold: 0.1 }, outcomeReasonCodes: ['CONFIDENCE_ABOVE_THRESHOLD'],
+        },
+        conformalSetSize: 1,
+      }),
+    };
+    const doc = { entityId: eid, entityType: 'wine' as const, canonicalLabel: '2022 Vinas Mora kaamen III' };
+    const lookupPlanner: LookupPlannerPort = {
+      plan: vi.fn().mockResolvedValue({
+        rawQuery: 'vina espectro', normalizedQuery: 'vina espectro', intent: 'known_item', route: 'entity',
+        retrievalMode: 'entity_lookup', queryClass: 'short_entity',
+        anchors: [{ surfaceForm: 'vina espectro', normalizedForm: 'vina espectro', candidateEntityIds: [eid], lookupStrategies: [strategy], confidence: 1.0 }],
+        constraints: { hard: [], soft: [], inferred: [] }, expansions: { lexical: [], semantic: [] },
+        policy: {}, uncertainty: {}, normalizedQueryViews: makeViews('vina espectro'),
+        plannerVersion: '1', policyRuleVersion: '1', thresholdProfileId: 'default',
+      } as never),
+    };
+    return new EntityLookupV2UseCase({
+      admissionGate: new ConceptAdmissionGate(),
+      lookupPlanner,
+      entityResolver: resolver,
+      resolverProjectionLookup: {
+        getResolverProjections: vi.fn().mockResolvedValue(new Map([[eid, {
+          entityId: eid,
+          entityType: 'wine',
+          canonicalLabel: doc.canonicalLabel,
+          aliasesIdentitySafe: [],
+          identitySafeKeys: [],
+        }]])),
+      },
+      querySanitizer: { sanitize: vi.fn((q: string) => ({ safe: true, sanitizedQuery: q })) } as never,
+    });
+  }
+
+  it('FAILS closed when trusted top candidate is supported only by fuzzy recall', async () => {
+    const out = await trustedUseCase('fuzzy_char_ngram').execute({ query: 'vina espectro', maxCandidates: 5, mode: 'default' });
+    expect(out.status).toBe('failed');
+    expect(out.evidenceSummary.decisionReasonCode).toBe('recall_only_no_match');
+  });
+
+  it('RESOLVES when trusted top candidate carries identity-grade evidence', async () => {
+    const out = await trustedUseCase('compact_exact').execute({ query: 'vina espectro', maxCandidates: 5, mode: 'default' });
+    expect(out.status).toBe('resolved');
   });
 });
 
@@ -132,23 +189,30 @@ describe('audit MED — max_candidates caps the surfaced candidate list', () => 
       }),
     };
     const doc = (id: ReturnType<typeof createEntityId>) => ({ entityId: id, entityType: 'wine' as const, canonicalLabel: 'E' });
-    const queryPlanner: QueryPlannerPort = {
+    const lookupPlanner: LookupPlannerPort = {
       plan: vi.fn().mockResolvedValue({
         rawQuery: 'opus one', normalizedQuery: 'opus one', intent: 'known_item', route: 'entity',
         retrievalMode: 'entity_lookup', queryClass: 'known-item',
-        anchors: [{ surfaceForm: 'opus one', normalizedForm: 'opus one', candidateEntityIds: ids, lookupStrategies: ['fuzzy_char_ngram'], confidence: 0.6 }],
+        anchors: [{ surfaceForm: 'opus one', normalizedForm: 'opus one', candidateEntityIds: ids, lookupStrategies: ['exact'], confidence: 0.97 }],
         constraints: { hard: [], soft: [], inferred: [] }, expansions: { lexical: [], semantic: [] },
         policy: {}, uncertainty: {}, normalizedQueryViews: makeViews('opus one'),
         plannerVersion: '1', policyRuleVersion: '1', thresholdProfileId: 'default',
-      }),
+      } as never),
     };
     const useCase = new EntityLookupV2UseCase({
       admissionGate: new ConceptAdmissionGate(),
-      queryPlanner,
+      lookupPlanner,
       entityResolver: resolver,
-      entityLookup: {
-        getDocument: vi.fn().mockImplementation(async (id) => doc(id)),
-        getDocuments: vi.fn(async (xs: readonly ReturnType<typeof createEntityId>[]) => new Map(xs.map((id) => [id, doc(id)]))),
+      resolverProjectionLookup: {
+        getResolverProjections: vi.fn(async (xs: readonly ReturnType<typeof createEntityId>[]) => new Map(
+          xs.map((id) => [id, {
+            entityId: id,
+            entityType: 'wine',
+            canonicalLabel: doc(id).canonicalLabel,
+            aliasesIdentitySafe: [],
+            identitySafeKeys: [],
+          }]),
+        )),
       },
       querySanitizer: { sanitize: vi.fn((q: string) => ({ safe: true, sanitizedQuery: q })) } as never,
     });
@@ -182,7 +246,7 @@ describe('audit R2 HIGH — untrusted resolve is not forgeable by a recall strat
       }),
     };
     const doc = { entityId: eid, entityType: 'wine' as const, canonicalLabel: 'Chateau Margaux' };
-    const queryPlanner: QueryPlannerPort = {
+    const lookupPlanner: LookupPlannerPort = {
       plan: vi.fn().mockResolvedValue({
         rawQuery: 'margaux', normalizedQuery: 'margaux', intent: 'known_item', route: 'entity',
         retrievalMode: 'entity_lookup', queryClass: 'short_entity',
@@ -190,24 +254,29 @@ describe('audit R2 HIGH — untrusted resolve is not forgeable by a recall strat
         constraints: { hard: [], soft: [], inferred: [] }, expansions: { lexical: [], semantic: [] },
         policy: {}, uncertainty: {}, normalizedQueryViews: makeViews('margaux'),
         plannerVersion: '1', policyRuleVersion: '1', thresholdProfileId: 'default',
-      }),
+      } as never),
     };
     return new EntityLookupV2UseCase({
       admissionGate: new ConceptAdmissionGate(),
-      queryPlanner,
+      lookupPlanner,
       entityResolver: resolver,
-      entityLookup: {
-        getDocument: vi.fn().mockResolvedValue(doc),
-        getDocuments: vi.fn().mockResolvedValue(new Map([[eid, doc]])),
+      resolverProjectionLookup: {
+        getResolverProjections: vi.fn().mockResolvedValue(new Map([[eid, {
+          entityId: eid,
+          entityType: 'wine',
+          canonicalLabel: doc.canonicalLabel,
+          aliasesIdentitySafe: [],
+          identitySafeKeys: [],
+        }]])),
       },
       querySanitizer: { sanitize: vi.fn((q: string) => ({ safe: true, sanitizedQuery: q })) } as never,
     });
   }
 
-  it('ABSTAINS when untrusted top candidate has only a lexical_exact (recall) strategy', async () => {
+  it('FAILS closed when untrusted top candidate has only a lexical_exact (recall) strategy', async () => {
     const out = await untrustedUseCase('lexical_exact').execute({ query: 'margaux', maxCandidates: 5, mode: 'default' });
-    expect(out.status).toBe('ambiguous');
-    expect(out.evidenceSummary.decisionReasonCode).toBe('uncalibrated_low_trust');
+    expect(out.status).toBe('failed');
+    expect(out.evidenceSummary.decisionReasonCode).toBe('recall_only_no_match');
   });
 
   it('RESOLVES when untrusted top candidate has a strict exact strategy', async () => {

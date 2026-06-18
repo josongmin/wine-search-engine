@@ -6,6 +6,7 @@ summary: |
   dedicated lookup primitive로 직행하는 경로. 한국어 별칭 catalog (3-tier:
   gold/seeded/silver)에 매칭되면 LLM 없이 처리.
 
+status: deprecated
 maturity: 5
 maturity_rationale: |
   프로덕션 와이어링 완료 (`cascade-router`가 query를 적절한 retrieval mode로 라우팅).
@@ -20,14 +21,12 @@ maturity_rationale: |
   전체 curated surface로 검증 — production normalize/vintage-strip 로직 drift
   발생 시 즉시 실패.
 
-status: active
 since: 2025-09
-last_reviewed: 2026-05-21
+last_reviewed: 2026-06-10
 owner: core
 
 surfaces:
-  - "Agent tool: lookup_wine"
-  - "HTTP: POST /v1/lookup/wine"
+  - "Agent tool: lookup_wine (V2 authority via lookup-authority.ts)"
 
 key_files:
   - src/domain/query/model/retrieval-mode.ts
@@ -52,6 +51,7 @@ known_limitations:
   - "Gold catalog manual curation 필요 — 신규 와이너리 신속 반영 불가"
   - "Cross-language alias expansion 미흡 (e.g. 'Moët' ↔ '모엣')"
   - "resolveCuratedExactLookupTarget는 trailing 4-digit vintage를 strip한 뒤 base entity surface로 lookup — 결과적으로 year-specific SKU surface (예: '라피트 2016' → 'Château Lafite Rothschild 2016') 는 production 경로로 직접 도달 불가. Regression test는 이를 의도된 divergence로 핀(dual-implementation parity property의 out-of-scope case)."
+  - "공개 HTTP surface authority는 이미 `POST /v2/entity-lookup`로 이동했다. 이 항목은 agent/tool naming과 curated alias hot-path 설명용 레거시 카탈로그다."
 
 next_steps:
   - "Gold catalog 자동 갱신 파이프라인 (Korean wine 이커머스 데이터 활용)"

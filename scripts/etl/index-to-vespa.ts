@@ -27,6 +27,7 @@ import {
 import { EMBEDDING_MODEL, EMBEDDING_DIMENSION } from '../../src/domain/shared/constants/embedding.js';
 import { parseNdjson } from './ndjson.js';
 import { normalizeRegion } from './region-normalizer.js';
+import type { SpladeEncoder } from './splade-encoder.js';
 import { VespaClient } from '../../src/infrastructure/vespa/vespa-client.js';
 import { toVespaFields } from '../../src/infrastructure/vespa/mapping.js';
 import { createCanonicalEntityId } from '../../src/domain/shared/types/entity-id.js';
@@ -628,6 +629,27 @@ interface CriticProxy {
   readonly isSynthetic: boolean;
 }
 
+/**
+ * Confidence → critic rerank weight, in [0, 1].
+ *
+ * Track-C critic proxies are ALWAYS synthetic (LLM-estimated), so `isSynthetic`
+ * carries no discriminative signal (it is a constant `true`). The usable trust
+ * lever is the LLM's self-reported `confidence`. This multiplier feeds the
+ * `wine_aware` second-phase critic term so a low-confidence synthetic proxy is
+ * trusted less than a high-confidence one (see retrieval-document.ts
+ * criticConfidenceWeight + wine_entity.sd critic_confidence_weight).
+ *
+ * Curve: linear-ish decay (high=1.0, medium=0.66, low=0.33). An unknown /
+ * absent confidence resolves to 1.0 at rank time (back-compat for documents
+ * indexed before this field existed) — so we only EMIT the field for the three
+ * known values, never a fabricated default.
+ */
+const CRITIC_CONFIDENCE_WEIGHT: ReadonlyMap<string, number> = new Map([
+  ['high', 1.0],
+  ['medium', 0.66],
+  ['low', 0.33],
+]);
+
 interface CertificationResult {
   readonly organic: boolean;
   readonly biodynamic: boolean;
@@ -806,6 +828,7 @@ export function silverToIndexable(
   rec: EnrichedSilverRecord,
   goldCanonicalLookup: ReadonlyMap<string, string> = new Map(),
   sourceContinuityLookup: ReadonlyMap<SourceRecordId, SourceEntityContinuityRecord> = new Map(),
+  spladeEncoder?: SpladeEncoder,
 ): IndexableWineRecord {
   const gold = rec as GoldRecord;
   const resolvedEntity = resolveWineSnapshotEntity(rec, goldCanonicalLookup, sourceContinuityLookup);
@@ -819,6 +842,28 @@ export function silverToIndexable(
     if (gold.ratingAvg != null) return Math.max(0, Math.min(1, gold.ratingAvg / 5));
     return undefined;
   })();
+
+  // Confidence-derived rerank weight for the synthetic critic proxy. Only
+  // emitted when (a) the critic score actually came from a Track-C proxy and
+  // (b) that proxy's confidence is one of the known levels. When it came from
+  // the Vivino ratingAvg fallback, there is no proxy confidence to speak of, so
+  // we leave the weight absent and the ranker defaults to 1.0.
+  const criticConfidenceWeight: number | undefined =
+    gold.criticProxy?.proxyScore != null
+      ? CRITIC_CONFIDENCE_WEIGHT.get(gold.criticProxy.confidence)
+      : undefined;
+
+  // RFC-022 P1: doc-side learned-sparse (SPLADE) encoding seam. When a
+  // SpladeEncoder is injected (P2 wires the real ONNX encoder; tests inject a
+  // stub), encode the English tasting text — SPLADE doc-side is English-only by
+  // design (RFC-022 §3.1), Korean recall stays on alias/BM25/dense channels.
+  // Without an injected encoder we preserve any pre-computed vector on the
+  // record (currently always absent), so production stays byte-identical until
+  // P2. An encoder returning undefined (e.g. empty text) leaves the field off.
+  const learnedSparseWeights =
+    spladeEncoder !== undefined && rec.searchTextEn.length > 0
+      ? spladeEncoder.encode(rec.searchTextEn)
+      : rec.learnedSparseWeights;
 
   const certTags: readonly string[] | undefined =
     gold.certifications != null ? buildCertificationTags(gold.certifications) : undefined;
@@ -898,6 +943,7 @@ export function silverToIndexable(
     ...(rec.acidity != null ? { acidity: rec.acidity } : {}),
     ...(rec.tannin != null ? { tannin: rec.tannin } : {}),
     ...(criticScoreNormalized !== undefined ? { criticScoreNormalized } : {}),
+    ...(criticConfidenceWeight !== undefined ? { criticConfidenceWeight } : {}),
     ...(gold.drinkingWindow != null
       ? {
           drinkingWindowStart: gold.drinkingWindow.drinkingWindowStart,
@@ -943,8 +989,8 @@ export function silverToIndexable(
     ...(certTags !== undefined && certTags.length > 0 ? { certifications: [...certTags] } : {}),
     ...(soilType !== undefined ? { soilType } : {}),
     ...(producerType !== undefined ? { producerType } : {}),
-    ...(rec.learnedSparseWeights !== undefined
-      ? { learnedSparseWeights: rec.learnedSparseWeights }
+    ...(learnedSparseWeights !== undefined
+      ? { learnedSparseWeights }
       : {}),
     ...(rec.syntheticQueries !== undefined && rec.syntheticQueries.length > 0
       ? { syntheticQueries: rec.syntheticQueries }
@@ -1043,9 +1089,10 @@ export function silverToRetrievalDoc(
   searchSnapshotId?: string,
   goldCanonicalLookup?: ReadonlyMap<string, string>,
   sourceContinuityLookup: ReadonlyMap<SourceRecordId, SourceEntityContinuityRecord> = new Map(),
+  spladeEncoder?: SpladeEncoder,
 ): RetrievalDocument {
   const lookup = goldCanonicalLookup ?? new Map();
-  const indexable = silverToIndexable(rec, lookup, sourceContinuityLookup);
+  const indexable = silverToIndexable(rec, lookup, sourceContinuityLookup, spladeEncoder);
 
   const doc: RetrievalDocument = {
     entityId: createCanonicalEntityId(indexable.entityId),
@@ -1094,6 +1141,9 @@ export function silverToRetrievalDoc(
     ...(indexable.flavorProfiles !== undefined ? { flavorProfiles: indexable.flavorProfiles } : {}),
     ...(indexable.criticScoreNormalized !== undefined
       ? { criticScoreNormalized: indexable.criticScoreNormalized }
+      : {}),
+    ...(indexable.criticConfidenceWeight !== undefined
+      ? { criticConfidenceWeight: indexable.criticConfidenceWeight }
       : {}),
     ...(indexable.learnedSparseWeights !== undefined
       ? { learnedSparseWeights: indexable.learnedSparseWeights }
@@ -1402,9 +1452,11 @@ export async function materializePreparedVespaFeedArtifact(args: {
   readonly hash: string;
 }> {
   const goldLookup = await loadGoldCanonicalLookupForBuild({ fixtureRepoRoot: args.fixtureRepoRoot });
-  const sourceContinuityLookup = await loadActiveSourceEntityContinuity();
   const raw = await fs.readFile(args.inputPath, 'utf8');
   const records = parseNdjson<EnrichedSilverRecord>(raw, args.inputPath).records;
+  const sourceContinuityLookup = await loadActiveSourceEntityContinuity(undefined, {
+    sourceIds: records.map((record) => record.sourceId),
+  });
   const reusablePreparedDocs = args.reuseEmbeddingFromPreparedFeedPath !== undefined
     ? parsePreparedVespaFeedDocuments(
       await fs.readFile(args.reuseEmbeddingFromPreparedFeedPath, 'utf8'),
@@ -1459,7 +1511,6 @@ export async function run(): Promise<void> {
   }
 
   const goldLookup = await loadGoldCanonicalLookupForBuild({ fixtureRepoRoot: args.fixtureRepoRoot });
-  const sourceContinuityLookup = await loadActiveSourceEntityContinuity();
   assertCanonicalTrackCArtifactInput(args.input, 'index-to-vespa');
 
   console.log(`Reading enriched Silver from ${args.input} …`);
@@ -1469,6 +1520,9 @@ export async function run(): Promise<void> {
   if (args.limit > 0) {
     records = records.slice(0, args.limit);
   }
+  const sourceContinuityLookup = await loadActiveSourceEntityContinuity(undefined, {
+    sourceIds: records.map((record) => record.sourceId),
+  });
   console.log(`  Records to index: ${records.length}`);
 
   if (args.dryRun) {

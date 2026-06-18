@@ -74,6 +74,9 @@ class GoldenEvalPipelineAdapter implements SearchPipelinePort {
       predictedStatus: c.expectedStatus,
       ...(resolved && c.expectedEntityId !== undefined ? { predictedEntityId: c.expectedEntityId } : {}),
       decisionConfidence: 0.88,
+      // Raw (pre-calibration) top-1 resolver score — surfaced only when a
+      // candidate was scored (resolved/ambiguous), absent for clean failures.
+      ...(c.expectedStatus !== 'failed' ? { top1RawScore: 0.731 } : {}),
       evidenceItems: resolved ? STUB_EVIDENCE : [],
       ...(resolved ? { funnelMetrics: STUB_FUNNEL_METRICS } : {}),
       latencyMs: 1,
@@ -214,6 +217,21 @@ describe('Decision Utility — Eval Set Integration', () => {
 
     const ambiguous = stored.find((result) => result.predictedStatus === 'ambiguous');
     expect(ambiguous?.funnelMetrics).toBeUndefined();
+  });
+
+  it('propagates raw top-1 resolver score (top1RawScore) into stored eval results for calibration', async () => {
+    // Regression: the calibration training loop was open because the eval
+    // harness never persisted top1_raw_score (0/4150 prod rows). The pipeline
+    // output now carries top1RawScore and the runner MUST map it onto the
+    // stored EvalResult so extract-calibration-trace can fit calibration.
+    await evalRunner.run();
+
+    const stored = evalResultStore.getAll();
+    const scored = stored.filter((r) => r.predictedStatus !== 'failed');
+    expect(scored.length).toBeGreaterThan(0);
+    for (const result of scored) {
+      expect(result.top1RawScore).toBe(0.731);
+    }
   });
 
   it('eval report contains per-slice metrics', async () => {

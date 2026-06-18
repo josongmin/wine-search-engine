@@ -73,6 +73,8 @@ class MemStore implements CurationStorePort {
       queueByStatus: { pending: this.byId.size, approved: 0, rejected: 0, published: 0 },
       queueByKind: { alias: 0, ambiguity: 0, suppression: 0 },
       totalProposals: this.byId.size,
+      publishedAwaitingMaterialization: 0,
+      legacyApprovedAbbreviationBacklog: 0,
     };
   }
 }
@@ -83,7 +85,7 @@ function post(app: FastifyInstance, url: string, payload: unknown, headers: Reco
 
 const aliasSubmit = {
   kind: 'alias', surface_form: 'dom perignon', target_entity_id: 'ent-dp',
-  proposed_type: 'misspelling', confidence: 0.9, evidence: { reason: 'hole' },
+  proposed_type: 'misspelling', confidence: 0.9, evidence: {},
 };
 
 describe('/v2/entity-lookup/ops/* curation plane (T-ELV2-07)', () => {
@@ -117,6 +119,42 @@ describe('/v2/entity-lookup/ops/* curation plane (T-ELV2-07)', () => {
     const body = res.json() as Record<string, unknown>;
     expect(body).toHaveProperty('queue_by_status');
     expect(body).toHaveProperty('total_proposals');
+    expect(body).toHaveProperty('published_awaiting_materialization');
+    expect(body).toHaveProperty('legacy_approved_abbreviation_backlog');
+  });
+
+  it('includes lookup_runtime substrate when wired on coverage-health', async () => {
+    await app.close();
+    app = Fastify();
+    registerRequestContext(app);
+    registerHttpDebugMode(app, { secret: DEBUG_SECRET });
+    registerHttpOpsWriteMode(app, { secret: WRITE_SECRET });
+    app.setErrorHandler(errorHandler);
+    store = new MemStore();
+    registerEntityLookupV2OpsCurationRoutes(app, {
+      curationUseCase: new CurationUseCase(store),
+      lookupOpsRuntime: {
+        searchSnapshotId: 'search-snapshot:v1:test',
+        familyGraphEdgeCount: 12,
+        ltrSupportStatus: 'unsupported',
+        ltrSupportReason: 'lookup_domain_model_absent',
+        unwiredSubstrateIds: ['pg_alias_matcher_trigram', 'lookup_ltr_rerank'],
+      },
+    });
+    await app.ready();
+
+    const res = await post(app, '/v2/entity-lookup/ops/coverage-health', {}, { 'x-debug-key': DEBUG_SECRET });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      lookup_runtime?: {
+        search_snapshot_id?: string;
+        family_graph_edge_count: number;
+        unwired_substrate_ids: string[];
+      };
+    };
+    expect(body.lookup_runtime?.search_snapshot_id).toBe('search-snapshot:v1:test');
+    expect(body.lookup_runtime?.family_graph_edge_count).toBe(12);
+    expect(body.lookup_runtime?.unwired_substrate_ids).toContain('lookup_ltr_rerank');
   });
 
   it('serves alias-audit with the debug key', async () => {
@@ -144,6 +182,104 @@ describe('/v2/entity-lookup/ops/* curation plane (T-ELV2-07)', () => {
     expect(body.proposal.kind).toBe('alias');
   });
 
+  it('submits legacy ops-console evidence with note key', async () => {
+    const res = await post(
+      app,
+      '/v2/entity-lookup/ops/proposals/submit',
+      {
+        ...aliasSubmit,
+        evidence: { source: 'ops_console', note: 'menu verified' },
+      },
+      { 'x-ops-write-key': WRITE_SECRET },
+    );
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { proposal: { evidence: Record<string, unknown> } };
+    expect(body.proposal.evidence).toEqual({
+      source: 'ops_console',
+      operator_note: 'menu verified',
+    });
+  });
+
+  it('submits RFC-014 snake_case operator_note evidence', async () => {
+    const res = await post(
+      app,
+      '/v2/entity-lookup/ops/proposals/submit',
+      {
+        ...aliasSubmit,
+        evidence: { source: 'ops_console', operator_note: 'wire verified' },
+      },
+      { 'x-ops-write-key': WRITE_SECRET },
+    );
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { proposal: { evidence: Record<string, unknown> } };
+    expect(body.proposal.evidence).toEqual({
+      source: 'ops_console',
+      operator_note: 'wire verified',
+    });
+  });
+
+  it('submits ambiguity proposal with normalized_form and snake_case evidence', async () => {
+    const res = await post(
+      app,
+      '/v2/entity-lookup/ops/proposals/submit',
+      {
+        kind: 'ambiguity',
+        normalized_form: 'Opus One',
+        member_entity_ids: ['ent-a', 'ent-b'],
+        evidence: { source: 'ops_console', ambiguity_types: ['operator_curation'], severity: 'medium' },
+      },
+      { 'x-ops-write-key': WRITE_SECRET },
+    );
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      proposal: { kind: string; normalized_form: string; evidence: Record<string, unknown> };
+    };
+    expect(body.proposal.kind).toBe('ambiguity');
+    expect(body.proposal.normalized_form).toBe('opus one');
+    expect(body.proposal.evidence).toEqual({
+      source: 'ops_console',
+      ambiguity_types: ['operator_curation'],
+      severity: 'medium',
+    });
+  });
+
+  it('submits suppression proposal with scoped target and evidence wire mapping', async () => {
+    const res = await post(
+      app,
+      '/v2/entity-lookup/ops/proposals/submit',
+      {
+        kind: 'suppression',
+        surface_form: 'bad alias',
+        target_entity_id: 'ent-x',
+        reason: 'operator verified noise',
+        evidence: { source: 'ops_console', note: 'menu verified' },
+      },
+      { 'x-ops-write-key': WRITE_SECRET },
+    );
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      proposal: { kind: string; surface_form: string; reason: string; evidence: Record<string, unknown> };
+    };
+    expect(body.proposal.kind).toBe('suppression');
+    expect(body.proposal.surface_form).toBe('bad alias');
+    expect(body.proposal.reason).toBe('operator verified noise');
+    expect(body.proposal.evidence).toEqual({
+      source: 'ops_console',
+      operator_note: 'menu verified',
+    });
+  });
+
+  it('runs submit→review reject through the write plane', async () => {
+    const submitted = await post(app, '/v2/entity-lookup/ops/proposals/submit', aliasSubmit, { 'x-ops-write-key': WRITE_SECRET });
+    const id = (submitted.json() as { proposal: { proposal_id: string } }).proposal.proposal_id;
+
+    const reviewed = await post(app, '/v2/entity-lookup/ops/proposals/review',
+      { kind: 'alias', proposal_id: id, decision: 'reject', reviewed_by: 'op', decision_reason: 'bad surface' },
+      { 'x-ops-write-key': WRITE_SECRET });
+    expect(reviewed.statusCode).toBe(200);
+    expect((reviewed.json() as { proposal: { status: string } }).proposal.status).toBe('rejected');
+  });
+
   it('runs submit→review→publish through the write plane', async () => {
     const submitted = await post(app, '/v2/entity-lookup/ops/proposals/submit', aliasSubmit, { 'x-ops-write-key': WRITE_SECRET });
     const id = (submitted.json() as { proposal: { proposal_id: string } }).proposal.proposal_id;
@@ -159,6 +295,40 @@ describe('/v2/entity-lookup/ops/* curation plane (T-ELV2-07)', () => {
       { 'x-ops-write-key': WRITE_SECRET });
     expect(published.statusCode).toBe(200);
     expect((published.json() as { proposal: { status: string } }).proposal.status).toBe('published');
+  });
+
+  it('runs ambiguity submit→review→publish with kind on review/publish', async () => {
+    const submitted = await post(
+      app,
+      '/v2/entity-lookup/ops/proposals/submit',
+      {
+        kind: 'ambiguity',
+        normalized_form: 'opus one',
+        member_entity_ids: ['ent-a', 'ent-b'],
+        evidence: {},
+      },
+      { 'x-ops-write-key': WRITE_SECRET },
+    );
+    const id = (submitted.json() as { proposal: { proposal_id: string } }).proposal.proposal_id;
+
+    const reviewed = await post(
+      app,
+      '/v2/entity-lookup/ops/proposals/review',
+      { kind: 'ambiguity', proposal_id: id, decision: 'approve', reviewed_by: 'op', decision_reason: 'ok' },
+      { 'x-ops-write-key': WRITE_SECRET },
+    );
+    expect(reviewed.statusCode).toBe(200);
+
+    const published = await post(
+      app,
+      '/v2/entity-lookup/ops/proposals/publish',
+      { kind: 'ambiguity', proposal_id: id, reviewed_by: 'op' },
+      { 'x-ops-write-key': WRITE_SECRET },
+    );
+    expect(published.statusCode).toBe(200);
+    expect((published.json() as { proposal: { kind: string; status: string } }).proposal).toEqual(
+      expect.objectContaining({ kind: 'ambiguity', status: 'published' }),
+    );
   });
 
   it('404s a review of an unknown proposal', async () => {

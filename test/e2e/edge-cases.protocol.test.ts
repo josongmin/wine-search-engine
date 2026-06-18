@@ -68,9 +68,9 @@ describe('HTTP method and routing', () => {
 
 describe('Response body integrity', () => {
   it.each([
-    ['search/hybrid', () => post('/v1/search/hybrid', { query: 'Opus One 2018' })],
-    ['lookup/wine', () => post('/v1/lookup/wine', { query: 'Opus One 2018' })],
-  ])('POST /v1/%s response body is always valid JSON', async (_label, runRequest) => {
+    ['/v1/search/hybrid', () => post('/v1/search/hybrid', { query: 'Opus One 2018' })],
+    ['/v2/entity-lookup', () => post('/v2/entity-lookup', { query: 'Opus One 2018' })],
+  ])('POST %s response body is always valid JSON', async (_label, runRequest) => {
     const res = await runRequest();
     expectValidJsonBody(res);
   });
@@ -116,24 +116,27 @@ describe('Header and protocol edge cases', () => {
   });
 });
 
-describe('Lookup endpoint edge cases', () => {
-  it('/v1/lookup/wine returns a valid search envelope for a known entity', async () => {
-    const res = await post('/v1/lookup/wine', { query: 'Opus One 2018' });
+describe('Lookup endpoint edge cases (V2)', () => {
+  it('/v2/entity-lookup returns a valid V2 4-state envelope for a known entity', async () => {
+    const res = await post('/v2/entity-lookup', { query: 'Opus One 2018' });
 
     expect(res.statusCode).toBe(200);
     const body = res.json() as Record<string, unknown>;
-    expect(body['query_type']).toBe('search');
-    expect(Array.isArray(body['results'])).toBe(true);
+    // V2-native 4-state contract.
+    expect(['resolved', 'ambiguous', 'failed', 'redirect_discovery']).toContain(body['status']);
+    expect(Array.isArray(body['candidates'])).toBe(true);
     expect(typeof body['meta']).toBe('object');
   });
 
-  it('/v1/lookup/wine rejects comparison-style queries with a valid JSON error body', async () => {
-    const res = await post('/v1/lookup/wine', { query: 'Opus One vs Sassicaia' });
+  it('/v2/entity-lookup admits a comparison-style query and returns a valid JSON 4-state body (no 400)', async () => {
+    // V2-only cutover: unlike the removed /v1/lookup/wine (which 400'd comparison
+    // queries), the EntityLookupV2 concept gate admits the query and returns a
+    // 4-state result (typically failed/redirect_discovery for a vs-query) rather
+    // than an error envelope.
+    const res = await post('/v2/entity-lookup', { query: 'Opus One vs Sassicaia' });
 
-    expect(res.statusCode).toBe(400);
-    const body = expectValidJsonBody(res) as Record<string, unknown>;
-    const error = body['error'] as Record<string, unknown>;
-    expect(typeof error['code']).toBe('string');
-    expect(typeof error['message']).toBe('string');
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as Record<string, unknown>;
+    expect(['resolved', 'ambiguous', 'failed', 'redirect_discovery']).toContain(body['status']);
   });
 });

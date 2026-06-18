@@ -8,6 +8,7 @@
 
 import { BKTree } from './bk-tree.js';
 import { soundexEn, soundexKo } from './phonetic.js';
+import { editDistanceSimilarity } from '../../alias/service/edit-distance.js';
 import { compareScoreWithTiebreaker } from '../../shared/utils/stable-comparator.js';
 
 interface FuzzyMatchResult {
@@ -83,8 +84,9 @@ export class FuzzyMatcher {
    * Phonetic similarity: 1 if phonetic keys match, 0 otherwise.
    */
   private combinedScore(query: string, term: string, editDistance: number): number {
-    const maxLen = Math.max(query.length, term.length);
-    const editSimilarity = maxLen > 0 ? 1 - editDistance / maxLen : 1;
+    // SSoT: edit-distance similarity formula lives in alias/service/edit-distance
+    // (rule 30 — no duplicated formula that can drift from the canonical one).
+    const editSimilarity = editDistanceSimilarity(query, term, editDistance);
 
     const phoneticMatch = this.phoneticMatch(query, term) ? 1 : 0;
 

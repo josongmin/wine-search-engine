@@ -1,0 +1,13 @@
+{"surface":"까쇼","locale":"ko","conceptClass":"grape","redirectReason":"concept_query","sourceEvidence":"reviewed:korean-famous:elv2-kr-056","reviewedAt":"2026-06-04T00:00:00.000Z"}
+{"surface":"까베르네 소비뇽","locale":"ko","conceptClass":"grape","redirectReason":"concept_query","sourceEvidence":"reviewed:korean-famous:elv2-kr-057","reviewedAt":"2026-06-04T00:00:00.000Z"}
+{"surface":"메를로","locale":"ko","conceptClass":"grape","redirectReason":"concept_query","sourceEvidence":"reviewed:korean-famous:elv2-kr-058","reviewedAt":"2026-06-04T00:00:00.000Z"}
+{"surface":"바롤로","locale":"ko","conceptClass":"region","redirectReason":"concept_query","sourceEvidence":"reviewed:korean-famous:elv2-kr-049","reviewedAt":"2026-06-04T00:00:00.000Z"}
+{"surface":"Bordeaux","locale":"global","conceptClass":"region","redirectReason":"concept_query","sourceEvidence":"reviewed:korean-famous:elv2-kr-059","reviewedAt":"2026-06-04T00:00:00.000Z"}
+{"surface":"달콤한 화이트","locale":"ko","conceptClass":"style","redirectReason":"concept_query","sourceEvidence":"reviewed:korean-famous:elv2-kr-060","reviewedAt":"2026-06-04T00:00:00.000Z"}
+{"surface":"와인 추천해줘","locale":"ko","conceptClass":"recommendation","redirectReason":"generic_non_entity_query","sourceEvidence":"reviewed:korean-famous:elv2-kr-061","reviewedAt":"2026-06-04T00:00:00.000Z"}
+{"surface":"와인 추천","locale":"ko","conceptClass":"recommendation","redirectReason":"generic_non_entity_query","sourceEvidence":"reviewed:hotset:elv2-026","reviewedAt":"2026-06-04T00:00:00.000Z"}
+{"surface":"샴페인 추천","locale":"ko","conceptClass":"recommendation","redirectReason":"concept_query","sourceEvidence":"reviewed:korean-famous:elv2-kr-074","reviewedAt":"2026-06-04T00:00:00.000Z"}
+{"surface":"스테이크랑 어울리는 와인","locale":"ko","conceptClass":"pairing","redirectReason":"concept_query","sourceEvidence":"reviewed:korean-famous:elv2-kr-075","reviewedAt":"2026-06-04T00:00:00.000Z"}
+{"surface":"Cabernet Sauvignon","locale":"global","conceptClass":"grape","redirectReason":"concept_query","sourceEvidence":"reviewed:hotset:elv2-005","reviewedAt":"2026-06-04T00:00:00.000Z"}
+{"surface":"full bodied red","locale":"global","conceptClass":"style","redirectReason":"concept_query","sourceEvidence":"reviewed:hotset:elv2-006","reviewedAt":"2026-06-04T00:00:00.000Z"}
+{"surface":"Napa Valley","locale":"global","conceptClass":"region","redirectReason":"concept_query","sourceEvidence":"reviewed:hotset:elv2-007","reviewedAt":"2026-06-04T00:00:00.000Z"}

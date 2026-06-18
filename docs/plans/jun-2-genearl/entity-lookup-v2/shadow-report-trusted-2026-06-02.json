@@ -1,0 +1,217 @@
+{
+  "generatedAt": "2026-06-02T09:01:33.738Z",
+  "gitSha": "7eae89007320381cf3ffd788fe34d3937bb0108e",
+  "corpus": "test/fixtures/lookup-v2-hotset.jsonl",
+  "rows": [
+    {
+      "qid": "elv2-001",
+      "query": "Opus One 2018",
+      "expectedStatus": "resolved",
+      "expectedLabelHint": "opus one 2018",
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v2": {
+        "status": "resolved",
+        "topEntityId": "opus-one-2018",
+        "topLabel": "Opus One 2018"
+      }
+    },
+    {
+      "qid": "elv2-002",
+      "query": "오푸스원",
+      "expectedStatus": "resolved",
+      "expectedLabelHint": "opus one",
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v2": {
+        "status": "resolved",
+        "topEntityId": "opus-one-2018",
+        "topLabel": "Opus One 2018"
+      }
+    },
+    {
+      "qid": "elv2-003",
+      "query": "opu one",
+      "expectedStatus": "failed",
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v2": {
+        "status": "ambiguous"
+      }
+    },
+    {
+      "qid": "elv2-004",
+      "query": "까쇼",
+      "expectedStatus": "redirect_discovery",
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v2": {
+        "status": "redirect_discovery"
+      }
+    },
+    {
+      "qid": "elv2-005",
+      "query": "Cabernet Sauvignon",
+      "expectedStatus": "redirect_discovery",
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v2": {
+        "status": "redirect_discovery"
+      }
+    },
+    {
+      "qid": "elv2-006",
+      "query": "full bodied red",
+      "expectedStatus": "redirect_discovery",
+      "v1": {
+        "status": "failed"
+      },
+      "v2": {
+        "status": "redirect_discovery"
+      }
+    },
+    {
+      "qid": "elv2-007",
+      "query": "Napa Valley",
+      "expectedStatus": "redirect_discovery",
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v2": {
+        "status": "redirect_discovery"
+      }
+    },
+    {
+      "qid": "elv2-008",
+      "query": "Dom Perignon",
+      "expectedStatus": "resolved",
+      "expectedLabelHint": "dom perignon",
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v2": {
+        "status": "ambiguous"
+      }
+    },
+    {
+      "qid": "elv2-009",
+      "query": "돔페리뇽",
+      "expectedStatus": "resolved",
+      "expectedLabelHint": "dom perignon",
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v2": {
+        "status": "failed"
+      }
+    },
+    {
+      "qid": "elv2-010",
+      "query": "Penfolds Grange",
+      "expectedStatus": "resolved",
+      "expectedLabelHint": "penfolds grange",
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v2": {
+        "status": "resolved",
+        "topEntityId": "wine-ce-ae3675d0f1a45cc578ba15452d8b0a4af984beaaa20087665e714fd72c03e344",
+        "topLabel": "2019 Penfolds Grange"
+      }
+    },
+    {
+      "qid": "elv2-011",
+      "query": "Sassicaia 2019",
+      "expectedStatus": "resolved",
+      "expectedLabelHint": "sassicaia 2019",
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v2": {
+        "status": "ambiguous"
+      }
+    },
+    {
+      "qid": "elv2-012",
+      "query": "a",
+      "expectedStatus": "failed",
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v2": {
+        "status": "failed"
+      }
+    },
+    {
+      "qid": "elv2-013",
+      "query": "wine",
+      "expectedStatus": "redirect_discovery",
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v2": {
+        "status": "redirect_discovery"
+      }
+    },
+    {
+      "qid": "elv2-014",
+      "query": "Caymus Cabernet Sauvignon",
+      "expectedStatus": "resolved",
+      "expectedLabelHint": "caymus",
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v2": {
+        "status": "ambiguous"
+      }
+    },
+    {
+      "qid": "elv2-015",
+      "query": "오퍼스원 2019",
+      "expectedStatus": "ambiguous",
+      "v1": {
+        "status": "ambiguous"
+      },
+      "v2": {
+        "status": "resolved",
+        "topEntityId": "opus-one-2018",
+        "topLabel": "Opus One 2018"
+      }
+    }
+  ],
+  "report": {
+    "rowCount": 15,
+    "v1": {
+      "total": 15,
+      "correct": 1,
+      "wrongPositive": 0,
+      "abstained": 15,
+      "correctRate": 0.06666666666666667,
+      "wrongPositiveRate": 0,
+      "abstainRate": 1
+    },
+    "v2": {
+      "total": 15,
+      "correct": 9,
+      "wrongPositive": 1,
+      "abstained": 11,
+      "correctRate": 0.6,
+      "wrongPositiveRate": 0.06666666666666667,
+      "abstainRate": 0.7333333333333333
+    },
+    "v2ConceptRedirectAccuracy": 1,
+    "improvements": 9,
+    "regressions": 1,
+    "gate": {
+      "pass": false,
+      "reasons": [
+        "V2 introduces wrong-positives (6.7%) where V1 had none"
+      ]
+    }
+  }
+}

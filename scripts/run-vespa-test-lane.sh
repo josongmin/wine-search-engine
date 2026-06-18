@@ -22,7 +22,6 @@ bash "$SCRIPT_DIR/setup-vespa-test.sh"
 
 export VESPA_URL="http://localhost:18080"
 export TEST_DB_URL="postgresql://wine:wine_test@localhost:5433/wine_engine_test"
-export TEST_REDIS_URL="redis://localhost:6380"
 export TEST_MODE="vespa"
 
 echo "▶ Running: $*"

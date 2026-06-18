@@ -1,6 +1,12 @@
 # May 29 Interface Revamp Tickets
 
 > 목적: [../rfc.md](../rfc.md)와 [../architecture-decision.md](../architecture-decision.md)을 실행 티켓으로 분해한다.
+>
+> Historical / audit-only ticket board.
+> Current public lookup truth moved to `docs/bench/STATUS.md` and
+> `tools/feature-catalog/features/retrieval/entity-lookup-v2.yaml`.
+> Ticket outputs that mention `/v1/lookup/wine` are preserved as pre-cutover
+> planning history only.
 
 ## 필수 읽기
 

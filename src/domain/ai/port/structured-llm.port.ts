@@ -217,3 +217,24 @@ export class StructuredLlmCircuitOpenError extends Error {
     this.name = 'StructuredLlmCircuitOpenError';
   }
 }
+
+/**
+ * Raised when the PROVIDER rejected the request at the transport level — an
+ * HTTP non-2xx response (auth / credit-exhausted / quota / rate-limit / 4xx
+ * request rejection / 5xx). The model NEVER produced output, so this is
+ * categorically distinct from {@link StructuredLlmValidationError} (a 200
+ * response whose model output failed OUR schema). Conflating the two — as the
+ * adapters historically did, mapping HTTP 400 "credit balance too low" to a
+ * ValidationError — makes a provider outage masquerade as malformed model
+ * output. Consumers treat this as "LLM unavailable" (honest degradation),
+ * never as "the model said something we couldn't parse".
+ */
+export class StructuredLlmProviderError extends Error {
+  readonly httpStatus: number | undefined;
+
+  constructor(httpStatus: number | undefined, message?: string) {
+    super(message ?? 'structured-llm: provider unavailable');
+    this.name = 'StructuredLlmProviderError';
+    this.httpStatus = httpStatus;
+  }
+}

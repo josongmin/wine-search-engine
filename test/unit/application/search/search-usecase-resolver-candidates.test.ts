@@ -1,20 +1,21 @@
 import { describe, expect, it, vi } from 'vitest';
+import { wrapEntityDocumentBatchLookupAsResolverProjection, type EntityDocumentBatchLookup } from '../../../../src/application/search/__tests__/resolver-projection-lookup.stub.js';
 import { buildResolverCandidatesFromGenerator } from '../../../../src/application/search/search-usecase-resolver-candidates.js';
 import { createEntityId } from '../../../../src/domain/shared/types/index.js';
 import type { CanonicalEntityId } from '../../../../src/domain/shared/types/index.js';
 import type { RetrievalDocument } from '../../../../src/domain/retrieval/model/retrieval-document.js';
-import type { EntityDocumentLookupPort } from '../../../../src/application/search/port/search-pipeline-deps.port.js';
+import type { LookupResolverProjectionPort } from '../../../../src/application/search/port/search-pipeline-deps.port.js';
 import type { EntityCandidateGeneratorInput } from '../../../../src/domain/resolver/model/entity-candidate-generator-input.js';
 import type { AliasType } from '../../../../src/domain/alias/model/alias.js';
 
 /**
  * T-E4-01: Helper to build a batch-capable lookup port from a single-document
  * resolver function. Mirrors the production contract where getDocuments() is
- * the required path and getDocument() is deprecated/test-only.
+ * the required batch hydration path.
  */
 function makeBatchLookup(
   singleFn: (id: CanonicalEntityId) => Promise<RetrievalDocument | null>,
-): EntityDocumentLookupPort {
+): EntityDocumentBatchLookup {
   return {
     getDocuments: vi.fn(async (ids: readonly CanonicalEntityId[]) => {
       const map = new Map<CanonicalEntityId, RetrievalDocument>();
@@ -57,7 +58,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
     };
     const lookup = makeBatchLookup(async () => doc);
 
-    const candidates = await buildResolverCandidatesFromGenerator(makeGeneratorInput(), lookup);
+    const candidates = await buildResolverCandidatesFromGenerator(makeGeneratorInput(), wrapEntityDocumentBatchLookupAsResolverProjection(lookup));
 
     expect(lookup.getDocuments).toHaveBeenCalledWith([entityId]);
     expect(candidates).toEqual([
@@ -81,6 +82,65 @@ describe('buildResolverCandidatesFromGenerator', () => {
         sources: ['alias'],
       }),
     ]);
+  });
+
+  it('mints exact-like identity evidence from a matched exact-safe certificate even when identitySafeKeys do not carry the Korean surface', async () => {
+    const entityId = createEntityId('haut-brion-1967');
+    const resolverProjectionLookup: LookupResolverProjectionPort = {
+      getResolverProjections: vi.fn(async (ids: readonly CanonicalEntityId[]) => {
+        const map = new Map();
+        for (const id of ids) {
+          map.set(id, {
+            entityId,
+            entityType: 'wine' as const,
+            canonicalLabel: '1967 Château Haut-Brion',
+            aliasesIdentitySafe: ['Chateau Haut-Brion'],
+            identitySafeKeys: ['chateau haut brion'],
+            identityCertificates: [{
+              kind: 'exact_safe' as const,
+              normalizedSurface: '오브리옹',
+              singleton: true,
+              collisionFree: true,
+              sourceTier: 'curated' as const,
+            }],
+            attributeHints: {
+              producer: 'Château Haut-Brion',
+            },
+          });
+        }
+        return map;
+      }),
+    };
+
+    const candidates = await buildResolverCandidatesFromGenerator(
+      {
+        rawQuery: '오브리옹',
+        normalizedQuery: '오브리옹',
+        anchors: [
+          {
+            surfaceForm: '오브리옹',
+            normalizedForm: '오브리옹',
+            candidateEntityIds: [entityId],
+            lookupStrategies: ['exact'],
+            aliasType: 'observed_query_alias',
+            confidence: 0.98,
+            source: 'alias',
+          },
+        ],
+      },
+      resolverProjectionLookup,
+    );
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.identityCertificates).toEqual([
+      expect.objectContaining({
+        kind: 'exact_safe',
+        normalizedSurface: '오브리옹',
+      }),
+    ]);
+    expect(candidates[0]?.sourceSignals.aliasExactMatch).toBeCloseTo(0.98);
+    expect(candidates[0]?.sourceSignals.canonicalNormalizedMatch).toBeCloseTo(0.98);
+    expect(candidates[0]?.sourceSignals.canonicalExactMatch).toBe(1);
   });
 
   it('merges mixed-source support for the same entity without losing provenance', async () => {
@@ -112,7 +172,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
           },
         ],
       },
-      lookup,
+      wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
     );
 
     expect(candidates).toHaveLength(1);
@@ -123,6 +183,53 @@ describe('buildResolverCandidatesFromGenerator', () => {
       }),
     );
     expect(candidates[0]?.aliasMatches).toHaveLength(2);
+  });
+
+  it('does NOT populate the identity-normalized lane for a PURE fuzzy anchor (lane-leak guard)', async () => {
+    // Regression: a candidate matched ONLY via a fuzzy strategy (no exactLike
+    // strategy in the set) used to leak full anchor confidence into
+    // canonicalNormalizedMatch (the identity lane, scorer weight 0.9), because
+    // the gate that zeroes that lane only fired for exactLike-that-failed or
+    // phonetic — not for fuzzy (identitySafeMatch === undefined). That let a
+    // generic token fuzzy hit (e.g. "Viña"→"Vinas") score identity-grade and
+    // wrong-resolve a different wine. Fuzzy evidence must flow ONLY through the
+    // aliasFuzzyMatch + editDistanceScore lanes; the identity lane is 0.
+    const entityId = createEntityId('vinas-mora-kaamen-iii-2022');
+    const lookup = makeBatchLookup(async () => ({
+      entityId,
+      entityType: 'wine',
+      canonicalLabel: '2022 Vinas Mora kaamen III',
+      producer: 'Vinas Mora',
+      aliasesIdentitySafe: ['Vinas Mora kaamen III', '2022 Vinas Mora kaamen III'],
+    } as unknown as RetrievalDocument));
+
+    const candidates = await buildResolverCandidatesFromGenerator(
+      {
+        rawQuery: 'Viña Espectro Maipo Valley Carmenere',
+        normalizedQuery: 'vina espectro maipo valley carmenere',
+        anchors: [
+          {
+            surfaceForm: '2022 Vinas Mora kaamen III',
+            normalizedForm: '2022 vinas mora kaamen iii',
+            candidateEntityIds: [entityId],
+            lookupStrategies: ['fuzzy_char_ngram'],
+            aliasType: 'misspelling',
+            confidence: 0.9,
+            source: 'alias',
+          },
+        ],
+      },
+      wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
+    );
+
+    const signals = candidates[0]?.sourceSignals;
+    // identity lanes must be ZERO for a pure-fuzzy hit
+    expect(signals?.canonicalNormalizedMatch).toBe(0);
+    expect(signals?.canonicalExactMatch).toBe(0);
+    expect(signals?.aliasExactMatch).toBe(0);
+    // fuzzy evidence still flows through its designed lanes
+    expect(signals?.aliasFuzzyMatch).toBeCloseTo(0.9);
+    expect(signals?.editDistanceScore).toBeGreaterThan(0);
   });
 
   it('keeps exact identity signal only for candidates whose identity-safe projection matches the anchor', async () => {
@@ -168,7 +275,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
           },
         ],
       },
-      lookup,
+      wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
     );
 
     const grandVin = candidates.find((candidate) => candidate.entityId === grandVinId);
@@ -206,7 +313,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
           },
         ],
       },
-      lookup,
+      wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
     );
 
     expect(candidates).toHaveLength(1);
@@ -251,7 +358,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
           },
         ],
       },
-      lookup,
+      wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
     );
 
     expect(candidates).toHaveLength(1);
@@ -301,7 +408,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
           },
         ],
       },
-      lookup,
+      wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
     );
 
     expect(candidates).toHaveLength(1);
@@ -344,7 +451,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
           },
         ],
       },
-      lookup,
+      wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
     );
 
     expect(candidates).toHaveLength(1);
@@ -380,7 +487,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
           },
         ],
       },
-      lookup,
+      wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
     );
 
     expect(candidates).toHaveLength(1);
@@ -423,7 +530,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
           },
         ],
       },
-      lookup,
+      wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
     );
 
     expect(candidates).toHaveLength(1);
@@ -458,7 +565,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
           },
         ],
       },
-      lookup,
+      wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
     );
 
     expect(candidates).toHaveLength(1);
@@ -467,7 +574,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
     expect(candidates[0]?.sourceSignals.canonicalNormalizedMatch).toBe(0);
   });
 
-  it('uses batch getDocuments as the sole production hydration path', async () => {
+  it('uses batch getResolverProjections as the sole production hydration path', async () => {
     const entityId = createEntityId('opus-one-2018');
     const getDocuments = vi.fn().mockResolvedValue(
       new Map([
@@ -475,13 +582,15 @@ describe('buildResolverCandidatesFromGenerator', () => {
           entityId,
           entityType: 'wine',
           canonicalLabel: 'Opus One 2018',
+          aliasesIdentitySafe: ['Opus One 2018'],
+          identityCertificates: [],
         }],
       ]),
     );
 
     const candidates = await buildResolverCandidatesFromGenerator(
       makeGeneratorInput(),
-      { getDocuments },
+      wrapEntityDocumentBatchLookupAsResolverProjection({ getDocuments }),
     );
 
     expect(getDocuments).toHaveBeenCalledWith([entityId]);
@@ -489,14 +598,14 @@ describe('buildResolverCandidatesFromGenerator', () => {
     expect(candidates[0]?.canonicalLabel).toBe('Opus One 2018');
   });
 
-  it('throws batch_lookup_failed when getDocuments rejects', async () => {
-    const getDocuments = vi.fn().mockRejectedValue(new Error('Vespa timeout'));
+  it('throws resolver_projection_overlay_failed when projection lookup rejects', async () => {
+    const getResolverProjections = vi.fn().mockRejectedValue(new Error('Vespa timeout'));
 
     await expect(
-      buildResolverCandidatesFromGenerator(makeGeneratorInput(), { getDocuments }),
+      buildResolverCandidatesFromGenerator(makeGeneratorInput(), { getResolverProjections }),
     ).rejects.toMatchObject({
       code: 'INTERNAL_INCONSISTENCY',
-      message: expect.stringContaining('batch_lookup_failed'),
+      message: expect.stringContaining('resolver_projection_overlay_failed'),
     });
   });
 
@@ -530,7 +639,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
     };
 
     await expect(
-      buildResolverCandidatesFromGenerator(input, { getDocuments }),
+      buildResolverCandidatesFromGenerator(input, wrapEntityDocumentBatchLookupAsResolverProjection({ getDocuments })),
     ).rejects.toMatchObject({
       code: 'INTERNAL_INCONSISTENCY',
       message: expect.stringContaining('partial_resolution_forbidden'),
@@ -573,7 +682,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
           lookupStrategies: ['exact'],
           aliasType: 'derived_initialism',
         }),
-        lookup,
+        wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
       );
       expect(candidates[0]?.aliasMatches[0]?.aliasType).toBe('derived_initialism');
     });
@@ -587,7 +696,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
           candidateEntityIds: [entityId],
           lookupStrategies: ['exact'],
         }),
-        lookup,
+        wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
       );
       expect(candidates[0]?.aliasMatches[0]).toEqual({
         aliasValue: 'CM',
@@ -604,7 +713,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
           candidateEntityIds: [entityId],
           lookupStrategies: ['substring'],
         }),
-        lookup,
+        wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
       );
       expect(candidates[0]?.aliasMatches[0]?.aliasType).toBeUndefined();
       expect(candidates[0]?.sourceSignals.aliasFuzzyMatch).toBeGreaterThan(0);
@@ -619,7 +728,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
           candidateEntityIds: [entityId],
           lookupStrategies: ['phonetic_fuzzy'],
         }),
-        lookup,
+        wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
       );
       expect(candidates[0]?.aliasMatches[0]?.aliasType).toBeUndefined();
       expect(candidates[0]?.sourceSignals.phoneticMatch).toBeGreaterThan(0);
@@ -657,7 +766,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
             },
           ],
         },
-        lookup,
+        wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
       );
       const types = candidates[0]?.aliasMatches.map((m) => m.aliasType) ?? [];
       expect(types).toContain('canonical');
@@ -678,7 +787,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
 // 동일 entityId 의 두 앵커를 순서를 바꿔 입력하여 결과 소스 신호를 비교한다.
 
 describe('mergeSignals — 수학적 속성 (교환법칙 · 멱등법칙 · 3-anchor max)', () => {
-  function makeLookup(entityId: string): EntityDocumentLookupPort {
+  function makeLookup(entityId: string): EntityDocumentBatchLookup {
     const doc = {
       entityId: createEntityId(entityId),
       entityType: 'wine' as const,
@@ -717,7 +826,7 @@ describe('mergeSignals — 수학적 속성 (교환법칙 · 멱등법칙 · 3-a
           },
         ],
       },
-      lookup,
+      wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
     );
 
     // B-then-A (순서 반전)
@@ -746,7 +855,7 @@ describe('mergeSignals — 수학적 속성 (교환법칙 · 멱등법칙 · 3-a
           },
         ],
       },
-      lookup,
+      wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
     );
 
     // sourceSignals 는 merge 결과 — 교환법칙: 순서 무관하게 동일해야 함
@@ -769,12 +878,12 @@ describe('mergeSignals — 수학적 속성 (교환법칙 · 멱등법칙 · 3-a
     // 동일 anchor 1회
     const r1 = await buildResolverCandidatesFromGenerator(
       { rawQuery: 'opus one', normalizedQuery: 'opus one', anchors: [sameAnchor] },
-      lookup,
+      wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
     );
     // 동일 anchor 2회 (중복)
     const r2 = await buildResolverCandidatesFromGenerator(
       { rawQuery: 'opus one', normalizedQuery: 'opus one', anchors: [sameAnchor, sameAnchor] },
-      lookup,
+      wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
     );
 
     // max(0.85, 0.85) = 0.85 — 멱등
@@ -824,7 +933,7 @@ describe('mergeSignals — 수학적 속성 (교환법칙 · 멱등법칙 · 3-a
           },
         ],
       },
-      lookup,
+      wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
     );
 
     expect(candidates).toHaveLength(1);
@@ -855,7 +964,7 @@ describe('mergeSignals — 수학적 속성 (교환법칙 · 멱등법칙 · 3-a
             source: 'alias' as const,
           })),
         },
-        lookup,
+        wrapEntityDocumentBatchLookupAsResolverProjection(lookup),
       );
 
     // 세 순서 모두 동일 결과
@@ -868,5 +977,63 @@ describe('mergeSignals — 수학적 속성 (교환법칙 · 멱등법칙 · 3-a
     expect(r1[0]?.sourceSignals.aliasExactMatch).toBeCloseTo(0.95);
     expect(r2[0]?.sourceSignals.aliasExactMatch).toBeCloseTo(0.95);
     expect(r3[0]?.sourceSignals.aliasExactMatch).toBeCloseTo(0.95);
+  });
+
+  it('hydrates exact-safe certificates from resolver projections even when preloadedDocs already filled the doc map', async () => {
+    const entityId = createEntityId('haut-brion-1967');
+    const resolverProjectionLookup: LookupResolverProjectionPort = {
+      getResolverProjections: vi.fn(async (ids) => new Map(ids.map((id) => [id, {
+        entityId: id,
+        entityType: 'wine',
+        canonicalLabel: '1967 Château Haut-Brion Pessac-Léognan (Premier Grand Cru Classé)',
+        aliasesIdentitySafe: ['Haut-Brion', '오브리옹'],
+        identityCertificates: [{
+          kind: 'exact_safe',
+          singleton: true,
+          collisionFree: true,
+          sourceTier: 'curated',
+          normalizedSurface: '오브리옹',
+        }],
+      }] as const))),
+    };
+
+    const preloadedDocs = new Map<string, RetrievalDocument>([
+      [String(entityId), {
+        entityId,
+        entityType: 'wine',
+        canonicalLabel: '1967 Château Haut-Brion Pessac-Léognan (Premier Grand Cru Classé)',
+        aliasesIdentitySafe: ['Haut-Brion', '오브리옹'],
+      } as unknown as RetrievalDocument],
+    ]);
+
+    const candidates = await buildResolverCandidatesFromGenerator(
+      {
+        rawQuery: '오브리옹',
+        normalizedQuery: '오브리옹',
+        anchors: [
+          {
+            surfaceForm: '오브리옹',
+            normalizedForm: '오브리옹',
+            candidateEntityIds: [entityId],
+            lookupStrategies: ['exact'],
+            aliasType: 'translation',
+            confidence: 0.98,
+            source: 'alias',
+          },
+        ],
+        preloadedDocs,
+      },
+      resolverProjectionLookup,
+    );
+
+    expect(resolverProjectionLookup.getResolverProjections).toHaveBeenCalledWith([entityId]);
+    expect(candidates[0]?.identityCertificates).toEqual([
+      expect.objectContaining({
+        kind: 'exact_safe',
+        singleton: true,
+        collisionFree: true,
+        normalizedSurface: '오브리옹',
+      }),
+    ]);
   });
 });

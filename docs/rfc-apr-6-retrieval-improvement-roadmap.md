@@ -159,7 +159,7 @@ PG wine_pdp_snapshot (Bronze)
 | Rerank | Cross-encoder HTTP, wine-aware passage | `ranker.ts`, `reranker.ts` |
 | LTR | Per-query-class LambdaMART 재정렬 (모델 있을 때, serve-time owner는 `Ranker.rank()`) | `ranker.ts`, `ltr-ranker.ts`, `ltr-training-service.ts` |
 | Decision | Admission, gap threshold, query-class별 프로파일 | `decision-engine.ts`, `RFC-016` |
-| Decision / authority | 결정론적 authority trace·스냅샷·배치 id, canonical 직렬화 SSOT | `authority-trace.ts`, `canonical-json.ts`, `hash.ts`, `id-schema-version.ts`, `pg-snapshot-store.ts`, `batch-search.usecase.ts`; 상세는 `docs/bugbash/apr-6-hardening-wave3.md` |
+| Decision / authority | 결정론적 authority trace·스냅샷·배치 id, canonical 직렬화 SSOT | `authority-trace.ts`, `canonical-json.ts`, `hash.ts`, `id-schema-version.ts`, `pg-snapshot-store.ts`, `batch-search-runner.ts`; 상세는 `docs/bugbash/apr-6-hardening-wave3.md` |
 | Policy | 응답 캐시 적격 판단, kill-switch 정책 표 | `cache-policy.ts`, `kill-switch-policy.ts` |
 | Observability | 검색 실행 구조화 로그 스키마 | `src/observability/search-log-schema.ts`, `log-search-event.ts` |
 | Security | Query sanitize, optional LLM injection judge (Redis cache) | `query-sanitizer.ts`, `llm-injection-judge.ts` |
@@ -1037,7 +1037,7 @@ anchor similarity의 한 축으로 behavioral similarity는 유용하다.
 | 축 | 내용 | 코드·문서 |
 |----|------|-----------|
 | Canonical 직렬화 | authority hash·`response_hash` 입력에 `JSON.stringify` 직접 사용 금지 | `src/domain/shared/utils/canonical-json.ts`, `hash.ts` |
-| ID 버전 | `decision:v1:…`, `admission:v1:…`, `snapshot:v1:…`, `batch:v1:…` | `id-schema-version.ts`, `authority-trace.ts`, `pg-snapshot-store.ts`, `batch-search.usecase.ts` |
+| ID 버전 | `decision:v1:…`, `admission:v1:…`, `snapshot:v1:…`, `batch:v1:…` | `id-schema-version.ts`, `authority-trace.ts`, `pg-snapshot-store.ts`, `batch-search-runner.ts` |
 | Admission 다신호 | `decideAdmission` + 기존 게이트와 병행 (confidence 중복 거절은 `ConfidenceRefusalPolicy`에 위임) | `admission-policy.ts`, `admission-gate.ts` |
 | HTTP 계약 | `authority_trace_ref`, `runtime_correlation_ref`, `execution_mode`, … | `search-response.schema.ts`, `response-builder.ts` |
 | 관측 | `search_execution` 이벤트 | `log-search-event.ts`, post-route |

@@ -2,26 +2,24 @@
 /**
  * S1.2 — Freeze a frozen agent-benchmark baseline at the current commit.
  *
- * Runs the standard profile of the agent benchmark and writes the full report
- * JSON to `test/benchmark/agent/results/baseline-<gitsha>.json`. Embedding the
- * short git SHA in the filename keeps every frozen baseline reproducible and
- * traceable to the exact commit it measured — so later runs can diff against a
- * KNOWN reference instead of an aggregate that silently drifts.
+ * Historical note: the repo-native live agent runner is currently absent
+ * (`test/benchmark/agent/runner.ts`). Until that runner is restored, this
+ * helper fail-closes instead of pretending to freeze a trustworthy baseline.
  *
  * Usage:
- *   npx tsx scripts/eval/freeze-agent-baseline.ts
- *   npx tsx scripts/eval/freeze-agent-baseline.ts --profile nightly      # override profile
- *   npx tsx scripts/eval/freeze-agent-baseline.ts -- --concurrency 5     # extra runner flags after `--`
+ *   pnpm exec tsx scripts/eval/freeze-agent-baseline.ts
+ *   pnpm exec tsx scripts/eval/freeze-agent-baseline.ts --profile nightly
+ *   pnpm exec tsx scripts/eval/freeze-agent-baseline.ts -- --concurrency 5
  *
- * Then diff a later run against it:
- *   npx tsx test/benchmark/agent/runner.ts \
+ * Once the runner exists again:
+ *   pnpm exec tsx test/benchmark/agent/runner.ts \
  *     --profile standard \
  *     --baseline test/benchmark/agent/results/baseline-<gitsha>.json
  *
  * Exit codes mirror the runner: 0 success, 1 runtime failure.
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 
@@ -29,6 +27,8 @@ import process from 'node:process';
 const RESULTS_DIR = path.resolve(process.cwd(), 'test/benchmark/agent/results');
 /** Default profile to freeze — the curated, judge-on standard suite. */
 const DEFAULT_PROFILE = 'standard';
+/** Historical runner path. Absent in the current checkout; checked fail-closed. */
+const RUNNER_PATH = path.resolve(process.cwd(), 'test/benchmark/agent/runner.ts');
 
 interface Args {
   readonly profile: string;
@@ -67,7 +67,6 @@ function parseArgs(argv: readonly string[]): Args {
 function resolveGitSha(): string {
   const sha = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { encoding: 'utf8' });
   if (sha.status !== 0 || sha.stdout.trim().length === 0) {
-    // No git context — use a sortable UTC timestamp so the filename stays unique.
     return `nogit-${new Date().toISOString().replace(/[:.]/g, '-')}`;
   }
   const short = sha.stdout.trim();
@@ -78,14 +77,28 @@ function resolveGitSha(): string {
 
 async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+
+  if (!existsSync(RUNNER_PATH)) {
+    console.error('[freeze-baseline] benchmark runner missing: test/benchmark/agent/runner.ts');
+    console.error('[freeze-baseline] current repo-native executable lanes are:');
+    console.error('  - pnpm run bench:smoke');
+    console.error('  - pnpm run bench:agent:export-scenarios-md');
+    console.error('  - pnpm run eval:lookup-v2:authority -- --use-active-runtime --output /tmp/entity-resolution-validation.json');
+    console.error('  - pnpm run eval:lookup-v2:parity -- --use-active-runtime --output /tmp/lookup-v2-parity-report.json');
+    console.error('[freeze-baseline] restore the agent runner before freezing live agent baselines again.');
+    process.exitCode = 1;
+    return;
+  }
+
   const sha = resolveGitSha();
   const outPath = path.join(RESULTS_DIR, `baseline-${sha}.json`);
 
   mkdirSync(RESULTS_DIR, { recursive: true });
 
   const runnerArgs = [
+    'exec',
     'tsx',
-    path.resolve(process.cwd(), 'test/benchmark/agent/runner.ts'),
+    RUNNER_PATH,
     '--profile',
     args.profile,
     '--out',
@@ -96,7 +109,7 @@ async function run(): Promise<void> {
   console.error(`[freeze-baseline] profile=${args.profile} sha=${sha}`);
   console.error(`[freeze-baseline] writing → ${outPath}`);
 
-  const child = spawn('npx', runnerArgs, {
+  const child = spawn('pnpm', runnerArgs, {
     cwd: process.cwd(),
     stdio: 'inherit',
     env: { ...process.env },
@@ -108,13 +121,13 @@ async function run(): Promise<void> {
   });
 
   if (exitCode === 0) {
-    console.error(`[freeze-baseline] ✅ baseline frozen at ${outPath}`);
+    console.error(`[freeze-baseline] baseline frozen at ${outPath}`);
     console.error(
       `[freeze-baseline] diff later runs with:\n`
-      + `  npx tsx test/benchmark/agent/runner.ts --profile ${args.profile} --baseline ${outPath}`,
+      + `  pnpm exec tsx test/benchmark/agent/runner.ts --profile ${args.profile} --baseline ${outPath}`,
     );
   } else {
-    console.error(`[freeze-baseline] ❌ runner exited ${exitCode} — baseline NOT trustworthy`);
+    console.error(`[freeze-baseline] runner exited ${exitCode} — baseline NOT trustworthy`);
     process.exitCode = exitCode;
   }
 }

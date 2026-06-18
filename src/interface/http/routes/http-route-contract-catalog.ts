@@ -17,7 +17,6 @@ import {
   HealthRouteContract,
   HybridSearchRouteContract,
   LexicalSearchRouteContract,
-  LookupWineRouteContract,
   ReadyRouteContract,
   SemanticSearchRouteContract,
 } from './route-contracts.js';
@@ -83,9 +82,7 @@ interface DeclaredHttpRouteContract {
  *           remaining runtime contract is the minimal
  *           search + agent + liveness/readiness set. Remaining: 9.
  *   7.1.0 — T-ELV2-01: add the dedicated entity-lookup V2 surface
- *           (`POST /v2/entity-lookup`) (2026-06-02). Additive — V1
- *           `/v1/lookup/wine` is unchanged and remains the authority until the
- *           T-ELV2-08 shadow-compare cutover. Remaining: 10.
+ *           (`POST /v2/entity-lookup`) (2026-06-02). Additive. Remaining: 10.
  *   7.2.0 — T-ELV2-07: add the trusted operator read plane
  *           (`POST /v2/entity-lookup/ops/inspect`, X-Debug-Key gated) (2026-06-02).
  *           Additive. Remaining: 11.
@@ -94,8 +91,12 @@ interface DeclaredHttpRouteContract {
  *           `POST /v2/entity-lookup/ops/proposals[/{review,publish}]`. Reads
  *           X-Debug-Key gated, writes X-Ops-Write-Key gated. Additive.
  *           Remaining: 17.
+ *   8.0.0 — BREAKING (V2-only lookup cutover, 2026-06-03): REMOVE
+ *           `POST /v1/lookup/wine`. The sole public lookup surface is now
+ *           `POST /v2/entity-lookup` (4-state V2-native contract). No 410 stub —
+ *           the route is unregistered (404). Remaining: 16.
  */
-export const HTTP_CONTRACT_CATALOG_VERSION = '7.3.0';
+export const HTTP_CONTRACT_CATALOG_VERSION = '8.0.0';
 
 export const DeclaredHttpRouteContractCatalog: readonly DeclaredHttpRouteContract[] = [
   { method: 'GET', url: '/health', contract: HealthRouteContract },
@@ -103,7 +104,6 @@ export const DeclaredHttpRouteContractCatalog: readonly DeclaredHttpRouteContrac
   { method: 'POST', url: '/v1/search/hybrid', contract: HybridSearchRouteContract },
   { method: 'POST', url: '/v1/search/semantic', contract: SemanticSearchRouteContract },
   { method: 'POST', url: '/v1/search/lexical', contract: LexicalSearchRouteContract },
-  { method: 'POST', url: '/v1/lookup/wine', contract: LookupWineRouteContract },
   { method: 'POST', url: '/v2/entity-lookup', contract: EntityLookupV2RouteContract },
   { method: 'POST', url: '/v2/entity-lookup/ops/inspect', contract: EntityLookupV2OpsInspectRouteContract },
   { method: 'POST', url: '/v2/entity-lookup/ops/alias-audit', contract: EntityLookupV2OpsAliasAuditRouteContract },
@@ -220,7 +220,7 @@ export function computeHttpContractCatalogFingerprint(
  * failing test.
  */
 export const HTTP_CONTRACT_CATALOG_FINGERPRINT =
-  '1c8be20cf59af8c2a45057ddb2a26ec4a3356042b5563442f3359276a4dfdec1';
+  '72b367e6bec06c40b0048a1fe82c622222c36e6858070f0093970142d5da2e4a';
 
 export function buildDeclaredHttpRouteContractManifest(): HttpRouteContractManifest {
   const routes: RegisteredHttpRouteContract[] = DeclaredHttpRouteContractCatalog.map((entry) => {
