@@ -2,20 +2,21 @@
 
 # Wine Search Engine
 
+<p align="center"><a href="#engineering-highlights">Engineering</a> · <a href="#architecture">Architecture</a> · <a href="#quick-start">Get started</a> · <a href="#operating-and-contributing">Reference</a></p>
+
 A TypeScript search and wine-intelligence backend combining entity interpretation, retrieval, ranking, natural-language agent workflows, and a Fastify HTTP API. PostgreSQL, Redis, Vespa, and optional HTTP ML services provide separate infrastructure capabilities.
 
 [Architecture](#architecture) · [Quick start](#quick-start) · [Verification](#verification) · [Configuration](#configuration)
 
-
 ## Engineering highlights
 
-| Mechanism | Engineering purpose |
-| :--- | :--- |
-| **Domain-first search pipeline** | Query and retrieval policy live in domain/application layers; infrastructure adapters and HTTP response builders have separate ownership. |
-| **Hybrid retrieval and ranking** | Candidate retrieval, entity resolution, and rank/decision stages have distinct contracts and observability. |
-| **Snapshot-scoped publication** | Search snapshot publication and runtime-handle binding make the serving generation an explicit operating concern. |
-| **Declared HTTP contracts** | Route catalogs, response/schema contracts, and OpenAPI parity checks provide an inspectable public interface. |
-| **Evaluation as an independent plane** | Unit, regression, contract, integration, Vespa-backed, and offline-evaluation lanes target different failure modes. |
+| Mechanism | Engineering purpose | Source |
+| :--- | :--- | :--- |
+| **Domain-first search pipeline** | Query and retrieval policy live in domain/application layers; infrastructure adapters and HTTP response builders have separate ownership. | [Domain](src/domain/) |
+| **Hybrid retrieval and ranking** | Candidate retrieval, entity resolution, and rank/decision stages have distinct contracts and observability. | [Application](src/application/) |
+| **Snapshot-scoped publication** | Search snapshot publication and runtime-handle binding make the serving generation an explicit operating concern. | [Runtime handles](src/config/runtime-handles.ts) |
+| **Declared HTTP contracts** | Route catalogs, response/schema contracts, and OpenAPI parity checks provide an inspectable public interface. | [Route contracts](src/interface/http/routes/route-contracts.ts) |
+| **Evaluation as an independent plane** | Unit, regression, contract, integration, Vespa-backed, and offline-evaluation lanes target different failure modes. | [Test lanes](config/vitest/) |
 
 ## Search flow
 
@@ -143,3 +144,5 @@ Debug request flow through [pipeline debug steps](src/domain/observability/pipel
 - [Script and test selection](package.json)
 
 Deployment, data ingestion, external-model calls, and production migrations require their own environment and authorization. This entry point describes development and operating boundaries rather than asserting a current production qualification.
+
+<p align="center"><sub><a href="https://github.com/josongmin">Project map</a> · <a href="#engineering-highlights">Back to overview</a></sub></p>
