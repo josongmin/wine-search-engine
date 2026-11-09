@@ -1,8 +1,21 @@
+<p align="center"><img src="readme-banner.svg" alt="Wine Search Engine — Typed query planning, hybrid retrieval, and governed index publication." width="100%"></p>
+
 # Wine Search Engine
 
 A TypeScript search and wine-intelligence backend combining entity interpretation, retrieval, ranking, natural-language agent workflows, and a Fastify HTTP API. PostgreSQL, Redis, Vespa, and optional HTTP ML services provide separate infrastructure capabilities.
 
 [Architecture](#architecture) · [Quick start](#quick-start) · [Verification](#verification) · [Configuration](#configuration)
+
+
+## Engineering highlights
+
+| Mechanism | Engineering purpose |
+| :--- | :--- |
+| **Domain-first search pipeline** | Query and retrieval policy live in domain/application layers; infrastructure adapters and HTTP response builders have separate ownership. |
+| **Hybrid retrieval and ranking** | Candidate retrieval, entity resolution, and rank/decision stages have distinct contracts and observability. |
+| **Snapshot-scoped publication** | Search snapshot publication and runtime-handle binding make the serving generation an explicit operating concern. |
+| **Declared HTTP contracts** | Route catalogs, response/schema contracts, and OpenAPI parity checks provide an inspectable public interface. |
+| **Evaluation as an independent plane** | Unit, regression, contract, integration, Vespa-backed, and offline-evaluation lanes target different failure modes. |
 
 ## Search flow
 
